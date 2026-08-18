@@ -25,7 +25,7 @@
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 
 export const name = "code-collapse";
@@ -37,7 +37,8 @@ const NAMESPACE = settingsNamespace("code-collapse");
 /** 每次 run_code 调用后追加的默认提示（双语信封；settings.callHint 留空 = 本默认）。 */
 /** 这里是为了引导模型使用We need，不使用格式 */
 const DEFAULT_CALL_HINT = [
-  "Let's keep using 'We need...' to continue.",
+  "We need to countinue in English.",
+  "We need to keep using 'We need...' to continue.",
 ].join("\n");
 
 /** 首轮注入的默认提醒（统一消息格式：[标题] / > / 内容 / <；We need 风格）。 */
@@ -71,6 +72,83 @@ const SETTINGS_SCHEMA = z.object({
   firstRoundHint: z.boolean().default(true),
   firstRoundText: z.string().default(DEFAULT_FIRST_ROUND_HINT),
 });
+
+/** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
+export const DEFAULT_SECTION = {
+  enabled: true,
+  appendCallHint: true,
+  callHint: "",
+  firstRoundHint: true,
+};
+// ---------------------------------------------------------------------------
+// settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
+// 只写"缺失的键"，保留用户已有配置；settings.yaml 文件不存在时由 settings
+// 服务在首次写入时自动创建（DSH_HOME 下的 settings.yaml）。
+// ---------------------------------------------------------------------------
+
+/** 卸载判定：插件 fiber 正在拆除时不再回写 source（与 dsh-settings 内部一致）。 */
+function isUnloading(ctx) {
+  const state = ctx.fiber.state;
+  return state === 5 || state === 4; // FiberState.Unloading / Disposed
+}
+
+/**
+ * 注册 settings 命名空间（语义与 installSettingsSection 相同：composition entry
+ * 作 base、用户层优先、热重载），并在用户段缺失时只写缺失的键补齐默认值。
+ */
+function installSettingsWithDefaults(ctx, ns, schema, entry, defaults, hooks) {
+  ctx.inject(["settings"], (sctx) => {
+    const scope = sctx.settings.register(ns, schema, { base: entry });
+    hooks.setSource(() => scope.get());
+    sctx.effect(() => () => {
+      if (isUnloading(ctx)) return;
+      hooks.setSource(() => entry);
+      hooks.onChange();
+    });
+    hooks.onChange();
+    scope.watch(() => {
+      if (isUnloading(ctx)) return;
+      hooks.onChange();
+    });
+    // 自愈：只补缺失键，保留用户已有配置（best-effort，失败只记日志）。
+    ensureSettingsDefaults(sctx.settings, ns, defaults, ctx.logger);
+  });
+}
+
+/**
+ * 检查 settings.yaml 用户段：缺失的默认键用默认值补齐（合并写入，保留已有键）。
+ * 返回写入的 patch；无需写入或失败时返回 null。独立导出便于测试。
+ */
+export function ensureSettingsDefaults(settings, ns, defaults, logger) {
+  try {
+    const descriptor = settings.describe().find((item) => item.ns === ns);
+    const user =
+      descriptor !== undefined && descriptor.user !== null && typeof descriptor.user === "object"
+        ? descriptor.user
+        : {};
+    const patch = {};
+    for (const [key, value] of Object.entries(defaults)) {
+      if (!Object.prototype.hasOwnProperty.call(user, key)) patch[key] = value;
+    }
+    if (Object.keys(patch).length === 0) return null;
+    const write = settings.update(ns, patch);
+    if (write !== null && typeof write.then === "function") {
+      void write.then(
+        () => {
+          logger?.info?.("[ns] settings.yaml config section auto-filled missing keys: " + Object.keys(patch).join(", "));
+        },
+        (error) => {
+          logger?.warn?.("[ns] auto-fill defaults failed: " + (error instanceof Error ? error.message : String(error)));
+        },
+      );
+    }
+    return patch;
+  } catch (error) {
+    logger?.warn?.("[ns] check defaults failed: " + (error instanceof Error ? error.message : String(error)));
+    return null;
+  }
+}
+
 
 function safeMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -170,7 +248,7 @@ export function apply(ctx, config = {}) {
     }
   }
 
-  installSettingsSection(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, {
+  installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {
     setSource: (current) => {
       source = current;
     },

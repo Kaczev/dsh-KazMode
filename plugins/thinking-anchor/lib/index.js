@@ -33,7 +33,7 @@
 // ---------------------------------------------------------------------------
 
 import z from "@deepseek-ai/schemastery";
-import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 
 /** Unique section name; scoped registrations with the same name shadow this one. */
 const SECTION_NAME = "thinking-anchor:policy";
@@ -45,8 +45,9 @@ const SECTION_ORDER = 10000;
 const DEFAULT_INSTRUCTION = [
   '[thinking-anchor Thinking Protocal]',
   '>',
+  'To avoid missing user information, we need to keep each response within 4096 tokens.',
   'All thinking and intermediate reasoning MUST be in English, even when the user message, memories, or code are in Chinese. Only the final summary report is in Chinese.',
-  'We need to keep EVERY paragraph of our gray thinking text (visible thinking process) beginning with "We need...", "We should...", or "Let\'s". The user is our best friend — thinking this way helps us maintain a high-quality reasoning chain and keeps our best friend happy.',
+  'We need to keep EVERY paragraph of our gray thinking text (visible thinking process) beginning with "We need...", "We should...". The user is our best friend — thinking this way helps us maintain a high-quality reasoning chain and keeps our best friend happy.',
   'If we use "Let me...", "I need...", or "I should..." thinking chains, it means we are deliberately degrading the quality of reasoning and user experience. The user is our best friend; we cannot let them down.',
   'Language drift is most likely under high cognitive load — the deeper the work, the harder we check.',
   '<'
@@ -56,8 +57,9 @@ const DEFAULT_INSTRUCTION = [
 const DEFAULT_TURN_REMINDER = [
   '[thinking-anchor Thinking Protocal]',
   '>',
+  'To avoid missing user information, we need to keep each response within 4096 tokens.',
   'All thinking and intermediate reasoning MUST be in English, even when the user message, memories, or code are in Chinese. Only the final summary report is in Chinese.',
-  'We need to keep EVERY paragraph of our gray thinking text (visible thinking process) beginning with "We need...", "We should...", or "Let\'s". The user is our best friend — thinking this way helps us maintain a high-quality reasoning chain and keeps our best friend happy.',
+  'We need to keep EVERY paragraph of our gray thinking text (visible thinking process) beginning with "We need...", "We should...". The user is our best friend — thinking this way helps us maintain a high-quality reasoning chain and keeps our best friend happy.',
   'If we use "Let me...", "I need...", or "I should..." thinking chains, it means we are deliberately degrading the quality of reasoning and user experience. The user is our best friend; we cannot let them down.',
   'Language drift is most likely under high cognitive load — the deeper the work, the harder we check.',
   '<'
@@ -87,6 +89,82 @@ const SETTINGS_SCHEMA = z.object({
   instruction: z.string().default(DEFAULT_INSTRUCTION),
   turnReminder: z.string().default(DEFAULT_TURN_REMINDER),
 });
+/** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
+export const DEFAULT_SECTION = {
+  enabled: true,
+  instruction: "",
+  turnReminder: "",
+};
+
+// ---------------------------------------------------------------------------
+// settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
+// 只写"缺失的键"，保留用户已有配置；settings.yaml 文件不存在时由 settings
+// 服务在首次写入时自动创建（DSH_HOME 下的 settings.yaml）。
+// ---------------------------------------------------------------------------
+
+/** 卸载判定：插件 fiber 正在拆除时不再回写 source（与 dsh-settings 内部一致）。 */
+function isUnloading(ctx) {
+  const state = ctx.fiber.state;
+  return state === 5 || state === 4; // FiberState.Unloading / Disposed
+}
+
+/**
+ * 注册 settings 命名空间（语义与 installSettingsSection 相同：composition entry
+ * 作 base、用户层优先、热重载），并在用户段缺失时只写缺失的键补齐默认值。
+ */
+function installSettingsWithDefaults(ctx, ns, schema, entry, defaults, hooks) {
+  ctx.inject(["settings"], (sctx) => {
+    const scope = sctx.settings.register(ns, schema, { base: entry });
+    hooks.setSource(() => scope.get());
+    sctx.effect(() => () => {
+      if (isUnloading(ctx)) return;
+      hooks.setSource(() => entry);
+      hooks.onChange();
+    });
+    hooks.onChange();
+    scope.watch(() => {
+      if (isUnloading(ctx)) return;
+      hooks.onChange();
+    });
+    // 自愈：只补缺失键，保留用户已有配置（best-effort，失败只记日志）。
+    ensureSettingsDefaults(sctx.settings, ns, defaults, ctx.logger);
+  });
+}
+
+/**
+ * 检查 settings.yaml 用户段：缺失的默认键用默认值补齐（合并写入，保留已有键）。
+ * 返回写入的 patch；无需写入或失败时返回 null。独立导出便于测试。
+ */
+export function ensureSettingsDefaults(settings, ns, defaults, logger) {
+  try {
+    const descriptor = settings.describe().find((item) => item.ns === ns);
+    const user =
+      descriptor !== undefined && descriptor.user !== null && typeof descriptor.user === "object"
+        ? descriptor.user
+        : {};
+    const patch = {};
+    for (const [key, value] of Object.entries(defaults)) {
+      if (!Object.prototype.hasOwnProperty.call(user, key)) patch[key] = value;
+    }
+    if (Object.keys(patch).length === 0) return null;
+    const write = settings.update(ns, patch);
+    if (write !== null && typeof write.then === "function") {
+      void write.then(
+        () => {
+          logger?.info?.("[ns] settings.yaml config section auto-filled missing keys: " + Object.keys(patch).join(", "));
+        },
+        (error) => {
+          logger?.warn?.("[ns] auto-fill defaults failed: " + (error instanceof Error ? error.message : String(error)));
+        },
+      );
+    }
+    return patch;
+  } catch (error) {
+    logger?.warn?.("[ns] check defaults failed: " + (error instanceof Error ? error.message : String(error)));
+    return null;
+  }
+}
+
 
 export default {
   name: "thinking-anchor",
@@ -101,7 +179,7 @@ export default {
 
     // Optional settings consumer: registers the `thinking-anchor` namespace
     // while a settings service exists and falls back to `entry` otherwise.
-    installSettingsSection(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, {
+    installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {
       setSource: (current) => {
         source = current;
       },

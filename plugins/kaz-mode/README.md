@@ -61,6 +61,11 @@ round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件
   （已启用的不动；未加载的插件跳过）。同时把 round-minimal 的 `showPolicy`（轮次
   提示段开关）**原值快照**到 `kaz-mode.roundMinimalPolicySnapshot` 并置为 `true`
   ——Kaz 模式下首轮/次轮轮次提示正常输出（首轮：不执行任务、仅询问细节；次轮：更多工具开放）。
+- **默认关闭清单（`defaultDisabledPlugins`）**：默认含 `task-master-whiteboard`——
+  进入 Kaz 的瞬间把这些插件置为 `enabled: false`（Kaz 模式下默认关闭），且联动
+  `forceEnableManaged` 跳过它们、不再自动启用；用户仍可在面板单独开启，开启后
+  联动不再触碰（只有下一次"进入 Kaz"才重新默认关闭）。想恢复旧行为，把该项设为
+  `[]` 即可。
 - **关闭 Kaz 模式**：五个插件的 `enabled` 保持当前状态、不做改动（只有"进入 Kaz"
   才强制启用；用户在 Kaz 模式下手动关闭的保持关闭）。例外：round-minimal 的
   `showPolicy` 按快照**精确恢复**——原来用户显式写过的写回原值（原本是 `false`
@@ -247,6 +252,7 @@ Copy-Item ".\kaz-preset" "$env:USERPROFILE\.dsh\.agent-presets\kaz" -Recurse -Fo
 | `firstRoundHint` | string | `请在第一句话中说明本次对话的总任务目标。` | 首轮提示条文案（只显示给用户看，不进入模型提示词） |
 | `previousPreset` | string | `cordis` | **自动维护**：最近一个非 kaz 预设 id，头部按钮"关闭 Kaz"时切回它（预设选择器切换时同步更新） |
 | `managedPlugins` | string[] | 五个插件 id | 联动管理的插件命名空间清单（一般不需要改） |
+| `defaultDisabledPlugins` | string[] | `[task-master-whiteboard]` | **Kaz 模式下默认关闭的插件**：进入 Kaz 的瞬间把这些插件置为 `enabled: false`（不随联动启用），但用户仍可在面板 / settings.yaml 手动开启，联动不再触碰它们；再次进入 Kaz 会重新默认关闭。清空数组 `[]` 即恢复旧行为（全部随联动启用） |
 | `savedPluginStates` | object | `{}` | **内部字段**：开启 Kaz 前五个插件的原始状态快照（自动维护，请勿手改） |
 | `roundMinimalPolicySnapshot` | object | `{active:false,...}` | **内部字段**：round-minimal.showPolicy 的联动快照（进入 Kaz 时记录、退出 Kaz 时按此恢复并清空；重启续联不覆盖最早快照），请勿手改 |
 | `minimalTools` | string[] | `[pwsh, str_replace_editor]` | Kaz 工具面·极简基底：始终保留的最小工具集 |
@@ -263,7 +269,9 @@ Copy-Item ".\kaz-preset" "$env:USERPROFILE\.dsh\.agent-presets\kaz" -Recurse -Fo
 
 1. 刷新页面，会话头部（session log 按钮左侧）出现「Kaz 模式：已关闭」按钮（灰色圆点）；
 2. 在**预设选择器**选「Kaz 模式」→ 按钮变绿「已开启」，五个插件被联动启用
-   （未启用的自动开启），`settings.yaml` 的 `kaz-mode.savedPluginStates` 记录下它们原先
+   （未启用的自动开启；`kaz-mode.defaultDisabledPlugins` 清单内的插件——默认
+   `task-master-whiteboard`——会被置为 `enabled: false`，Kaz 模式下默认关闭、
+   仍可在面板手动开启），`settings.yaml` 的 `kaz-mode.savedPluginStates` 记录下它们原先
    的状态，`agent-presets.default` 写入 `kaz`；
 3. 点击头部按钮（▼）展开「详细设置」面板：查看五个插件的状态徽章，按需单独开关、
    点「配置」调整参数（改动自动写回 `settings.yaml`，即时生效）；
