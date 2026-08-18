@@ -59,7 +59,8 @@ import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 const NAMESPACE = settingsNamespace("round-minimal");
 
 /** 首轮极简工具集默认值：pwsh 为 Windows 原生 shell，str_replace_editor 覆盖常用文件编辑。 */
-const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "str_replace_editor"];
+/** 反转：deepseek团队说不要使用pwsh，用bash最好 */
+const DEFAULT_FIRST_ROUND_TOOLS = ["bash", "str_replace_editor"];
 
 /** task-master-whiteboard 插件的六个白板工具（插件存在且启用时自动加入首轮工具集）。 */
 const WHITEBOARD_TOOLS = [
@@ -80,13 +81,13 @@ const DEFAULT_ROUND_ONE_INSTRUCTION = [
   "[round-minimal First Round Mode]",
   ">",
   "We need to treat this as the first round: do not execute the task yet — only ask about the task details or wait for the user to provide them.",
-  "",
-  "[run_code / pwsh quick rules]",
-  ">",
-  "- pwsh result: stdout/stderr are OBJECTS, not strings — read .text (r.stdout?.text ?? \"\"), never concatenate them directly.",
-  "- Encoding: do not read UTF-8 files with Get-Content (CJK becomes mojibake) — use the read tool.",
-  "- PowerShell JSON: ConvertTo-Json flattens single-element arrays to a bare string (use -AsArray or build the JSON manually); Set-Content -Encoding UTF8 adds a BOM that breaks JSON.parse (strip /^\uFEFF/ or write with node).",
-  "- Generated code strings: no nested backticks/template literals inside run_code — use single-quoted strings.",
+  // "",
+  // "[run_code / pwsh quick rules]",
+  // ">",
+  // "- pwsh result: stdout/stderr are OBJECTS, not strings — read .text (r.stdout?.text ?? \"\"), never concatenate them directly.",
+  // "- Encoding: do not read UTF-8 files with Get-Content (CJK becomes mojibake) — use the read tool.",
+  // "- PowerShell JSON: ConvertTo-Json flattens single-element arrays to a bare string (use -AsArray or build the JSON manually); Set-Content -Encoding UTF8 adds a BOM that breaks JSON.parse (strip /^\uFEFF/ or write with node).",
+  // "- Generated code strings: no nested backticks/template literals inside run_code — use single-quoted strings.",
   "<",
 ].join("\n");
 
