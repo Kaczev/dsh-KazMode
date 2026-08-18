@@ -1,15 +1,7 @@
-# dsh-KazMode
-node_modules/
-*.log
+# 部署/测试残留
+.verify/
+*.tmp
+
+# 系统与编辑器
 .DS_Store
 Thumbs.db
-
-# 个人 dsh 数据（不要上传）
-.credentials.yaml
-settings.yaml
-.anonymous-user-id
-pet.json
-sessions/
-storages/
-undo/
-undo-snapshots/
