@@ -1,0 +1,22 @@
+{
+  "name": "tool-grouping",
+  "version": "0.1.0",
+  "description": "Regroups dsh tools into named groups/realms at runtime: the tool-fs group (read/write/edit/glob/grep + str_replace_editor) and the workflowEngine group (workflow/ralph with the workflow worker), leaving every other tool in the default group.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/index.js"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}
