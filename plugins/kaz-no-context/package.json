@@ -1,0 +1,20 @@
+{
+  "name": "kaz-no-context",
+  "version": "0.1.0",
+  "description": "Kaz 预设专用降噪插件：在 Kaz 会话作用域内抑制运行时上下文快照（Current runtime context / sandbox / approval 策略注记），并剔除 tool-skill 注入的 skill-catalog 合成消息；skill 工具与技能加载能力不变。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  }
+}

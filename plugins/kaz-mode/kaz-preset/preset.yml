@@ -1,0 +1,2 @@
+name: Kaz 模式
+description: Kaczev 的专属模式：以 cordis 完整环境为基底（记忆注入、全量工具、上下文正常），叠加 Kaz 超级模式——首轮极简（round-minimal）、工具分组（tool-grouping）、思考锚点（thinking-anchor）、工具过滤（tool-filter），由 kaz-mode 插件联动管理。

@@ -1,0 +1,15 @@
+# dsh-KazMode
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 个人 dsh 数据（不要上传）
+.credentials.yaml
+settings.yaml
+.anonymous-user-id
+pet.json
+sessions/
+storages/
+undo/
+undo-snapshots/

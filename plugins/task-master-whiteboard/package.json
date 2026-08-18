@@ -1,0 +1,14 @@
+{
+  "name": "task-master-whiteboard",
+  "version": "1.0.0",
+  "description": "Task Master whiteboard plugin: external cognitive scratchpads (.dsh/whiteboards/) with 6 CRUD tools and a Task Master role prompt section.",
+  "type": "module",
+  "main": "lib/index.js",
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}

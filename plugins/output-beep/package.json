@@ -1,0 +1,5 @@
+{
+  "name": "output-beep",
+  "main": "lib/index.js",
+  "type": "module"
+}
