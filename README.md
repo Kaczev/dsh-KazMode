@@ -33,6 +33,13 @@ Kaczev 的 dsh「Kaz 模式」插件全家桶 + agent preset。
 - 把 11 个插件依赖合并进 profile 的 `package.json`（与作者机器一致）
 - 最后自检：junction、客户端 bundle、补丁、dsh 版本全部核对，有问题会红字列出并返回非 0 退出码
 
+## 与官方机制的关系（为什么需要 install.bat）
+
+- **cordis.patch.yml**：官方没有命令会写它——它是 profile 的手写补丁层（默认模板就是注释 + `[]`）。脚本只是把插件组合行以模板形式幂等写入。
+- **settings.yaml**：插件自带默认值，settings.yaml 只是可选覆盖层（Web 设置面板 / 手写都可）。脚本只合并缺失的设置段，不覆盖已有配置。
+- **agent 预设**：官方渠道只有一个——把预设目录放进 `~/.dsh/.agent-presets/<id>/`（发现器自动扫描，无 CLI 命令）。脚本做的就是把 `kaz-preset/` 复制过去，正是官方方式。
+- **dsh-host-apiproxy 补丁**：`WEB_SETTINGS_NAMESPACES` 是硬编码白名单，官方源码明确把「插件自动暴露自身命名空间」标为延期工作，**没有**环境变量或配置可扩展，只能改文件（升级 dsh 会被覆盖，重跑 install.bat 即可）。
+
 ## 手动安装
 
 如果不想用脚本，按以下步骤：

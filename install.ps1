@@ -109,6 +109,11 @@ function Patch-ApiProxyFile {
 
 function Find-ApiProxyFile {
   $candidates = New-Object System.Collections.ArrayList
+  $dir = Get-DshInstallDir
+  if ($dir) {
+    [void]$candidates.Add((Join-Path $dir 'node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js'))
+    [void]$candidates.Add((Join-Path $dir 'node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-apiproxy/lib/index.js'))
+  }
   $cmd = Get-Command dsh -ErrorAction SilentlyContinue
   if ($cmd) {
     $binDir = Split-Path -Parent $cmd.Source
@@ -120,29 +125,48 @@ function Find-ApiProxyFile {
   foreach ($c in $candidates) {
     if (Test-Path -LiteralPath $c) { return $c }
   }
-  $root = Join-Path $env:APPDATA 'npm/node_modules'
-  if (Test-Path -LiteralPath $root) {
-    $hit = Get-ChildItem -LiteralPath $root -Recurse -Filter 'index.js' -ErrorAction SilentlyContinue |
-      Where-Object { $_.Name -eq 'index.js' -and $_.FullName -match 'dsh-host-apiproxy' -and $_.DirectoryName -match 'dsh-host-apiproxy' } |
-      Select-Object -First 1
-    if ($hit) { return $hit.FullName }
+  return ''
+}
+
+function Get-DshInstallDir {
+  $candidates = New-Object System.Collections.ArrayList
+  [void]$candidates.Add((Join-Path $env:APPDATA 'npm/node_modules/@deepseek-ai/dsh'))
+  $cmd = Get-Command dsh -ErrorAction SilentlyContinue
+  if ($cmd) {
+    $binDir = Split-Path -Parent $cmd.Source
+    [void]$candidates.Add((Join-Path $binDir 'node_modules/@deepseek-ai/dsh'))
+  }
+  $npxRoot = Join-Path $env:LOCALAPPDATA 'npm-cache/_npx'
+  if (Test-Path -LiteralPath $npxRoot) {
+    $npxDirs = @(Get-ChildItem -LiteralPath $npxRoot -Directory -ErrorAction SilentlyContinue)
+    foreach ($d in $npxDirs) {
+      [void]$candidates.Add((Join-Path $d.FullName 'node_modules/@deepseek-ai/dsh'))
+    }
+  }
+  foreach ($c in $candidates) {
+    if (Test-Path -LiteralPath (Join-Path $c 'package.json')) { return $c }
   }
   return ''
 }
 
 function Get-DshVersion {
-  $candidates = @(
-    (Join-Path $env:APPDATA 'npm/node_modules/@deepseek-ai/dsh/package.json')
-  )
-  $cmd = Get-Command dsh -ErrorAction SilentlyContinue
-  if ($cmd) {
-    $binDir = Split-Path -Parent $cmd.Source
-    $candidates += (Join-Path $binDir 'node_modules/@deepseek-ai/dsh/package.json')
+  $dir = Get-DshInstallDir
+  if ($dir) {
+    try { return (Get-Content -LiteralPath (Join-Path $dir 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version } catch { }
   }
-  foreach ($c in $candidates) {
-    if (Test-Path -LiteralPath $c) {
-      try { return (Get-Content -LiteralPath $c -Raw -Encoding UTF8 | ConvertFrom-Json).version } catch { }
-    }
+  return ''
+}
+
+function Get-JsYamlPath {
+  $dir = Get-DshInstallDir
+  if (-not $dir) { return '' }
+  $cands = @(
+    (Join-Path $dir 'node_modules/js-yaml/index.js'),
+    (Join-Path $dir 'node_modules/@deepseek-ai/dsh/node_modules/js-yaml/index.js'),
+    (Join-Path (Split-Path $dir -Parent) 'js-yaml/index.js')
+  )
+  foreach ($c in $cands) {
+    if (Test-Path -LiteralPath $c) { return $c }
   }
   return ''
 }
@@ -165,6 +189,10 @@ if ($Diagnose) {
   Write-Host ''
   Write-Host '[1] dsh 版本' -ForegroundColor Cyan
   $ver = Get-DshVersion
+  $dshDir = Get-DshInstallDir
+  if ($dshDir) {
+    Write-Host ('    位置: ' + $dshDir)
+  }
   if ($ver) {
     Write-Host ('    版本: ' + $ver)
     if ($ver -notmatch '^0[.]1[.]0-rc[.](6|7|8|9)|^0[.]1[.]0') {
@@ -187,6 +215,11 @@ if ($Diagnose) {
     foreach ($id in $expectedIds) {
       $ok = $patch -match ('(?m)^[ 	]*(?:- )?(?:id|name):[ 	]*' + [regex]::Escape($id) + '[ 	]*' + $cr + '?$')
       Write-Host ('    ' + $id + ': ' + $(if ($ok) { 'OK' } else { '缺失' }))
+    }
+    $emptySeq = $patch -match '(?m)^[ 	]*[[]][ 	]*$'
+    $hasRows = $patch -match '(?m)^[ 	]*-[ 	]'
+    if ($emptySeq -and $hasRows) {
+      Write-Host '    检测到 [] 与组合行并存 —— YAML 非法！请重跑 install.bat 修复' -ForegroundColor Red
     }
   } else {
     Write-Host '    文件不存在！' -ForegroundColor Red
@@ -301,7 +334,23 @@ New-Item -ItemType Directory -Path $NodeModulesDir -Force | Out-Null
 foreach ($p in $pluginDirs) {
   $link = Join-Path $NodeModulesDir $p.Name
   if (Test-Path -LiteralPath $link) {
-    Write-Host ("    已存在，跳过: " + $p.Name) -ForegroundColor Yellow
+    $pkgOk = Test-Path -LiteralPath (Join-Path $link 'package.json')
+    if ($pkgOk) {
+      Write-Host ("    已存在，跳过: " + $p.Name) -ForegroundColor Yellow
+    } else {
+      $item = Get-Item -LiteralPath $link -Force
+      if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        try {
+          Remove-Item -LiteralPath $link -Force
+          New-Item -ItemType Junction -Path $link -Target (Join-Path $ProfilePluginsDir $p.Name) -ErrorAction Stop | Out-Null
+          Write-Host ("    已重建损坏的链接: " + $p.Name) -ForegroundColor Green
+        } catch {
+          Write-Host ("    链接重建失败: " + $p.Name + " - " + $_.Exception.Message) -ForegroundColor Red
+        }
+      } else {
+        Write-Host ("    警告：node_modules/" + $p.Name + " 已存在（非链接且无 package.json），请手动删除后重跑") -ForegroundColor Red
+      }
+    }
   } else {
     try {
       New-Item -ItemType Junction -Path $link -Target (Join-Path $ProfilePluginsDir $p.Name) -ErrorAction Stop | Out-Null
@@ -332,21 +381,41 @@ $existingPatch = ''
 if (Test-Path -LiteralPath $PatchFile) {
   $existingPatch = Get-Content -LiteralPath $PatchFile -Raw -Encoding UTF8
 }
+$patchLines = $existingPatch -split $lf
+$keptLines = New-Object System.Collections.ArrayList
+$sawBlockEntry = $false
+$sawEmptySeq = $false
+foreach ($line in $patchLines) {
+  $t = $line.Trim()
+  if ($t -eq '[]') { $sawEmptySeq = $true; continue }
+  if ($t -ne '' -and -not $t.StartsWith('#')) { $sawBlockEntry = $true }
+  [void]$keptLines.Add($line)
+}
+$cleanedPatch = $keptLines -join $lf
+$placeholderPatch = -not $sawBlockEntry
+
 $missing = @($rows | Where-Object {
   $existingPatch -notmatch ('(?m)^[ 	]*(?:- )?(?:id|name):[ 	]*' + [regex]::Escape($_.id) + '[ 	]*' + $cr + '?$')
 })
-if ($missing.Count -eq 0) {
+if ($missing.Count -eq 0 -and -not $sawEmptySeq) {
   Write-Host '    已包含全部插件行，跳过' -ForegroundColor Green
 } else {
   $block = ($missing | ForEach-Object { $_.text }) -join ($nl + $nl)
-  if ($existingPatch.Trim() -eq '' -or $existingPatch.Trim() -eq '[]') {
+  if ($placeholderPatch) {
     $header = '# dsh-KazMode 插件注册（由 install.ps1 生成）' + $nl + '# 组合行说明见各插件 README；实时配置写在 ~/.dsh/settings.yaml' + $nl + $nl
     $newContent = $header + $block + $nl
+  } elseif ($sawEmptySeq) {
+    $newContent = $cleanedPatch.TrimEnd() + $nl + $nl + $block + $nl
   } else {
     $newContent = $existingPatch.TrimEnd() + $nl + $nl + $block + $nl
   }
   Write-Utf8NoBom -Path $PatchFile -Content $newContent
-  Write-Host ("    已追加 " + $missing.Count + " 条组合行") -ForegroundColor Green
+  if ($missing.Count -gt 0) {
+    Write-Host ("    已追加 " + $missing.Count + " 条组合行") -ForegroundColor Green
+  }
+  if ($sawEmptySeq) {
+    Write-Host '    已移除残留的 []（YAML 非法占位）' -ForegroundColor Green
+  }
 }
 
 # ---------- 4. Kaz 预设 ----------
@@ -441,11 +510,11 @@ if (Test-Path -LiteralPath $pkgFile) {
 $missingLinks = @()
 foreach ($p in $pluginDirs) {
   $link = Join-Path $NodeModulesDir $p.Name
-  if (-not (Test-Path -LiteralPath $link)) { $missingLinks += $p.Name }
+  if (-not (Test-Path -LiteralPath (Join-Path $link 'package.json'))) { $missingLinks += $p.Name }
 }
 if ($missingLinks.Count -gt 0) {
-  [void]$selfCheckFailures.Add(('node_modules 链接缺失: ' + ($missingLinks -join ', ')))
-  Write-Host ('    警告：node_modules 链接缺失: ' + ($missingLinks -join ', ')) -ForegroundColor Red
+  [void]$selfCheckFailures.Add(('node_modules 链接缺失或损坏: ' + ($missingLinks -join ', ')))
+  Write-Host ('    警告：node_modules 链接缺失或损坏: ' + ($missingLinks -join ', ')) -ForegroundColor Red
 } else {
   Write-Host '    node_modules 链接全部就绪' -ForegroundColor Green
 }
@@ -481,6 +550,19 @@ if ($ver) {
   }
 } else {
   Write-Host '    警告：未找到 dsh 全局安装（无法核对版本）' -ForegroundColor Yellow
+}
+
+# 7f. cordis.patch.yml YAML 合法性（防止 [] 占位残留这类启动崩溃）
+$yamlLib = Get-JsYamlPath
+if ($yamlLib -and (Test-Path -LiteralPath $PatchFile) -and (Get-Command node -ErrorAction SilentlyContinue)) {
+  $nodeScript = "const y=require(process.argv[1]);const f=process.argv[2];try{y.load(require('fs').readFileSync(f,'utf8'));console.log('OK')}catch(e){console.log('FAIL: '+e.message);process.exit(1)}"
+  $yamlOut = & node -e $nodeScript $yamlLib $PatchFile 2>&1
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host '    cordis.patch.yml YAML 合法' -ForegroundColor Green
+  } else {
+    [void]$selfCheckFailures.Add(('cordis.patch.yml YAML 非法（' + (($yamlOut -join ' ')) + '）'))
+    Write-Host ('    警告：cordis.patch.yml YAML 非法！' + ($yamlOut -join ' ')) -ForegroundColor Red
+  }
 }
 
 # ---------- 汇总 ----------
