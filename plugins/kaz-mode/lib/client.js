@@ -129,6 +129,7 @@ window.__ModuleLoader__.load({
 			{ key: "postFirstRoundMode", kind: "select", label: "postFirstRoundMode（首轮之后恢复的基底模式：标准 / 极简 / 创造）", options: ["standard", "minimal", "creative"] },
 			{ key: "minimalTools", kind: "list", label: "minimalTools（工具面·极简基底，逗号分隔）" },
 			{ key: "toolWhitelist", kind: "list", label: "toolWhitelist（工具面·白名单：逐个工具名，逗号分隔，不用组 id）" },
+			{ key: "defaultDisabledPlugins", kind: "list", label: "defaultDisabledPlugins（进入 Kaz 时默认关闭的插件 id，逗号分隔；仍可在面板手动开启）" },
 		];
 
 		/** kaz-memory 的配置字段（2026-08-17 起精简）：每轮只发固定总述行，
@@ -427,6 +428,12 @@ window.__ModuleLoader__.load({
 				const enabled = value !== null && typeof value === "object" ? value.enabled !== false : false;
 				const writable = writableOf(snap);
 				const missing = value === null;
+				const kazSnap = useScope(kazScope);
+				const kazValue = valueOf(kazSnap);
+				const defaultOff =
+					kazValue !== null &&
+					Array.isArray(kazValue.defaultDisabledPlugins) &&
+					kazValue.defaultDisabledPlugins.includes(plugin.id);
 
 				return createElement(
 					"div",
@@ -438,7 +445,7 @@ window.__ModuleLoader__.load({
 							"span",
 							{ className: "kzm-name", title: plugin.id },
 							plugin.name,
-							createElement("span", { className: "kzm-tag" }, "  " + plugin.tag),
+							createElement("span", { className: "kzm-tag" }, "  " + plugin.tag + (defaultOff ? "  · Kaz 默认关闭" : "")),
 						),
 						createElement(StateBadge, { state: missing ? "missing" : enabled ? "on" : "off" }),
 						createElement(Toggle, {
