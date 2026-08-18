@@ -53,13 +53,14 @@
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
-import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 round-minimal: 段。 */
 const NAMESPACE = settingsNamespace("round-minimal");
 
 /** 首轮极简工具集默认值：pwsh 为 Windows 原生 shell，str_replace_editor 覆盖常用文件编辑。 */
-const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "str_replace_editor"];
+/** 反转：deepseek团队说不要使用pwsh，用bash最好 */
+const DEFAULT_FIRST_ROUND_TOOLS = ["bash", "str_replace_editor"];
 
 /** task-master-whiteboard 插件的六个白板工具（插件存在且启用时自动加入首轮工具集）。 */
 const WHITEBOARD_TOOLS = [
@@ -80,13 +81,13 @@ const DEFAULT_ROUND_ONE_INSTRUCTION = [
   "[round-minimal First Round Mode]",
   ">",
   "We need to treat this as the first round: do not execute the task yet — only ask about the task details or wait for the user to provide them.",
-  "",
-  "[run_code / pwsh quick rules]",
-  ">",
-  "- pwsh result: stdout/stderr are OBJECTS, not strings — read .text (r.stdout?.text ?? \"\"), never concatenate them directly.",
-  "- Encoding: do not read UTF-8 files with Get-Content (CJK becomes mojibake) — use the read tool.",
-  "- PowerShell JSON: ConvertTo-Json flattens single-element arrays to a bare string (use -AsArray or build the JSON manually); Set-Content -Encoding UTF8 adds a BOM that breaks JSON.parse (strip /^\uFEFF/ or write with node).",
-  "- Generated code strings: no nested backticks/template literals inside run_code — use single-quoted strings.",
+  // "",
+  // "[run_code / pwsh quick rules]",
+  // ">",
+  // "- pwsh result: stdout/stderr are OBJECTS, not strings — read .text (r.stdout?.text ?? \"\"), never concatenate them directly.",
+  // "- Encoding: do not read UTF-8 files with Get-Content (CJK becomes mojibake) — use the read tool.",
+  // "- PowerShell JSON: ConvertTo-Json flattens single-element arrays to a bare string (use -AsArray or build the JSON manually); Set-Content -Encoding UTF8 adds a BOM that breaks JSON.parse (strip /^\uFEFF/ or write with node).",
+  // "- Generated code strings: no nested backticks/template literals inside run_code — use single-quoted strings.",
   "<",
 ].join("\n");
 
@@ -94,7 +95,7 @@ const DEFAULT_ROUND_ONE_INSTRUCTION = [
 const DEFAULT_ROUND_TWO_INSTRUCTION = [
   "[round-minimal Second Round Reminder]",
   ">",
-  "We need to ...",
+  "We can start executing the task.",
   "<",
 ].join("\n");
 
@@ -107,82 +108,6 @@ const SETTINGS_SCHEMA = z.object({
   includeSubagents: z.boolean().default(false),
   showPolicy: z.boolean().default(true),
 });
-
-/** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
-export const DEFAULT_SECTION = {
-  roundOneInstruction: "",
-  roundTwoInstruction: "",
-  enabled: true,
-};
-// ---------------------------------------------------------------------------
-// settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
-// 只写"缺失的键"，保留用户已有配置；settings.yaml 文件不存在时由 settings
-// 服务在首次写入时自动创建（DSH_HOME 下的 settings.yaml）。
-// ---------------------------------------------------------------------------
-
-/** 卸载判定：插件 fiber 正在拆除时不再回写 source（与 dsh-settings 内部一致）。 */
-function isUnloading(ctx) {
-  const state = ctx.fiber.state;
-  return state === 5 || state === 4; // FiberState.Unloading / Disposed
-}
-
-/**
- * 注册 settings 命名空间（语义与 installSettingsSection 相同：composition entry
- * 作 base、用户层优先、热重载），并在用户段缺失时只写缺失的键补齐默认值。
- */
-function installSettingsWithDefaults(ctx, ns, schema, entry, defaults, hooks) {
-  ctx.inject(["settings"], (sctx) => {
-    const scope = sctx.settings.register(ns, schema, { base: entry });
-    hooks.setSource(() => scope.get());
-    sctx.effect(() => () => {
-      if (isUnloading(ctx)) return;
-      hooks.setSource(() => entry);
-      hooks.onChange();
-    });
-    hooks.onChange();
-    scope.watch(() => {
-      if (isUnloading(ctx)) return;
-      hooks.onChange();
-    });
-    // 自愈：只补缺失键，保留用户已有配置（best-effort，失败只记日志）。
-    ensureSettingsDefaults(sctx.settings, ns, defaults, ctx.logger);
-  });
-}
-
-/**
- * 检查 settings.yaml 用户段：缺失的默认键用默认值补齐（合并写入，保留已有键）。
- * 返回写入的 patch；无需写入或失败时返回 null。独立导出便于测试。
- */
-export function ensureSettingsDefaults(settings, ns, defaults, logger) {
-  try {
-    const descriptor = settings.describe().find((item) => item.ns === ns);
-    const user =
-      descriptor !== undefined && descriptor.user !== null && typeof descriptor.user === "object"
-        ? descriptor.user
-        : {};
-    const patch = {};
-    for (const [key, value] of Object.entries(defaults)) {
-      if (!Object.prototype.hasOwnProperty.call(user, key)) patch[key] = value;
-    }
-    if (Object.keys(patch).length === 0) return null;
-    const write = settings.update(ns, patch);
-    if (write !== null && typeof write.then === "function") {
-      void write.then(
-        () => {
-          logger?.info?.("[ns] settings.yaml config section auto-filled missing keys: " + Object.keys(patch).join(", "));
-        },
-        (error) => {
-          logger?.warn?.("[ns] auto-fill defaults failed: " + (error instanceof Error ? error.message : String(error)));
-        },
-      );
-    }
-    return patch;
-  } catch (error) {
-    logger?.warn?.("[ns] check defaults failed: " + (error instanceof Error ? error.message : String(error)));
-    return null;
-  }
-}
-
 
 /** 归一化任意来源（组合行 config / settings 解析值）的配置。 */
 function normalizeConfig(raw) {
@@ -263,7 +188,7 @@ export default {
     // 回退到默认值，导致 settings.yaml 里的 enabled 等配置全部失效。
     const entry = normalizeConfig(config);
     let source = () => entry;
-    installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {
+    installSettingsSection(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, {
       setSource: (current) => {
         source = () => normalizeConfig(current());
       },

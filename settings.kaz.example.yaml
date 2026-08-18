@@ -1,0 +1,83 @@
+# dsh-KazMode 设置示例
+# 合并进 ~/.dsh/settings.yaml 使用。install.ps1 只会补缺失的段，不会覆盖已有配置。
+# 不含个人数据 / 凭据。
+
+# 可选：把默认预设设为 Kaz 模式；不想自动切换就删掉这段，在预设选择器里手动选。
+agent-presets:
+  default: kaz
+
+thinking-anchor:
+  enabled: true
+  instruction: ""
+  turnReminder: ""
+
+tool-filter:
+  enabled: true
+  mode: remove
+  disabledTools:
+    - tool-cordis
+    - tool-subagent-report
+    - codex
+    - claude-code
+
+tool-grouping:
+  enabled: true
+  registerStatusTool: true
+  mode: tag
+  groups:
+    - id: tool-fs
+      realm: minimal-local-fs
+      tools: [ read, write, edit, glob, grep ]
+    - id: workflowEngine
+      realm: workflowEngine
+      tools: [ workflow, ralph ]
+    - id: kaz-memory
+      realm: kazMemory
+      tools: [ memory_save, memory_list, memory_search, memory_forget ]
+
+round-minimal:
+  enabled: true
+  roundOneInstruction: ""
+  roundTwoInstruction: ""
+
+kaz-mode:
+  enabled: true
+  registerStatusTool: true
+  showFirstRoundHint: true
+  firstRoundHint: 请在第一句话中说明本次对话的总任务目标。
+  postFirstRoundMode: standard
+  toolWhitelist:
+    [
+      read, write, edit, glob, grep,
+      job_list, job_output, job_kill,
+      web_search, skill, todo_write, ask_user_question,
+      create_goal, get_goal, update_goal,
+      subagent, subagent_fork, list_agents, send_message, interrupt_agent,
+      workflow, ralph,
+      memory_save, memory_list, memory_search, memory_forget,
+      tool_grouping_status, kaz_mode_status,
+      new_whiteboard, list_whiteboards, read_whiteboard,
+      append_whiteboard, update_whiteboard, clear_whiteboard
+    ]
+
+kaz-memory:
+  enabled: true
+  guidance: ""
+
+code-collapse:
+  enabled: true
+  appendCallHint: true
+  callHint: ""
+  firstRoundHint: true
+
+output-beep:
+  enabled: true
+  includeSubagents: false
+  frequency: 1000
+  duration: 300
+
+task-master-whiteboard:
+  enabled: true
+
+round-display:
+  enabled: true

@@ -9,13 +9,10 @@
 // 宿主平面职责：
 //   1) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照八个
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
-//      再把它们全部置为 enabled=true；defaultDisabledPlugins 默认关闭清单里的
-//      插件（默认 task-master-whiteboard）例外——进入 Kaz 时被置为 enabled=false
-//      （Kaz 模式下默认关闭，用户仍可在面板 / settings.yaml 手动开启，联动不再
-//      触碰它们）；变为 false（关闭 / 切走）时不恢复、不改动八个插件的 enabled
-//      状态——用户在 Kaz 模式下手动关闭的插件保持关闭。例外：round-minimal 的
-//      showPolicy（轮次提示段开关）进入 Kaz 时快照原值并置 false，退出 Kaz 时
-//      按快照精确恢复（原值可能是 false）。
+//      再把它们全部置为 enabled=true；变为 false（关闭 / 切走）时不恢复、
+//      不改动八个插件的 enabled 状态——用户在 Kaz 模式下手动关闭的插件保持
+//      关闭。例外：round-minimal 的 showPolicy（轮次提示段开关）进入 Kaz 时
+//      快照原值并置 false，退出 Kaz 时按快照精确恢复（原值可能是 false）。
 //   2) 预设联动：Kaz 模式已注册为 agent preset（id: kaz）。default 切到 "kaz"
 //      或会话切换到 kaz 时把 kaz-mode.enabled 置 true（触发上面的插件联动）；
 //      切到其它预设 / 其它会话时置 false（不改动四个插件）。同时把最近一个
@@ -51,7 +48,7 @@
 
 import z from "@deepseek-ai/schemastery";
 import { defineTool, renderToolsSdk } from "@deepseek-ai/dsh-tools";
-import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { installSettingsSection, settingsNamespace } from "@deepseek-ai/dsh-settings";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
 const NAMESPACE = settingsNamespace("kaz-mode");
@@ -122,10 +119,6 @@ const DEFAULT_TOOL_WHITELIST = [
   "tool_grouping_status", "kaz_mode_status",
 ];
 
-/** 进入 Kaz 时默认关闭的被管理插件 id 清单（Kaz 模式下默认关闭，
- *  但用户仍可在面板 / settings.yaml 手动开启）。 */
-const DEFAULT_DISABLED_PLUGINS = ["task-master-whiteboard"];
-
 /** 被管理的八个插件（id 与 settings.yaml 命名空间一致）。 */
 const MANAGED_PLUGINS = [
   { id: "thinking-anchor", label: "thinking-anchor（插件1 · 思考锚点）" },
@@ -145,8 +138,6 @@ const SETTINGS_SCHEMA = z.object({
   showFirstRoundHint: z.boolean().default(true),
   firstRoundHint: z.string().default(DEFAULT_FIRST_ROUND_HINT),
   managedPlugins: z.array(z.string()).default(MANAGED_PLUGINS.map((plugin) => plugin.id)),
-  /** 进入 Kaz 时默认关闭的被管理插件 id 清单（Kaz 模式下默认关闭，仍可手动开启）。 */
-  defaultDisabledPlugins: z.array(z.string()).default([...DEFAULT_DISABLED_PLUGINS]),
   /** Kaz 工具面·极简基底（始终保留的最小工具集）。 */
   minimalTools: z.array(z.string()).default([...DEFAULT_MINIMAL_TOOLS]),
   /** Kaz 工具面·白名单：逐个列出工具名（不用组 id，分组归属交给 tool-grouping），热改生效。 */
@@ -173,96 +164,6 @@ const SETTINGS_SCHEMA = z.object({
     .default({}),
 });
 
-/** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段。
- *  savedPluginStates / roundMinimalPolicySnapshot / previousPreset 是运行时联动
- *  字段（Kaz 面板自行写入），不预置，避免把本机的联动状态带到新机器。 */
-export const DEFAULT_SECTION = {
-  enabled: true,
-  postFirstRoundMode: DEFAULT_POST_ROUND_MODE,
-  defaultDisabledPlugins: [...DEFAULT_DISABLED_PLUGINS],
-  toolWhitelist: [
-    "read", "write", "edit", "glob", "grep",
-    "job_list", "job_output", "job_kill",
-    "web_search", "skill", "todo_write", "ask_user_question",
-    "create_goal", "get_goal", "update_goal",
-    "subagent", "subagent_fork", "list_agents", "send_message", "interrupt_agent",
-    "workflow", "ralph",
-    "memory_save", "memory_list", "memory_search", "memory_forget",
-    "tool_grouping_status", "kaz_mode_status",
-    "new_whiteboard", "list_whiteboards", "read_whiteboard",
-    "append_whiteboard", "update_whiteboard", "clear_whiteboard",
-  ],
-};
-// ---------------------------------------------------------------------------
-// settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
-// 只写"缺失的键"，保留用户已有配置；settings.yaml 文件不存在时由 settings
-// 服务在首次写入时自动创建（DSH_HOME 下的 settings.yaml）。
-// ---------------------------------------------------------------------------
-
-/** 卸载判定：插件 fiber 正在拆除时不再回写 source（与 dsh-settings 内部一致）。 */
-function isUnloading(ctx) {
-  const state = ctx.fiber.state;
-  return state === 5 || state === 4; // FiberState.Unloading / Disposed
-}
-
-/**
- * 注册 settings 命名空间（语义与 installSettingsSection 相同：composition entry
- * 作 base、用户层优先、热重载），并在用户段缺失时只写缺失的键补齐默认值。
- */
-function installSettingsWithDefaults(ctx, ns, schema, entry, defaults, hooks) {
-  ctx.inject(["settings"], (sctx) => {
-    const scope = sctx.settings.register(ns, schema, { base: entry });
-    hooks.setSource(() => scope.get());
-    sctx.effect(() => () => {
-      if (isUnloading(ctx)) return;
-      hooks.setSource(() => entry);
-      hooks.onChange();
-    });
-    hooks.onChange();
-    scope.watch(() => {
-      if (isUnloading(ctx)) return;
-      hooks.onChange();
-    });
-    // 自愈：只补缺失键，保留用户已有配置（best-effort，失败只记日志）。
-    ensureSettingsDefaults(sctx.settings, ns, defaults, ctx.logger);
-  });
-}
-
-/**
- * 检查 settings.yaml 用户段：缺失的默认键用默认值补齐（合并写入，保留已有键）。
- * 返回写入的 patch；无需写入或失败时返回 null。独立导出便于测试。
- */
-export function ensureSettingsDefaults(settings, ns, defaults, logger) {
-  try {
-    const descriptor = settings.describe().find((item) => item.ns === ns);
-    const user =
-      descriptor !== undefined && descriptor.user !== null && typeof descriptor.user === "object"
-        ? descriptor.user
-        : {};
-    const patch = {};
-    for (const [key, value] of Object.entries(defaults)) {
-      if (!Object.prototype.hasOwnProperty.call(user, key)) patch[key] = value;
-    }
-    if (Object.keys(patch).length === 0) return null;
-    const write = settings.update(ns, patch);
-    if (write !== null && typeof write.then === "function") {
-      void write.then(
-        () => {
-          logger?.info?.("[ns] settings.yaml config section auto-filled missing keys: " + Object.keys(patch).join(", "));
-        },
-        (error) => {
-          logger?.warn?.("[ns] auto-fill defaults failed: " + (error instanceof Error ? error.message : String(error)));
-        },
-      );
-    }
-    return patch;
-  } catch (error) {
-    logger?.warn?.("[ns] check defaults failed: " + (error instanceof Error ? error.message : String(error)));
-    return null;
-  }
-}
-
-
 /** 归一化任意来源（组合行 config / settings 解析值）的配置。 */
 function normalizeConfig(raw) {
   const value = raw && typeof raw === "object" ? raw : {};
@@ -275,7 +176,6 @@ function normalizeConfig(raw) {
       : [...fallback];
   const minimalTools = stringList(value.minimalTools, DEFAULT_MINIMAL_TOOLS);
   const toolWhitelist = stringList(value.toolWhitelist, DEFAULT_TOOL_WHITELIST);
-  const defaultDisabledPlugins = stringList(value.defaultDisabledPlugins, DEFAULT_DISABLED_PLUGINS);
   const saved = value.savedPluginStates && typeof value.savedPluginStates === "object" ? value.savedPluginStates : {};
   return {
     enabled: value.enabled === true,
@@ -288,7 +188,6 @@ function normalizeConfig(raw) {
         ? value.firstRoundHint.trim()
         : DEFAULT_FIRST_ROUND_HINT,
     managedPlugins: managed,
-    defaultDisabledPlugins,
     previousPreset:
       typeof value.previousPreset === "string" && value.previousPreset.trim().length > 0
         ? value.previousPreset.trim()
@@ -397,17 +296,12 @@ export default {
       return snapshot;
     }
 
-    /** 联动启用：把尚未启用的被管理插件置为 enabled=true（defaultDisabledPlugins
-     *  默认关闭清单内的插件跳过——Kaz 模式下默认关闭，联动不再启用它们）。
-     *  返回实际写入个数。 */
+    /** 联动启用：把尚未启用的被管理插件置为 enabled=true。返回实际写入个数。 */
     async function forceEnableManaged() {
       const settings = getSettings();
       if (settings === undefined) return 0;
-      const current = source();
-      const disabledByDefault = new Set(current.defaultDisabledPlugins);
       let count = 0;
       for (const plugin of managedList()) {
-        if (disabledByDefault.has(plugin.id)) continue;
         const state = readPluginState(plugin.id);
         if (state === null || state.enabled === true) continue;
         try {
@@ -416,30 +310,6 @@ export default {
           ctx.logger.info(`[kaz-mode] 联动启用 ${plugin.id}`);
         } catch (error) {
           ctx.logger.warn(`[kaz-mode] 联动启用 ${plugin.id} 失败：${safeMessage(error)}`);
-        }
-      }
-      return count;
-    }
-
-    /** 联动默认关闭：进入 Kaz 时把 defaultDisabledPlugins 清单内的插件置为
-     *  enabled=false（仅"进入 Kaz"瞬间执行一次；用户之后手动开启的保持开启，
-     *  联动不再触碰）。返回实际写入个数。 */
-    async function forceDisableDefaultManaged() {
-      const settings = getSettings();
-      if (settings === undefined) return 0;
-      const current = source();
-      const disabledByDefault = new Set(current.defaultDisabledPlugins);
-      let count = 0;
-      for (const plugin of managedList()) {
-        if (!disabledByDefault.has(plugin.id)) continue;
-        const state = readPluginState(plugin.id);
-        if (state === null || state.enabled === false) continue;
-        try {
-          await settings.update(settingsNamespace(plugin.id), { enabled: false });
-          count += 1;
-          ctx.logger.info(`[kaz-mode] 联动默认关闭 ${plugin.id}（Kaz 模式默认关闭清单）`);
-        } catch (error) {
-          ctx.logger.warn(`[kaz-mode] 联动默认关闭 ${plugin.id} 失败：${safeMessage(error)}`);
         }
       }
       return count;
@@ -547,13 +417,10 @@ export default {
               // round-minimal.showPolicy：先快照原值，再置 true（顺序不能反）。
               await snapshotRoundMinimalPolicy();
               await enableRoundMinimalPolicy();
-              // 默认关闭清单：进入 Kaz 的瞬间把这些插件置为 enabled=false
-              // （Kaz 模式下默认关闭；用户之后手动开启的保持开启）。
-              await forceDisableDefaultManaged();
             }
             const enabledCount = await forceEnableManaged();
             ctx.logger.info(
-              `[kaz-mode] Kaz 模式已开启：联动启用 ${enabledCount} 个插件（默认关闭清单已跳过）；原始状态快照已保存。`,
+              `[kaz-mode] Kaz 模式已开启：联动启用 ${enabledCount} 个插件；原始状态快照已保存。`,
             );
           } else {
             // 关闭 / 切走 Kaz：八个插件的 enabled 保持当前状态——只有"进入
@@ -904,13 +771,9 @@ export default {
 
       lines.push("[插件联动]");
       const saved = current.savedPluginStates ?? {};
-      const disabledByDefault = new Set(current.defaultDisabledPlugins);
       for (const plugin of managedList()) {
         const state = readPluginState(plugin.id);
         lines.push(`  • ${plugin.label}`);
-        if (disabledByDefault.has(plugin.id)) {
-          lines.push("      Kaz 默认关闭清单（defaultDisabledPlugins）：进入 Kaz 时置为禁用，仍可在面板手动开启");
-        }
         if (state === null) {
           lines.push("      状态: 未加载（settings 未注册，该插件行可能未挂载）");
         } else {
@@ -1061,7 +924,7 @@ export default {
           defineTool({
             name: "kaz_mode_status",
             description:
-              "只读报告 kaz-mode 超级模式当前状态：Kaz 模式开关、五个前置插件（thinking-anchor / round-minimal / tool-grouping / tool-filter / kaz-memory）的加载状态、八个被管理插件（含 code-collapse / output-beep / task-master-whiteboard / round-display）的启停、原始状态快照与 Kaz 默认关闭清单（defaultDisabledPlugins）、Kaz 工具面（minimalTools 极简基底 + toolWhitelist 白名单）、首轮极简伪装（首轮保留 persona + thinking-anchor + round-minimal 轮次提示 + code-collapse 首轮提醒 + task-master-whiteboard:role）与 postFirstRoundMode 基底恢复、round-minimal 信号与首轮工具基底（含 showPolicy）、tool-grouping 运行时分组视图。无需任何参数。",
+              "只读报告 kaz-mode 超级模式当前状态：Kaz 模式开关、五个前置插件（thinking-anchor / round-minimal / tool-grouping / tool-filter / kaz-memory）的加载状态、八个被管理插件（含 code-collapse / output-beep / task-master-whiteboard / round-display）的启停与原始状态快照、Kaz 工具面（minimalTools 极简基底 + toolWhitelist 白名单）、首轮极简伪装（首轮保留 persona + thinking-anchor + round-minimal 轮次提示 + code-collapse 首轮提醒 + task-master-whiteboard:role）与 postFirstRoundMode 基底恢复、round-minimal 信号与首轮工具基底（含 showPolicy）、tool-grouping 运行时分组视图。无需任何参数。",
             parameters: {},
             output: {
               schema: { type: "string" },
@@ -1106,51 +969,12 @@ export default {
     // settings 注册放到所有变量/函数定义之后：ctx.inject 可能同步回调，
     // 其 onChange 会调用 handleChange()，必须保证闭包变量已初始化（避免 TDZ）。
     // 注意：setSource 收到的是一个 thunk（`() => scope.get()`），不是当前值。
-    installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {
+    installSettingsSection(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, {
       setSource: (getValue) => {
         source = () => normalizeConfig(getValue());
       },
       onChange: () => handleChange(),
     });
-
-    // 自愈补充：agent-presets.default 缺失时自动设为 kaz（镜像作者 settings.yaml，
-    // 朋友的机器一启动就默认进入 Kaz 预设）。该命名空间由宿主 agent-presets
-    // 插件注册，启动竞态下可能晚于本插件——按退避重试（与预设同步一致）；
-    // 用户已有 default 值时绝不覆盖。
-    let presetSeeded = false;
-    const seedDefaultPreset = () => {
-      if (presetSeeded) return;
-      const settings = getSettings();
-      if (settings === undefined) return;
-      try {
-        const ap = settings.describe().find((item) => item.ns === PRESETS_NAMESPACE);
-        const apUser = ap !== undefined && ap.user !== null && typeof ap.user === "object" ? ap.user : {};
-        if (Object.prototype.hasOwnProperty.call(apUser, "default")) {
-          presetSeeded = true;
-          return;
-        }
-        const write = settings.update(PRESETS_NAMESPACE, { default: KAZ_PRESET_ID });
-        if (write !== null && typeof write.then === "function") {
-          void write.then(
-            () => {
-              presetSeeded = true;
-              ctx.logger?.info?.("[kaz-mode] agent-presets.default 缺失，已自动设为 kaz");
-            },
-            (error) => {
-              ctx.logger?.warn?.("[kaz-mode] 自动设置默认预设失败：" + (error instanceof Error ? error.message : String(error)));
-            },
-          );
-        } else {
-          presetSeeded = true;
-        }
-      } catch (error) {
-        // 命名空间尚未注册：稍后重试。
-        ctx.logger?.debug?.("[kaz-mode] 默认预设自愈暂不可用（agent-presets 命名空间未注册）");
-      }
-    };
-    for (const delay of [0, 50, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000]) {
-      setTimeout(seedDefaultPreset, delay);
-    }
 
     handleChange();
 
