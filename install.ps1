@@ -18,6 +18,10 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# 统一控制台编码为 UTF-8，避免中文乱码（Windows PowerShell 5.1 + Windows Terminal 常见问题）
+try { & chcp 65001 | Out-Null } catch { }
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
+try { $OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
 $nl = [string][char]13 + [string][char]10
 $lf = [string][char]10
 $cr = [string][char]13

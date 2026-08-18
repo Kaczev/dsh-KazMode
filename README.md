@@ -63,3 +63,4 @@ Kaczev 的 dsh「Kaz 模式」插件全家桶 + agent preset。
 | 面板显示「未安装」/设置写不进去 | 检查 dsh-host-apiproxy 补丁是否还在（升级 dsh 会被覆盖） |
 | 预设选择器没有「Kaz 模式」 | 确认 `~/.dsh/.agent-presets/kaz/` 存在，然后重启 dsh |
 | 首轮只有两个工具 | 正常：round-minimal 首轮极简，第二轮起恢复全量 |
+| 安装脚本中文乱码 | install.ps1 已内置 UTF-8 控制台设置；请勿用「另存为 ANSI/GBK」覆盖它（保持 UTF-8 with BOM） |
