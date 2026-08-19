@@ -10,6 +10,8 @@ window.__ModuleLoader__.load({
 		const createElement = react.createElement;
 		const Fragment = react.Fragment;
 		const useState = react.useState;
+		const useEffect = react.useEffect;
+		const useCallback = react.useCallback;
 		const useMemo = react.useMemo;
 		const useSyncExternalStore = react.useSyncExternalStore;
 		const useRef = react.useRef;
@@ -25,9 +27,8 @@ window.__ModuleLoader__.load({
 		const PRESET_NAMESPACE = "agent-presets";
 
 		/**
-		 * 被管理的八个插件与其配置字段（字段与各插件 settings.yaml 段一一对应）。
-		 * 字段描述只是"编辑器元数据"：每个字段的当前值一律从该插件的实时
-		 * settings 快照读取，kaz-mode 不内置任何工具列表或默认分组。
+		 * 被管理的插件与其配置字段（字段与各插件 settings.yaml 段一一对应）。
+		 * tag 作为悬停简介（Tooltip），解决名称过长被省略号截断的问题。
 		 */
 		const PLUGINS = [
 			{
@@ -102,6 +103,39 @@ window.__ModuleLoader__.load({
 				],
 			},
 			{
+				id: "round-display",
+				namespace: "round-display",
+				name: "round-display",
+				tag: "插件8 · 每轮注入显示",
+				fields: [
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：开启后自动判断是否显示本轮注入；关闭时完全隐藏）" },
+				],
+			},
+			{
+				id: "deepseek-default-model",
+				namespace: "deepseek-default-model",
+				name: "deepseek-default-model",
+				tag: "插件9 · DeepSeek 默认参数",
+				fields: [
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
+					{ key: "provider", kind: "text", label: "provider（提供方路由）" },
+					{ key: "model", kind: "text", label: "model（默认模型）" },
+					{ key: "reasoningEffort", kind: "select", label: "reasoningEffort（默认思考强度）", options: ["low", "medium", "high"] },
+					{ key: "generation_kwargs", kind: "json", label: "generation_kwargs（temperature / top_p / repetition_penalty）" },
+				],
+			},
+			{
+				id: "kaz-memory",
+				namespace: "kaz-memory",
+				name: "kaz-memory",
+				tag: "插件10 · 独立记忆组件（有独立开关）",
+				note: "记忆指引是每轮的固定短提示（2026-08-17 起）：只发一行总述（默认 We need 风格英文），记忆工具的具体用法由各工具描述自带；仅当 memory_search 在当前环境可调用时发（存在且可直接使用或经 run_code SDK 调用），不可用时完全静默。",
+				fields: [
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后 UI 不显示记忆面板）" },
+					{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（固定提示总述行；留空 = 内置默认）" },
+				],
+			},
+			{
 				id: "task-master-whiteboard",
 				namespace: "task-master-whiteboard",
 				name: "task-master-whiteboard",
@@ -109,15 +143,6 @@ window.__ModuleLoader__.load({
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：Task Master 白板工具与角色提示段）" },
 					{ key: "turnReminder", kind: "textarea", label: "turnReminder（每轮白板优先提醒，第二轮起每轮注入；留空 = 内置默认）" },
-				],
-			},
-			{
-				id: "round-display",
-				namespace: "round-display",
-				name: "round-display",
-				tag: "插件8 · 每轮注入显示",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：开启后自动判断是否显示本轮注入；关闭时完全隐藏）" },
 				],
 			},
 		];
@@ -132,14 +157,32 @@ window.__ModuleLoader__.load({
 			{ key: "defaultDisabledPlugins", kind: "list", label: "defaultDisabledPlugins（进入 Kaz 时默认关闭的插件 id，逗号分隔；仍可在面板手动开启）" },
 		];
 
-		/** kaz-memory 的配置字段（2026-08-17 起精简）：每轮只发固定总述行，
-		 *  工具细节已并入各工具描述；guidanceSearch/Save/List/Forget 保留兼容但不再生效。
-		 *  旧字段 guidance（整段覆盖）保留兼容但不在面板暴露。 */
-		const MEMORY_FIELDS = [
-			{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（固定提示总述行；留空 = 内置默认）" },
-		];
+		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
+		const RPC_CHANNEL = "/kaz-mode";
+		let rpc = null;
+		let lastRpcError = "";
+		async function rpcCall(endpoint, payload) {
+			if (rpc === null) {
+				lastRpcError = endpoint + ": RPC 客户端未创建";
+				return null;
+			}
+			try {
+				const result = await rpc.call(RPC_CHANNEL, endpoint, payload || {});
+				if (result !== null && typeof result === "object" && result.ok === true) {
+					lastRpcError = "";
+					return result.value;
+				}
+				lastRpcError = endpoint + ": " + (result !== null && typeof result === "object" && result.error ? result.error.message : "RPC 返回失败");
+				console.warn("[kaz-mode] rpc", endpoint, lastRpcError);
+				return null;
+			} catch (error) {
+				lastRpcError = endpoint + ": " + (error !== null && typeof error === "object" && error.message ? error.message : String(error));
+				console.warn("[kaz-mode] rpc", endpoint, error);
+				return null;
+			}
+		}
 
-		const inject = ["slots", "settingsScope"];
+		const inject = ["slots", "settingsScope", "connection"];
 
 		function apply(ctx) {
 			// ---- 样式（仅本插件组件的局部样式，使用 dsh 主题 token，随明暗主题） ----
@@ -152,16 +195,31 @@ window.__ModuleLoader__.load({
 .kzm-root[data-on="true"] .kzm-dot{background:#16a34a}
 .kzm-root[data-on="true"] .kzm-button{border-color:rgba(22,163,74,.45)}
 .kzm-chevron{color:var(--dsw-alias-label-tertiary);font-size:10px;flex:none}
-.kzm-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:60;width:336px;max-height:60vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:4px}
+.kzm-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:60;width:480px;max-height:70vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:4px;transition:opacity .16s ease,transform .16s ease}
 .kzm-portal{position:fixed;z-index:1200}
 .kzm-portal .kzm-panel{position:static;top:auto;bottom:auto;left:auto;right:auto;width:100%;box-sizing:border-box}
+.kzm-portal.kzm-opening .kzm-panel{opacity:1;transform:translateY(0)}
+.kzm-portal.kzm-closing .kzm-panel{opacity:0;transform:translateY(-6px)}
 .kzm-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
 .kzm-note{font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:1.5;margin:2px 0 6px}
 .kzm-preset{font-size:12px;color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-radius:8px;padding:6px 10px;line-height:1.5;margin:2px 0 6px}
 .kzm-row{border-top:1px solid var(--dsw-alias-border-l2);padding:8px 2px;display:flex;flex-direction:column;gap:6px}
 .kzm-row:first-of-type{border-top:none}
 .kzm-row-head{display:flex;align-items:center;gap:8px}
-.kzm-name{flex:1;min-width:0;font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kzm-state-section{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;padding:8px;margin:2px 0;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base))}
+.kzm-state-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.kzm-state-title{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);flex:1;min-width:160px}
+.kzm-state-desc{font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.4;width:100%}
+.kzm-default-actions{display:flex;gap:6px;margin:2px 0 6px;flex-wrap:nowrap}
+.kzm-default-actions .kzm-set-default-btn{flex:1;text-align:center}
+.kzm-reset-btn,.kzm-set-default-btn{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;flex:none}
+.kzm-reset-btn:hover,.kzm-set-default-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.kzm-override-badge{font-size:10px;color:#b45309;border:1px solid rgba(180,83,9,.4);background:rgba(180,83,9,.08);border-radius:8px;padding:1px 6px;flex:none}
+.kzm-state-item{display:flex;flex-direction:column;padding:3px 0;border-top:1px solid var(--dsw-alias-border-l2)}
+.kzm-state-item:first-of-type{border-top:none}
+.kzm-state-row{display:flex;align-items:center;gap:6px}
+.kzm-state-name{flex:1;min-width:0;font-size:12px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}
+.kzm-name{flex:1;min-width:0;font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}
 .kzm-tag{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .kzm-badge{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);flex:none}
 .kzm-badge[data-state="on"]{color:#16a34a;border-color:rgba(22,163,74,.45)}
@@ -205,7 +263,16 @@ window.__ModuleLoader__.load({
 				document.head.appendChild(tag);
 			}
 
-			// ---- settings 绑定：kaz-mode 自身 + agent-presets + 八个被管理插件 ----
+			// ---- RPC 客户端初始化（宿主 /kaz-mode 通道） ----
+			try {
+				if (ctx.connection !== undefined && ctx.connection !== null && ctx.connection.rpc !== undefined && typeof ctx.connection.rpc.call === "function") {
+					rpc = ctx.connection.rpc;
+				}
+			} catch {
+				rpc = null;
+			}
+
+			// ---- settings 绑定：kaz-mode 自身 + agent-presets + 被管理插件 ----
 			function bindScope(namespace) {
 				try {
 					return ctx.settingsScope.bind({ namespace });
@@ -217,6 +284,9 @@ window.__ModuleLoader__.load({
 			const presetScope = bindScope(PRESET_NAMESPACE);
 			const pluginScopes = new Map(PLUGINS.map((plugin) => [plugin.id, bindScope(plugin.namespace)]));
 			const memoryScope = bindScope("kaz-memory");
+
+			/** 会话列表 binding（由下方 conversation/sessions inject 填充）。 */
+			let sessionListBinding = null;
 
 			// ---- hooks ----
 			const scopeBindings = new WeakMap();
@@ -233,10 +303,39 @@ window.__ModuleLoader__.load({
 				return useSyncExternalStore(binding.subscribe, binding.getSnapshot, binding.getSnapshot);
 			}
 
+			/** 读取当前会话（依赖 conversation/sessions inject 填充的 binding）。 */
+			function useCurrentSession() {
+				const binding = sessionListBinding !== null
+					? sessionListBinding
+					: { subscribe: () => () => {}, getSnapshot: () => null };
+				const state = useSyncExternalStore(
+					binding.subscribe,
+					binding.getSnapshot,
+					binding.getSnapshot,
+				);
+				const current = state !== null && typeof state === "object" ? state.current : undefined;
+				const summary =
+					current !== undefined && state !== null && typeof state === "object" && state.byId !== null && typeof state.byId === "object"
+						? state.byId[current]
+						: undefined;
+				return { sessionId: typeof current === "string" ? current : null, summary: summary || null };
+			}
+
 			/** 取 settings 快照里 schema 解析后的值；未就绪返回 null。 */
 			function valueOf(snap) {
 				if (snap === null || snap === undefined || snap.status !== "ready") return null;
 				return snap.value === undefined ? null : snap.value;
+			}
+
+			/** 判断会话专属覆盖是否与当前模式默认设置不一致（不一致才显示“专属”）。 */
+			function stateDiffers(base, override) {
+				if (override === null || override === undefined || typeof override !== "object") return false;
+				for (const [key, value] of Object.entries(override)) {
+					if (value === null || value === undefined) continue;
+					const baseValue = base !== null && typeof base === "object" ? base[key] : undefined;
+					if (JSON.stringify(baseValue) !== JSON.stringify(value)) return true;
+				}
+				return false;
 			}
 
 			function writableOf(snap) {
@@ -337,6 +436,25 @@ window.__ModuleLoader__.load({
 						);
 						break;
 					}
+					case "text": {
+						const text = draft !== null ? draft : typeof current === "string" ? current : "";
+						editor = createElement("input", {
+							className: "kzm-input",
+							type: "text",
+							value: text,
+							disabled: !writable,
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								if (draft.trim() === "") {
+									commit(undefined, true);
+								} else {
+									commit(draft.trim());
+								}
+							},
+						});
+						break;
+					}
 					case "list": {
 						const text = draft !== null ? draft : Array.isArray(current) ? current.join(", ") : "";
 						editor = createElement("input", {
@@ -383,7 +501,7 @@ window.__ModuleLoader__.load({
 						break;
 					}
 					case "json": {
-						const text = draft !== null ? draft : JSON.stringify(current, null, 2);
+						const text = draft !== null ? draft : current === undefined ? "" : JSON.stringify(current, null, 2);
 						editor = createElement(
 							Fragment,
 							null,
@@ -443,7 +561,7 @@ window.__ModuleLoader__.load({
 						{ className: "kzm-row-head" },
 						createElement(
 							"span",
-							{ className: "kzm-name", title: plugin.id },
+							{ className: "kzm-name", title: plugin.tag || plugin.id },
 							plugin.name,
 							createElement("span", { className: "kzm-tag" }, "  " + plugin.tag + (defaultOff ? "  · Kaz 默认关闭" : "")),
 						),
@@ -513,37 +631,177 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			/** kaz-memory 配置行：独立记忆组件，不参与 Kaz 启停联动；有自己的 enabled
-			 *  开关（Kaz 面板开关）。关闭时侧边栏「记忆」按钮与记忆面板完全不渲染、
-			 *  宿主不注入指引/自动载入；本行与其它插件行一致——名称 + 徽章 + 开关 +
-			 *  「配置」按钮始终显示（配置表单不受开关影响，方便随时调整 guidanceHead）。 */
-			function MemoryConfigRow() {
-				const [cfgOpen, setCfgOpen] = useState(false);
-				const memSnap = useScope(memoryScope);
-				const memValue = valueOf(memSnap);
-				const missing = memValue === null;
-				const enabled = memValue !== null && typeof memValue === "object" ? memValue.enabled !== false : true;
-				const writable = writableOf(memSnap);
+			/** 会话/默认状态字段编辑器：值来自 RPC 返回的插件状态对象，写入经
+			 *  onCommit 回调转成 setSessionPlugin（编辑 a/b 也会成为当前对话专属覆盖）。 */
+			function StateFieldEditor({ field, state, onCommit, disabled }) {
+				const current = state !== null && typeof state === "object" ? state[field.key] : undefined;
+				const [draft, setDraft] = useState(null);
+				const [error, setError] = useState(null);
+				const [saving, setSaving] = useState(false);
+
+				const commit = (next, isUnset) => {
+					if (disabled === true) return;
+					setSaving(true);
+					setError(null);
+					Promise.resolve(onCommit(field.key, next, isUnset))
+						.then(() => setDraft(null))
+						.catch((err) => setError(String((err && err.message) || err)))
+						.finally(() => setSaving(false));
+				};
+
+				const label = createElement("label", null, field.label);
+				let editor = null;
+				switch (field.kind) {
+					case "boolean":
+						editor = createElement(
+							"div",
+							{ className: "kzm-field-line" },
+							createElement(Toggle, {
+								checked: current === true,
+								onChange: (next) => commit(next),
+								disabled: disabled === true,
+							}),
+						);
+						break;
+					case "select": {
+						const selected = Array.isArray(field.options) && field.options.includes(current) ? current : field.options[0];
+						editor = createElement(
+							"select",
+							{
+								className: "kzm-input kzm-select",
+								value: selected,
+								disabled: disabled === true,
+								onChange: (event) => commit(event.target.value),
+							},
+							field.options.map((option) => createElement("option", { key: option, value: option }, option)),
+						);
+						break;
+					}
+					case "text": {
+						const text = draft !== null ? draft : typeof current === "string" ? current : "";
+						editor = createElement("input", {
+							className: "kzm-input",
+							type: "text",
+							value: text,
+							disabled: disabled === true,
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								if (draft.trim() === "") {
+									commit(undefined, true);
+								} else {
+									commit(draft.trim());
+								}
+							},
+						});
+						break;
+					}
+					case "list": {
+						const text = draft !== null ? draft : Array.isArray(current) ? current.join(", ") : "";
+						editor = createElement("input", {
+							className: "kzm-input",
+							type: "text",
+							value: text,
+							disabled: disabled === true,
+							placeholder: "例如：a, b, c（逗号分隔）",
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								const trimmed = draft.trim();
+								if (trimmed === "") {
+									commit(undefined, true);
+									return;
+								}
+								const parsed = trimmed
+									.split(",")
+									.map((part) => part.trim())
+									.filter((part) => part.length > 0);
+								commit(parsed);
+							},
+						});
+						break;
+					}
+					case "textarea": {
+						const text = draft !== null ? draft : typeof current === "string" ? current : "";
+						editor = createElement("textarea", {
+							className: "kzm-input kzm-textarea",
+							value: text,
+							disabled: disabled === true,
+							placeholder: "留空 = 使用内置默认",
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								if (draft.trim() === "") {
+									commit(undefined, true);
+								} else {
+									commit(draft.trim());
+								}
+							},
+						});
+						break;
+					}
+					case "json": {
+						const text = draft !== null ? draft : current === undefined ? "" : JSON.stringify(current, null, 2);
+						editor = createElement(
+							Fragment,
+							null,
+							createElement("textarea", {
+								className: "kzm-input kzm-textarea",
+								value: text,
+								disabled: disabled === true,
+								spellCheck: false,
+								onChange: (event) => setDraft(event.target.value),
+								onBlur: () => {
+									if (draft === null) return;
+									try {
+										const parsed = JSON.parse(draft);
+										commit(parsed);
+									} catch (err) {
+										setError("JSON 解析失败：" + String((err && err.message) || err));
+									}
+								},
+							}),
+							error !== null && createElement("span", { className: "kzm-error" }, error),
+						);
+						break;
+					}
+					default:
+						editor = null;
+				}
+
 				return createElement(
 					"div",
-					{ className: "kzm-row" },
+					{ className: "kzm-field" },
+					label,
+					editor,
+					field.kind !== "json" && error !== null && createElement("span", { className: "kzm-error" }, error),
+					saving && createElement("span", { className: "kzm-saving" }, "正在同步…"),
+				);
+			}
+
+			/** 默认/会话层级中的一行插件状态（含可展开的详细配置编辑）。 */
+			function StatePluginRow({ plugin, state, overridden, onPatch, disabled }) {
+				const [cfgOpen, setCfgOpen] = useState(false);
+				const enabled = state !== null && typeof state === "object" ? state.enabled !== false : false;
+				const missing = state === null || state === undefined;
+				return createElement(
+					"div",
+					{ className: "kzm-state-item" },
 					createElement(
 						"div",
-						{ className: "kzm-row-head" },
+						{ className: "kzm-state-row" },
 						createElement(
 							"span",
-							{ className: "kzm-name", title: "kaz-memory" },
-							"kaz-memory",
-							createElement("span", { className: "kzm-tag" }, "  独立记忆组件（不随 Kaz 启停；有独立开关）"),
+							{ className: "kzm-state-name", title: plugin.tag || plugin.id },
+							plugin.name,
+							overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
 						),
 						createElement(StateBadge, { state: missing ? "missing" : enabled ? "on" : "off" }),
 						createElement(Toggle, {
 							checked: enabled,
-							onChange: (next) => {
-								if (writable) memoryScope.set("enabled", next).catch(() => {});
-							},
-							disabled: !writable,
-							title: writable ? "启用 / 禁用 kaz-memory（关闭后 UI 不显示记忆面板）" : "当前页面不可写（远程内存模式）",
+							onChange: (next) => onPatch(plugin.id, { enabled: next }),
+							disabled: disabled === true,
+							title: plugin.tag || plugin.id,
 						}),
 						createElement(
 							"button",
@@ -559,13 +817,70 @@ window.__ModuleLoader__.load({
 						createElement(
 							"div",
 							{ className: "kzm-fields" },
-							createElement(
-								"p",
-								{ className: "kzm-note" },
-								"记忆指引是每轮的固定短提示（2026-08-17 起）：只发一行总述（默认 We need 风格英文），记忆工具的具体用法由各工具描述自带；仅当 memory_search 在当前环境可调用时发（存在且可直接使用或经 run_code SDK 调用），不可用时完全静默。",
+							plugin.note !== undefined && createElement("p", { className: "kzm-note" }, plugin.note),
+							plugin.fields.filter((field) => field.key !== "enabled").map((field) =>
+								createElement(StateFieldEditor, {
+									key: field.key,
+									field,
+									state,
+									disabled,
+									onCommit: (key, next, isUnset) => {
+										if (isUnset) {
+											// 清空某个字段：写入 null 让宿主存 null，达到清空效果。
+											return onPatch(plugin.id, { [key]: null });
+										}
+										return onPatch(plugin.id, { [key]: next });
+									},
+								}),
 							),
-							MEMORY_FIELDS.map((field) => createElement(FieldEditor, { key: field.key, field, scope: memoryScope })),
 						),
+				);
+			}
+
+			/** 三个层级的设置区块：a=非 Kaz 默认，b=Kaz 默认，c=当前对话专属。 */
+			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onSetNonKazDefault, onSetKazDefault, disabled }) {
+				return createElement(
+					"div",
+					{ className: "kzm-state-section" },
+					createElement(
+						"div",
+						{ className: "kzm-state-head" },
+						createElement("span", { className: "kzm-state-title" }, title),
+						onRestore !== undefined &&
+							createElement(
+								"button",
+								{ type: "button", className: "kzm-reset-btn", onClick: onRestore, disabled: disabled === true },
+								"恢复原设置",
+							),
+					),
+					createElement("p", { className: "kzm-state-desc" }, desc),
+					(onSetNonKazDefault !== undefined || onSetKazDefault !== undefined) &&
+						createElement(
+							"div",
+							{ className: "kzm-default-actions" },
+							onSetNonKazDefault !== undefined &&
+								createElement(
+									"button",
+									{ type: "button", className: "kzm-set-default-btn", onClick: onSetNonKazDefault, disabled: disabled === true },
+									"设为非 Kaz 模式默认设置",
+								),
+							onSetKazDefault !== undefined &&
+								createElement(
+									"button",
+									{ type: "button", className: "kzm-set-default-btn", onClick: onSetKazDefault, disabled: disabled === true },
+									"设为 Kaz 模式默认设置",
+								),
+						),
+					PLUGINS.map((plugin) =>
+						createElement(StatePluginRow, {
+							key: plugin.id,
+							plugin,
+							state: stateMap !== null && stateMap !== undefined ? stateMap[plugin.id] : undefined,
+							overridden: overriddenMap !== undefined && overriddenMap[plugin.id] === true,
+							onPatch,
+							disabled,
+						}),
+					),
 				);
 			}
 
@@ -576,6 +891,86 @@ window.__ModuleLoader__.load({
 				const kazEnabled = kazValue !== null ? kazValue.enabled === true : false;
 				const preset = currentPresetOf(presetSnap);
 				const writable = writableOf(kazSnap);
+				const { sessionId, summary } = useCurrentSession();
+
+				const [stateData, setStateData] = useState(null);
+				const refresh = useCallback(async () => {
+					setStateData(null);
+					const res = await rpcCall("getState", { sessionId: sessionId || "" });
+					if (res !== null) setStateData(res);
+				}, [sessionId]);
+				useEffect(() => {
+					void refresh();
+				}, [refresh]);
+
+				const defaults = stateData !== null && stateData.defaults !== undefined ? stateData.defaults : { nonKaz: {}, kaz: {} };
+				const sessionOverrides = stateData !== null && stateData.session !== null && typeof stateData.session === "object" ? stateData.session : {};
+				const inConversation = summary !== null && summary !== undefined;
+				// 已有具体对话时以该会话的 Kaz 开关为准；新建对话页面以当前预设选择为准。
+				const effectiveKazEnabled = inConversation ? kazEnabled : preset === KAZ_PRESET_ID;
+				const mode = effectiveKazEnabled ? "kaz" : "nonKaz";
+				const baseMap = defaults[mode] || {};
+				const effectiveMap = {};
+				const overriddenMap = {};
+				for (const plugin of PLUGINS) {
+					const base = baseMap[plugin.id] !== null && typeof baseMap[plugin.id] === "object" ? baseMap[plugin.id] : {};
+					const override = sessionOverrides[plugin.id] !== null && typeof sessionOverrides[plugin.id] === "object" ? sessionOverrides[plugin.id] : {};
+					effectiveMap[plugin.id] = { ...base, ...override };
+					overriddenMap[plugin.id] = stateDiffers(base, override);
+				}
+				const hasOverrides = PLUGINS.some((plugin) => overriddenMap[plugin.id] === true);
+
+				const patchSession = useCallback(
+					async (pluginId, patch) => {
+						if (!sessionId) return null;
+						const res = await rpcCall("setSessionPlugin", { sessionId, pluginId, patch });
+						if (res !== null) {
+							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+						}
+						return res;
+					},
+					[sessionId],
+				);
+
+				const patchDefault = useCallback(
+					async (targetMode, pluginId, patch, cwd) => {
+						const res = await rpcCall("setDefaultPlugin", { mode: targetMode, pluginId, patch, cwd: cwd || "" });
+						if (res !== null) {
+							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
+						}
+						return res;
+					},
+					[],
+				);
+
+				const setAsDefault = useCallback(
+					async (targetMode) => {
+						if (!sessionId) return null;
+						const label = targetMode === "kaz" ? "Kaz" : "非 Kaz";
+						if (typeof window !== "undefined" && !window.confirm("确定将当前对话设置设为" + label + "模式默认设置吗？")) return null;
+						const res = await rpcCall("setAsDefault", { sessionId, mode: targetMode });
+						if (res !== null) {
+							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
+						}
+						return res;
+					},
+					[sessionId],
+				);
+
+				const resetDefault = useCallback(
+					async (targetMode, cwd) => {
+						const res = await rpcCall("resetDefault", { sessionId: sessionId || "", mode: targetMode, cwd: cwd || "" });
+						if (res !== null) {
+							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
+						}
+						return res;
+					},
+					[sessionId],
+				);
+
+				const sessionTitle = summary !== null && summary !== undefined && typeof summary.title === "string" && summary.title.trim().length > 0
+					? summary.title
+					: "当前对话";
 
 				return createElement(
 					"div",
@@ -584,7 +979,7 @@ window.__ModuleLoader__.load({
 						"p",
 						{ className: "kzm-panel-title" },
 						"Kaz 模式 · 详细设置",
-						createElement("span", { className: "kzm-badge", "data-state": kazEnabled ? "on" : "off" }, kazEnabled ? "已开启" : "已关闭"),
+						createElement("span", { className: "kzm-badge", "data-state": effectiveKazEnabled ? "on" : "off" }, effectiveKazEnabled ? "已开启" : "已关闭"),
 					),
 					createElement(
 						"p",
@@ -603,7 +998,7 @@ window.__ModuleLoader__.load({
 							"kaz-no-context 是 kaz 预设内置前置；kaz-memory 是独立定制的记忆组件（其工具组默认在白名单内）。",
 					),
 					preset === KAZ_PRESET_ID &&
-						kazEnabled !== true &&
+						effectiveKazEnabled !== true &&
 						createElement(
 							"div",
 							{ className: "kzm-drift" },
@@ -617,12 +1012,50 @@ window.__ModuleLoader__.load({
 						"p",
 						{ className: "kzm-note" },
 						writable
-							? "所有开关与配置改动自动同步到 settings.yaml，热重载生效。"
+							? (inConversation
+								? (hasOverrides
+									? "当前对话专属设置会覆盖默认设置；可随时将当前设置设为默认。"
+									: "当前对话与当前模式默认设置一致；修改后将变为专属设置。")
+								: "正在调整新建对话的默认设置：开关会直接保存为当前模式默认值。")
 							: "当前页面处于远程内存模式，设置不可写（请在本机 127.0.0.1 页面操作）。",
 					),
+					inConversation
+						? (hasOverrides
+							? createElement(StateSection, {
+								key: "session-" + (sessionId || ""),
+								title: sessionTitle + " 专属设置",
+								desc: "当前对话的插件状态，覆盖默认设置；可直接修改，也可设为非 Kaz / Kaz 默认。",
+								stateMap: effectiveMap,
+								overriddenMap,
+								onPatch: patchSession,
+								onSetNonKazDefault: () => setAsDefault("nonKaz"),
+								onSetKazDefault: () => setAsDefault("kaz"),
+								disabled: !writable,
+							})
+							: createElement(StateSection, {
+								key: "default-conv-" + mode,
+								title: (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "默认设置",
+								desc: "当前对话与" + (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "默认设置一致；修改后将变为专属设置。",
+								stateMap: effectiveMap,
+								overriddenMap,
+								onPatch: patchSession,
+								onRestore: () => resetDefault(mode, stateData !== null ? stateData.cwd : undefined),
+								disabled: !writable,
+							}))
+						: createElement(StateSection, {
+							key: "default-" + mode,
+							title: (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "下的默认设置",
+							desc: mode === "kaz"
+								? "新建对话若选择 Kaz 模式，将使用这里的插件状态。"
+								: "新建对话若未选择 Kaz 模式，将使用这里的插件状态。",
+							stateMap: mode === "kaz" ? defaults.kaz : defaults.nonKaz,
+							overriddenMap,
+							onPatch: (pluginId, patch) => patchDefault(mode, pluginId, patch, stateData !== null ? stateData.cwd : undefined),
+							onRestore: () => resetDefault(mode, stateData !== null ? stateData.cwd : undefined),
+							disabled: !writable,
+						}),
 					createElement(KazRow, null),
-					PLUGINS.map((plugin) => createElement(PluginRow, { key: plugin.id, plugin, scope: pluginScopes.get(plugin.id) })),
-					createElement(MemoryConfigRow, null),
+					lastRpcError.length > 0 && createElement("p", { className: "kzm-error" }, "RPC 通道未就绪：" + lastRpcError),
 				);
 			}
 
@@ -637,6 +1070,8 @@ window.__ModuleLoader__.load({
 				const kazSnap = useScope(kazScope);
 				const presetSnap = useScope(presetScope);
 				const [panelOpen, setPanelOpen] = useState(false);
+				const [closing, setClosing] = useState(false);
+				const closeTimer = useRef(null);
 
 				const kazValue = valueOf(kazSnap);
 				const preset = currentPresetOf(presetSnap);
@@ -649,6 +1084,42 @@ window.__ModuleLoader__.load({
 				// 的 overflow 裁切曾把 absolute 面板挡住（配置按钮按不到）。
 				const rootRef = useRef(null);
 				const [panelPos, setPanelPos] = useState(null);
+
+				const closePanel = useCallback(() => {
+					if (!panelOpen) return;
+					setClosing(true);
+					if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+					closeTimer.current = setTimeout(() => {
+						setPanelOpen(false);
+						setClosing(false);
+					}, 160);
+				}, [panelOpen]);
+
+				const openPanel = useCallback(() => {
+					if (closeTimer.current !== null) {
+						clearTimeout(closeTimer.current);
+						closeTimer.current = null;
+					}
+					setClosing(false);
+					setPanelOpen(true);
+				}, []);
+
+				useEffect(() => () => {
+					if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+				}, []);
+
+				// 点击面板外的空白区域时平滑收起（再次点击按钮展开）。
+				useEffect(() => {
+					if (!panelOpen) return;
+					const onMouseDown = (event) => {
+						if (rootRef.current !== null && rootRef.current.contains(event.target)) return;
+						if (event.target !== null && event.target !== undefined && typeof event.target.closest === "function" && event.target.closest(".kzm-panel") !== null) return;
+						closePanel();
+					};
+					document.addEventListener("mousedown", onMouseDown);
+					return () => document.removeEventListener("mousedown", onMouseDown);
+				}, [panelOpen, closePanel]);
+
 				useLayoutEffect(() => {
 					if (!panelOpen) return;
 					const update = () => {
@@ -656,8 +1127,8 @@ window.__ModuleLoader__.load({
 						if (el === null) return;
 						const rect = el.getBoundingClientRect();
 						const margin = 10;
-						const width = Math.min(360, window.innerWidth - 24);
-						const maxHeight = Math.min(Math.round(window.innerHeight * 0.6), 560);
+						const width = Math.min(480, window.innerWidth - 24);
+						const maxHeight = Math.min(Math.round(window.innerHeight * 0.7), 640);
 						let left = rect.left;
 						if (left + width > window.innerWidth - 12) left = Math.max(12, window.innerWidth - 12 - width);
 						const below = window.innerHeight - rect.bottom - margin;
@@ -693,17 +1164,23 @@ window.__ModuleLoader__.load({
 							title: drifted
 								? "默认预设是 Kaz，但 Kaz 模式当前未启用（某个会话切到了其它模式，或手动关闭）"
 								: "打开 Kaz 模式详细设置",
-							onClick: () => setPanelOpen((open) => !open),
+							onClick: () => {
+								if (panelOpen) closePanel();
+								else openPanel();
+							},
 						},
 						createElement("span", { className: "kzm-dot" }),
 						createElement("span", { className: "kzm-label" }, "Kaz 模式：" + (kazEnabled ? "已开启" : "已关闭")),
 						createElement("span", { className: "kzm-chevron" }, panelOpen ? "▲" : "▼"),
 					),
-					panelOpen &&
+					(panelOpen || closing) &&
 						createPortal(
 							createElement(
 								"div",
-								{ className: "kzm-portal", style: panelPos !== null ? panelPos : undefined },
+								{
+									className: "kzm-portal " + (closing ? "kzm-closing" : "kzm-opening"),
+									style: panelPos !== null ? panelPos : undefined,
+								},
 								createElement(KazPanel, null),
 							),
 							document.body,
@@ -765,11 +1242,24 @@ window.__ModuleLoader__.load({
 			// ---- 会话视图联动 ----
 			// 当前查看的会话预设驱动 kaz-mode.enabled：侧边栏切换对话
 			// （A 会话 = Kaz、B 会话 = 极简）时自动同步开关，主机联动随之
-			// 启停八个插件。无会话（新对话 hero）或会话未记录预设时不动。
+			// 启停插件；同时通过 RPC 把当前会话的插件状态应用到宿主。
+			// 无会话（新对话 hero）或会话未记录预设时不动。
 			ctx.inject(["conversation", "sessions"], (scope) => {
+				sessionListBinding = {
+					subscribe: (listener) => scope.sessions.list.subscribe(listener),
+					getSnapshot: () => scope.sessions.list.getSnapshot(),
+				};
+				let lastAppliedSessionId = null;
 				const sync = () => {
 					const state = scope.sessions.list.getSnapshot();
-					const summary = state !== null && state !== undefined && state.current !== undefined ? state.byId[state.current] : undefined;
+					const current = state !== null && state !== undefined ? state.current : undefined;
+					const summary = current !== undefined && state !== null && state.byId !== null && typeof state.byId === "object" ? state.byId[current] : undefined;
+					// 只有当前会话 id 真正变化时才向宿主应用该会话的插件状态，
+					// 避免 sessions 列表的频繁细碎更新导致反复写 settings.yaml。
+					if (typeof current === "string" && current.length > 0 && current !== lastAppliedSessionId) {
+						lastAppliedSessionId = current;
+						void rpcCall("applySession", { sessionId: current });
+					}
 					if (summary === undefined || typeof summary.agentPreset !== "string") return;
 					if (kazScope === null) return;
 					const snap = kazScope.getSnapshot();

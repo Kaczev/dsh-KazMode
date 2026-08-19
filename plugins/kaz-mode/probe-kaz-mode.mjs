@@ -24,6 +24,7 @@ const PLUGIN_DEFAULTS = {
   "code-collapse": { enabled: true },
   "task-master-whiteboard": { enabled: true },
   "round-display": { enabled: true },
+  "deepseek-default-model": { enabled: true },
   "kaz-mode": {
     enabled: false,
     savedPluginStates: {},
@@ -317,7 +318,7 @@ function check(label, ok) {
   );
   check(
     "③ 关闭后 savedPluginStates 快照保留（不随关闭清空）",
-    Object.keys(h.settings.getUser("kaz-mode")?.savedPluginStates ?? {}).length === 8,
+    Object.keys(h.settings.getUser("kaz-mode")?.savedPluginStates ?? {}).length === 9,
   );
   check("③ 关闭后状态工具保持注册（诊断工具不随开关隐藏）", h.tools.registered.has("kaz_mode_status"));
 

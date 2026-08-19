@@ -1,19 +1,20 @@
 // kaz-mode
 // ===========================================================================
-// 「Kaz 模式」超级模式插件 —— 统一管理并联动本工作区八个插件：
+// 「Kaz 模式」超级模式插件 —— 统一管理并联动本工作区插件：
 //   thinking-anchor（插件1）、round-minimal（插件2）、tool-grouping（插件3）、
 //   tool-filter（插件4）、code-collapse（插件5）、output-beep（插件6）、
-//   task-master-whiteboard（插件7 · 任务白板）、round-display（插件8 · 每轮注入显示），
+//   task-master-whiteboard（插件7 · 任务白板）、round-display（插件8 · 每轮注入显示）、
+//   deepseek-default-model（插件9 · DeepSeek 默认参数）、kaz-memory（独立记忆组件），
 //   并提供集中管理面板与头部开关按钮（客户端半）。
 //
 // 宿主平面职责：
-//   1) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照八个
+//   1) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
-//      再把它们全部置为 enabled=true；defaultDisabledPlugins 默认关闭清单里的
+//      再按会话/默认状态应用；defaultDisabledPlugins 默认关闭清单里的
 //      插件（默认 task-master-whiteboard）例外——进入 Kaz 时被置为 enabled=false
 //      （Kaz 模式下默认关闭，用户仍可在面板 / settings.yaml 手动开启，联动不再
-//      触碰它们）；变为 false（关闭 / 切走）时不恢复、不改动八个插件的 enabled
-//      状态——用户在 Kaz 模式下手动关闭的插件保持关闭。例外：round-minimal 的
+//      触碰它们）；变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用（无活跃
+//      会话时保持插件 enabled 状态不变）。例外：round-minimal 的
 //      showPolicy（轮次提示段开关）进入 Kaz 时快照原值并置 false，退出 Kaz 时
 //      按快照精确恢复（原值可能是 false）。
 //   2) 预设联动：Kaz 模式已注册为 agent preset（id: kaz）。default 切到 "kaz"
@@ -52,6 +53,9 @@
 import z from "@deepseek-ai/schemastery";
 import { defineTool, renderToolsSdk } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
 const NAMESPACE = settingsNamespace("kaz-mode");
@@ -126,7 +130,7 @@ const DEFAULT_TOOL_WHITELIST = [
  *  但用户仍可在面板 / settings.yaml 手动开启）。 */
 const DEFAULT_DISABLED_PLUGINS = ["task-master-whiteboard"];
 
-/** 被管理的八个插件（id 与 settings.yaml 命名空间一致）。 */
+/** 被管理的插件（id 与 settings.yaml 命名空间一致）。 */
 const MANAGED_PLUGINS = [
   { id: "thinking-anchor", label: "thinking-anchor（插件1 · 思考锚点）" },
   { id: "round-minimal", label: "round-minimal（插件2 · 极简plus轮次模式）" },
@@ -134,9 +138,70 @@ const MANAGED_PLUGINS = [
   { id: "tool-filter", label: "tool-filter（插件4 · 工具过滤）" },
   { id: "code-collapse", label: "code-collapse（插件5 · 工具塌缩 run_code）" },
   { id: "output-beep", label: "output-beep（插件6 · 输出完成提示音）" },
-  { id: "task-master-whiteboard", label: "task-master-whiteboard（插件7 · 任务白板）" },
   { id: "round-display", label: "round-display（插件8 · 每轮注入显示）" },
+  { id: "deepseek-default-model", label: "deepseek-default-model（插件9 · DeepSeek 默认参数）" },
+  { id: "kaz-memory", label: "kaz-memory（独立记忆组件）" },
+  { id: "task-master-whiteboard", label: "task-master-whiteboard（插件7 · 任务白板）" },
 ];
+
+/** 出厂默认（非 Kaz 模式）：Kaz 插件初始默认全关。 */
+const FACTORY_NON_KAZ_DEFAULTS = {
+  "thinking-anchor": { enabled: false, instruction: "", turnReminder: "" },
+  "round-minimal": {
+    enabled: false,
+    firstRoundTools: ["pwsh", "str_replace_editor"],
+    roundOneInstruction: "",
+    roundTwoInstruction: "",
+    includeSubagents: false,
+    showPolicy: true,
+  },
+  "tool-grouping": {
+    enabled: false,
+    registerStatusTool: true,
+    mode: "tag",
+    groups: [
+      { id: "tool-fs", realm: "minimal-local-fs", tools: ["read", "write", "edit", "glob", "grep"] },
+      { id: "workflowEngine", realm: "workflowEngine", tools: ["workflow", "ralph"] },
+      { id: "kaz-memory", realm: "kazMemory", tools: ["memory_save", "memory_list", "memory_search", "memory_forget"] },
+    ],
+  },
+  "tool-filter": {
+    enabled: false,
+    mode: "remove",
+    disabledTools: ["tool-cordis", "tool-subagent-report", "codex", "claude-code"],
+  },
+  "code-collapse": { enabled: false, appendCallHint: true, callHint: "", firstRoundHint: true },
+  "output-beep": { enabled: false, includeSubagents: false, frequency: 1000, duration: 300 },
+  "round-display": { enabled: false },
+  "deepseek-default-model": {
+    enabled: false,
+    provider: "deepseek-official",
+    model: "deepseek-v4-flash",
+    reasoningEffort: "high",
+    generation_kwargs: { temperature: 0.2, top_p: 1, repetition_penalty: 1.2 },
+  },
+  "kaz-memory": { enabled: false, guidance: "", guidanceHead: "" },
+  "task-master-whiteboard": { enabled: false, boardsDir: "", turnReminder: "" },
+};
+
+/** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开，仅 task-master-whiteboard 默认关闭。 */
+const FACTORY_KAZ_DEFAULTS = {};
+for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
+  FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
+}
+FACTORY_KAZ_DEFAULTS["task-master-whiteboard"] = {
+  ...FACTORY_NON_KAZ_DEFAULTS["task-master-whiteboard"],
+  enabled: false,
+};
+
+/** 会话级插件状态文件名（与 task-master-whiteboard 一致放在项目 .dsh/ 下）。 */
+const SESSION_STATES_FILE = "kaz-session-states.json";
+/** 两个模式的默认设置文件名（放在插件目录下，随插件分发/安装存在）。 */
+const DEFAULTS_FILE_NAME = "kaz-defaults.json";
+const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
+const DEFAULTS_FILE = join(PLUGIN_DIR, "..", DEFAULTS_FILE_NAME);
+/** 面板专用 RPC 通道。 */
+const RPC_CHANNEL = "/kaz-mode";
 
 /** 设置 schema（同时驱动设置页 UI 与客户端面板的字段读写）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -263,6 +328,149 @@ export function ensureSettingsDefaults(settings, ns, defaults, logger) {
 }
 
 
+// ---------------------------------------------------------------------------
+// 会话级插件状态持久化（.dsh/kaz-session-states.json）
+// ---------------------------------------------------------------------------
+
+/** 深拷贝可 JSON 序列化的对象（避免默认值被后续修改污染）。 */
+function deepClone(value) {
+  if (value === undefined) return undefined;
+  return JSON.parse(JSON.stringify(value));
+}
+
+/** 返回一份全新的出厂默认设置。 */
+function factoryDefaults() {
+  return {
+    nonKaz: deepClone(FACTORY_NON_KAZ_DEFAULTS),
+    kaz: deepClone(FACTORY_KAZ_DEFAULTS),
+  };
+}
+
+/** 规范化插件状态 map：只保留对象值。 */
+function normalizePluginMap(raw) {
+  const result = {};
+  if (raw === null || typeof raw !== "object") return result;
+  for (const [id, value] of Object.entries(raw)) {
+    if (value !== null && typeof value === "object") result[id] = value;
+  }
+  return result;
+}
+
+/** 合并出厂默认与已存默认：按插件逐个浅合并，保留出厂默认的缺失字段。 */
+function mergeDefaultsMap(factory, stored) {
+  const result = {};
+  for (const [id, base] of Object.entries(factory)) {
+    const override = stored[id];
+    result[id] = override !== null && typeof override === "object" ? { ...base, ...override } : { ...base };
+  }
+  return result;
+}
+
+/** 读取插件目录下的默认设置文件；不存在或损坏时回退到代码内出厂默认。 */
+function loadDefaults(logger) {
+  try {
+    if (!existsSync(DEFAULTS_FILE)) return factoryDefaults();
+    let raw = readFileSync(DEFAULTS_FILE, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    const parsed = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") return factoryDefaults();
+    const defaults = parsed.defaults !== null && typeof parsed.defaults === "object" ? parsed.defaults : {};
+    return {
+      nonKaz: mergeDefaultsMap(FACTORY_NON_KAZ_DEFAULTS, normalizePluginMap(defaults.nonKaz)),
+      kaz: mergeDefaultsMap(FACTORY_KAZ_DEFAULTS, normalizePluginMap(defaults.kaz)),
+    };
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 读取默认设置文件失败：" + safeMessage(error));
+    return factoryDefaults();
+  }
+}
+
+/** 写回插件目录下的默认设置文件（非 Kaz / Kaz 两个模式）。 */
+function saveDefaults(defaults, logger) {
+  try {
+    mkdirSync(dirname(DEFAULTS_FILE), { recursive: true });
+    writeFileSync(DEFAULTS_FILE, JSON.stringify({ version: 1, defaults }, null, 2) + "\n", "utf8");
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 写入默认设置文件失败：" + safeMessage(error));
+  }
+}
+
+/** 读取项目目录下的会话专属状态；不存在或损坏时返回空对象。 */
+function loadSessions(cwd, logger) {
+  const file = join(cwd, ".dsh", SESSION_STATES_FILE);
+  try {
+    if (!existsSync(file)) return {};
+    let raw = readFileSync(file, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    const parsed = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== "object") return {};
+    return parsed.sessions !== null && typeof parsed.sessions === "object" ? parsed.sessions : {};
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 读取会话状态文件失败：" + safeMessage(error));
+    return {};
+  }
+}
+
+/** 写回项目目录下的会话专属状态。 */
+function saveSessions(cwd, sessions, logger) {
+  const dir = join(cwd, ".dsh");
+  const file = join(dir, SESSION_STATES_FILE);
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, JSON.stringify({ version: 1, sessions }, null, 2) + "\n", "utf8");
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 写入会话状态文件失败：" + safeMessage(error));
+  }
+}
+
+/** 读取完整状态：默认设置来自插件目录，会话专属来自项目目录。 */
+function loadStateFile(cwd, logger) {
+  return {
+    defaults: loadDefaults(logger),
+    sessions: loadSessions(cwd, logger),
+  };
+}
+
+/** 会话键消毒（与 task-master-whiteboard 一致，防止路径穿越）。 */
+function sanitizeKey(key) {
+  const cleaned = String(key ?? "").replace(/[^A-Za-z0-9_-]/g, "_");
+  return cleaned.length > 0 ? cleaned : "default";
+}
+
+/** 从 agent 会话头解析项目工作区根目录。 */
+function workspaceOfAgent(agent) {
+  try {
+    const header = agent?.session?.header;
+    if (header !== null && header !== undefined && typeof header === "object" && typeof header.cwd === "string") {
+      return header.cwd;
+    }
+  } catch {
+    // fall through
+  }
+  return process.cwd();
+}
+
+/** 从 agent 会话头解析会话作用域键（子代理归入父会话）。 */
+function sessionKeyOfAgent(agent) {
+  try {
+    const header = agent?.session?.header;
+    if (header !== null && header !== undefined && typeof header === "object") {
+      if (typeof header.parentSession === "string" && header.parentSession.trim().length > 0) {
+        return sanitizeKey(header.parentSession);
+      }
+      if (typeof header.id === "string" && header.id.trim().length > 0) {
+        return sanitizeKey(header.id);
+      }
+    }
+    if (typeof agent?.id === "string" && agent.id.trim().length > 0) {
+      return sanitizeKey(agent.id);
+    }
+  } catch {
+    // fall through
+  }
+  return "default";
+}
+
 /** 归一化任意来源（组合行 config / settings 解析值）的配置。 */
 function normalizeConfig(raw) {
   const value = raw && typeof raw === "object" ? raw : {};
@@ -323,8 +531,9 @@ function safeMessage(error) {
 export default {
   name: "kaz-mode",
   // tools：状态工具注册挂在其链路上；systemPrompt：组装层工具面过滤挂在
-  // 其瀑布上；settings / toolGrouping / roundMinimal 为可选依赖（惰性解析）。
-  inject: ["tools", "systemPrompt"],
+  // 其瀑布上；connection：面板 RPC 通道；settings / toolGrouping / roundMinimal
+  // 为可选依赖（惰性解析）。
+  inject: ["tools", "systemPrompt", "connection"],
   apply(ctx, config = {}) {
     // 组合行 config 作为 base 层；settings.yaml 用户层优先（热重载）。
     const entry = normalizeConfig(config);
@@ -333,6 +542,9 @@ export default {
     /** 联动事务防重入：一次联动（快照+启用 / 恢复+清空）未结束前不重复触发。 */
     let linking = false;
     let statusDisposer = null;
+
+    /** 当前由客户端告知的活跃会话（用于按会话应用插件状态）。 */
+    let activeSession = null;
 
     /**
      * settings 服务惰性获取：启动时可能尚未挂载（kaz-mode 只 inject tools），
@@ -445,6 +657,68 @@ export default {
       return count;
     }
 
+    /** 由会话 id 解析项目工作区根目录（优先从 agents 服务取会话头，失败回退 cwd）。 */
+    function resolveSessionCwd(sessionId) {
+      if (typeof sessionId === "string" && sessionId.length > 0) {
+        try {
+          const agents = ctx.get("agents");
+          if (agents !== undefined && agents !== null && typeof agents.get === "function") {
+            const agent = agents.get(sessionId);
+            if (agent !== undefined && agent !== null) return workspaceOfAgent(agent);
+          }
+        } catch {
+          // fall through
+        }
+      }
+      return process.cwd();
+    }
+
+    /** 读取某会话的状态文件；返回 { cwd, data }。 */
+    function loadSessionData(sessionId) {
+      const cwd = resolveSessionCwd(sessionId);
+      const data = loadStateFile(cwd, ctx.logger);
+      return { cwd, data };
+    }
+
+    /** 计算某会话当前应生效的插件状态 map：专属覆盖 > 当前模式默认。 */
+    function effectivePluginStates(data, sessionId, kazEnabled) {
+      const mode = kazEnabled ? "kaz" : "nonKaz";
+      const defaults = data.defaults?.[mode] ?? {};
+      const sessionOverrides = data.sessions?.[sessionId] ?? {};
+      const result = {};
+      for (const plugin of managedList()) {
+        const base = defaults[plugin.id] !== null && typeof defaults[plugin.id] === "object" ? defaults[plugin.id] : {};
+        const override = sessionOverrides[plugin.id] !== null && typeof sessionOverrides[plugin.id] === "object" ? sessionOverrides[plugin.id] : {};
+        result[plugin.id] = { ...base, ...override };
+      }
+      return result;
+    }
+
+    /** 把某会话的生效插件状态写入各插件 settings.yaml 段（热重载生效）。 */
+    async function applyEffectiveState(cwd, sessionId) {
+      const settings = getSettings();
+      if (settings === undefined) return false;
+      const data = loadStateFile(cwd, ctx.logger);
+      const states = effectivePluginStates(data, sessionId, source().enabled === true);
+      let wrote = 0;
+      for (const plugin of managedList()) {
+        const state = states[plugin.id];
+        if (state === undefined || state === null) continue;
+        const current = readPluginState(plugin.id);
+        if (current === null) continue; // 未加载的插件不写入
+        try {
+          await settings.update(settingsNamespace(plugin.id), state);
+          wrote += 1;
+        } catch (error) {
+          ctx.logger.warn(`[kaz-mode] 按会话应用 ${plugin.id} 状态失败：${safeMessage(error)}`);
+        }
+      }
+      if (wrote > 0) {
+        ctx.logger.info(`[kaz-mode] 已按会话 ${sessionId} 应用 ${wrote} 个插件状态（Kaz=${source().enabled === true}）`);
+      }
+      return wrote > 0;
+    }
+
     /** 快照 round-minimal.showPolicy 的原始状态（含用户覆盖位），供退出 Kaz 时恢复。
      *  已有待恢复快照（active=true，例如重启后续联）时不覆盖——保留最早的原始值。 */
     async function snapshotRoundMinimalPolicy() {
@@ -511,9 +785,10 @@ export default {
     }
 
     /**
-     * 联动主流程：enabled=true（进入 Kaz）→ 快照 + 强制启用八个插件 +
-     * 开启 round-minimal.showPolicy；enabled=false（关闭 / 切走）→ 不改动
-     * 八个插件的 enabled，但按快照恢复 round-minimal.showPolicy。
+     * 联动主流程：enabled=true（进入 Kaz）→ 快照 + 按会话/默认状态应用插件；
+     * enabled=false（关闭 / 切走）→ 按会话/非 Kaz 默认状态应用插件，并恢复
+     * round-minimal.showPolicy。若尚无客户端告知的活跃会话，则回退到旧的
+     * 强制启用/默认关闭行为，保证纯 settings.yaml 使用方式仍然可用。
      * 防重入用"重跑标记"：一次联动进行中又收到新触发时记下 pending，
      * 当前这轮结束后立刻按最新状态再跑一轮——避免同一次预设切换里
      * 先后触发的多次写入互相吞掉。
@@ -547,23 +822,35 @@ export default {
               // round-minimal.showPolicy：先快照原值，再置 true（顺序不能反）。
               await snapshotRoundMinimalPolicy();
               await enableRoundMinimalPolicy();
+            }
+            if (activeSession !== null) {
+              await applyEffectiveState(activeSession.cwd, activeSession.sessionId);
+              ctx.logger.info(
+                `[kaz-mode] Kaz 模式已开启：已按会话 ${activeSession.sessionId} 应用插件状态；原始状态快照已保存。`,
+              );
+            } else {
               // 默认关闭清单：进入 Kaz 的瞬间把这些插件置为 enabled=false
               // （Kaz 模式下默认关闭；用户之后手动开启的保持开启）。
               await forceDisableDefaultManaged();
+              const enabledCount = await forceEnableManaged();
+              ctx.logger.info(
+                `[kaz-mode] Kaz 模式已开启：联动启用 ${enabledCount} 个插件（默认关闭清单已跳过）；原始状态快照已保存。`,
+              );
             }
-            const enabledCount = await forceEnableManaged();
-            ctx.logger.info(
-              `[kaz-mode] Kaz 模式已开启：联动启用 ${enabledCount} 个插件（默认关闭清单已跳过）；原始状态快照已保存。`,
-            );
           } else {
-            // 关闭 / 切走 Kaz：八个插件的 enabled 保持当前状态——只有"进入
-            // Kaz"才强制启用；用户在 Kaz 模式下手动关闭的保持关闭。例外：
-            // round-minimal 的 showPolicy 是进入 Kaz 时联动开启的，这里按
-            // 快照精确恢复原始状态（用户原本是关的也恢复为关）。
+            // 关闭 / 切走 Kaz：round-minimal 的 showPolicy 是进入 Kaz 时联动
+            // 开启的，这里按快照精确恢复原始状态（用户原本是关的也恢复为关）。
             await restoreRoundMinimalPolicy();
-            ctx.logger.info(
-              `[kaz-mode] Kaz 模式已关闭：八个插件 enabled 保持当前状态；round-minimal.showPolicy 已按快照恢复。`,
-            );
+            if (activeSession !== null) {
+              await applyEffectiveState(activeSession.cwd, activeSession.sessionId);
+              ctx.logger.info(
+                `[kaz-mode] Kaz 模式已关闭：已按会话 ${activeSession.sessionId} 应用非 Kaz 默认插件状态。`,
+              );
+            } else {
+              ctx.logger.info(
+                `[kaz-mode] Kaz 模式已关闭：插件 enabled 保持当前状态；round-minimal.showPolicy 已按快照恢复。`,
+              );
+            }
           }
         } while (linkRunPending);
       } catch (error) {
@@ -1061,7 +1348,7 @@ export default {
           defineTool({
             name: "kaz_mode_status",
             description:
-              "只读报告 kaz-mode 超级模式当前状态：Kaz 模式开关、五个前置插件（thinking-anchor / round-minimal / tool-grouping / tool-filter / kaz-memory）的加载状态、八个被管理插件（含 code-collapse / output-beep / task-master-whiteboard / round-display）的启停、原始状态快照与 Kaz 默认关闭清单（defaultDisabledPlugins）、Kaz 工具面（minimalTools 极简基底 + toolWhitelist 白名单）、首轮极简伪装（首轮保留 persona + thinking-anchor + round-minimal 轮次提示 + code-collapse 首轮提醒 + task-master-whiteboard:role）与 postFirstRoundMode 基底恢复、round-minimal 信号与首轮工具基底（含 showPolicy）、tool-grouping 运行时分组视图。无需任何参数。",
+              "只读报告 kaz-mode 超级模式当前状态：Kaz 模式开关、五个前置插件（thinking-anchor / round-minimal / tool-grouping / tool-filter / kaz-memory）的加载状态、被管理插件（含 code-collapse / output-beep / task-master-whiteboard / round-display / deepseek-default-model / kaz-memory）的启停、原始状态快照与 Kaz 默认关闭清单（defaultDisabledPlugins）、Kaz 工具面（minimalTools 极简基底 + toolWhitelist 白名单）、首轮极简伪装（首轮保留 persona + thinking-anchor + round-minimal 轮次提示 + code-collapse 首轮提醒 + task-master-whiteboard:role）与 postFirstRoundMode 基底恢复、round-minimal 信号与首轮工具基底（含 showPolicy）、tool-grouping 运行时分组视图。无需任何参数。",
             parameters: {},
             output: {
               schema: { type: "string" },
@@ -1197,6 +1484,158 @@ export default {
     };
     for (const delay of [0, 50, 200, 500, 1000, 2000, 5000, 10000, 20000, 30000]) {
       setTimeout(syncStartupOnce, delay);
+    }
+
+    // -----------------------------------------------------------------------
+    // 面板 RPC 通道（/kaz-mode，loopback）：会话级插件状态读写与默认设置管理
+    // -----------------------------------------------------------------------
+    function rpcFail(message) {
+      return { ok: false, error: { code: "internal", message: String(message), details: {} } };
+    }
+    const rpcHandler = async (endpoint, payload) => {
+      try {
+        const input = payload !== null && typeof payload === "object" ? payload : {};
+        const sessionId = typeof input.sessionId === "string" ? input.sessionId : "";
+        if (sessionId.length === 0 && endpoint !== "resetDefault" && endpoint !== "getState" && endpoint !== "setDefaultPlugin") {
+          return rpcFail("缺少 sessionId");
+        }
+
+        if (endpoint === "getState") {
+          const cwd = sessionId.length > 0 ? resolveSessionCwd(sessionId) : activeSession !== null ? activeSession.cwd : process.cwd();
+          const data = loadStateFile(cwd, ctx.logger);
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          return {
+            ok: true,
+            value: {
+              sessionId,
+              cwd,
+              kazEnabled: source().enabled === true,
+              defaults: data.defaults,
+              session: data.sessions[sessionId] || null,
+              factory: {
+                nonKaz: deepClone(FACTORY_NON_KAZ_DEFAULTS),
+                kaz: deepClone(FACTORY_KAZ_DEFAULTS),
+              },
+            },
+          };
+        }
+
+        if (endpoint === "applySession") {
+          const { cwd, data } = loadSessionData(sessionId);
+          activeSession = { sessionId, cwd };
+          await applyEffectiveState(cwd, sessionId);
+          return { ok: true, value: { applied: true, sessionId } };
+        }
+
+        if (endpoint === "setSessionPlugin") {
+          const pluginId = typeof input.pluginId === "string" ? input.pluginId : "";
+          const patch = input.patch !== null && typeof input.patch === "object" ? input.patch : null;
+          if (pluginId.length === 0 || patch === null) return rpcFail("缺少 pluginId 或 patch");
+          const { cwd, data } = loadSessionData(sessionId);
+          if (data.sessions[sessionId] === undefined || data.sessions[sessionId] === null) {
+            data.sessions[sessionId] = {};
+          }
+          if (data.sessions[sessionId][pluginId] === undefined || data.sessions[sessionId][pluginId] === null) {
+            data.sessions[sessionId][pluginId] = {};
+          }
+          const merged = { ...data.sessions[sessionId][pluginId] };
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === null) {
+              delete merged[key];
+            } else {
+              merged[key] = value;
+            }
+          }
+          if (Object.keys(merged).length === 0) {
+            delete data.sessions[sessionId][pluginId];
+          } else {
+            data.sessions[sessionId][pluginId] = merged;
+          }
+          saveSessions(cwd, data.sessions, ctx.logger);
+          activeSession = { sessionId, cwd };
+          await applyEffectiveState(cwd, sessionId);
+          return { ok: true, value: { session: data.sessions[sessionId] } };
+        }
+
+        if (endpoint === "setDefaultPlugin") {
+          const mode = input.mode === "nonKaz" || input.mode === "kaz" ? input.mode : null;
+          const pluginId = typeof input.pluginId === "string" ? input.pluginId : "";
+          const patch = input.patch !== null && typeof input.patch === "object" ? input.patch : null;
+          if (mode === null || pluginId.length === 0 || patch === null) return rpcFail("缺少 mode/pluginId/patch");
+          const cwd = typeof input.cwd === "string" && input.cwd.trim().length > 0
+            ? input.cwd.trim()
+            : activeSession !== null
+              ? activeSession.cwd
+              : process.cwd();
+          const data = loadStateFile(cwd, ctx.logger);
+          const current = data.defaults[mode]?.[pluginId] !== null && typeof data.defaults[mode]?.[pluginId] === "object" ? data.defaults[mode][pluginId] : {};
+          const merged = { ...current };
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === null) delete merged[key];
+            else merged[key] = value;
+          }
+          if (Object.keys(merged).length === 0) {
+            delete data.defaults[mode][pluginId];
+          } else {
+            data.defaults[mode][pluginId] = merged;
+          }
+          saveDefaults(data.defaults, ctx.logger);
+          const refreshed = loadStateFile(cwd, ctx.logger);
+          return { ok: true, value: { defaults: refreshed.defaults } };
+        }
+
+        if (endpoint === "setAsDefault") {
+          const mode = input.mode === "nonKaz" || input.mode === "kaz" ? input.mode : null;
+          if (mode === null) return rpcFail("mode 必须是 nonKaz 或 kaz");
+          const { cwd, data } = loadSessionData(sessionId);
+          // “当前对话的插件状态” = c 区显示的有效状态（专属覆盖 > 当前模式默认）。
+          const effective = effectivePluginStates(data, sessionId, source().enabled === true);
+          data.defaults[mode] = deepClone(effective);
+          saveDefaults(data.defaults, ctx.logger);
+          activeSession = { sessionId, cwd };
+          await applyEffectiveState(cwd, sessionId);
+          return { ok: true, value: { defaults: data.defaults } };
+        }
+
+        if (endpoint === "resetDefault") {
+          const mode = input.mode === "nonKaz" || input.mode === "kaz" ? input.mode : null;
+          if (mode === null) return rpcFail("mode 必须是 nonKaz 或 kaz");
+          const cwd = typeof input.cwd === "string" && input.cwd.trim().length > 0
+            ? input.cwd.trim()
+            : sessionId.length > 0
+              ? resolveSessionCwd(sessionId)
+              : process.cwd();
+          const data = loadStateFile(cwd, ctx.logger);
+          data.defaults[mode] = deepClone(mode === "kaz" ? FACTORY_KAZ_DEFAULTS : FACTORY_NON_KAZ_DEFAULTS);
+          saveDefaults(data.defaults, ctx.logger);
+          if (sessionId.length > 0) {
+            activeSession = { sessionId, cwd };
+            await applyEffectiveState(cwd, sessionId);
+          }
+          return { ok: true, value: { defaults: data.defaults } };
+        }
+
+        return rpcFail("unknown endpoint '" + String(endpoint) + "'");
+      } catch (error) {
+        ctx.logger.warn(
+          "[kaz-mode] RPC " + String(endpoint) + " 失败：" + (error instanceof Error ? error.message : String(error)),
+        );
+        return rpcFail(error instanceof Error ? error.message : String(error));
+      }
+    };
+    const connection = ctx.get("connection");
+    if (
+      connection !== undefined &&
+      connection !== null &&
+      connection.rpc !== undefined &&
+      typeof connection.rpc.handle === "function"
+    ) {
+      const disposeRpc = connection.rpc.handle(RPC_CHANNEL, rpcHandler, { authority: "loopback" });
+      ctx.effect(() => () => {
+        void disposeRpc();
+      });
+    } else {
+      ctx.logger.warn("[kaz-mode] connection 服务不可用，面板 RPC 通道未注册（仅设置页/状态工具可用）");
     }
 
     // 卸载时注销状态工具。

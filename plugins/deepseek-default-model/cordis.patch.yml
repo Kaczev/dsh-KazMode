@@ -1,0 +1,6 @@
+# deepseek-default-model bundle patch: inserts the plugin row into the web profile roster.
+# (本文件随插件包发布；在本 profile 中该行已直接写在 profiles/web/cordis.patch.yml，
+#  此文件用于以 bundle 方式安装到其它 profile 时自动注册。)
+- insert:
+    - id: deepseek-default-model
+      name: 'deepseek-default-model'

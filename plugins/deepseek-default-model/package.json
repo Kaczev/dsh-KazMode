@@ -1,0 +1,5 @@
+{
+  "name": "deepseek-default-model",
+  "main": "lib/index.js",
+  "type": "module"
+}

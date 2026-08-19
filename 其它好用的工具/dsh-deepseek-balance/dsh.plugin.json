@@ -1,0 +1,12 @@
+{
+  "name": "dsh-deepseek-balance",
+  "description": "DeepSeek 账户余额悬浮挂件：随时查看余额，支持拖拽吸附到屏幕边缘。",
+  "version": "0.1.0",
+  "entry": {
+    "name": "dsh-deepseek-balance",
+    "inject": ["webServer"]
+  },
+  "client": {
+    "platform": "web"
+  }
+}

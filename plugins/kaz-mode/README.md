@@ -5,7 +5,7 @@ Kaz 模式同时具备两个入口，双向同步：
 1. **agent preset**：`kaz` 预设已注册进 dsh 的预设体系（在预设选择器里与标准模式、
    极简模式等并列可选）；
 2. **会话头部按钮**：dsh Web UI 会话头部（session log 按钮左侧）常驻一个
-   **「Kaz 模式：已开启 / 已关闭」** 按钮，一键联动管理本工作区八个插件，并带集中管理面板。
+   **「Kaz 模式：已开启 / 已关闭」** 按钮，一键联动管理本工作区九个插件，并带集中管理面板。
 
 | 插件 | 角色 |
 | --- | --- |
@@ -17,6 +17,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | `output-beep`（插件6） | 输出完成提示音：模型输出完毕时响提示音（可配频率/时长/子代理） |
 | `task-master-whiteboard`（插件7） | 任务白板：Task Master 白板工具与角色提示段 |
 | `round-display`（插件8） | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板（开关在 Kaz 面板；关闭时完全隐藏） |
+| `deepseek-default-model`（插件9） | DeepSeek 默认参数：面板调整默认 provider / model / reasoningEffort / generation_kwargs，同步官方 agent-default-model 并把 temperature 应用到请求 |
 
 **Kaz 模式 = round-minimal（极简plus）基底 + kaz-mode 自身工具面（minimalTools 极简基底 + toolWhitelist 白名单）+ tool-grouping 分组叠加 + thinking-anchor / tool-filter / code-collapse 一同生效**。kaz 预设的 persona 与原生极简模式逐字一致（`You are a helpful software engineer assistant.`），kaz-mode 在此基础上叠加"首轮极简伪装 + 次轮基底恢复"：首轮系统提示保留 persona + thinking-anchor + round-minimal 轮次提示（首轮不执行任务，仅询问细节）+ code-collapse 首轮提醒（尽量一次 run_code 多用工具），次轮起 persona 替换为 `postFirstRoundMode` 对应的 shipped 预设 persona（standard / minimal / creative，默认 standard）；运行时上下文与极简模式同样被抑制。kaz-mode 自身不注册任何 systemPrompt 段，不覆盖用户已有配置。
 
@@ -50,13 +51,13 @@ round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件
 ### 1.5 预设联动（宿主半自动同步）
 
 - 预设切到 `kaz` → 宿主自动把 `kaz-mode.enabled` 置 `true` → 触发下面的插件联动；
-- 预设切走 → 置 `false` → 恢复五个插件原始状态；
+- 预设切走 → 置 `false` → 恢复九个插件原始状态；
 - 最近一个非 kaz 预设自动记录到 `kaz-mode.previousPreset`，按钮"关闭"时切回它；
 - 启动时若默认预设已是 `kaz`（重启前选着），自动开启联动。
 
 ### 2. 插件联动
 
-- **开启 Kaz 模式**：先把五个插件在 `settings.yaml` 里的原始 `enabled` 状态快照到
+- **开启 Kaz 模式**：先把九个插件在 `settings.yaml` 里的原始 `enabled` 状态快照到
   `kaz-mode.savedPluginStates`（持久化，重启后仍可恢复），再把它们全部自动启用
   （已启用的不动；未加载的插件跳过）。同时把 round-minimal 的 `showPolicy`（轮次
   提示段开关）**原值快照**到 `kaz-mode.roundMinimalPolicySnapshot` 并置为 `true`
@@ -66,7 +67,7 @@ round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件
   `forceEnableManaged` 跳过它们、不再自动启用；用户仍可在面板单独开启，开启后
   联动不再触碰（只有下一次"进入 Kaz"才重新默认关闭）。想恢复旧行为，把该项设为
   `[]` 即可。
-- **关闭 Kaz 模式**：五个插件的 `enabled` 保持当前状态、不做改动（只有"进入 Kaz"
+- **关闭 Kaz 模式**：九个插件的 `enabled` 保持当前状态、不做改动（只有"进入 Kaz"
   才强制启用；用户在 Kaz 模式下手动关闭的保持关闭）。例外：round-minimal 的
   `showPolicy` 按快照**精确恢复**——原来用户显式写过的写回原值（原本是 `false`
   就恢复为 `false`，不无脑打开），原来没写过的 `unset` 掉联动写入、回到继承默认。
@@ -78,7 +79,7 @@ round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件
 面板标题「Kaz 模式 · 详细设置」，自上而下：当前预设状态与切换提示、Kaz 模式组成说明
 （极简基底 round-minimal + thinking-anchor + tool-filter + tool-grouping；kaz-no-context
 为 kaz 预设内置前置；kaz-memory 为独立记忆组件，与以上插件不耦合，但有自己的
-`enabled` 开关（关闭后记忆面板整体隐藏））、kaz-mode 自身配置行、插件1–8、
+`enabled` 开关（关闭后记忆面板整体隐藏））、kaz-mode 自身配置行、插件1–9、
 kaz-memory 配置行。每个插件显示：
 
 - **插件名称 + 角色标注**（插件1 · 思考锚点 等）；
@@ -103,7 +104,7 @@ Kaz 模式开启时，**每个对话的首轮**在输入框上方显示提示条
 
 ### 5. 只读状态工具 `kaz_mode_status`
 
-`registerStatusTool: true` 时注册（无论开关状态——诊断工具不随开关隐藏），输出：Kaz 开关状态、五个插件的
+`registerStatusTool: true` 时注册（无论开关状态——诊断工具不随开关隐藏），输出：Kaz 开关状态、九个插件的
 启停与原始状态快照、tool-grouping 的**运行时分组视图**、round-minimal 的首轮工具基底。
 
 > **特别重要——工具分组不硬编码**：kaz-mode 不含任何工具列表。分组事实全部来自
@@ -144,8 +145,8 @@ kaz-preset/
   true，切走 → 置 false，并维护 `previousPreset`）；读取 `ctx.get("toolGrouping")`
   生成分组报告；注册只读工具 `kaz_mode_status`。
 - **客户端半**（`lib/client.js`）：浏览器模块（`window.__ModuleLoader__.load` 格式），
-  `ctx.settingsScope.bind()` 绑定 `kaz-mode`、`agent-presets` 与八个插件共 9 个设置
-  命名空间；注册 `conversation.session.header.utilities`（头部按钮+面板）与
+  `ctx.settingsScope.bind()` 绑定 `kaz-mode`、`agent-presets` 与九个被管理插件
+  （共 11 个设置命名空间）；注册 `conversation.session.header.utilities`（头部按钮+面板）与
   `conversation.input.dock`（首轮提示条）两个 slot。
   所有状态与写入都走 settings 通道，无自定义 RPC。
 
@@ -191,7 +192,7 @@ New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\web\node_modul
 
 ```yaml
 # kaz-mode: 超级模式插件。右上角「Kaz 模式」开关 + 管理面板，联动管理
-# thinking-anchor / round-minimal / tool-grouping / tool-filter 五个插件，
+# thinking-anchor / round-minimal / tool-grouping / tool-filter 等九个插件，
 # 并在对话首轮于输入框上方显示任务目标提示（仅 UI，不注入模型提示词）。
 # 实时配置见 settings.yaml 的 kaz-mode: 段。
 - insert:
@@ -245,20 +246,20 @@ Copy-Item ".\kaz-preset" "$env:USERPROFILE\.dsh\.agent-presets\kaz" -Recurse -Fo
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `enabled` | boolean | `false` | Kaz 模式总开关（**由预设联动自动维护**：预设 = kaz 时置 true，切走时置 false）。`true` 时执行插件联动、显示首轮提示并启用首轮极简伪装；`false` 时五个插件 enabled 保持现状、仅按快照恢复 round-minimal.showPolicy |
+| `enabled` | boolean | `false` | Kaz 模式总开关（**由预设联动自动维护**：预设 = kaz 时置 true，切走时置 false）。`true` 时执行插件联动、显示首轮提示并启用首轮极简伪装；`false` 时九个插件 enabled 保持现状、仅按快照恢复 round-minimal.showPolicy |
 | `postFirstRoundMode` | string | `standard` | 首轮极简伪装之后（第 2 轮起）恢复的基底模式：`standard`（标准）/ `minimal`（极简）/ `creative`（创造，= shipped `cordis` 预设）。persona 分别替换为对应 shipped 预设的 persona 文本。曾有的 `ptc` 选项（= shipped `code` 预设）已于 2026-08-17 删除——它只换 persona 不切 Code Mode 工具呈现，与 standard 效果相同，属误导选项；settings 里残留的 `ptc` 值会自动回退 standard |
 | `registerStatusTool` | boolean | `true` | 是否注册只读状态工具 `kaz_mode_status`（用于验证） |
 | `showFirstRoundHint` | boolean | `true` | 是否在对话首轮显示输入框上方的提示条 |
 | `firstRoundHint` | string | `请在第一句话中说明本次对话的总任务目标。` | 首轮提示条文案（只显示给用户看，不进入模型提示词） |
 | `previousPreset` | string | `cordis` | **自动维护**：最近一个非 kaz 预设 id，头部按钮"关闭 Kaz"时切回它（预设选择器切换时同步更新） |
-| `managedPlugins` | string[] | 五个插件 id | 联动管理的插件命名空间清单（一般不需要改） |
+| `managedPlugins` | string[] | 九个插件 id | 联动管理的插件命名空间清单（一般不需要改） |
 | `defaultDisabledPlugins` | string[] | `[task-master-whiteboard]` | **Kaz 模式下默认关闭的插件**：进入 Kaz 的瞬间把这些插件置为 `enabled: false`（不随联动启用），但用户仍可在面板 / settings.yaml 手动开启，联动不再触碰它们；再次进入 Kaz 会重新默认关闭。清空数组 `[]` 即恢复旧行为（全部随联动启用） |
-| `savedPluginStates` | object | `{}` | **内部字段**：开启 Kaz 前五个插件的原始状态快照（自动维护，请勿手改） |
+| `savedPluginStates` | object | `{}` | **内部字段**：开启 Kaz 前九个插件的原始状态快照（自动维护，请勿手改） |
 | `roundMinimalPolicySnapshot` | object | `{active:false,...}` | **内部字段**：round-minimal.showPolicy 的联动快照（进入 Kaz 时记录、退出 Kaz 时按此恢复并清空；重启续联不覆盖最早快照），请勿手改 |
 | `minimalTools` | string[] | `[pwsh, str_replace_editor]` | Kaz 工具面·极简基底：始终保留的最小工具集 |
 | `toolWhitelist` | string[] | `[kaz-memory, tool-fs, workflowEngine, tool_grouping_status, kaz_mode_status]` | Kaz 工具面·白名单：组 id（经 tool-grouping 展开）或字面工具名；想放行额外工具（如 `web_search`、`subagent`、`skill`）直接加名字 |
 
-五个插件各自的配置项（enabled、mode、groups、firstRoundTools、instruction 等）
+九个插件各自的配置项（enabled、mode、groups、firstRoundTools、instruction 等）
 直接在面板里编辑，或照旧在各自 `settings.yaml` 段修改。
 
 ---
@@ -268,12 +269,12 @@ Copy-Item ".\kaz-preset" "$env:USERPROFILE\.dsh\.agent-presets\kaz" -Recurse -Fo
 **场景：开启 Kaz 模式开始一个新任务。**
 
 1. 刷新页面，会话头部（session log 按钮左侧）出现「Kaz 模式：已关闭」按钮（灰色圆点）；
-2. 在**预设选择器**选「Kaz 模式」→ 按钮变绿「已开启」，五个插件被联动启用
+2. 在**预设选择器**选「Kaz 模式」→ 按钮变绿「已开启」，九个插件被联动启用
    （未启用的自动开启；`kaz-mode.defaultDisabledPlugins` 清单内的插件——默认
    `task-master-whiteboard`——会被置为 `enabled: false`，Kaz 模式下默认关闭、
    仍可在面板手动开启），`settings.yaml` 的 `kaz-mode.savedPluginStates` 记录下它们原先
    的状态，`agent-presets.default` 写入 `kaz`；
-3. 点击头部按钮（▼）展开「详细设置」面板：查看五个插件的状态徽章，按需单独开关、
+3. 点击头部按钮（▼）展开「详细设置」面板：查看九个插件的状态徽章，按需单独开关、
    点「配置」调整参数（改动自动写回 `settings.yaml`，即时生效）；
 4. 新建对话（或直接续用当前会话），输入框上方出现提示条
    「请在第一句话中说明本次对话的总任务目标。」；第一句话直接说任务目标；
@@ -291,13 +292,13 @@ Copy-Item ".\kaz-preset" "$env:USERPROFILE\.dsh\.agent-presets\kaz" -Recurse -Fo
 
 **关闭 Kaz 模式：**
 
-在预设选择器选其它预设（如 `cordis`）→ 圆点变灰、按钮显示「已关闭」→ 五个插件
-保持当前状态、不做任何改动（只有「进入 Kaz」会强制启用五个插件；用户在 Kaz 模式
+在预设选择器选其它预设（如 `cordis`）→ 圆点变灰、按钮显示「已关闭」→ 九个插件
+保持当前状态、不做任何改动（只有「进入 Kaz」会强制启用九个插件；用户在 Kaz 模式
 下手动关闭的插件保持关闭）→ 首轮提示条不再出现。
 
 **通过预设选择器切换（与按钮等效）：**
 
-在预设选择器里选「Kaz 模式」→ 头部按钮同步变「已开启」、五个插件联动启用；
+在预设选择器里选「Kaz 模式」→ 头部按钮同步变「已开启」、九个插件联动启用；
 选其它预设（标准模式 / 极简模式…）→ 按钮变「已关闭」、插件保持现状不被改动。
 
 ---
@@ -345,16 +346,16 @@ bundle 注册格式、slot 注册（头部工具区 + 输入 dock）、组件渲
 2. 在预设选择器选「Kaz 模式」：按钮变绿、显示「已开启」；日志出现
    `[kaz-mode] 预设已切换为 kaz → 开启 Kaz 模式。` 与
    `[kaz-mode] Kaz 模式已开启：联动启用 N 个插件…`；
-   打开 `settings.yaml` 确认 `agent-presets.default: kaz`、五个插件的
+   打开 `settings.yaml` 确认 `agent-presets.default: kaz`、九个插件的
    `enabled: true` 与 `kaz-mode.savedPluginStates` 快照；
 3. 预设选择器：打开预设选择器能看到「Kaz 模式」并已选中；选「标准模式」→
-   按钮立即变「已关闭」、`settings.yaml` 里五个插件恢复原状；
-4. 面板：展开管理面板，五个插件显示「启用」徽章；单独关掉某个再打开，观察
+   按钮立即变「已关闭」、`settings.yaml` 里九个插件恢复原状；
+4. 面板：展开管理面板，九个插件显示「启用」徽章；单独关掉某个再打开，观察
    `settings.yaml` 对应段即时变化；面板顶部显示当前预设与关闭时切回的预设；
 5. 新建对话：输入框上方出现「请在第一句话中说明本次对话的总任务目标。」；
    说第二句话后提示消失；用工具 `kaz_mode_status` 查看分组报告（分组数据与
    `tool_grouping_status` 一致）；
-6. 关闭 Kaz 模式：预设切回 `previousPreset` 记录的预设，五个插件恢复原状
+6. 关闭 Kaz 模式：预设切回 `previousPreset` 记录的预设，九个插件恢复原状
    （`settings.yaml` 的 enabled 写回 / 字段被移除），快照清空。
 
 ### 5. 开关验证
@@ -372,7 +373,7 @@ bundle 注册格式、slot 注册（头部工具区 + 输入 dock）、组件渲
 | 重启后看不到按钮 | ① 代码改动需要重启 dsh（ESM 缓存）；② 确认 `cordis.patch.yml` 有 kaz-mode 行且 `--dump-config` 能看到；③ 强刷页面（Ctrl+F5）拉取新的客户端 bundle |
 | 按钮不出现 / 被遮挡 | 按钮在**会话头部工具区**（session log 按钮左侧），行内排版不会遮挡。若完全看不到：确认已打开一个会话（空白首页 hero 状态没有头部工具区）；其它同上一行 |
 | 面板里的开关 / 输入框不可点 | 页面处于远程内存模式（非 127.0.0.1 访问）时 settings 不可写。请在本机访问页面（按钮本身始终可展开面板） |
-| **面板里五个插件显示「未安装」/ kaz-mode 显示「禁用」/ 记忆面板显示「无待确认」** | 部署的 api 网关白名单（`dsh-host-apiproxy` 的 `WEB_SETTINGS_NAMESPACES`）默认不暴露插件自有命名空间。本工作区已本地打补丁：把 `kaz-mode` / `kaz-memory` / `thinking-anchor` / `round-minimal` / `tool-grouping` / `tool-filter` / `code-collapse` / `output-beep` / `task-master-whiteboard` / `round-display` 加入该数组。**升级 dsh 会覆盖此补丁**，需重新加回（数组内有 `LOCAL PATCH (Kaczev Kaz 工作区)` 注释标记） |
+| **面板里九个插件显示「未安装」/ kaz-mode 显示「禁用」/ 记忆面板显示「无待确认」** | 部署的 api 网关白名单（`dsh-host-apiproxy` 的 `WEB_SETTINGS_NAMESPACES`）默认不暴露插件自有命名空间。本工作区已本地打补丁：把 `kaz-mode` / `kaz-memory` / `thinking-anchor` / `round-minimal` / `tool-grouping` / `tool-filter` / `code-collapse` / `output-beep` / `task-master-whiteboard` / `round-display` / `deepseek-default-model` 加入该数组。**升级 dsh 会覆盖此补丁**，需重新加回（数组内有 `LOCAL PATCH (Kaczev Kaz 工作区)` 注释标记） |
 | 预设选择器里没有「Kaz 模式」 | 未装 kaz 预设：把 `kaz-preset/` 复制到 `~/.dsh/.agent-presets/kaz/`（见安装步骤 5）后重启 dsh |
 | 选完预设但按钮状态没马上变 | 预设选择器写的是 `agent-presets.default`，由宿主预设联动再写 `kaz-mode.enabled`（差一个 settings 往返）。最终状态一致即可 |
 | 面板里某插件显示「未安装」 | 该插件行未挂载或未在 settings 注册（settings 命名空间只在插件加载后存在）。检查对应插件的 `cordis.patch.yml` 行 |
@@ -382,7 +383,7 @@ bundle 注册格式、slot 注册（头部工具区 + 输入 dock）、组件渲
 | 和 round-minimal / tool-grouping 冲突吗 | 不冲突。kaz-mode 只联动它们的 `enabled`，并消费它们发布的运行时事实：白名单按 tool-grouping 的组 id 展开、首轮极简信号来自 round-minimal 服务/事件；三个插件叠加时各自的条件都满足才隐藏/拒绝 |
 | Kaz 模式下某个工具消失了 | Kaz 工具面只放行 `minimalTools + toolWhitelist`，白名单外的工具（如 `web_search`、`subagent`、`skill`、`todo_write`）不可见且调用被拒。需要时把工具名或组 id 加进 `kaz-mode.toolWhitelist`（热重载） |
 | 首轮模型不再搜索记忆 | 预期行为：首轮极简（round-minimal）只有 pwsh / str_replace_editor，kaz-mode 收到信号后同时移除 tool:memory 指引；从第二轮起记忆工具与指引恢复 |
-| **Kaz 会话里没有上下文注入 / memory 不起作用 / 五个插件像没生效** | 0.2.x 及以前的 kaz 预设直接照抄 `minimal` 组合（persona `complete: true`）或 `cordis` 组合（persona 非 complete 但首轮提示不含伪装）。**当前版本**：kaz 预设 = cordis 完整副本 + persona 改为与 minimal 逐字一致（`complete: false`、`includeRuntimeContext: false`），首轮极简伪装与次轮基底恢复全部由 kaz-mode 在组装层实现。更新 `~/.dsh/.agent-presets/kaz/` 与 kaz-mode / round-minimal / code-collapse 代码后**重启 dsh**，**新建**一个 Kaz 会话生效（系统提示首轮 = persona + thinking-anchor + round-minimal 轮次提示 + code-collapse 首轮提醒，次轮起 persona 恢复为 standard 文本） |
+| **Kaz 会话里没有上下文注入 / memory 不起作用 / 九个插件像没生效** | 0.2.x 及以前的 kaz 预设直接照抄 `minimal` 组合（persona `complete: true`）或 `cordis` 组合（persona 非 complete 但首轮提示不含伪装）。**当前版本**：kaz 预设 = cordis 完整副本 + persona 改为与 minimal 逐字一致（`complete: false`、`includeRuntimeContext: false`），首轮极简伪装与次轮基底恢复全部由 kaz-mode 在组装层实现。更新 `~/.dsh/.agent-presets/kaz/` 与 kaz-mode / round-minimal / code-collapse 代码后**重启 dsh**，**新建**一个 Kaz 会话生效（系统提示首轮 = persona + thinking-anchor + round-minimal 轮次提示 + code-collapse 首轮提醒，次轮起 persona 恢复为 standard 文本） |
 | 首轮提示不出现 | 需同时满足：Kaz 开启、`showFirstRoundHint: true`、round-minimal 启用、当前对话仍在首轮（≤1 轮）。注意：无会话的空白首页（hero）没有输入 dock，先新建/打开会话即可看到 |
 | 想临时停用整个插件 | `settings.yaml` 设 `kaz-mode.enabled: false`（注意：下一次切换预设时会被预设联动覆盖）；或删除组合行后重启 |
 | **重启后右上角仍没有按钮**、`/plugins/kaz-mode/client.js` 返回 404 | 0.1.0 初版 `package.json` 的 `exports` 缺少 `"./package.json"` 导出，导致 dsh 客户端包扫描（`require.resolve("kaz-mode/package.json")`）失败、包被**静默跳过**（宿主半正常、客户端半缺失）。0.1.1 已修复：确认 `exports` 含 `"./package.json": "./package.json"` 后**重启 dsh** 并强刷页面。自检：`node -e "const{createRequire}=require('module');console.log(createRequire('file:///C:/Users/Kaczev/.dsh/profiles/web/').resolve('kaz-mode/package.json'))"` 应能解析出路径。今后给任何插件加客户端半，`exports` 都要带上 `"./package.json"` |
@@ -393,4 +394,4 @@ bundle 注册格式、slot 注册（头部工具区 + 输入 dock）、组件渲
 - 依赖运行时已安装的 `@deepseek-ai/cordis`、`@deepseek-ai/dsh-settings`、
   `@deepseek-ai/dsh-tools`、`@deepseek-ai/schemastery`；
 - 客户端半为纯 JavaScript 浏览器 bundle（React 18），随 dsh 主题明暗切换；
-- 安装方式与工作区其余五个插件完全一致（见《创建dsh插件指南.md》）。
+- 安装方式与工作区其余九个插件完全一致（见《创建dsh插件指南.md》）。
