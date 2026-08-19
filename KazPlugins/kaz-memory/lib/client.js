@@ -51,9 +51,11 @@ window.__ModuleLoader__.load({
 .kzm-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary);flex:none}
 .kzm-root[data-count="true"] .kzm-dot{background:#16a34a}
 .kzm-chevron{color:var(--dsw-alias-label-tertiary);font-size:10px;flex:none}
+.kzm-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:60;width:480px;max-height:70vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:4px;transition:opacity .16s ease,transform .16s ease}
 .kzm-portal{position:fixed;z-index:1200}
 .kzm-portal .kzm-panel{position:static;top:auto;bottom:auto;left:auto;right:auto;width:100%;box-sizing:border-box}
-.kzm-panel{max-height:60vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:6px}
+.kzm-portal.kzm-opening .kzm-panel{opacity:1;transform:translateY(0)}
+.kzm-portal.kzm-closing .kzm-panel{opacity:0;transform:translateY(-6px)}
 .kzm-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
 .kzm-badge{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary)}
 .kzm-badge[data-count="true"]{color:#16a34a;border-color:rgba(22,163,74,.45)}
@@ -420,6 +422,8 @@ window.__ModuleLoader__.load({
 			 */
 			function MemoryHeaderButton({ wide, useSessions }) {
 				const [panelOpen, setPanelOpen] = useState(false);
+				const [closing, setClosing] = useState(false);
+				const closeTimer = useRef(null);
 				const [memories, setMemories] = useState([]);
 				const compact = wide === false;
 
@@ -458,6 +462,42 @@ window.__ModuleLoader__.load({
 
 				const rootRef = useRef(null);
 				const [panelPos, setPanelPos] = useState(null);
+
+				const closePanel = useCallback(() => {
+					if (!panelOpen) return;
+					setClosing(true);
+					if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+					closeTimer.current = setTimeout(() => {
+						setPanelOpen(false);
+						setClosing(false);
+					}, 160);
+				}, [panelOpen]);
+
+				const openPanel = useCallback(() => {
+					if (closeTimer.current !== null) {
+						clearTimeout(closeTimer.current);
+						closeTimer.current = null;
+					}
+					setClosing(false);
+					setPanelOpen(true);
+				}, []);
+
+				useEffect(() => () => {
+					if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+				}, []);
+
+				// 点击面板外的空白区域时平滑收起（再次点击按钮展开）。
+				useEffect(() => {
+					if (!panelOpen) return;
+					const onMouseDown = (event) => {
+						if (rootRef.current !== null && rootRef.current.contains(event.target)) return;
+						if (event.target !== null && event.target !== undefined && typeof event.target.closest === "function" && event.target.closest(".kzm-panel") !== null) return;
+						closePanel();
+					};
+					document.addEventListener("mousedown", onMouseDown);
+					return () => document.removeEventListener("mousedown", onMouseDown);
+				}, [panelOpen, closePanel]);
+
 				useLayoutEffect(() => {
 					if (!panelOpen) return;
 					const update = () => {
@@ -465,8 +505,8 @@ window.__ModuleLoader__.load({
 						if (el === null) return;
 						const rect = el.getBoundingClientRect();
 						const margin = 10;
-						const width = Math.min(360, window.innerWidth - 24);
-						const maxHeight = Math.min(Math.round(window.innerHeight * 0.6), 560);
+						const width = Math.min(480, window.innerWidth - 24);
+						const maxHeight = Math.min(Math.round(window.innerHeight * 0.7), 640);
 						let left = rect.right + margin;
 						if (left + width > window.innerWidth - 12) left = Math.max(12, window.innerWidth - 12 - width);
 						const below = window.innerHeight - rect.bottom - margin;
@@ -485,7 +525,8 @@ window.__ModuleLoader__.load({
 				}, [panelOpen]);
 
 				const toggle = () => {
-					setPanelOpen(!panelOpen);
+					if (panelOpen) closePanel();
+					else openPanel();
 				};
 
 				return createElement(
@@ -509,11 +550,14 @@ window.__ModuleLoader__.load({
 						createElement("span", { className: "kzm-label" }, "记忆" + (count > 0 ? " " + count : "")),
 						createElement("span", { className: "kzm-chevron" }, panelOpen ? "▲" : "▼"),
 					),
-					panelOpen &&
+					(panelOpen || closing) &&
 						createPortal(
 							createElement(
 								"div",
-								{ className: "kzm-portal", style: panelPos !== null ? panelPos : undefined },
+								{
+									className: "kzm-portal " + (closing ? "kzm-closing" : "kzm-opening"),
+									style: panelPos !== null ? panelPos : undefined,
+								},
 								createElement(MemoryPanel, { project: currentCwd }),
 							),
 							document.body,

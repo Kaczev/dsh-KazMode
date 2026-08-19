@@ -1,9 +1,10 @@
 // output-beep —— 模型输出完毕提示音
 // ===========================================================================
 // 宿主侧插件：监听 agent/status，任意 agent 输出完毕（回到 idle）时播放一次
-// Windows 系统提示音（PowerShell [console]::beep，频率/时长可配）。默认只对
-// 主会话提示（includeSubagents=false 时忽略子代理会话——它们完成时同样会发
-// agent/status，避免子代理批量完成时提示音连响）。
+// Windows 系统提示音（PowerShell [console]::beep，频率/时长可配）；同时监听
+// session/event 的 ask_user_question 工具调用，模型提问弹窗出现时也响一次。
+// 默认只对主会话提示（includeSubagents=false 时忽略子代理会话——它们完成时
+// 同样会发 agent/status，避免子代理批量完成时提示音连响）。
 //
 // settings 命名空间 `output-beep`（~/.dsh/settings.yaml，热重载）：
 //   enabled          总开关（默认 true）
@@ -144,11 +145,24 @@ export function apply(ctx, config = {}) {
   let source = () => entry;
 
   /** 判断是否子代理会话（header.origin === "subagent" 或带 parentSession）。 */
+  function isSubagentHeader(header) {
+    if (header === null || header === undefined || typeof header !== "object") return false;
+    return header.origin === "subagent" || typeof header.parentSession === "string";
+  }
+
+  /** agent 形态：从 agent.session.header 判断。 */
   function isSubagent(agent) {
     try {
-      const header = agent?.session?.header;
-      if (header === null || header === undefined || typeof header !== "object") return false;
-      return header.origin === "subagent" || typeof header.parentSession === "string";
+      return isSubagentHeader(agent?.session?.header);
+    } catch {
+      return false;
+    }
+  }
+
+  /** session/event 形态：直接从 session.header 判断。 */
+  function isSubagentSession(session) {
+    try {
+      return isSubagentHeader(session?.header);
     } catch {
       return false;
     }
@@ -156,20 +170,37 @@ export function apply(ctx, config = {}) {
 
   let lastBeepAt = 0;
 
-  function handleIdle(agent) {
-    const current = source();
+  /** 播放前的统一判定 + 防抖；subagent 参数表示当前事件是否来自子代理。 */
+  function handleBeep(current, subagent) {
     if (current === null || typeof current !== "object" || current.enabled !== true) return;
-    if (current.includeSubagents !== true && isSubagent(agent)) return;
+    if (current.includeSubagents !== true && subagent) return;
     const now = Date.now();
     if (now - lastBeepAt < BEEP_DEBOUNCE_MS) return;
     lastBeepAt = now;
     playBeep(current.frequency, current.duration, ctx.logger);
   }
 
+  function handleIdle(agent) {
+    handleBeep(source(), isSubagent(agent));
+  }
+
+  /** 模型调用 ask_user_question 提问时立即响一声（不等整轮结束 idle）。 */
+  function handleAsk(session) {
+    handleBeep(source(), isSubagentSession(session));
+  }
+
   // agent 回到 idle = 整个驱动循环结束（可能含多个 turn/step）= 模型输出完毕。
   ctx.on("agent/status", ({ agent, status }) => {
     if (status !== "idle") return;
     handleIdle(agent);
+  });
+
+  // 模型调用 ask_user_question 时，UI 出现提问弹窗，立即响一声提醒用户。
+  ctx.on("session/event", (session, event) => {
+    if (event === null || typeof event !== "object" || event.type !== "tool/call") return;
+    const data = event.data;
+    if (data === null || typeof data !== "object" || data.name !== "ask_user_question") return;
+    handleAsk(session);
   });
 
   installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {

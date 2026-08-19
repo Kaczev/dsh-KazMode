@@ -387,17 +387,20 @@ export async function apply(ctx, config = {}) {
     return lastProjectRoot;
   }
 
-  // ---- 自动载入：memory_search 首次可用时，把已确认且标记「自动载入」的记忆注入一次 ----
+  // ---- 自动载入 + 固定指引：已注入标记持久化 ----
   // 2026-08-19 修复（Kaczev 报告）：autoLoadInjected 是进程内 WeakMap，dsh 重启
   // 后清空，恢复的会话会把 memory_search 误判为「首次可用」而重复注入。修复：
   // 把已注入的 agent id 持久化到 <DSH_HOME>/storages/kaz-memory-auto-injected.json
   // （默认 ~/.dsh/storages；config.autoInjectedStore 可覆盖，探针用临时文件），
   // 重启后同一会话不再注入。仅在实际注入成功后才落标。
+  // 2026-08-21 扩展：固定指引（[kaz-memory guidance]）的 guidanceInjected 同样
+  // 是进程内 WeakMap，重启后也会重复注入；这里把两种注入标记一起持久化。
   const AUTO_INJECTED_STORE =
     typeof config.autoInjectedStore === "string" && config.autoInjectedStore.trim().length > 0
       ? config.autoInjectedStore.trim()
       : join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", "kaz-memory-auto-injected.json");
   const persistedInjected = new Set();
+  const persistedGuidanceInjected = new Set();
   try {
     if (existsSync(AUTO_INJECTED_STORE)) {
       // 兼容手工编辑/工具写入时可能带上的 UTF-8 BOM（﻿）
@@ -411,34 +414,54 @@ export async function apply(ctx, config = {}) {
         // 兼容 PowerShell ConvertTo-Json 单元素数组被解包成字符串的写法
         persistedInjected.add(parsed.agents);
       }
+      if (parsed !== null && typeof parsed === "object" && Array.isArray(parsed.guidanceAgents)) {
+        for (const id of parsed.guidanceAgents) {
+          if (typeof id === "string" && id.length > 0) persistedGuidanceInjected.add(id);
+        }
+      } else if (parsed !== null && typeof parsed === "object" && typeof parsed.guidanceAgents === "string" && parsed.guidanceAgents.length > 0) {
+        // 兼容 PowerShell ConvertTo-Json 单元素数组被解包成字符串的写法
+        persistedGuidanceInjected.add(parsed.guidanceAgents);
+      }
     }
   } catch (error) {
-    ctx.logger.warn(`[kaz-memory] 读取自动载入标记失败：${error instanceof Error ? error.message : String(error)}`);
+    ctx.logger.warn(`[kaz-memory] 读取注入标记失败：${error instanceof Error ? error.message : String(error)}`);
   }
   function persistInjected() {
     try {
       mkdirSync(dirname(AUTO_INJECTED_STORE), { recursive: true });
       writeFileSync(
         AUTO_INJECTED_STORE,
-        JSON.stringify({ agents: [...persistedInjected].sort(), updatedAt: Date.now() }, null, 2) + "\n",
+        JSON.stringify(
+          {
+            agents: [...persistedInjected].sort(),
+            guidanceAgents: [...persistedGuidanceInjected].sort(),
+            updatedAt: Date.now(),
+          },
+          null,
+          2,
+        ) + "\n",
         "utf8",
       );
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 持久化自动载入标记失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[kaz-memory] 持久化注入标记失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
   const autoLoadInjected = new WeakMap();
+  const guidanceInjected = new WeakMap();
 
-  // 2026-08-19：加载时预标记现有 agent（thinking-anchor 同款）。重启后恢复的
-  // 会话即使不在持久化标记里（例如标记文件晚于会话创建、或 id 格式差异），
-  // 也不会被重复注入；持久化标记继续兜底「重启后晚于插件加载才恢复的会话」。
+  // 加载时预标记现有 agent（thinking-anchor 同款）：自动载入和固定指引都视为
+  // 已注入。重启后恢复的会话即使不在持久化标记里（例如标记文件晚于会话创建、
+  // 或 id 格式差异），也不会被重复注入；持久化标记继续兜底「重启后晚于插件
+  // 加载才恢复的会话」。
   try {
     const agents = ctx.get("agents");
     if (agents !== undefined && agents !== null && typeof agents.list === "function") {
       for (const agent of agents.list()) {
         if (agent !== null && typeof agent === "object" && agent.id !== undefined) {
           autoLoadInjected.set(agent, true);
+          guidanceInjected.set(agent, true);
           persistedInjected.add(String(agent.id));
+          persistedGuidanceInjected.add(String(agent.id));
         }
       }
       persistInjected();
@@ -623,6 +646,30 @@ export async function apply(ctx, config = {}) {
     }
   }
 
+  /**
+   * 会话日志里是否已注入过 kaz-memory 的消息（自动载入 recall 或固定指引 guidance）。
+   * 这是跨重启去重的最终防线：无论标记文件是否及时写入、agent 是否在插件加载时
+   * 已被枚举到，只要会话历史里已经出现过 kaz-memory 的注入记录，就不再注入。
+   */
+  function hasInjectedBefore(agent, form) {
+    try {
+      const events = agent?.session?.events;
+      if (!Array.isArray(events)) return false;
+      return events.some((event) => {
+        if (event === null || typeof event !== "object" || event.type !== "user/message") return false;
+        const data = event.data;
+        if (data === null || typeof data !== "object") return false;
+        const source = data.source;
+        if (source === null || typeof source !== "object") return false;
+        if (source.kind !== "plugin" || source.plugin !== "kaz-memory") return false;
+        if (form !== undefined && source.form !== form) return false;
+        return true;
+      });
+    } catch {
+      return false;
+    }
+  }
+
   // ---- 自动载入：对话开始时（首个 pre-step）把已确认且标记「自动载入」的记忆
   // 注入一次（2026-08 重构：不再等 memory_search 首次可用——对话一开始就注入）----
   ctx.on("agent/pre-step", async (payload, next) => {
@@ -636,6 +683,8 @@ export async function apply(ctx, config = {}) {
     if (autoLoadInjected.has(agent)) return decision;
     // 跨重启去重：该会话此前已注入过（持久化标记）→ 跳过。
     if (agent.id !== undefined && persistedInjected.has(String(agent.id))) return decision;
+    // 最终防线：会话日志里已出现过 kaz-memory 自动载入记录 → 跳过。
+    if (hasInjectedBefore(agent, "recall")) return decision;
     const recall = await buildAutoLoadMessage(agent);
     if (recall === undefined) return decision;
     // 实际注入成功后才落标（进程内 + 持久化）。
@@ -653,13 +702,16 @@ export async function apply(ctx, config = {}) {
   // Kaz 模式固定系统提示词会滤掉所有非 persona 段，因此固定指引不再注册
   // systemPrompt.section；改为在会话已有第一次 tool/call 后的某个 pre-step
   // 以合成用户消息注入一次（round-display 同步上报）。
-  const guidanceInjected = new WeakMap();
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
     const agent = payload?.agent;
     if (agent === null || agent === undefined || typeof agent !== "object") return decision;
     if (guidanceInjected.has(agent)) return decision;
+    // 跨重启去重：该会话此前已注入过固定指引 → 跳过。
+    if (agent.id !== undefined && persistedGuidanceInjected.has(String(agent.id))) return decision;
+    // 最终防线：会话日志里已出现过 kaz-memory 固定指引记录 → 跳过。
+    if (hasInjectedBefore(agent, "guidance")) return decision;
     // 首轮工具调用之后才注入：此时 memory_search 已进入工具面。
     if (!hasToolCall(agent)) return decision;
     const text = guidanceText(agent);
@@ -675,6 +727,10 @@ export async function apply(ctx, config = {}) {
       return decision;
     }
     guidanceInjected.set(agent, true);
+    if (agent.id !== undefined) {
+      persistedGuidanceInjected.add(String(agent.id));
+      persistInjected();
+    }
     reportRoundDisplay(agent, text);
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
   });

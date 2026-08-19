@@ -257,7 +257,10 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 const execProjA = { agent: { session: { header: { cwd: "C:/projA" } } } };
 const execProjB = { agent: { session: { header: { cwd: "C:/projB" } } } };
 
-await apply(base, { openFolder: (folder) => openedFolders.push(folder) });
+// 主 harness 用隔离的注入标记文件，避免读到真实 ~/.dsh/storages 里的持久化标记
+// （否则 guidance 测试的固定 agent id 会被跨重启去重挡住）。
+const mainStore = join(tmpdir(), "km-main-" + Date.now() + ".json");
+await apply(base, { openFolder: (folder) => openedFolders.push(folder), autoInjectedStore: mainStore });
 await settle();
 
 // ① memory_list：只回 id/namespace/status/名称
@@ -597,6 +600,8 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   check("⑬ 重新开启后自动载入恢复注入", hasRecallOff(dOn) === true);
   rmSync(storeOff, { force: true });
 }
+
+rmSync(mainStore, { force: true });
 
 console.log(failures === 0 ? "\nPROBE OK" : `\nPROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);
