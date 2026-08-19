@@ -905,9 +905,18 @@ window.__ModuleLoader__.load({
 
 				const defaults = stateData !== null && stateData.defaults !== undefined ? stateData.defaults : { nonKaz: {}, kaz: {} };
 				const sessionOverrides = stateData !== null && stateData.session !== null && typeof stateData.session === "object" ? stateData.session : {};
-				const inConversation = summary !== null && summary !== undefined;
-				// 已有具体对话时以该会话的 Kaz 开关为准；新建对话页面以当前预设选择为准。
-				const effectiveKazEnabled = inConversation ? kazEnabled : preset === KAZ_PRESET_ID;
+				// 空白会话 = 新建对话页面，不能当作“具体对话”处理。
+				const isBlank = summary !== null && summary !== undefined && summary.blank === true;
+				const inConversation = summary !== null && summary !== undefined && !isBlank;
+				// 新建对话页面优先使用空白会话上已暂存/已应用的 agentPreset；
+				// 取不到时再回退到 agent-presets.default。
+				const newConversationPreset = !inConversation && summary !== null && typeof summary.agentPreset === "string"
+					? summary.agentPreset
+					: undefined;
+				const effectiveKazEnabled = inConversation
+					? kazEnabled
+					: (newConversationPreset !== undefined ? newConversationPreset === KAZ_PRESET_ID : preset === KAZ_PRESET_ID);
+				const displayPreset = inConversation ? preset : (newConversationPreset !== undefined ? newConversationPreset : preset);
 				const mode = effectiveKazEnabled ? "kaz" : "nonKaz";
 				const baseMap = defaults[mode] || {};
 				const effectiveMap = {};
@@ -985,8 +994,8 @@ window.__ModuleLoader__.load({
 						"p",
 						{ className: "kzm-preset" },
 						"当前预设：",
-						createElement("strong", null, preset !== undefined ? preset : "（不可读）"),
-						preset === KAZ_PRESET_ID ? " ← Kaz 模式" : "",
+						createElement("strong", null, displayPreset !== undefined ? displayPreset : "（不可读）"),
+						displayPreset === KAZ_PRESET_ID ? " ← Kaz 模式" : "",
 						createElement("br", null),
 						"Kaz 模式跟随当前会话的预设自动开关（新对话选择模式、侧边栏切换对话时都会同步）。",
 					),
@@ -997,7 +1006,7 @@ window.__ModuleLoader__.load({
 							"+ round-minimal 首轮极简伪装（首轮提示仅 persona + thinking-anchor 两段，次轮起按 postFirstRoundMode 恢复基底）+ thinking-anchor + tool-filter + tool-grouping；" +
 							"kaz-no-context 是 kaz 预设内置前置；kaz-memory 是独立定制的记忆组件（其工具组默认在白名单内）。",
 					),
-					preset === KAZ_PRESET_ID &&
+					displayPreset === KAZ_PRESET_ID &&
 						effectiveKazEnabled !== true &&
 						createElement(
 							"div",
@@ -1076,8 +1085,17 @@ window.__ModuleLoader__.load({
 				const kazValue = valueOf(kazSnap);
 				const preset = currentPresetOf(presetSnap);
 				const kazEnabled = kazValue !== null && kazValue.enabled === true;
+				const { summary } = useCurrentSession();
+				const isBlank = summary !== null && summary !== undefined && summary.blank === true;
+				const inConversation = summary !== null && summary !== undefined && !isBlank;
+				const newConversationPreset = !inConversation && summary !== null && typeof summary.agentPreset === "string"
+					? summary.agentPreset
+					: undefined;
+				const effectiveKazEnabled = inConversation
+					? kazEnabled
+					: (newConversationPreset !== undefined ? newConversationPreset === KAZ_PRESET_ID : preset === KAZ_PRESET_ID);
 				const isKaz = preset === KAZ_PRESET_ID;
-				const drifted = isKaz && !kazEnabled;
+				const drifted = isKaz && !effectiveKazEnabled;
 				const compact = wide === false;
 
 				// 面板经 portal 挂到 document.body 并用 fixed 定位：侧边栏容器
@@ -1151,7 +1169,7 @@ window.__ModuleLoader__.load({
 					{
 						ref: rootRef,
 						className: "kzm-root",
-						"data-on": kazEnabled ? "true" : "false",
+						"data-on": effectiveKazEnabled ? "true" : "false",
 						"data-warn": drifted ? "true" : "false",
 						"data-side": "true",
 						"data-compact": compact ? "true" : "false",
@@ -1170,7 +1188,7 @@ window.__ModuleLoader__.load({
 							},
 						},
 						createElement("span", { className: "kzm-dot" }),
-						createElement("span", { className: "kzm-label" }, "Kaz 模式：" + (kazEnabled ? "已开启" : "已关闭")),
+						createElement("span", { className: "kzm-label" }, "Kaz 模式：" + (effectiveKazEnabled ? "已开启" : "已关闭")),
 						createElement("span", { className: "kzm-chevron" }, panelOpen ? "▲" : "▼"),
 					),
 					(panelOpen || closing) &&
