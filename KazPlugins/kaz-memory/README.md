@@ -1,12 +1,12 @@
 # kaz-memory —— 带「自动载入」的独立记忆插件
 
-与 `@max-null/dsh-memory` 同功能的跨会话明文记忆；默认**不注入**，但对每条记忆可标记「自动载入」，在**对话开始时**自动注入一次（2026-08 重构：不再等 memory_search 首次可用）：
+与 `@max-null/dsh-memory` 同功能的跨会话明文记忆；默认**不注入记忆正文**，但首轮工具调用后会注入一条记忆指引；对每条记忆可标记「自动载入」，在**对话开始时**自动注入一次（2026-08 重构：不再等 memory_search 首次可用）：
 
 | | @max-null/dsh-memory | kaz-memory |
 | --- | --- | --- |
 | 引擎 / 存储 | MemoryEngine，`$DSH_HOME/storages/memory.json`（global）+ `<cwd>/.dsh/storages/memory_project.json`（project） | **vendored 同一引擎（MIT），格式不变**；global 存 `$DSH_HOME/storages/memory.json`，project 按**项目文件夹**各存一份 `<项目>/.dsh/storages/memory_project.json`（2026-08-17 起不再用 `process.cwd()`） |
 | 四工具 | memory_save / memory_list / memory_search / memory_forget | 同名工具；**memory_list 只返回 id/namespace/status/名称（不含正文与 keywords）**，memory_search 返回全文 |
-| 固定指引 | tool:memory | tool:memory + 「已确认且标记自动载入的记忆会在对话开始时自动注入一次；之后需要更完整/精确记忆时主动 memory_search」 |
+| 固定指引 | tool:memory | 首轮工具调用后以上下文消息注入一次固定指引；已确认且标记自动载入的记忆会在对话开始时自动注入一次；之后需要更完整/精确记忆时主动 memory_search |
 | 上下文注入 | `memory:recall` 把 auto 记忆逐条注入系统提示 | **按需注入一次**：已确认且标记「自动载入」（autoLoad）的记忆，在**对话开始**（首个 pre-step）以上下文注入方式注入一次；其余记忆靠模型主动 memory_search |
 | 人工确认闸门 | setStatus 仅存于服务层，**无 UI / 工具 / CLI（断头路）** | 客户端半：会话头部「记忆」按钮（Kaz 按钮左侧，order -2）+ 面板（待确认：确认生效/忽略/删除；**全部记忆：点标题按需取全文 / 改名 / 删除**），经**专用 Connection RPC 通道 `/kaz-memory`（loopback）**读写——settings.yaml 不再承载任何记忆存储信息；模型没有任何对应工具 |
 
@@ -55,15 +55,17 @@
 - **面板不被侧边栏裁剪（2026-08-17）**：记忆面板经 `createPortal` 挂到
   `document.body`，按按钮矩形 fixed 定位、自动在视口内收拢（宽度不足时向上/
   向左回退），侧边栏再窄也不会挡住面板。
-- **消息格式（2026-08-17 起精简；2026-08-21 改为主动行动式措辞）**：记忆指引
-  是每轮的**固定短提示**——`[kaz-memory guidance] / > / 内容 / <` 信封格式，只发
+- **消息格式（2026-08-17 起精简；2026-08-21 改为主动行动式措辞；2026-08-22
+  改为首轮工具调用后注入）**：记忆指引
+  是**首轮工具调用之后以上下文消息注入一次**的**固定短提示**——`[kaz-memory guidance] / > / 内容 / <` 信封格式，只发
   一行 We need 风格英文总述（**主动行动式**：任务开始时先用 memory_search 查记忆、
   学到重要事实后用 memory_save 存下来——而不是等遇到难题才想起记忆）；记忆工具
   的具体用法由各工具描述自带，不再逐行重复 A/B/C/D。**仅当 memory_search 在当前
   环境确实可调用时发送**（存在且可直接使用，或 Code Mode 下经 run_code SDK 可调用；
   注册了但工具面/白名单不含它、首轮极简等不可调用场景一律不发）；不可用即返回空串，
-  不向模型发无意义的指引——部署基础英文记忆指引段（`tool:memory`）已在组装层
-  **无条件移除**。
+  不向模型发无意义的指引。Kaz 模式会滤掉 systemPrompt 段，因此固定指引不再注册
+  `tool:memory:kaz-memory` 系统提示段，改为 `agent/pre-step` 合成用户消息注入；
+  部署基础英文记忆指引段（`tool:memory`）仍在组装层**无条件移除**。
 - **总开关（2026-08-21）**：settings.yaml `kaz-memory` 段的 `enabled`（默认
   `true`，Kaz 模式面板提供开关）。关闭时：不注入记忆指引、不自动载入记忆，
   客户端完全不渲染记忆面板（侧边栏「记忆」按钮与面板整体隐藏）；开启时

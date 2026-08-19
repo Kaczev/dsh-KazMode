@@ -121,7 +121,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     provider: "deepseek-official",
     model: "deepseek-v4-flash",
     reasoningEffort: "high",
-    generation_kwargs: { temperature: 0.2, top_p: 1, repetition_penalty: 1.2 },
+    generation_kwargs: { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 },
   },
   "kaz-memory": { enabled: false, guidance: "", guidanceHead: "" },
   "kaz-diag": { enabled: false },

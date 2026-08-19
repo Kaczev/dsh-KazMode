@@ -41,7 +41,7 @@ const DEFAULT_PROVIDER = "deepseek-official";
 const DEFAULT_MODEL = "deepseek-v4-flash";
 const DEFAULT_REASONING_EFFORT = "high";
 const DEFAULT_TEMPERATURE = 0.2;
-const DEFAULT_TOP_P = 1;
+const DEFAULT_TOP_P = 0.9;
 const DEFAULT_REPETITION_PENALTY = 1.2;
 
 const GENERATION_KWARGS_DEFAULTS = {

@@ -4,9 +4,9 @@
 //   * ctx.memory 引擎 + memory_save / memory_list / memory_search / memory_forget
 //     四工具（引擎 vendored 自 @max-null/dsh-memory，MIT，存储位置与格式不变）
 //   * 每条记忆 JSON 里持久化 name（保存/确认时自动从正文生成，面板可改名）
-//   * tool:memory 固定指引；已确认且标记「自动载入」（autoLoad）的记忆会在
-//     对话开始时（首个 pre-step）以上下文注入方式注入一次（2026-08 重构：
-//     不再等 memory_search 首次可用）
+//   * tool:memory 固定指引在首轮工具调用之后以上下文消息注入一次；已确认且
+//     标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）以上下文
+//     注入方式注入一次（2026-08 重构：不再等 memory_search 首次可用）
 //   * memory_list 只返回 id/namespace/status/autoLoad/名称，不返回正文与
 //     keywords——避免列表调用把记忆灌进上下文；memory_search 才返回全文。
 //   * 项目记忆按项目文件夹隔离（2026-08-17）：project 记忆写在
@@ -203,7 +203,7 @@ function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinim
 }
 
 /**
- * 拼装每轮固定提示 [kaz-memory guidance]：
+ * 拼装首轮工具调用后注入的 [kaz-memory guidance] 上下文消息：
  *  统一消息格式 [标题] / > / 内容 / <；只发总述行（S）——记忆工具的具体
  *  用法由各工具描述自带，不再逐行重复 A/B/C/D。仅当 memory_search 在当前
  *  环境确实可调用（存在且可直接使用或经 run_code SDK 调用）时发送；
@@ -460,7 +460,7 @@ export async function apply(ctx, config = {}) {
       return undefined;
     }
     if (!Array.isArray(records) || records.length === 0) return undefined;
-    const lines = ["[kaz-memory Auto-Load]", ">", "We need to keep everything in English except for the final summary.", "Confirmed memories marked as 'auto-load':"];
+    const lines = ["[kaz-memory Auto-Load]", ">", "We need to recall the memories:"];
     for (const record of records) {
       const title = nameOf(record.content, 80) || "（未命名记忆）";
       const body = String(record.content ?? "").replace(/\r?\n/g, "\n  ");
@@ -556,10 +556,10 @@ export async function apply(ctx, config = {}) {
     ctx.logger.warn("[kaz-memory] connection 服务不可用，面板 RPC 通道未注册（仅工具与自动载入可用）");
   }
 
-  // ---- 每轮指引：settings 里 guidance 留空则发固定总述行（工具细节由工具
-  // 描述自带，不再重复 A/B/C/D 行）；仅当 memory_search 在当前环境可调用时
-  // 才发（存在且可直接使用或经 run_code SDK 调用）；刻意不注册
-  // memory:recall 上下文注入 ----
+  // ---- 首轮工具调用后的指引注入：settings 里 guidance 留空则发固定总述行
+  // （工具细节由工具描述自带，不再重复 A/B/C/D 行）；仅在 memory_search 当前
+  // 环境可调用时，以合成用户消息注入一次。Kaz 模式会把 systemPrompt 段全部滤掉，
+  // 所以这里不再注册 tool:memory:kaz-memory 段，改为 pre-step 上下文注入。----
   const guidanceText = (agent) => {
     const current = source();
     // 组件总开关：关闭时不注入任何记忆指引（round-display 上报随内容为空自然跳过）。
@@ -612,17 +612,16 @@ export async function apply(ctx, config = {}) {
     return "";
   }
 
-  ctx.systemPrompt.section({
-    name: "tool:memory:kaz-memory",
-    order: 115,
-    text: (context) => {
-      const agent = context !== null && typeof context === "object" ? context.agent : undefined;
-      const text = guidanceText(agent);
-      // 告诉 round-display 显示插件本轮发送了什么（best-effort）。
-      if (agent !== undefined) reportRoundDisplay(agent, text);
-      return text;
-    },
-  });
+  /** 会话里是否已发生第一次工具调用。 */
+  function hasToolCall(agent) {
+    try {
+      const events = agent?.session?.events;
+      if (!Array.isArray(events)) return false;
+      return events.some((event) => event !== null && typeof event === "object" && event.type === "tool/call");
+    } catch {
+      return false;
+    }
+  }
 
   // ---- 自动载入：对话开始时（首个 pre-step）把已确认且标记「自动载入」的记忆
   // 注入一次（2026-08 重构：不再等 memory_search 首次可用——对话一开始就注入）----
@@ -650,10 +649,39 @@ export async function apply(ctx, config = {}) {
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, recall] : decision.messages };
   });
 
+  // ---- 固定指引：首轮工具调用之后以上下文消息注入一次 ----
+  // Kaz 模式固定系统提示词会滤掉所有非 persona 段，因此固定指引不再注册
+  // systemPrompt.section；改为在会话已有第一次 tool/call 后的某个 pre-step
+  // 以合成用户消息注入一次（round-display 同步上报）。
+  const guidanceInjected = new WeakMap();
+  ctx.on("agent/pre-step", async (payload, next) => {
+    const decision = await next();
+    if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
+    const agent = payload?.agent;
+    if (agent === null || agent === undefined || typeof agent !== "object") return decision;
+    if (guidanceInjected.has(agent)) return decision;
+    // 首轮工具调用之后才注入：此时 memory_search 已进入工具面。
+    if (!hasToolCall(agent)) return decision;
+    const text = guidanceText(agent);
+    if (typeof text !== "string" || text.trim().length === 0) return decision;
+    let message;
+    try {
+      message = createUserMessage({
+        content: [{ type: "text", text }],
+        source: { kind: "plugin", plugin: "kaz-memory", form: "guidance" },
+      });
+    } catch (error) {
+      ctx.logger.warn(`[kaz-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
+      return decision;
+    }
+    guidanceInjected.set(agent, true);
+    reportRoundDisplay(agent, text);
+    return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
+  });
+
   // ---- 组装层兜底：无条件移除基础英文记忆指引（tool:memory）----
-  // kaz-memory 的固定指引（tool:memory:kaz-memory）是唯一记忆指引段，
-  // 内容为 We need 风格英文一行（Kaczev 2026-08-17）。kaz-mode 在 Kaz 模式会
-  // 移除本指引（固定提示词）；这里作为全模式兜底：任何会话、任何模式都
+  // kaz-memory 不再注册 tool:memory:kaz-memory 系统提示段；固定指引改为首轮
+  // 工具调用后以上下文消息注入。这里保留全模式兜底：任何会话、任何模式都
   // 不再注入基础英文记忆指引（tool:memory）。
   ctx.on("system-prompt/assemble", async (assembly, context, next) => {
     if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.sections)) {
