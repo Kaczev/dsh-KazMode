@@ -59,7 +59,7 @@
     },
     "kaz": {
       "thinking-anchor": {
-        "enabled": true,
+        "enabled": false,
         "instruction": "",
         "turnReminder": ""
       },
@@ -107,7 +107,7 @@
         "guidanceHead": ""
       },
       "kaz-diag": {
-        "enabled": true
+        "enabled": false
       },
       "first-round-hints": {
         "enabled": true

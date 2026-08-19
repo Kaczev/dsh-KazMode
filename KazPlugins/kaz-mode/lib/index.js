@@ -129,10 +129,13 @@ const FACTORY_NON_KAZ_DEFAULTS = {
 };
 
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
+/** 默认不开启thinking-anchor、kaz-diag */
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
-
+  if (id === "thinking-anchor" || id === "kaz-diag") {
+    FACTORY_KAZ_DEFAULTS[id].enabled = false;
+  }
 }
 
 /** 会话级插件状态文件名（放在项目 .dsh/ 下）。 */

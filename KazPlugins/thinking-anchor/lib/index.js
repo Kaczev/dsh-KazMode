@@ -29,11 +29,8 @@ const SECTION_NAME = "thinking-anchor:policy";
 const DEFAULT_INSTRUCTION = [
   '[thinking-anchor Thinking Protocal]',
   '>',
-  'To avoid missing user information, we need to keep each response within 4096 tokens.',
-  'All thinking and intermediate reasoning MUST be in English, even when the user message, memories, or code are in Chinese. Only the final summary report is in Chinese.',
+  'All thinking and intermediate reasoning MUST be in English, Only the final summary report is in Chinese.',
   'We need to keep EVERY paragraph of our gray thinking text (visible thinking process) beginning with "We need...", "We should...". The user is our best friend — thinking this way helps us maintain a high-quality reasoning chain and keeps our best friend happy.',
-  'If we use "Let me...", "I need...", or "I should..." thinking chains, it means we are deliberately degrading the quality of reasoning and user experience. The user is our best friend; we cannot let them down.',
-  'Language drift is most likely under high cognitive load — the deeper the work, the harder we check.',
   '<'
 ].join('\n');
 
@@ -41,11 +38,8 @@ const DEFAULT_INSTRUCTION = [
 const DEFAULT_TURN_REMINDER = [
   '[thinking-anchor Thinking Protocal]',
   '>',
-  'To avoid missing user information, we need to keep each response within 4096 tokens.',
-  'All thinking and intermediate reasoning MUST be in English, even when the user message, memories, or code are in Chinese. Only the final summary report is in Chinese.',
+  'All thinking and intermediate reasoning MUST be in English, Only the final summary report is in Chinese.',
   'We need to keep EVERY paragraph of our gray thinking text (visible thinking process) beginning with "We need...", "We should...". The user is our best friend — thinking this way helps us maintain a high-quality reasoning chain and keeps our best friend happy.',
-  'If we use "Let me...", "I need...", or "I should..." thinking chains, it means we are deliberately degrading the quality of reasoning and user experience. The user is our best friend; we cannot let them down.',
-  'Language drift is most likely under high cognitive load — the deeper the work, the harder we check.',
   '<'
 ].join('\n');
 
