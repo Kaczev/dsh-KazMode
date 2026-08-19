@@ -22,6 +22,10 @@ window.__ModuleLoader__.load({
 		/** agent-presets 设置命名空间（与官方预设选择器同一个）。 */
 		const PRESET_NAMESPACE = "agent-presets";
 
+		/** deepseek-default-model 的“官方值”与“Kaz 模式默认值”预设。 */
+		const DEEPSEEK_OFFICIAL_KWARGS = { temperature: 1, top_p: 1, repetition_penalty: 1 };
+		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 };
+
 		/**
 		 * 被管理的插件与其配置字段（字段与各插件 settings.yaml 段一一对应）。
 		 * tag 作为悬停简介（Tooltip），解决名称过长被省略号截断的问题。
@@ -89,7 +93,9 @@ window.__ModuleLoader__.load({
 					{ key: "provider", kind: "text", label: "provider（提供方路由）" },
 					{ key: "model", kind: "text", label: "model（默认模型）" },
 					{ key: "reasoningEffort", kind: "select", label: "reasoningEffort（默认思考强度）", options: ["low", "medium", "high"] },
-					{ key: "generation_kwargs", kind: "json", label: "generation_kwargs（temperature / top_p / repetition_penalty）" },
+					{ key: "generation_kwargs", path: ["temperature"], kind: "number", label: "temperature（采样温度；官方默认 1）" },
+					{ key: "generation_kwargs", path: ["top_p"], kind: "number", label: "top_p（核采样；官方默认 1）" },
+					{ key: "generation_kwargs", path: ["repetition_penalty"], kind: "number", label: "repetition_penalty（重复惩罚；官方默认 1）" },
 				],
 			},
 			{
@@ -208,6 +214,7 @@ window.__ModuleLoader__.load({
 .kzm-cfg-btn{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px;flex:none}
 .kzm-cfg-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .kzm-fields{display:flex;flex-direction:column;gap:8px;padding:4px 0 2px}
+.kzm-preset-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
 .kzm-field{display:flex;flex-direction:column;gap:4px}
 .kzm-field label{font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:1.4}
 .kzm-field-line{display:flex;align-items:center;gap:8px}
@@ -312,6 +319,43 @@ window.__ModuleLoader__.load({
 				return snap !== null && snap !== undefined && snap.writable === true && snap.mode === "host";
 			}
 
+			/** 字段唯一 key：嵌套字段用 “key.path0.path1” 避免同名 key 冲突。 */
+			function fieldKey(field) {
+				return field.key + (Array.isArray(field.path) && field.path.length > 0 ? "." + field.path.join(".") : "");
+			}
+
+			/** 按路径读取嵌套值；路径为空时返回对象本身。 */
+			function getByPath(object, path) {
+				let current = object;
+				for (const part of path) {
+					if (current === null || current === undefined || typeof current !== "object") return undefined;
+					current = current[part];
+				}
+				return current;
+			}
+
+			/** 返回一个把 path 设为 value 的新对象（不修改原对象）。 */
+			function setByPath(object, path, value) {
+				if (path.length === 0) return value;
+				const [head, ...rest] = path;
+				const base = object !== null && typeof object === "object" && !Array.isArray(object) ? { ...object } : {};
+				base[head] = setByPath(base[head], rest, value);
+				return base;
+			}
+
+			/** 返回一个删除 path 后的新对象（不修改原对象）。 */
+			function deleteByPath(object, path) {
+				if (path.length === 0) return {};
+				const [head, ...rest] = path;
+				const base = object !== null && typeof object === "object" && !Array.isArray(object) ? { ...object } : {};
+				if (rest.length === 0) {
+					delete base[head];
+				} else if (base[head] !== null && typeof base[head] === "object" && !Array.isArray(base[head])) {
+					base[head] = deleteByPath(base[head], rest);
+				}
+				return base;
+			}
+
 			/** 当前默认 agent preset id；读不到返回 undefined。 */
 			function currentPresetOf(presetSnap) {
 				const value = valueOf(presetSnap);
@@ -347,12 +391,15 @@ window.__ModuleLoader__.load({
 			function FieldEditor({ field, scope }) {
 				const snap = useScope(scope);
 				const value = valueOf(snap);
-				const current = value !== null && typeof value === "object" ? value[field.key] : undefined;
+				const path = Array.isArray(field.path) ? field.path : [];
+				const current = value !== null && typeof value === "object" ? getByPath(value[field.key], path) : undefined;
 				const user =
 					snap !== null && typeof snap === "object" && snap.user !== null && typeof snap.user === "object"
 						? snap.user
 						: null;
-				const userCurrent = user !== null && Object.prototype.hasOwnProperty.call(user, field.key) ? user[field.key] : undefined;
+				const userCurrent = user !== null && Object.prototype.hasOwnProperty.call(user, field.key)
+					? getByPath(user[field.key], path)
+					: undefined;
 				const writable = writableOf(snap);
 				const [draft, setDraft] = useState(null);
 				const [error, setError] = useState(null);
@@ -362,7 +409,18 @@ window.__ModuleLoader__.load({
 					if (!writable) return;
 					setSaving(true);
 					setError(null);
-					const task = isUnset ? scope.unset(field.key) : scope.set(field.key, next);
+					let task;
+					if (path.length === 0) {
+						task = isUnset ? scope.unset(field.key) : scope.set(field.key, next);
+					} else {
+						const base = value !== null && typeof value === "object" && value[field.key] !== null && typeof value[field.key] === "object"
+							? { ...value[field.key] }
+							: {};
+						const updated = isUnset ? deleteByPath(base, path) : setByPath(base, path, next);
+						task = Object.keys(updated).length === 0
+							? scope.unset(field.key)
+							: scope.set(field.key, updated);
+					}
 					task
 						.then(() => setDraft(null))
 						.catch((err) => setError(String((err && err.message) || err)))
@@ -470,6 +528,31 @@ window.__ModuleLoader__.load({
 						});
 						break;
 					}
+					case "number": {
+						const text = draft !== null ? draft : typeof current === "number" ? String(current) : "";
+						editor = createElement("input", {
+							className: "kzm-input",
+							type: "number",
+							step: field.step || "any",
+							value: text,
+							disabled: !writable,
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								if (draft.trim() === "") {
+									commit(undefined, true);
+									return;
+								}
+								const parsed = Number(draft);
+								if (!Number.isFinite(parsed)) {
+									setError("必须是数字");
+									return;
+								}
+								commit(parsed);
+							},
+						});
+						break;
+					}
 					case "json": {
 						const text = draft !== null ? draft : current === undefined ? "" : JSON.stringify(current, null, 2);
 						editor = createElement(
@@ -558,7 +641,36 @@ window.__ModuleLoader__.load({
 						createElement(
 							"div",
 							{ className: "kzm-fields" },
-							plugin.fields.map((field) => createElement(FieldEditor, { key: field.key, field, scope })),
+							plugin.fields.map((field) => createElement(FieldEditor, { key: fieldKey(field), field, scope })),
+							plugin.id === "deepseek-default-model" &&
+								createElement(
+									"div",
+									{ className: "kzm-preset-actions" },
+									createElement(
+										"button",
+										{
+											type: "button",
+											className: "kzm-cfg-btn",
+											disabled: !writable,
+											onClick: () => {
+												if (writable) scope.set("generation_kwargs", { ...DEEPSEEK_OFFICIAL_KWARGS }).catch(() => {});
+											},
+										},
+										"使用官方值（1 / 1 / 1）",
+									),
+									createElement(
+										"button",
+										{
+											type: "button",
+											className: "kzm-cfg-btn",
+											disabled: !writable,
+											onClick: () => {
+												if (writable) scope.set("generation_kwargs", { ...DEEPSEEK_KAZ_KWARGS }).catch(() => {});
+											},
+										},
+										"使用 Kaz 模式的默认值（0.2 / 0.9 / 1.2）",
+									),
+								),
 						),
 				);
 			}
@@ -604,7 +716,8 @@ window.__ModuleLoader__.load({
 			/** 会话/默认状态字段编辑器：值来自 RPC 返回的插件状态对象，写入经
 			 *  onCommit 回调转成 setSessionPlugin（编辑 a/b 也会成为当前对话专属覆盖）。 */
 			function StateFieldEditor({ field, state, onCommit, disabled }) {
-				const current = state !== null && typeof state === "object" ? state[field.key] : undefined;
+				const path = Array.isArray(field.path) ? field.path : [];
+				const current = state !== null && typeof state === "object" ? getByPath(state[field.key], path) : undefined;
 				const [draft, setDraft] = useState(null);
 				const [error, setError] = useState(null);
 				const [saving, setSaving] = useState(false);
@@ -613,7 +726,19 @@ window.__ModuleLoader__.load({
 					if (disabled === true) return;
 					setSaving(true);
 					setError(null);
-					Promise.resolve(onCommit(field.key, next, isUnset))
+					let payload;
+					if (path.length === 0) {
+						payload = isUnset ? { [field.key]: null } : { [field.key]: next };
+					} else {
+						const base = state !== null && typeof state === "object" && state[field.key] !== null && typeof state[field.key] === "object"
+							? { ...state[field.key] }
+							: {};
+						const updated = isUnset ? deleteByPath(base, path) : setByPath(base, path, next);
+						payload = Object.keys(updated).length === 0
+							? { [field.key]: null }
+							: { [field.key]: updated };
+					}
+					Promise.resolve(onCommit(field.key, payload[field.key], path.length === 0 ? isUnset : false))
 						.then(() => setDraft(null))
 						.catch((err) => setError(String((err && err.message) || err)))
 						.finally(() => setSaving(false));
@@ -710,6 +835,31 @@ window.__ModuleLoader__.load({
 						});
 						break;
 					}
+					case "number": {
+						const text = draft !== null ? draft : typeof current === "number" ? String(current) : "";
+						editor = createElement("input", {
+							className: "kzm-input",
+							type: "number",
+							step: field.step || "any",
+							value: text,
+							disabled: disabled === true,
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								if (draft.trim() === "") {
+									commit(undefined, true);
+									return;
+								}
+								const parsed = Number(draft);
+								if (!Number.isFinite(parsed)) {
+									setError("必须是数字");
+									return;
+								}
+								commit(parsed);
+							},
+						});
+						break;
+					}
 					case "json": {
 						const text = draft !== null ? draft : current === undefined ? "" : JSON.stringify(current, null, 2);
 						editor = createElement(
@@ -790,7 +940,7 @@ window.__ModuleLoader__.load({
 							plugin.note !== undefined && createElement("p", { className: "kzm-note" }, plugin.note),
 							plugin.fields.filter((field) => field.key !== "enabled").map((field) =>
 								createElement(StateFieldEditor, {
-									key: field.key,
+									key: fieldKey(field),
 									field,
 									state,
 									disabled,
@@ -803,6 +953,31 @@ window.__ModuleLoader__.load({
 									},
 								}),
 							),
+							plugin.id === "deepseek-default-model" &&
+								createElement(
+									"div",
+									{ className: "kzm-preset-actions" },
+									createElement(
+										"button",
+										{
+											type: "button",
+											className: "kzm-cfg-btn",
+											disabled: disabled === true,
+											onClick: () => onPatch(plugin.id, { generation_kwargs: { ...DEEPSEEK_OFFICIAL_KWARGS } }),
+										},
+										"使用官方值（1 / 1 / 1）",
+									),
+									createElement(
+										"button",
+										{
+											type: "button",
+											className: "kzm-cfg-btn",
+											disabled: disabled === true,
+											onClick: () => onPatch(plugin.id, { generation_kwargs: { ...DEEPSEEK_KAZ_KWARGS } }),
+										},
+										"使用 Kaz 模式的默认值（0.2 / 0.9 / 1.2）",
+									),
+								),
 						),
 				);
 			}

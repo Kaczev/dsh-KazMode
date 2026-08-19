@@ -8,7 +8,8 @@
 // 改动下一次请求即生效）。
 //
 // settings 命名空间 `deepseek-default-model`（~/.dsh/settings.yaml，热重载）：
-//   enabled            总开关（默认 true；关闭后不再应用默认参数，也不再同步官方段）
+//   enabled            总开关（默认 true；关闭后不再应用默认参数，恢复 temperature
+//                      放行并把官方 agent-default-model 恢复到官方默认值）
 //   provider           提供方路由（默认 deepseek-official）
 //   model              默认模型（默认 deepseek-v4-flash）
 //   reasoningEffort    默认思考强度（默认 high）
@@ -49,6 +50,16 @@ const GENERATION_KWARGS_DEFAULTS = {
   top_p: DEFAULT_TOP_P,
   repetition_penalty: DEFAULT_REPETITION_PENALTY,
 };
+
+/** “使用官方值”对应的 generation_kwargs：官方 DeepSeek 默认 temperature / top_p / repetition_penalty 都是 1。 */
+export const OFFICIAL_GENERATION_KWARGS = {
+  temperature: 1,
+  top_p: 1,
+  repetition_penalty: 1,
+};
+
+/** “使用 Kaz 模式的默认值”对应的 generation_kwargs（即本插件出厂默认）。 */
+export const KAZ_GENERATION_KWARGS = { ...GENERATION_KWARGS_DEFAULTS };
 
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
@@ -180,12 +191,37 @@ export function apply(ctx, config = {}) {
   /** settings 服务惰性获取（apply 阶段可能尚未挂载）。 */
   const getSettings = () => ctx.get("settings");
 
+  /** 本实例是否真的向官方 agent-default-model 段写过值；避免插件一开始就是关闭时误恢复。 */
+  let everSynced = false;
+
+  /** 把官方 agent-default-model 段恢复到官方默认值（provider/model，不带 reasoningEffort）。
+   *  只在本插件确实启用过/写过官方段后执行，避免插件一开始就是关闭时误清空用户配置。 */
+  async function restoreOfficial() {
+    if (!everSynced) return;
+    const settings = getSettings();
+    if (settings === undefined) return;
+    const target = { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL };
+    try {
+      await settings.replace(OFFICIAL_NS, target);
+      ctx.logger?.info?.(
+        "[deepseek-default-model] 插件已关闭，恢复 agent-default-model 到官方默认值: " + JSON.stringify(target),
+      );
+    } catch (error) {
+      ctx.logger?.warn?.(
+        "[deepseek-default-model] 恢复 agent-default-model 失败（官方 dsh-agent-default-model 未挂载？）: " + safeMessage(error),
+      );
+    }
+  }
+
   /** 把本插件当前的 provider/model/reasoningEffort 同步进官方 agent-default-model
    *  设置段（官方服务热重载 → 新会话的默认模型选择立即更新）。仅在用户编辑
    *  本插件段后触发（见下方的 syncArmed 冷却窗口），并且只写与官方段当前
    *  解析值不同的键（避免无谓写入）。失败只记日志（官方插件未挂载时静默降级）。 */
   async function syncToOfficial(current) {
-    if (current === null || typeof current !== "object" || current.enabled !== true) return;
+    if (current === null || typeof current !== "object" || current.enabled !== true) {
+      await restoreOfficial();
+      return;
+    }
     const settings = getSettings();
     if (settings === undefined) return;
     const candidates = {
@@ -207,6 +243,7 @@ export function apply(ctx, config = {}) {
       if (currentOfficial !== value) patch[key] = value;
     }
     if (Object.keys(patch).length === 0) return;
+    everSynced = true;
     try {
       await settings.update(OFFICIAL_NS, patch);
       ctx.logger?.info?.(
@@ -232,6 +269,7 @@ export function apply(ctx, config = {}) {
         if (!Object.prototype.hasOwnProperty.call(user, key)) patch[key] = DEFAULT_SECTION[key];
       }
       if (Object.keys(patch).length === 0) return;
+      everSynced = true;
       const write = settings.update(OFFICIAL_NS, patch);
       if (write !== null && typeof write.then === "function") {
         void write.then(
@@ -279,7 +317,26 @@ export function apply(ctx, config = {}) {
   });
 
   // 官方段自愈（只补缺失键）：在 settings 服务就绪后执行一次。
+  // 如果插件当前启用且官方段用户层已有 reasoningEffort（官方组合层没有这个键，
+  // 通常是本插件此前同步写入的），关闭时要允许恢复到官方默认值。
   ctx.inject(["settings"], (sctx) => {
+    try {
+      const descriptor = sctx.settings.describe().find((item) => item.ns === OFFICIAL_NS);
+      const current = source();
+      if (
+        current !== null &&
+        typeof current === "object" &&
+        current.enabled === true &&
+        descriptor !== undefined &&
+        descriptor.user !== null &&
+        typeof descriptor.user === "object" &&
+        Object.prototype.hasOwnProperty.call(descriptor.user, "reasoningEffort")
+      ) {
+        everSynced = true;
+      }
+    } catch (error) {
+      ctx.logger?.warn?.("[deepseek-default-model] 检查 agent-default-model 同步状态失败: " + safeMessage(error));
+    }
     fillOfficialMissing(sctx.settings);
   });
 
@@ -288,8 +345,8 @@ export function apply(ctx, config = {}) {
   // 再交给 llm.prepareCall()。这里在 prepareCall 之前补上 temperature：
   //   - 插件启用时：无条件写入面板当前值（DSH 官方管线没有其它 temperature
   //     来源，会话/适配器默认值为空，因此"写默认"不会覆盖任何显式选择）；
-  //   - 插件关闭时：把 proposal 里继承自 request/header 的 temperature 移除，
-  //     让适配器回到自身默认。
+  //   - 插件关闭时：完全放行 proposal，不再删除/写入 temperature，从而恢复
+  //     到插件修改前的状态（未显式设置时由 DeepSeek 官方默认 temperature=1 生效）。
   // 返回新对象（seed 是冻结的，不能原地改）。
   ctx.on("agent/request", async (payload, next) => {
     let proposal;
@@ -302,10 +359,6 @@ export function apply(ctx, config = {}) {
     if (proposal === null || typeof proposal !== "object") return proposal;
     const current = source();
     if (current === null || typeof current !== "object" || current.enabled !== true) {
-      if (Object.prototype.hasOwnProperty.call(proposal, "temperature")) {
-        const { temperature: _dropped, ...rest } = proposal;
-        return rest;
-      }
       return proposal;
     }
     const temperature = current.generation_kwargs?.temperature;

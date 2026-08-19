@@ -10,7 +10,7 @@ deepseek-default-model:
   reasoningEffort: high
   generation_kwargs:
     temperature: 0.2
-    top_p: 1
+    top_p: 0.9
     repetition_penalty: 1.2
 ```
 
@@ -27,7 +27,16 @@ deepseek-default-model:
 3. **temperature 应用到请求**：通过 `agent/request` 瀑布把
    `generation_kwargs.temperature` 写入每次模型请求（主会话与子代理都生效）。
    面板改 temperature 后，下一次请求即用新值（立即生效）。
-4. **设置文件自愈**：
+4. **官方值 / Kaz 默认值一键切换**：Kaz 面板展开该插件后有两个按钮——
+   “使用官方值（1 / 1 / 1）”把 `generation_kwargs` 设为
+   `temperature=1, top_p=1, repetition_penalty=1`；“使用 Kaz 模式的默认值
+   （0.2 / 0.9 / 1.2）”恢复为本插件出厂默认。
+5. **关闭时恢复**：把 `enabled` 设为 `false` 后，`agent/request` 不再写入或
+   删除 temperature（未显式设置时由 DeepSeek 官方默认 `temperature=1` 生效），
+   并会把官方 `agent-default-model:` 段恢复到官方默认
+   （`provider=deepseek-official, model=deepseek-v4-flash`，不带
+   `reasoningEffort`）。
+6. **设置文件自愈**：
    - `settings.yaml` 缺失时由 settings 服务首次写入自动创建；本插件段缺失键
      自动补齐默认值（只补缺失，保留已有配置）。
    - 官方 `agent-default-model:` 段缺失 `provider/model/reasoningEffort` 时只补
@@ -71,5 +80,7 @@ DSH 的请求管线（`GenerateOptions`）只支持 `temperature / maxTokens / s
 1. 删除 `profiles/web/cordis.patch.yml` 中的插件行。
 2. 从 `profiles/web/package.json` 移除依赖并运行 `pnpm install`。
 3. 删除 `plugins/deepseek-default-model` 目录与 `node_modules/deepseek-default-model`。
-4. 可选：删除 `settings.yaml` 中的 `deepseek-default-model:` 段（官方
-   `agent-default-model:` 段会保留你最后设置的值，属正常行为）。
+4. 可选：删除 `settings.yaml` 中的 `deepseek-default-model:` 段。若插件在关闭时
+   已恢复过，官方 `agent-default-model:` 段通常已回到官方默认值；若仍残留插件
+   写入的值，可手动删除 `reasoningEffort` 或把该段改回
+   `provider: deepseek-official` / `model: deepseek-v4-flash`。
