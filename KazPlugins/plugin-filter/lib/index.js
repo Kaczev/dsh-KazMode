@@ -1,4 +1,4 @@
-// tool-filter
+// plugin-filter（原 tool-filter）
 // ===========================================================================
 // 在 dsh 的工具"注册 → 组装 → 执行"三条链路上过滤指定工具，阻止它们被加载
 // 或使用：
@@ -17,7 +17,7 @@
 //     tools/pre-execute 拦截所有对它们的调用并返回明确的拒绝原因——dsh 永远
 //     不会真正执行它们。
 //
-// 配置（热重载，写入 ~/.dsh/settings.yaml 的 tool-filter: 命名空间即可，无需
+// 配置（热重载，写入 ~/.dsh/settings.yaml 的 plugin-filter: 命名空间即可，无需
 // 重启；组合行 cordis.patch.yml 的 config 作为 base 层，用户设置优先）：
 //   enabled       是否启用过滤，默认 true
 //   mode          "remove" | "disable"，默认 "remove"
@@ -46,8 +46,8 @@ import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 /** 默认禁用的工具/插件名。 */
 const DEFAULT_DISABLED_TOOLS = ["tool-cordis", "tool-subagent-report", "codex", "claude-code"];
 
-/** 设置命名空间：~/.dsh/settings.yaml 中的 tool-filter: 段。 */
-const NAMESPACE = settingsNamespace("tool-filter");
+/** 设置命名空间：~/.dsh/settings.yaml 中的 plugin-filter: 段。 */
+const NAMESPACE = settingsNamespace("plugin-filter");
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -220,7 +220,7 @@ function isBlockedPlugin(config, entryId, entryName) {
 }
 
 export default {
-  name: "tool-filter",
+  name: "plugin-filter",
   // 尽早拿到 tools 与 systemPrompt 服务：注册拦截、查询兜底、
   // 组装过滤、执行拒绝都挂在这两个服务的链路上。
   inject: ["tools", "systemPrompt"],
@@ -240,7 +240,7 @@ export default {
 
     const initial = source();
     ctx.logger.info(
-      `[tool-filter] 已加载：enabled=${initial.enabled}, mode=${initial.mode}, ` +
+      `[plugin-filter] 已加载：enabled=${initial.enabled}, mode=${initial.mode}, ` +
         `disabledTools=[${initial.disabledTools.join(", ")}]`,
     );
 
@@ -264,15 +264,15 @@ export default {
           if (options === undefined || options === null || typeof options !== "object") continue;
           if (item.disabled) continue;
           // 自保护：绝不禁用本插件自己的条目。
-          if (options.id === "tool-filter" || options.name === "tool-filter") continue;
+          if (options.id === "plugin-filter" || options.name === "plugin-filter") continue;
           const hit = isBlockedPlugin(current, options.id, options.name);
           if (hit === undefined) continue;
           ctx.logger.info(
-            `[tool-filter] mode=remove：禁用插件条目 "${options.id ?? options.name}"（命中 "${hit}"）`,
+            `[plugin-filter] mode=remove：禁用插件条目 "${options.id ?? options.name}"（命中 "${hit}"）`,
           );
           Promise.resolve(item.update({ disabled: true })).catch((error) => {
             ctx.logger.warn(
-              `[tool-filter] 禁用插件条目 "${options.id ?? options.name}" 失败：` +
+              `[plugin-filter] 禁用插件条目 "${options.id ?? options.name}" 失败：` +
                 (error instanceof Error ? error.message : String(error)),
             );
           });
@@ -287,18 +287,18 @@ export default {
         const options = fiber?.entry?.options;
         if (options === undefined || options === null || typeof options !== "object") return;
         // 自保护：绝不禁用本插件自己的 fiber。
-        if (options.id === "tool-filter" || options.name === "tool-filter") return;
+        if (options.id === "plugin-filter" || options.name === "plugin-filter") return;
         const current = source();
         if (current.mode !== "remove" || current.enabled !== true) return;
         if (isBlockedPlugin(current, options.id, options.name) === undefined) return;
         if (!options.disabled) options.disabled = true;
         if (fiber.uid === null) return;
         ctx.logger.info(
-          `[tool-filter] mode=remove：销毁匹配插件 "${options.id ?? options.name}" 的已创建 fiber`,
+          `[plugin-filter] mode=remove：销毁匹配插件 "${options.id ?? options.name}" 的已创建 fiber`,
         );
         Promise.resolve(fiber.dispose?.()).catch((error) => {
           ctx.logger.warn(
-            `[tool-filter] 销毁 fiber 失败：` +
+            `[plugin-filter] 销毁 fiber 失败：` +
               (error instanceof Error ? error.message : String(error)),
           );
         });
@@ -326,7 +326,7 @@ export default {
         const hit = isBlocked(current, definition?.name, pluginName);
         if (hit !== undefined) {
           ctx.logger.info(
-            `[tool-filter] mode=remove：丢弃工具 "${definition?.name}"` +
+            `[plugin-filter] mode=remove：丢弃工具 "${definition?.name}"` +
               (pluginName ? `（插件 ${pluginName} 注册）` : "") +
               `，命中 disabledTools 条目 "${hit}"`,
           );
@@ -391,10 +391,10 @@ export default {
       if (current.mode === "disable" && current.enabled === true) {
         const hit = isBlocked(current, exec?.name, undefined);
         if (hit !== undefined) {
-          ctx.logger.info(`[tool-filter] mode=disable：拒绝调用工具 "${exec?.name}"（命中 "${hit}"）`);
+          ctx.logger.info(`[plugin-filter] mode=disable：拒绝调用工具 "${exec?.name}"（命中 "${hit}"）`);
           return {
             kind: "deny",
-            reason: `工具 "${exec?.name}" 已被 tool-filter 禁用（mode: disable，命中 disabledTools 条目 "${hit}"）。如确需使用，请在设置中调整 tool-filter 配置。`,
+            reason: `工具 "${exec?.name}" 已被 plugin-filter 禁用（mode: disable，命中 disabledTools 条目 "${hit}"）。如确需使用，请在设置中调整 plugin-filter 配置。`,
           };
         }
       }

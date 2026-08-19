@@ -16,7 +16,7 @@ deepseek-default-model:
 
 ## 它做了什么
 
-1. **面板管理**：作为 Kaz 模式的第 9 个被管理插件，在 Kaz 面板出现一行
+1. **面板管理**：作为 Kaz 模式的被管理插件，在 Kaz 面板出现一行
    （DeepSeek 默认参数），展开可调整 `provider / model / reasoningEffort /
    temperature / top_p / repetition_penalty`。改动自动写入
    `~/.dsh/settings.yaml` 的 `deepseek-default-model:` 段，热重载。

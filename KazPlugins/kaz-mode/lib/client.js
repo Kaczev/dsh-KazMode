@@ -12,14 +12,10 @@ window.__ModuleLoader__.load({
 		const useState = react.useState;
 		const useEffect = react.useEffect;
 		const useCallback = react.useCallback;
-		const useMemo = react.useMemo;
 		const useSyncExternalStore = react.useSyncExternalStore;
 		const useRef = react.useRef;
 		const useLayoutEffect = react.useLayoutEffect;
 		const createPortal = reactDom.createPortal;
-
-		/** 首轮提示兜底文案（正常情况下来自 kaz-mode settings 的 firstRoundHint）。 */
-		const HINT_FALLBACK = "请在第一句话中说明本次对话的总任务目标。";
 
 		/** Kaz 模式对应的 agent preset id（与宿主半一致）。 */
 		const KAZ_PRESET_ID = "kaz";
@@ -35,44 +31,29 @@ window.__ModuleLoader__.load({
 				id: "thinking-anchor",
 				namespace: "thinking-anchor",
 				name: "thinking-anchor",
-				tag: "插件1 · 思考锚点",
+				tag: "思考锚点 · 消息注入",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
-					{ key: "instruction", kind: "textarea", label: "instruction（思考指令，多行）" },
-					{ key: "turnReminder", kind: "textarea", label: "turnReminder（每轮思考链提醒，首轮后每轮注入；留空 = 用内置默认）" },
+					{ key: "instruction", kind: "textarea", label: "instruction（思考指令，多行；对话开始时作为消息注入）" },
+					{ key: "turnReminder", kind: "textarea", label: "turnReminder（每轮思考链提醒，作为消息注入；留空 = 用内置默认）" },
 				],
 			},
 			{
 				id: "round-minimal",
 				namespace: "round-minimal",
 				name: "round-minimal",
-				tag: "插件2 · 极简plus轮次模式",
+				tag: "首阶段极简 · 首次工具调用后恢复",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
-					{ key: "firstRoundTools", kind: "list", label: "firstRoundTools（首轮工具白名单，逗号分隔）" },
-					{ key: "roundOneInstruction", kind: "textarea", label: "roundOneInstruction（首轮对模型的提示）" },
-					{ key: "roundTwoInstruction", kind: "textarea", label: "roundTwoInstruction（第二轮过渡提示）" },
-					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走首轮极简）" },
-					{ key: "showPolicy", kind: "boolean", label: "showPolicy（轮次提示段开关；Kaz 模式期间默认被联动置为 true，退出 Kaz 时按快照恢复）" },
+					{ key: "firstRoundTools", kind: "list", label: "firstRoundTools（首次工具调用前的工具白名单，逗号分隔）" },
+					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走首阶段极简）" },
 				],
 			},
 			{
-				id: "tool-grouping",
-				namespace: "tool-grouping",
-				name: "tool-grouping",
-				tag: "插件3 · 工具分组",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
-					{ key: "registerStatusTool", kind: "boolean", label: "registerStatusTool（注册状态工具）" },
-					{ key: "mode", kind: "select", label: "mode（tag 仅分组 / trace 附调用日志）", options: ["tag", "trace"] },
-					{ key: "groups", kind: "json", label: "groups（分组定义，JSON 数组）" },
-				],
-			},
-			{
-				id: "tool-filter",
-				namespace: "tool-filter",
-				name: "tool-filter",
-				tag: "插件4 · 工具过滤",
+				id: "plugin-filter",
+				namespace: "plugin-filter",
+				name: "plugin-filter",
+				tag: "工具过滤（原 tool-filter）",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
 					{ key: "mode", kind: "select", label: "mode（remove 移除 / disable 禁用）", options: ["remove", "disable"] },
@@ -80,23 +61,10 @@ window.__ModuleLoader__.load({
 				],
 			},
 			{
-				id: "code-collapse",
-				namespace: "code-collapse",
-				name: "code-collapse",
-				tag: "插件5 · 工具塌缩 run_code",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关；工具面折叠为唯一入口 run_code）" },
-					{ key: "appendCallHint", kind: "boolean", label: "appendCallHint（每次 run_code 调用后追加 We need 提示）" },
-					{ key: "callHint", kind: "textarea", label: "callHint（追加的提示文案，双语信封；留空 = 内置默认）" },
-					{ key: "firstRoundHint", kind: "boolean", label: "firstRoundHint（首轮注入 run_code 使用提醒；Kaz 模式默认启用）" },
-					{ key: "firstRoundText", kind: "textarea", label: "firstRoundText（首轮提醒文案，[标题] / > / 内容 / <；留空 = 内置默认）" },
-				],
-			},
-			{
 				id: "output-beep",
 				namespace: "output-beep",
 				name: "output-beep",
-				tag: "插件6 · 输出完成提示音",
+				tag: "输出完成提示音",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：模型输出完毕时响提示音）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理输出完毕也提示；默认关）" },
@@ -106,7 +74,7 @@ window.__ModuleLoader__.load({
 				id: "round-display",
 				namespace: "round-display",
 				name: "round-display",
-				tag: "插件8 · 每轮注入显示",
+				tag: "每轮注入显示",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：开启后自动判断是否显示本轮注入；关闭时完全隐藏）" },
 				],
@@ -115,7 +83,7 @@ window.__ModuleLoader__.load({
 				id: "deepseek-default-model",
 				namespace: "deepseek-default-model",
 				name: "deepseek-default-model",
-				tag: "插件9 · DeepSeek 默认参数",
+				tag: "DeepSeek 默认参数",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
 					{ key: "provider", kind: "text", label: "provider（提供方路由）" },
@@ -128,32 +96,40 @@ window.__ModuleLoader__.load({
 				id: "kaz-memory",
 				namespace: "kaz-memory",
 				name: "kaz-memory",
-				tag: "插件10 · 独立记忆组件（有独立开关）",
-				note: "记忆指引是每轮的固定短提示（2026-08-17 起）：只发一行总述（默认 We need 风格英文），记忆工具的具体用法由各工具描述自带；仅当 memory_search 在当前环境可调用时发（存在且可直接使用或经 run_code SDK 调用），不可用时完全静默。",
+				tag: "独立记忆组件（有独立开关）",
+				note: "记忆自动载入在对话开始时注入；记忆工具（memory_save/list/search/forget）仅在 kaz-memory 开启时加入 Kaz 模式的全部工具列表。",
 				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后 UI 不显示记忆面板）" },
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不注入记忆、记忆工具移出 Kaz 工具面）" },
 					{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（固定提示总述行；留空 = 内置默认）" },
 				],
 			},
 			{
-				id: "task-master-whiteboard",
-				namespace: "task-master-whiteboard",
-				name: "task-master-whiteboard",
-				tag: "插件7 · 任务白板",
+				id: "kaz-diag",
+				namespace: "kaz-diag",
+				name: "kaz-diag",
+				tag: "诊断 · 状态工具",
+				note: "开启后 kaz_mode_status 才注册并加入 Kaz 模式的全部工具列表（与 kaz-memory 工具同款条件）。",
 				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：Task Master 白板工具与角色提示段）" },
-					{ key: "turnReminder", kind: "textarea", label: "turnReminder（每轮白板优先提醒，第二轮起每轮注入；留空 = 内置默认）" },
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：注册 kaz_mode_status 诊断工具）" },
+				],
+			},
+			{
+				id: "first-round-hints",
+				namespace: "first-round-hints",
+				name: "first-round-hints",
+				tag: "首轮其它消息提示 · 对话开始注入",
+				note: "对话开始时把消息作为一条合成用户消息注入一次（kaz-memory 自动载入 / thinking-anchor 同款机制）。",
+				fields: [
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：对话开始时注入消息）" },
+					{ key: "message", kind: "textarea", label: "message（注入的消息内容；留空 = 内置默认 pwsh 使用要点）" },
 				],
 			},
 		];
 
 		/** kaz-mode 自身的面板配置字段（不提供 enabled 开关——它由预设驱动）。 */
 		const KAZ_FIELDS = [
-			{ key: "showFirstRoundHint", kind: "boolean", label: "showFirstRoundHint（显示首轮提示条）" },
-			{ key: "firstRoundHint", kind: "textarea", label: "firstRoundHint（首轮提示文案，仅 UI 显示）" },
-			{ key: "postFirstRoundMode", kind: "select", label: "postFirstRoundMode（首轮之后恢复的基底模式：标准 / 极简 / 创造）", options: ["standard", "minimal", "creative"] },
-			{ key: "minimalTools", kind: "list", label: "minimalTools（工具面·极简基底，逗号分隔）" },
-			{ key: "toolWhitelist", kind: "list", label: "toolWhitelist（工具面·白名单：逐个工具名，逗号分隔，不用组 id）" },
+			{ key: "minimalTools", kind: "list", label: "minimalTools（工具面·极简基底：首次工具调用前保留的最小工具，逗号分隔）" },
+			{ key: "toolWhitelist", kind: "list", label: "toolWhitelist（Kaz 全部工具白名单：手动增删工具就在这里改，逗号分隔；kaz-memory 关闭时其工具自动移出，kaz-diag 开启时自动加入 kaz_mode_status）" },
 			{ key: "defaultDisabledPlugins", kind: "list", label: "defaultDisabledPlugins（进入 Kaz 时默认关闭的插件 id，逗号分隔；仍可在面板手动开启）" },
 		];
 
@@ -241,11 +217,6 @@ window.__ModuleLoader__.load({
 .kzm-textarea{min-height:64px;resize:vertical;line-height:1.5}
 .kzm-error{color:#dc2626;font-size:11px;line-height:1.4}
 .kzm-saving{font-size:11px;color:var(--dsw-alias-label-tertiary)}
-.kzm-hint{display:flex;align-items:center;gap:10px;box-sizing:border-box;width:calc(100% - 32px);max-width:var(--dsh-composer-card-max-width,780px);margin:0 auto 6px;padding:8px 12px;border-radius:10px;background:var(--dsw-specific-tip,var(--dsw-alias-bg-base));border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5}
-.kzm-hint-text{flex:1;min-width:0}
-.kzm-hint-tag{flex:none;font-size:11px;color:var(--dsw-alias-label-tertiary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:1px 6px}
-.kzm-hint-close{border:none;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px;flex:none}
-.kzm-hint-close:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .kzm-drift{display:flex;align-items:center;gap:8px;border:1px solid rgba(217,119,6,.5);background:rgba(217,119,6,.08);border-radius:8px;padding:6px 10px;margin:2px 0 6px}
 .kzm-drift-text{flex:1;font-size:12px;color:var(--dsw-alias-label-primary);line-height:1.5}
 .kzm-root[data-warn="true"] .kzm-dot{background:#d97706}
@@ -282,7 +253,6 @@ window.__ModuleLoader__.load({
 			}
 			const kazScope = bindScope("kaz-mode");
 			const presetScope = bindScope(PRESET_NAMESPACE);
-			const pluginScopes = new Map(PLUGINS.map((plugin) => [plugin.id, bindScope(plugin.namespace)]));
 			const memoryScope = bindScope("kaz-memory");
 
 			/** 会话列表 binding（由下方 conversation/sessions inject 填充）。 */
@@ -1003,9 +973,9 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"Kaz 模式 = kaz-mode 工具面（minimalTools 极简基底 + toolWhitelist 白名单，子代理会话同样适用）" +
-							"+ round-minimal 首轮极简伪装（首轮提示仅 persona + thinking-anchor 两段，次轮起按 postFirstRoundMode 恢复基底）+ thinking-anchor + tool-filter + tool-grouping；" +
-							"kaz-no-context 是 kaz 预设内置前置；kaz-memory 是独立定制的记忆组件（其工具组默认在白名单内）。",
+						"Kaz 模式 = 固定系统提示词（You are a helpful software engineer assistant.）+ 工具面两阶段：首次工具调用前 minimalTools ∪ round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（minimalTools + toolWhitelist 白名单，子代理会话同样适用）；" +
+							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory + kaz-diag；" +
+							"kaz-memory 关闭时其工具自动移出白名单，kaz-diag 开启时 kaz_mode_status 自动加入。",
 					),
 					displayPreset === KAZ_PRESET_ID &&
 						effectiveKazEnabled !== true &&
@@ -1207,57 +1177,6 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			/**
-			 * 首轮提示条：Kaz 模式开启 + 当前对话仍在首轮（无 turn/start 或
-			 * 最大轮次 <= 1）+ round-minimal 启用时，显示在输入框上方。
-			 * 纯 UI 提示，不进入模型提示词。
-			 */
-			function FirstRoundHint({ useSession }) {
-				const kazSnap = useScope(kazScope);
-				const rmScope = pluginScopes.get("round-minimal");
-				const rmSnap = useScope(rmScope);
-				const [dismissed, setDismissed] = useState(false);
-				const turnTimings = useSession((session) => session.turnTimings);
-				const maxTurn = useMemo(() => {
-					if (!turnTimings || turnTimings.size === 0) return 0;
-					let max = 0;
-					turnTimings.forEach((_value, turn) => {
-						if (typeof turn === "number" && turn > max) max = turn;
-					});
-					return max;
-				}, [turnTimings]);
-
-				const kazValue = valueOf(kazSnap);
-				const rmValue = valueOf(rmSnap);
-				if (dismissed) return null;
-				if (kazValue === null || kazValue.enabled !== true) return null;
-				if (kazValue.showFirstRoundHint === false) return null;
-				if (rmValue === null || rmValue.enabled === false) return null;
-				if (maxTurn > 1) return null;
-
-				const text =
-					typeof kazValue.firstRoundHint === "string" && kazValue.firstRoundHint.trim().length > 0
-						? kazValue.firstRoundHint
-						: HINT_FALLBACK;
-
-				return createElement(
-					"div",
-					{ className: "kzm-hint" },
-					createElement("span", { className: "kzm-hint-tag" }, "Kaz 模式 · 首轮"),
-					createElement("span", { className: "kzm-hint-text" }, text),
-					createElement(
-						"button",
-						{
-							type: "button",
-							className: "kzm-hint-close",
-							title: "关闭本条提示",
-							onClick: () => setDismissed(true),
-						},
-						"×",
-					),
-				);
-			}
-
 			// ---- 会话视图联动 ----
 			// 当前查看的会话预设驱动 kaz-mode.enabled：侧边栏切换对话
 			// （A 会话 = Kaz、B 会话 = 极简）时自动同步开关，主机联动随之
@@ -1301,9 +1220,6 @@ window.__ModuleLoader__.load({
 			// 常驻可见——未开始对话时也能管理八个插件）；记忆按钮在其左侧（order -2）。
 			ctx.slots.inject("sidebar.footer.action", () =>
 				ctx.slots.register({ name: "sidebar.footer.action", id: "kaz-mode", order: -1 }, KazModeHeaderButton),
-			);
-			ctx.slots.inject("conversation.input.dock", () =>
-				ctx.slots.register({ name: "conversation.input.dock", id: "kaz-first-round-hint", order: 100 }, FirstRoundHint),
 			);
 		}
 

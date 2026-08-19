@@ -7,7 +7,7 @@
 ## 特性
 
 - **独立工作**：不依赖 Kaz 模式。装了就能用（默认 `enabled: true`）。
-- **Kaz 面板开关**：Kaz 模式把它作为第 6 个被管理插件，右上角 Kaz 面板里有
+- **Kaz 面板开关**：Kaz 模式把它作为被管理插件，右上角 Kaz 面板里有
   `output-beep` 配置行（enabled / includeSubagents 开关）。
 - **子代理过滤**：默认只对主会话提示；子代理（background subagent / workflow /
   ralph 的子会话）输出完毕时同样会发 `agent/status`，但默认不提示，避免连响。

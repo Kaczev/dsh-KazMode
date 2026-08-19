@@ -1,46 +1,30 @@
-// thinking-anchor
-// ---------------------------------------------------------------------------
-// Injects a one-time reasoning instruction into the system prompt of each NEW
-// conversation, appended as its own prompt section at the VERY END of the
-// system prompt (order 10000, plus an assemble-time guarantee that moves this
-// section to the last position of assembly.sections), so its strong wording
-// overrides built-in defaults by recency (the original persona and other
-// sections stay untouched).
+// thinking-anchor（消息注入模式）
+// ===========================================================================
+// Injects a one-time reasoning instruction into each NEW conversation as a
+// SYNTHETIC USER MESSAGE, not a system-prompt section (2026-08 refactor:
+// Kaz mode pins the system prompt to a single sentence and strips every other
+// prompt section, so thinking-anchor now uses the same message-injection
+// mechanism as kaz-memory's auto-load).
 //
 // Semantics
-//   * The full instruction text is returned only on the FIRST prompt
-//     assembly of a new conversation; from turn 2 on, every assembly gets a
-//     short reminder (settings `turnReminder`). Both messages use the
-//     "[title] / > / content / <" envelope with an English and a Chinese
-//     section each. A settings field left EMPTY falls back to the built-in
-//     default text below; set `enabled: false` to disable the whole plugin.
-//   * The instruction is bilingual: the full protocol is stated in English
-//     and repeated in Chinese, so the requirement is unambiguous.
-//   * "New conversation" is judged two ways:
-//       1. agents already alive when this plugin loads are pre-marked as
-//          anchored — their conversations began before the plugin, so they
-//          never receive the instruction;
-//       2. a session whose log already contains a user message (a resumed
-//          conversation after a restart) is skipped as well.
-//   * The `enabled` toggle AND the instruction text come from the
-//     `thinking-anchor:` section of $DSH_HOME/settings.yaml — both hot-reload
-//     (no restart needed), so the wording can be tuned live. Without a
-//     settings provider, the composition entry config + schema defaults act
-//     as the source.
-//
-// Composition: a host-plane row (see README). The section is registered on
-// the host layer, so it participates in every agent's prompt assembly.
-// ---------------------------------------------------------------------------
+//   * 新对话开始时（首个 agent/pre-step，step === 1）注入完整指令一次；
+//   * 此后每个 turn 的开头（step === 1）注入简短提醒（settings `turnReminder`），
+//     维持 We need / We should 思维链习惯（对抗长对话漂移）；
+//   * 续接对话（会话日志里已有 user/message）不重复完整指令，从当轮起只提醒；
+//   * 插件加载时已存活的 agent 被预标记——它们的对话开始于插件之前，不会收到
+//     完整指令（与旧版 section 模式一致）；
+//   * settings 字段留空 = 使用内置默认文案；`enabled: false` = 关闭整个插件。
+//     Both the toggle and the texts come from `thinking-anchor:` in
+//     $DSH_HOME/settings.yaml and hot-reload.
+//   * 注入是消息（source.kind = "plugin"），不触碰系统提示词。
+// ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 
-/** Unique section name; scoped registrations with the same name shadow this one. */
+/** Unique section name kept for round-display mapping compatibility. */
 const SECTION_NAME = "thinking-anchor:policy";
-/** Concatenation order: 10000 远大于任何内置（-100/0/50/110/115/150/200）与
- * 插件注册的 section order，配合组装层兜底（把本段移到 assembly.sections
- * 末尾），保证推理协议是系统提示的最后一段（最近因覆盖默认思考习惯）。 */
-const SECTION_ORDER = 10000;
 
 const DEFAULT_INSTRUCTION = [
   '[thinking-anchor Thinking Protocal]',
@@ -64,24 +48,6 @@ const DEFAULT_TURN_REMINDER = [
   'Language drift is most likely under high cognitive load — the deeper the work, the harder we check.',
   '<'
 ].join('\n');
-
-/** 读取代理当前轮次：会话日志中最近一个 turn/start 的 data.turn；无则 0。 */
-function currentTurnOf(agent) {
-  try {
-    const events = agent?.session?.events;
-    if (!Array.isArray(events)) return 0;
-    let turn = 0;
-    for (const event of events) {
-      if (event === null || typeof event !== "object") continue;
-      if (event.type !== "turn/start") continue;
-      const value = event.data?.turn;
-      if (typeof value === "number" && value > turn) turn = value;
-    }
-    return turn;
-  } catch {
-    return 0;
-  }
-}
 
 const NAMESPACE = settingsNamespace("thinking-anchor");
 const SETTINGS_SCHEMA = z.object({
@@ -168,17 +134,12 @@ export function ensureSettingsDefaults(settings, ns, defaults, logger) {
 
 export default {
   name: "thinking-anchor",
-  // The section must be registered as soon as the prompt registry exists;
-  // it is always mounted by the base composition.
-  inject: ["systemPrompt"],
   apply(ctx, config = {}) {
     // Composition entry config doubles as the settings `base` layer, so the
     // row may pin `enabled` and the user document may still override it.
     const entry = { enabled: config.enabled !== false };
     let source = () => entry;
 
-    // Optional settings consumer: registers the `thinking-anchor` namespace
-    // while a settings service exists and falls back to `entry` otherwise.
     installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {
       setSource: (current) => {
         source = current;
@@ -199,12 +160,16 @@ export default {
       }
     }
 
+    /** 文本取值：settings 留空则用内置默认。 */
+    const textOf = (value, fallback) =>
+      typeof value === "string" && value.trim().length > 0 ? value : fallback;
+
     // Conversations that started before this plugin loaded are not "new":
-    // pre-mark their agents so the instruction is injected only into
+    // pre-mark their agents so the full instruction is injected only into
     // conversations that begin while the plugin is active.
     const anchored = new Set();
     const agents = ctx.get("agents");
-    if (agents !== undefined) {
+    if (agents !== undefined && agents !== null && typeof agents.list === "function") {
       for (const agent of agents.list()) {
         if (agent !== null && typeof agent === "object" && agent.id !== undefined) {
           anchored.add(agent.id);
@@ -212,72 +177,57 @@ export default {
       }
     }
 
-    // 注入策略：新对话首轮一次性完整指令；此后每轮（turn >= 2）注入
-    // turnReminder 简短提醒。续接对话不重复完整指令，但从当轮起提醒。
-    ctx.systemPrompt.section({
-      name: SECTION_NAME,
-      order: SECTION_ORDER,
-      text: (context) => {
-        const agent = context.agent;
-        if (agent === null || typeof agent !== "object") return "";
-        const current = source();
-        if (current.enabled === false) return "";
+    // 注入策略（消息注入，kaz-memory 自动载入同款机制）：
+    //   * 每个 turn 的开头（agent/pre-step，step === 1）执行一次；
+    //   * 新对话（未标记）且无历史用户消息 → 注入完整指令一次；
+    //   * 续接对话（未标记但有历史用户消息）→ 不注入完整指令，只提醒；
+    //   * 已标记的会话 → 每轮注入 turnReminder 简短提醒。
+    // 注入以合成用户消息追加到 decision.messages，不触碰系统提示词。
+    ctx.on("agent/pre-step", async (payload, next) => {
+      const decision = await next();
+      if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
+      if (payload === null || typeof payload !== "object" || payload.step !== 1) return decision;
+      const agent = payload.agent;
+      if (agent === null || agent === undefined || typeof agent !== "object") return decision;
+      const current = source();
+      if (current === null || typeof current !== "object" || current.enabled === false) return decision;
+      const id = agent.id;
+      if (id === undefined) return decision;
 
-        const id = agent.id;
-        if (id === undefined) return "";
+      const hasPriorUserMessage =
+        agent.session !== undefined &&
+        agent.session !== null &&
+        Array.isArray(agent.session.events) &&
+        agent.session.events.some((event) => event !== null && typeof event === "object" && event.type === "user/message");
 
-        // 每轮提醒：turn >= 2 才输出；settings 字段留空则用内置默认文案
-        // （关闭整个插件用 enabled: false）。
-        const textOf = (value, fallback) =>
-          typeof value === "string" && value.trim().length > 0 ? value : fallback;
-        const turnReminderOf = (config) =>
-          currentTurnOf(agent) >= 2 ? textOf(config.turnReminder, DEFAULT_TURN_REMINDER) : "";
+      const first = !anchored.has(id);
+      anchored.add(id);
 
-        let output = "";
-        // 首轮（或重启后续接对话的首个组装）：注入完整指令一次并标记；
-        // 此后每轮注入简短提醒，保持思维链习惯。
-        if (!anchored.has(id)) {
-          // Skip resumed conversations: a session that already contains a user
-          // message began before this process, so its first assembly here is not
-          // a "first request".
-          const session = agent.session;
-          const hasPriorUserMessage =
-            session !== undefined &&
-            session !== null &&
-            Array.isArray(session.events) &&
-            session.events.some((event) => event !== null && event.type === "user/message");
-          anchored.add(id);
-          if (hasPriorUserMessage) {
-            // 续接对话：不再注入完整指令，但后续每轮仍提醒。
-            output = turnReminderOf(current);
-          } else {
-            output = textOf(current.instruction, DEFAULT_INSTRUCTION);
-          }
+      let text = "";
+      if (first) {
+        if (hasPriorUserMessage) {
+          text = textOf(current.turnReminder, DEFAULT_TURN_REMINDER);
         } else {
-          output = turnReminderOf(current);
+          text = textOf(current.instruction, DEFAULT_INSTRUCTION);
         }
-
-        // 告诉 round-display 显示插件本轮发送了什么（best-effort）。
-        reportRoundDisplay(agent, output);
-        return output;
-      },
-    });
-
-    // 组装层兜底：无论其它插件给 section 排了什么 order，都把本段移到
-    // assembly.sections 的末尾——保证 thinking-anchor 提示词一定渲染在
-    // 所有系统提示之后（最近因覆盖默认思考习惯）。kaz-mode 首轮极简会
-    // 保留本段（persona + thinking-anchor），此处的重排与其过滤互不干扰。
-    ctx.on("system-prompt/assemble", (assembly, _context, next) => {
-      if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.sections)) {
-        const anchorIndex = assembly.sections.findIndex(
-          (section) => section !== null && typeof section === "object" && section.name === SECTION_NAME,
-        );
-        if (anchorIndex >= 0 && anchorIndex !== assembly.sections.length - 1) {
-          const [anchor] = assembly.sections.splice(anchorIndex, 1);
-          assembly.sections.push(anchor);
-        }
+      } else {
+        text = textOf(current.turnReminder, DEFAULT_TURN_REMINDER);
       }
-      return next();
+      if (typeof text !== "string" || text.trim().length === 0) return decision;
+
+      let message;
+      try {
+        message = createUserMessage({
+          content: [{ type: "text", text }],
+          source: { kind: "plugin", plugin: "thinking-anchor" },
+        });
+      } catch (error) {
+        ctx.logger.warn(`[thinking-anchor] 构造注入消息失败：${error instanceof Error ? error.message : String(error)}`);
+        return decision;
+      }
+      // 告诉 round-display 显示插件本轮发送了什么（best-effort）。
+      reportRoundDisplay(agent, text);
+      return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
     });
 
     // Bounded memory: drop anchored entries when agents leave the registry.

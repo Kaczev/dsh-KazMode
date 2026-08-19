@@ -1,28 +1,27 @@
 # kaz-memory —— 带「自动载入」的独立记忆插件
 
-与 `@max-null/dsh-memory` 同功能的跨会话明文记忆；默认**不注入**，但对每条记忆可标记「自动载入」，在 memory_search 首次可用时自动注入一次：
+与 `@max-null/dsh-memory` 同功能的跨会话明文记忆；默认**不注入**，但对每条记忆可标记「自动载入」，在**对话开始时**自动注入一次（2026-08 重构：不再等 memory_search 首次可用）：
 
 | | @max-null/dsh-memory | kaz-memory |
 | --- | --- | --- |
 | 引擎 / 存储 | MemoryEngine，`$DSH_HOME/storages/memory.json`（global）+ `<cwd>/.dsh/storages/memory_project.json`（project） | **vendored 同一引擎（MIT），格式不变**；global 存 `$DSH_HOME/storages/memory.json`，project 按**项目文件夹**各存一份 `<项目>/.dsh/storages/memory_project.json`（2026-08-17 起不再用 `process.cwd()`） |
 | 四工具 | memory_save / memory_list / memory_search / memory_forget | 同名工具；**memory_list 只返回 id/namespace/status/名称（不含正文与 keywords）**，memory_search 返回全文 |
-| 固定指引 | tool:memory | tool:memory + 「已确认且标记自动载入的记忆会在 memory_search 首次可用时自动注入一次；之后需要更完整/精确记忆时主动 memory_search」 |
-| 上下文注入 | `memory:recall` 把 auto 记忆逐条注入系统提示 | **按需注入一次**：已确认且标记「自动载入」（autoLoad）的记忆，在该会话 memory_search 首次可用时（如 round-minimal 第二轮）以上下文注入方式注入一次；其余记忆靠模型主动 memory_search |
+| 固定指引 | tool:memory | tool:memory + 「已确认且标记自动载入的记忆会在对话开始时自动注入一次；之后需要更完整/精确记忆时主动 memory_search」 |
+| 上下文注入 | `memory:recall` 把 auto 记忆逐条注入系统提示 | **按需注入一次**：已确认且标记「自动载入」（autoLoad）的记忆，在**对话开始**（首个 pre-step）以上下文注入方式注入一次；其余记忆靠模型主动 memory_search |
 | 人工确认闸门 | setStatus 仅存于服务层，**无 UI / 工具 / CLI（断头路）** | 客户端半：会话头部「记忆」按钮（Kaz 按钮左侧，order -2）+ 面板（待确认：确认生效/忽略/删除；**全部记忆：点标题按需取全文 / 改名 / 删除**），经**专用 Connection RPC 通道 `/kaz-memory`（loopback）**读写——settings.yaml 不再承载任何记忆存储信息；模型没有任何对应工具 |
 
 ## 设计要点
 
 - **name 入 JSON（2026-08-19）**：每条记录持久化 `name` 字段（保存/确认时自动从正文的标题行/首行生成，
   ≤140 字）；面板可「改名」，改完写回 JSON。旧记录没有 `name` 时读取端按旧逻辑从正文现算（不强制迁移）。
-- **自动载入（2026-08-19）**：每条记忆新增 `autoLoad` 布尔字段（默认 `false`，旧记录读作 false，
+- **自动载入（2026-08-19 引入，2026-08 重构触发时机）**：每条记忆新增 `autoLoad` 布尔字段（默认 `false`，旧记录读作 false，
   即「目前的记忆都先不自动载入」）。面板可逐条切换「自动载入」，已确认且标记的记忆在
-  **该会话 `memory_search` 首次可用时**（以组装后的工具面为准，例如 round-minimal 第二轮放开、
-  Kaz 白名单放行）以 `source: {kind:'plugin', form:'recall'}` 的用户消息**注入一次**；每个会话只注入
-  一次，第三轮及以后不再注入。**只注入 status=auto 且 autoLoad=true 的记忆**，suggested/suggest 不注入。
+  **对话开始时**（首个 `agent/pre-step`，step === 1，不再等 memory_search 可用）以
+  `source: {kind:'plugin', form:'recall'}` 的用户消息**注入一次**；每个会话只注入
+  一次。**只注入 status=auto 且 autoLoad=true 的记忆**，suggested/suggest 不注入。
   跨重启去重（2026-08-19）："已注入"标记持久化在 `~/.dsh/storages/kaz-memory-auto-injected.json`
   （agent/session id 集合，仅实际注入成功后落标）；插件加载时还会预标记当前已存在的所有
-  agent（thinking-anchor 同款）——dsh 重启后恢复的会话不会把 memory_search 误判为首次可用
-  而重复注入，新会话仍正常注入一次。
+  agent（thinking-anchor 同款）——dsh 重启后恢复的会话不会重复注入，新会话仍正常注入一次。
 - **其余记忆按需拉取**：未标记自动载入的记忆不进上下文，模型需要时主动 `memory_search`。
 - **memory_list 只回名称（2026-08-16）**：`memory_list` 只返回 `id / namespace / status / 名称`
   （名称取标题行/首行截断 ≤140 字），**不含正文与 keywords**——避免一次列表调用把记忆灌进
@@ -142,8 +141,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\plugins\kaz-memory\probe-engine.mjs"
    旧记录无 `name` 时按正文回退现算。
 7. 调用 `memory_list` 确认返回项只有 `id/namespace/status/autoLoad/名称` 五项、**没有 content 与 keywords**；
    `memory_search` 才返回全文；**settings.yaml 的 `kaz-memory` 段只剩 guidance 配置，无任何记忆存储信息**。
-8b. round-minimal 场景：第一轮（memory_search 不可用）不注入；第二轮起自动注入一次
-   已确认且勾选自动载入的记忆全文；第三轮不再注入。
+8b. 自动载入时机：对话开始（首个 pre-step）即注入一次已确认且勾选自动载入的记忆全文，
+    不依赖 memory_search 是否可用；每会话只注入一次。
 9. 项目记忆按项目隔离：在 A 工作区 `memory_save(namespace=project)` 后，
    A 工作区的 `memory_list`/`memory_search` 能看到，B 工作区看不到；json 落在
    `<A>/.dsh/storages/memory_project.json`，且桌面不再出现 `.dsh`。

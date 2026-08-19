@@ -5,7 +5,8 @@
 //     四工具（引擎 vendored 自 @max-null/dsh-memory，MIT，存储位置与格式不变）
 //   * 每条记忆 JSON 里持久化 name（保存/确认时自动从正文生成，面板可改名）
 //   * tool:memory 固定指引；已确认且标记「自动载入」（autoLoad）的记忆会在
-//     memory_search 首次可用时以上下文注入方式注入一次（round-minimal 第二轮等）
+//     对话开始时（首个 pre-step）以上下文注入方式注入一次（2026-08 重构：
+//     不再等 memory_search 首次可用）
 //   * memory_list 只返回 id/namespace/status/autoLoad/名称，不返回正文与
 //     keywords——避免列表调用把记忆灌进上下文；memory_search 才返回全文。
 //   * 项目记忆按项目文件夹隔离（2026-08-17）：project 记忆写在
@@ -88,26 +89,6 @@ function nameOf(content, max = 140) {
   return head.length > max ? head.slice(0, max) + "…" : head;
 }
 
-/** 读取代理当前轮次：会话日志中最近一个 turn/start 的 data.turn；无则 0。
- *  与 round-minimal 同款判定——首轮（turn === 1）极简模式下 memory_search
- *  不可调用（执行层也会拒绝），即使注册层 schemas 里有它也不能注入。 */
-function currentTurnOf(agent) {
-  try {
-    const events = agent?.session?.events;
-    if (!Array.isArray(events)) return 0;
-    let turn = 0;
-    for (const event of events) {
-      if (event === null || typeof event !== "object") continue;
-      if (event.type !== "turn/start") continue;
-      const value = event.data?.turn;
-      if (typeof value === "number" && value > turn) turn = value;
-    }
-    return turn;
-  } catch {
-    return 0;
-  }
-}
-
 function recordValue(record) {
   return {
     id: String(record.id),
@@ -163,10 +144,9 @@ const GUIDANCE_HEAD =
   "We should search the memory (memory_search) at the start of a task for relevant information, and we should save important facts we learn (memory_save) — the memory is shared with the user and persists across conversations.";
 
 /** 判断某个记忆工具当前是否可用：
- *  1) 注册检查：tool-filter / 组合移除会让 toolGrouping.isRegistered 返回 false；
+ *  1) 注册检查：plugin-filter / 组合移除会让工具不在注册表（工具面过滤后也不可见）；
  *  2) Kaz 工具面检查：kaz-mode.enabled=true 时，工具必须在 minimalTools +
- *     toolWhitelist 里才可见（组装层会过滤掉白名单外工具）；白名单兼容旧版
- *     "kaz-memory" 组 id（按 toolGrouping 分组放行）。
+ *     toolWhitelist 里才可见（组装层会过滤掉白名单外工具）。
  *  读不到的服务 / 设置一律按"不受限制"处理。 */
 function toolAvailable(name, grouping, kazSettings) {
   const groupingOk = grouping !== undefined && grouping !== null && typeof grouping.isRegistered === "function";
@@ -447,7 +427,6 @@ export async function apply(ctx, config = {}) {
       ctx.logger.warn(`[kaz-memory] 持久化自动载入标记失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  const memorySearchUsable = new WeakMap();
   const autoLoadInjected = new WeakMap();
 
   // 2026-08-19：加载时预标记现有 agent（thinking-anchor 同款）。重启后恢复的
@@ -645,7 +624,8 @@ export async function apply(ctx, config = {}) {
     },
   });
 
-  // ---- 自动载入：每个会话在 memory_search 首次可用时注入一次（round-minimal 第二轮等场景）----
+  // ---- 自动载入：对话开始时（首个 pre-step）把已确认且标记「自动载入」的记忆
+  // 注入一次（2026-08 重构：不再等 memory_search 首次可用——对话一开始就注入）----
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
@@ -654,7 +634,6 @@ export async function apply(ctx, config = {}) {
     if (agent === null || agent === undefined || typeof agent !== "object") return decision;
     // 组件总开关：关闭时不做自动载入注入。
     if (source().enabled === false) return decision;
-    if (memorySearchUsable.get(agent) !== true) return decision;
     if (autoLoadInjected.has(agent)) return decision;
     // 跨重启去重：该会话此前已注入过（持久化标记）→ 跳过。
     if (agent.id !== undefined && persistedInjected.has(String(agent.id))) return decision;
@@ -673,8 +652,8 @@ export async function apply(ctx, config = {}) {
 
   // ---- 组装层兜底：无条件移除基础英文记忆指引（tool:memory）----
   // kaz-memory 的固定指引（tool:memory:kaz-memory）是唯一记忆指引段，
-  // 内容为 We need 风格英文一行（Kaczev 2026-08-17）。kaz-mode 在 Kaz 模式首轮（极简伪装）会
-  // 移除本指引、次轮起保留；这里作为全模式兜底：任何会话、任何模式都
+  // 内容为 We need 风格英文一行（Kaczev 2026-08-17）。kaz-mode 在 Kaz 模式会
+  // 移除本指引（固定提示词）；这里作为全模式兜底：任何会话、任何模式都
   // 不再注入基础英文记忆指引（tool:memory）。
   ctx.on("system-prompt/assemble", async (assembly, context, next) => {
     if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.sections)) {
@@ -682,42 +661,7 @@ export async function apply(ctx, config = {}) {
         (section) => !(section !== null && typeof section === "object" && section.name === "tool:memory"),
       );
     }
-    const result = await next();
-    const agent = context !== null && typeof context === "object" ? context.agent : undefined;
-    if (agent !== undefined) {
-      // memory_search 可用性判定（自动载入前置条件）：
-      //   1) 组装层工具面 assembly.tools 含 memory_search → 可用（原生模式、
-      //      非首轮极简；round-minimal / kaz-mode 首轮已把它从工具面移除）；
-      //   2) 未命中且非首轮（turn > 1）时补查 tools 服务完整 schemas——
-      //      Code Mode 下 wireSchemas 把组装工具面折叠为只剩 run_code，
-      //      assembly.tools 里没有 memory_search，但 schemas(agent) 仍返回
-      //      全部可见工具（含 memory_search），经 run_code SDK 可调用，视为可用；
-      //   首轮（turn === 1）不补查 schemas：首轮极简下 memory_search 不可调用
-      //  （round-minimal 执行层也拒绝），保持「memory_search 首次可用时注入
-      //  一次」的语义。
-      const turn = currentTurnOf(agent);
-      let usable =
-        assembly !== null &&
-        typeof assembly === "object" &&
-        Array.isArray(assembly.tools) &&
-        assembly.tools.some((tool) => tool !== null && typeof tool === "object" && tool.name === "memory_search");
-      if (!usable && turn > 1) {
-        try {
-          const toolsSvc = ctx.get("tools");
-          const schemas =
-            toolsSvc !== null && toolsSvc !== undefined && typeof toolsSvc.schemas === "function"
-              ? toolsSvc.schemas(agent)
-              : [];
-          usable =
-            Array.isArray(schemas) &&
-            schemas.some((schema) => schema !== null && typeof schema === "object" && schema.name === "memory_search");
-        } catch (error) {
-          ctx.logger.warn("[kaz-memory] 查询 tools.schemas 判定 memory_search 可用性失败：" + (error instanceof Error ? error.message : String(error)));
-        }
-      }
-      memorySearchUsable.set(agent, usable);
-    }
-    return result;
+    return next();
   });
 
   // ---- 四工具（与 @max-null/dsh-memory 同名同 schema 同行为） ----

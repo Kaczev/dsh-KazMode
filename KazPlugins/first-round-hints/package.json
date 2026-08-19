@@ -1,0 +1,23 @@
+{
+  "name": "first-round-hints",
+  "version": "0.1.0",
+  "description": "首轮其它消息提示插件：对话开始时把 pwsh 使用要点（stdout/stderr 是对象、编码陷阱、JSON 序列化陷阱）作为一条合成用户消息注入一次（kaz-memory 自动载入 / thinking-anchor 同款注入机制），不触碰系统提示词。消息内容可在 settings.yaml 的 first-round-hints.message 热改。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  }
+}

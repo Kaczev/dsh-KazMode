@@ -1,4 +1,4 @@
-# tool-filter（中文说明）
+# plugin-filter（原 tool-filter，中文说明）
 
 一个 dsh（DeepSeek Harness）插件：从 dsh 的工具列表中**过滤指定工具**，阻止它们
 被加载或使用。默认屏蔽 `tool-cordis`、`tool-subagent-report`、`codex`、
@@ -59,13 +59,13 @@
 
 > 插件来自 `cordis.patch.yml`（用户补丁层），而内置工具插件来自 bundle 层
 > （如 `@deepseek-ai/dsh-base`），bundle 会先于补丁层挂载。即使某个工具在
-> tool-filter 补丁生效**之前**就已注册，第 2、3 层兜底仍会保证它既不出现在
+> plugin-filter 补丁生效**之前**就已注册，第 2、3 层兜底仍会保证它既不出现在
 > 模型可见的工具列表里、也不会被执行 —— 因此不存在可观察到的竞态。
 
 ## 文件结构
 
 ```
-tool-filter/
+plugin-filter/
 ├── package.json      # 包元数据 + peer 依赖
 ├── lib/index.js      # 插件本体（纯 ESM，Cordis 插件）
 └── README.md         # 本文件
@@ -78,7 +78,7 @@ tool-filter/
 
 dsh 的插件 = 一个 npm 包 + 组合（`cordis.yml` 补丁）里的一行。共三步：
 
-**① 把包放进 profile**（目录位置：`~/.dsh/profiles/web/plugins/tool-filter`）。
+**① 把包放进 profile**（目录位置：`~/.dsh/profiles/web/plugins/plugin-filter`）。
 任选其一：
 
 - 方式 A（npm，推荐）：
@@ -88,18 +88,18 @@ dsh 的插件 = 一个 npm 包 + 组合（`cordis.yml` 补丁）里的一行。�
   # 本机 dsh 环境会设置 npm_config_allow_scripts，npm 11 会因此拒绝项目内安装，
   # 临时移除即可（只影响这一次命令）
   Remove-Item Env:npm_config_allow_scripts
-  npm install --legacy-peer-deps --no-audit --no-fund --save ./plugins/tool-filter
+  npm install --legacy-peer-deps --no-audit --no-fund --save ./plugins/plugin-filter
   ```
 
-  npm 会把 `web/node_modules/tool-filter` 建成指向
-  `web/plugins/tool-filter` 的目录联接（junction），改源码即时生效、无需重装。
+  npm 会把 `web/node_modules/plugin-filter` 建成指向
+  `web/plugins/plugin-filter` 的目录联接（junction），改源码即时生效、无需重装。
 
 - 方式 B（无 npm / 不想用 npm）：
 
   ```powershell
-  $dst = Join-Path $env:USERPROFILE ".dsh\profiles\web\plugins\tool-filter"
-  Copy-Item ".\tool-filter" -Destination $dst -Recurse -Force
-  New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\web\node_modules\tool-filter" -Target $dst
+  $dst = Join-Path $env:USERPROFILE ".dsh\profiles\web\plugins\plugin-filter"
+  Copy-Item "C:\Users\Kaczev\.dsh\profiles\web\KazPlugins\plugin-filter" -Destination $dst -Recurse -Force
+  New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\web\node_modules\plugin-filter" -Target $dst
   ```
 
 **② 修改 `cordis.patch.yml`（必须）**：在
@@ -107,8 +107,8 @@ dsh 的插件 = 一个 npm 包 + 组合（`cordis.yml` 补丁）里的一行。�
 
 ```yaml
 - insert:
-    - id: tool-filter
-      name: tool-filter
+    - id: plugin-filter
+      name: plugin-filter
       config:
         enabled: true
         mode: remove
@@ -122,11 +122,11 @@ dsh 的插件 = 一个 npm 包 + 组合（`cordis.yml` 补丁）里的一行。�
 想让插件对**所有** profile 生效：把这段放到 `~/.dsh/cordis.patch.yml`（机器级层）
 而不是 profile 文件。
 
-**③ 修改 `~/.dsh/settings.yaml`（可选但推荐）**：追加 `tool-filter:` 段，保存即
+**③ 修改 `~/.dsh/settings.yaml`（可选但推荐）**：追加 `plugin-filter:` 段，保存即
 **热重载**，之后无需重启即可开关、切模式、改列表：
 
 ```yaml
-tool-filter:
+plugin-filter:
   enabled: true
   mode: remove
   disabledTools:
@@ -148,7 +148,7 @@ tool-filter:
 | `disabledTools` | string[] | `["tool-cordis", "tool-subagent-report", "codex", "claude-code"]` | 要禁用的工具/插件名，可自由增删。 |
 
 组合行 `config` 是 **base 层**；`settings.yaml` 是**用户层**，用户层优先。
-设置页（设置 → 插件配置）中也会出现 `tool-filter` 命名空间，可直接编辑。
+设置页（设置 → 插件配置）中也会出现 `plugin-filter` 命名空间，可直接编辑。
 
 ## 使用示例
 
@@ -156,7 +156,7 @@ tool-filter:
 
 ```yaml
 # ~/.dsh/settings.yaml
-tool-filter:
+plugin-filter:
   enabled: true
   mode: disable
   disabledTools:
@@ -169,7 +169,7 @@ tool-filter:
 **追加一个自定义禁用项（例如再禁用 `web_search`）**：
 
 ```yaml
-tool-filter:
+plugin-filter:
   enabled: true
   mode: remove
   disabledTools:
@@ -183,7 +183,7 @@ tool-filter:
 **临时整体关闭**：
 
 ```yaml
-tool-filter:
+plugin-filter:
   enabled: false
 ```
 
@@ -192,14 +192,14 @@ tool-filter:
 1. **组合正确**（免启动）：
 
    ```powershell
-   dsh --profile web --dump-config | Select-String "tool-filter"
+   dsh --profile web --dump-config | Select-String "plugin-filter"
    ```
 
-   输出中应能看到 `tool-filter` 行及其 `config`（enabled / mode / disabledTools）。
+   输出中应能看到 `plugin-filter` 行及其 `config`（enabled / mode / disabledTools）。
 
 2. **插件列表（UI 设置 → 插件 → 插件列表）**：
    - `mode: remove`：`tool-subagent-report` 卡片应显示 **"已停用"**（无状态圆点）；
-     `tool-filter` 显示"已启用"。
+     `plugin-filter` 显示"已启用"。
    - 顺带说明：`tool-cordis` 这个工具插件**并未**挂载在 web profile 的组合里，
      插件列表不会出现它；列表里那些名字带 `cordis` 的条目（如
      `cordis-host-runner`、`cordis-client-runner`、`ui-cordis`）是 dsh 自身的
@@ -214,7 +214,7 @@ tool-filter:
    - `mode: remove`：模型看不到该工具；即使强行构造调用也返回
      `unknown tool`；
    - `mode: disable`：模型能看到该工具，但调用返回
-     `工具 "X" 已被 tool-filter 禁用（mode: disable…）`。
+     `工具 "X" 已被 plugin-filter 禁用（mode: disable…）`。
 
 5. **开关**：把 `enabled` 改成 `false` 保存（热重载），再重复第 2、3 步 ——
    工具应恢复可见/可用；验证完改回 `true`。
@@ -245,7 +245,7 @@ tool-filter:
 ```powershell
 cd "$env:USERPROFILE\.dsh\profiles\web"
 Remove-Item Env:npm_config_allow_scripts
-npm uninstall --legacy-peer-deps tool-filter
-# 再删掉 cordis.patch.yml 里的 tool-filter insert 行、
-# settings.yaml 里的 tool-filter: 段，重启 dsh。
+npm uninstall --legacy-peer-deps plugin-filter
+# 再删掉 cordis.patch.yml 里的 plugin-filter insert 行、
+# settings.yaml 里的 plugin-filter: 段，重启 dsh。
 ```

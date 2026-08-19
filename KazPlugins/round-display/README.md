@@ -1,17 +1,15 @@
 # round-display —— 每轮注入显示插件（Kaz 模式附属）
 
 只负责「显示」，不向模型注入任何内容：记录每一轮开始时 Kaz 模式联动/附属插件
-（thinking-anchor / round-minimal / code-collapse / kaz-memory 等）给模型发送的
+（thinking-anchor / round-minimal / kaz-memory 等）给模型发送的
 信息，并在对话输入区右侧提供「本轮注入」按钮与面板，按下后在对话框右侧显示
 本轮注入信息（格式：[插件名]>（信息内容）<）。
 
 ## 原理
 
-- **轮次**：每次用户发一条消息 = 一轮（与 round-minimal 同款判定：会话日志中最近
-  一个 turn/start 的 data.turn）。
+- **轮次**：每次用户发一条消息 = 一轮（会话日志中最近一个 turn/start 的 data.turn）。
 - **被动捕获**：监听 `system-prompt/assemble` 瀑布，读取最终组装里非空的已知插件段
-  （`thinking-anchor:policy` / `round-minimal:policy` / `code-collapse:first-round` /
-  `tool:memory:kaz-memory` / `kaz-mode:round1-code-sdk`），按 agent × 轮次存档。
+  （`thinking-anchor:policy` / `tool:memory:kaz-memory`），按 agent × 轮次存档。
   段文本在瀑布后已求值，读到即该轮实际注入模型的内容。
 - **主动上报**：发布 `roundDisplay` 服务（`report({ agent, plugin, title, content })`），
   其它要发送信息的插件在发送时尝试调用它告诉本插件要显示（best-effort：服务不存在
@@ -33,7 +31,7 @@ round-display:
   enabled: true
 ```
 
-**开关位置**：round-display 已被 kaz-mode 收编为被管理插件（插件8），
+**开关位置**：round-display 已被 kaz-mode 收编为被管理插件，
 Kaz 模式面板（侧边栏底部「Kaz 模式」按钮 → 详细设置）里有独立的
 `enabled` 开关（默认开）。开启时本插件自动判断是否显示本轮注入；
 关闭时**完全隐藏**——客户端连「本轮注入」按钮都不渲染，宿主也不记录。

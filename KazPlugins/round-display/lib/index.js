@@ -3,9 +3,8 @@
 // 「每轮注入显示」插件（Kaz 模式附属）——只负责显示，不向模型注入任何内容：
 //
 //   1) 被动捕获：监听 system-prompt/assemble 瀑布，在最终组装里读取非空的
-//      已知插件段（thinking-anchor:policy / round-minimal:policy /
-//      code-collapse:first-round / tool:memory:kaz-memory / kaz-mode:round1-code-sdk），
-//      按 agent × 轮次存档。段文本在瀑布后已求值，读到即最终注入内容。
+//      已知插件段（thinking-anchor:policy / tool:memory:kaz-memory），按 agent ×
+//      轮次存档。段文本在瀑布后已求值，读到即最终注入内容。
 //   2) 主动上报：发布 roundDisplay 服务（report 接口），其它要发送信息的插件
 //      在发送时尝试调用 ctx.get("roundDisplay")?.report({ agent, plugin, title, content })
 //      告诉本插件要显示（best-effort：服务不存在时静默跳过，不影响主流程）。
@@ -36,11 +35,8 @@ const RPC_CHANNEL = "/round-display";
 
 /** 已知插件段 → 插件显示名（被动捕获的归属表；report 主动上报不受此表限制）。 */
 const SECTION_PLUGIN = {
-  "code-collapse:first-round": "code-collapse",
-  "round-minimal:policy": "round-minimal",
   "thinking-anchor:policy": "thinking-anchor",
   "tool:memory:kaz-memory": "kaz-memory",
-  "kaz-mode:round1-code-sdk": "kaz-mode",
 };
 
 /** 组装结果里忽略的内置段（不是插件注入的信息）。 */
