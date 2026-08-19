@@ -905,18 +905,19 @@ window.__ModuleLoader__.load({
 
 				const defaults = stateData !== null && stateData.defaults !== undefined ? stateData.defaults : { nonKaz: {}, kaz: {} };
 				const sessionOverrides = stateData !== null && stateData.session !== null && typeof stateData.session === "object" ? stateData.session : {};
-				// 空白会话 = 新建对话页面，不能当作“具体对话”处理。
-				const isBlank = summary !== null && summary !== undefined && summary.blank === true;
-				const inConversation = summary !== null && summary !== undefined && !isBlank;
+				// 有会话（含空白的新建对话）就按“对话”处理：编辑会写入会话专属覆盖。
+				const hasSession = summary !== null && summary !== undefined;
+				const isBlank = hasSession && summary.blank === true;
+				const inEstablished = hasSession && !isBlank;
 				// 新建对话页面优先使用空白会话上已暂存/已应用的 agentPreset；
 				// 取不到时再回退到 agent-presets.default。
-				const newConversationPreset = !inConversation && summary !== null && typeof summary.agentPreset === "string"
+				const newConversationPreset = !inEstablished && hasSession && typeof summary.agentPreset === "string"
 					? summary.agentPreset
 					: undefined;
-				const effectiveKazEnabled = inConversation
+				const effectiveKazEnabled = inEstablished
 					? kazEnabled
 					: (newConversationPreset !== undefined ? newConversationPreset === KAZ_PRESET_ID : preset === KAZ_PRESET_ID);
-				const displayPreset = inConversation ? preset : (newConversationPreset !== undefined ? newConversationPreset : preset);
+				const displayPreset = inEstablished ? preset : (newConversationPreset !== undefined ? newConversationPreset : preset);
 				const mode = effectiveKazEnabled ? "kaz" : "nonKaz";
 				const baseMap = defaults[mode] || {};
 				const effectiveMap = {};
@@ -1021,14 +1022,14 @@ window.__ModuleLoader__.load({
 						"p",
 						{ className: "kzm-note" },
 						writable
-							? (inConversation
+							? (hasSession
 								? (hasOverrides
 									? "当前对话专属设置会覆盖默认设置；可随时将当前设置设为默认。"
 									: "当前对话与当前模式默认设置一致；修改后将变为专属设置。")
 								: "正在调整新建对话的默认设置：开关会直接保存为当前模式默认值。")
 							: "当前页面处于远程内存模式，设置不可写（请在本机 127.0.0.1 页面操作）。",
 					),
-					inConversation
+					hasSession
 						? (hasOverrides
 							? createElement(StateSection, {
 								key: "session-" + (sessionId || ""),
