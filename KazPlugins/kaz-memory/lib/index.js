@@ -140,8 +140,10 @@ function present(title, kind, rawInput) {
 /** 指引总述行（S 信息）：memory_search 可调用时作为指引第一行。
  *  2026-08-21：改为主动行动式措辞——模型应当主动查记忆、主动存记忆，
  *  而不是等到"遇到难题"才想起记忆。 */
-const GUIDANCE_HEAD =
-  "We need to search the memory (memory_search) at the start of a task for relevant information, and we need to save important facts we learn (memory_save) — the memory is shared with the user and persists across conversations.";
+const GUIDANCE_HEAD = [
+  "We need to search the memory (memory_search) at the start of a task for relevant information",
+  "We need to save important facts we learn (memory_save) — the memory is shared with the user and persists across conversations."
+].join("\n");
 
 /** 判断某个记忆工具当前是否可用：
  *  1) 注册检查：plugin-filter / 组合移除会让工具不在注册表（工具面过滤后也不可见）；
