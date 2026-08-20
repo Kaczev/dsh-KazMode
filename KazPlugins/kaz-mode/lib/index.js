@@ -38,7 +38,6 @@ import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
 const NAMESPACE = settingsNamespace("kaz-mode");
@@ -140,10 +139,10 @@ for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
 
 /** 会话级插件状态文件名（放在项目 .dsh/ 下）。 */
 const SESSION_STATES_FILE = "kaz-session-states.json";
-/** 两个模式的默认设置文件名（放在插件目录下，随插件分发/安装存在）。 */
+/** 两个模式的默认设置文件名（放在 C:\\Users\\Kaczev\\.dsh\\storages 下）。 */
 const DEFAULTS_FILE_NAME = "kaz-defaults.json";
-const PLUGIN_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULTS_FILE = join(PLUGIN_DIR, "..", DEFAULTS_FILE_NAME);
+const STORAGE_DIR = "C:\\Users\\Kaczev\\.dsh\\storages";
+const DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/kaz-mode";
 
@@ -285,7 +284,7 @@ function mergeDefaultsMap(factory, stored) {
   return result;
 }
 
-/** 读取插件目录下的默认设置文件；不存在或损坏时回退到代码内出厂默认。 */
+/** 读取 storages 下的默认设置文件；不存在或损坏时回退到代码内出厂默认。 */
 function loadDefaults(logger) {
   try {
     if (!existsSync(DEFAULTS_FILE)) return factoryDefaults();
@@ -304,7 +303,7 @@ function loadDefaults(logger) {
   }
 }
 
-/** 写回插件目录下的默认设置文件（非 Kaz / Kaz 两个模式）。 */
+/** 写回 storages 下的默认设置文件（非 Kaz / Kaz 两个模式）。 */
 function saveDefaults(defaults, logger) {
   try {
     mkdirSync(dirname(DEFAULTS_FILE), { recursive: true });

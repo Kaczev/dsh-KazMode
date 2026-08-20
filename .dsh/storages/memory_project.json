@@ -1,0 +1,26 @@
+{
+  "unit": {
+    "name": "memory_project",
+    "version": 1
+  },
+  "global": null,
+  "tables": {
+    "blocks": {
+      "0a8b2b32-d319-4335-b815-762e0083990b": {
+        "namespace": "project",
+        "status": "suggested",
+        "autoLoad": false,
+        "name": "kaz-mode 插件的默认设置文件 kaz-defaults.json 已从插件目录改为读取/写入 C:\\Users\\Kaczev\\.dsh\\storages\\kaz-defaults.json（lib/index.js 中 DEFAULTS_FILE 指向该路径，原插件目录文…",
+        "content": "kaz-mode 插件的默认设置文件 kaz-defaults.json 已从插件目录改为读取/写入 C:\\Users\\Kaczev\\.dsh\\storages\\kaz-defaults.json（lib/index.js 中 DEFAULTS_FILE 指向该路径，原插件目录文件已复制到新位置）。",
+        "keywords": [
+          "kaz-defaults.json",
+          "kaz-mode",
+          "storages",
+          "defaults_file"
+        ],
+        "createdAt": 1787184452140,
+        "updatedAt": 1787184452140
+      }
+    }
+  }
+}
