@@ -132,6 +132,18 @@ window.__ModuleLoader__.load({
 			},
 		];
 
+		/** 常驻补丁插件：不随 Kaz/非Kaz 模式切换而关闭，专门修正 dsh 显示/体验问题。 */
+		const PATCH_PLUGINS = [
+			{
+				id: "kaz-agent-preset-display",
+				namespace: "kaz-agent-preset-display",
+				name: "kaz-agent-preset-display",
+				tag: "补丁插件 · 新对话预设显示修正",
+				note: "常驻补丁插件：注册 conversation.hero.agentPreset，让新对话 hero 优先显示空白会话自己的 agentPreset。Kaz 模式和非 Kaz 模式下都默认开启。",
+				fields: [],
+			},
+		];
+
 		/** kaz-mode 自身的面板配置字段（不提供 enabled 开关——它由预设驱动）。 */
 		const KAZ_FIELDS = [
 			{ key: "minimalTools", kind: "list", label: "minimalTools（工具面·极简基底：首次工具调用前保留的最小工具，逗号分隔）" },
@@ -260,6 +272,7 @@ window.__ModuleLoader__.load({
 			const kazScope = bindScope("kaz-mode");
 			const presetScope = bindScope(PRESET_NAMESPACE);
 			const memoryScope = bindScope("kaz-memory");
+			const patchScope = bindScope("kaz-agent-preset-display");
 
 			/** 会话列表 binding（由下方 conversation/sessions inject 填充）。 */
 			let sessionListBinding = null;
@@ -993,7 +1006,7 @@ window.__ModuleLoader__.load({
 			}
 
 			/** 三个层级的设置区块：a=非 Kaz 默认，b=Kaz 默认，c=当前对话专属。 */
-			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onSetNonKazDefault, onSetKazDefault, disabled }) {
+			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onSetNonKazDefault, onSetKazDefault, disabled, plugins = PLUGINS }) {
 				return createElement(
 					"div",
 					{ className: "kzm-state-section" },
@@ -1026,7 +1039,7 @@ window.__ModuleLoader__.load({
 									"设为 Kaz 模式默认设置",
 								),
 						),
-					PLUGINS.map((plugin) =>
+					plugins.map((plugin) =>
 						createElement(StatePluginRow, {
 							key: plugin.id,
 							plugin,
@@ -1042,10 +1055,22 @@ window.__ModuleLoader__.load({
 			function KazPanel() {
 				const kazSnap = useScope(kazScope);
 				const presetSnap = useScope(presetScope);
+				const patchSnap = useScope(patchScope);
 				const kazValue = valueOf(kazSnap);
 				const kazEnabled = kazValue !== null ? kazValue.enabled === true : false;
 				const preset = currentPresetOf(presetSnap);
 				const writable = writableOf(kazSnap);
+				const patchWritable = writableOf(patchSnap);
+				const patchValue = valueOf(patchSnap);
+				const patchStateMap = {};
+				for (const plugin of PATCH_PLUGINS) {
+					patchStateMap[plugin.id] = patchValue !== null && typeof patchValue === "object" ? patchValue : {};
+				}
+				const patchOverriddenMap = {};
+				const patchOnPatch = (pluginId, patch) => {
+					if (patchScope === null || !patchWritable) return Promise.resolve(null);
+					return patchScope.set("enabled", patch.enabled).catch(() => {});
+				};
 				const { sessionId, summary } = useCurrentSession();
 
 				// 有会话（含空白的新建对话）就按“对话”处理：编辑会写入会话专属覆盖。
@@ -1226,6 +1251,16 @@ window.__ModuleLoader__.load({
 							onRestore: () => resetDefault(mode, stateData !== null ? stateData.cwd : undefined),
 							disabled: !writable,
 						}),
+					createElement(StateSection, {
+						key: "patch-plugins",
+						title: "补丁插件（常驻）",
+						desc: "这类插件修正 dsh 显示/体验问题；Kaz 模式与非 Kaz 模式下都默认开启，不随模式切换自动关闭。",
+						stateMap: patchStateMap,
+						overriddenMap: patchOverriddenMap,
+						onPatch: patchOnPatch,
+						disabled: !patchWritable,
+						plugins: PATCH_PLUGINS,
+					}),
 					createElement(KazRow, null),
 					lastRpcError.length > 0 && createElement("p", { className: "kzm-error" }, "RPC 通道未就绪：" + lastRpcError),
 				);
