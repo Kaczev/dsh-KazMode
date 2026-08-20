@@ -907,6 +907,7 @@ window.__ModuleLoader__.load({
 							"span",
 							{ className: "kzm-state-name", title: plugin.tag || plugin.id },
 							plugin.name,
+							plugin.tag !== undefined && createElement("span", { className: "kzm-tag" }, "  " + plugin.tag),
 							overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
 						),
 						createElement(StateBadge, { state: missing ? "missing" : enabled ? "on" : "off" }),
