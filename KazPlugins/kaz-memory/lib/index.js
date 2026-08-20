@@ -1,12 +1,13 @@
 // kaz-memory —— 独立记忆插件（自动载入 + RPC 面板通道）
 // ===========================================================================
 // 与 @max-null/dsh-memory 同功能的跨会话明文记忆：
-//   * ctx.memory 引擎 + memory_save / memory_list / memory_search / memory_forget
-//     四工具（引擎 vendored 自 @max-null/dsh-memory，MIT，存储位置与格式不变）
+//   * ctx.memory 引擎 + memory_save / memory_update / memory_list / memory_search /
+//     memory_forget 五工具（引擎 vendored 自 @max-null/dsh-memory，MIT，存储位置与格式不变）
 //   * 每条记忆 JSON 里持久化 name（保存/确认时自动从正文生成，面板可改名）
-//   * tool:memory 固定指引在首轮工具调用之后以上下文消息注入一次；已确认且
-//     标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）以上下文
-//     注入方式注入一次（2026-08 重构：不再等 memory_search 首次可用）
+//   * tool:memory 固定指引在首轮工具调用之后以上下文消息注入一次；首次
+//     memory_search 之后会再注入一次遗忘指引（memory_forget 清理已完成任务）；
+//     已确认且标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）
+//     以上下文注入方式注入一次（2026-08 重构：不再等 memory_search 首次可用）
 //   * memory_list 只返回 id/namespace/status/autoLoad/名称，不返回正文与
 //     keywords——避免列表调用把记忆灌进上下文；memory_search 才返回全文。
 //   * 项目记忆按项目文件夹隔离（2026-08-17）：project 记忆写在
@@ -15,8 +16,8 @@
 //   * 面板数据通道 = 专用 Connection RPC（/kaz-memory，loopback）：list / open /
 //     rename / status / autoLoad / forget / openFolder。记忆数据（含 name）全部
 //     存在 JSON 文件里，settings.yaml 不再承载任何记忆存储信息（2026-08-19）。
-//   * 人工确认闸门：模型 memory_save 只能写 suggested，只有人在面板确认才置为
-//     auto；模型没有任何对应工具，闸门成立。
+//   * 人工确认闸门：模型 memory_save 只能写 pending，只有人在面板确认才置为
+//     applied；模型没有任何对应工具，闸门成立。
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
@@ -44,7 +45,7 @@ const RECORD_SCHEMA = {
   properties: {
     id: { type: "string", required: true },
     namespace: { type: "string", required: true, enum: ["global", "project"] },
-    status: { type: "string", required: true, enum: ["suggested", "auto", "suggest"] },
+    status: { type: "string", required: true, enum: ["pending", "ignored", "applied"] },
     autoLoad: { type: "boolean", required: true },
     name: { type: "string", required: true },
     content: { type: "string", required: true },
@@ -70,7 +71,7 @@ const LIST_RECORD_SCHEMA = {
   properties: {
     id: { type: "string", required: true },
     namespace: { type: "string", required: true, enum: ["global", "project"] },
-    status: { type: "string", required: true, enum: ["suggested", "auto", "suggest"] },
+    status: { type: "string", required: true, enum: ["pending", "ignored", "applied"] },
     autoLoad: { type: "boolean", required: true },
     name: { type: "string", required: true },
   },
@@ -143,6 +144,12 @@ function present(title, kind, rawInput) {
 const GUIDANCE_HEAD = [
   "We need to search the memory (memory_search) at the start of a task for relevant information",
   "We need to save important facts we learn (memory_save) — the memory is shared with the user and persists across conversations."
+].join("\n");
+
+/** 首次 memory_search 之后注入的遗忘指引（每次会话一次）。 */
+const GUIDANCE_FORGET = [
+ "We need to forget memories (memory_forget) related to tasks that have been completed and no longer need to be retained.",
+ "We need to update memories (memory_update) when the stored content is incorrect, when the content needs to be changed, or when the memory's name or keywords are no longer accurate."
 ].join("\n");
 
 /** 判断某个记忆工具当前是否可用：
@@ -225,6 +232,26 @@ function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc,
   if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc)) return "";
   return ["[kaz-memory guidance]", ">", head, "<"].join("\n");
 }
+
+/**
+ * 拼装首次 memory_search 之后注入的 [kaz-memory guidance] 上下文消息：
+ *  提醒模型用 memory_forget 清理已完成、不再需要保留的任务记忆。
+ *  仅在 memory_search 与 memory_forget 当前环境都确实可调用时发送。
+ *
+ *  overrides.forget：guidanceForget 覆盖（留空 = 内置默认）。
+ */
+function composeForgetGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc) {
+  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc)) return "";
+  if (!toolAvailable("memory_forget", grouping, kazSettings)) return "";
+  const line =
+    overrides !== null &&
+    typeof overrides === "object" &&
+    typeof overrides.forget === "string" &&
+    overrides.forget.trim().length > 0
+      ? overrides.forget.trim()
+      : GUIDANCE_FORGET;
+  return ["[kaz-memory guidance]", ">", line, "<"].join("\n");
+}
 const SETTINGS_SCHEMA = z.object({
   /** 总开关（Kaz 模式面板提供开关）：关闭时完全不注入记忆指引、不自动载入，
    *  客户端也不渲染记忆面板（sidebar 按钮与面板整体隐藏）。 */
@@ -233,7 +260,8 @@ const SETTINGS_SCHEMA = z.object({
   guidance: z.string().default(""),
   /** 固定提示总述行覆盖：留空 = 内置默认。 */
   guidanceHead: z.string().default(""),
-  /** 以下四个字段保留兼容（2026-08-17 起不再生效）：工具细节已并入各工具描述。 */
+  /** 以下三个字段保留兼容（2026-08-17 起不再生效）：工具细节已并入各工具描述。
+   *  guidanceForget 自首次 memory_search 遗忘指引起恢复生效（覆盖默认遗忘指引）。 */
   guidanceSearch: z.string().default(""),
   guidanceSave: z.string().default(""),
   guidanceList: z.string().default(""),
@@ -403,6 +431,7 @@ export async function apply(ctx, config = {}) {
       : join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", "kaz-memory-auto-injected.json");
   const persistedInjected = new Set();
   const persistedGuidanceInjected = new Set();
+  const persistedForgetGuidanceInjected = new Set();
   try {
     if (existsSync(AUTO_INJECTED_STORE)) {
       // 兼容手工编辑/工具写入时可能带上的 UTF-8 BOM（﻿）
@@ -424,6 +453,14 @@ export async function apply(ctx, config = {}) {
         // 兼容 PowerShell ConvertTo-Json 单元素数组被解包成字符串的写法
         persistedGuidanceInjected.add(parsed.guidanceAgents);
       }
+      if (parsed !== null && typeof parsed === "object" && Array.isArray(parsed.forgetGuidanceAgents)) {
+        for (const id of parsed.forgetGuidanceAgents) {
+          if (typeof id === "string" && id.length > 0) persistedForgetGuidanceInjected.add(id);
+        }
+      } else if (parsed !== null && typeof parsed === "object" && typeof parsed.forgetGuidanceAgents === "string" && parsed.forgetGuidanceAgents.length > 0) {
+        // 兼容 PowerShell ConvertTo-Json 单元素数组被解包成字符串的写法
+        persistedForgetGuidanceInjected.add(parsed.forgetGuidanceAgents);
+      }
     }
   } catch (error) {
     ctx.logger.warn(`[kaz-memory] 读取注入标记失败：${error instanceof Error ? error.message : String(error)}`);
@@ -437,6 +474,7 @@ export async function apply(ctx, config = {}) {
           {
             agents: [...persistedInjected].sort(),
             guidanceAgents: [...persistedGuidanceInjected].sort(),
+            forgetGuidanceAgents: [...persistedForgetGuidanceInjected].sort(),
             updatedAt: Date.now(),
           },
           null,
@@ -450,11 +488,13 @@ export async function apply(ctx, config = {}) {
   }
   const autoLoadInjected = new WeakMap();
   const guidanceInjected = new WeakMap();
+  const forgetGuidanceInjected = new WeakMap();
 
   // 加载时预标记现有 agent（thinking-anchor 同款）：自动载入和固定指引都视为
   // 已注入。重启后恢复的会话即使不在持久化标记里（例如标记文件晚于会话创建、
   // 或 id 格式差异），也不会被重复注入；持久化标记继续兜底「重启后晚于插件
-  // 加载才恢复的会话」。
+  // 加载才恢复的会话」。注意：遗忘指引是新功能，不预标记旧会话——旧会话若
+  // 首次使用 memory_search 仍应收到一次；重复注入由 hasInjectedBefore 兜底。
   try {
     const agents = ctx.get("agents");
     if (agents !== undefined && agents !== null && typeof agents.list === "function") {
@@ -476,7 +516,7 @@ export async function apply(ctx, config = {}) {
     let records;
     try {
       records = await memory.list({
-        status: "auto",
+        status: "applied",
         autoLoad: true,
         projectRoot: projectRootOf({ agent }),
       });
@@ -548,7 +588,8 @@ export async function apply(ctx, config = {}) {
         return { ok: true, value: metaValue(record) };
       }
       if (endpoint === "status") {
-        const status = payload?.status === "suggest" ? "suggest" : "auto";
+        const status =
+          payload?.status === "ignored" || payload?.status === "suggest" ? "ignored" : "applied";
         const record = await memory.setStatus(String(payload?.id), status);
         return { ok: true, value: metaValue(record) };
       }
@@ -607,6 +648,29 @@ export async function apply(ctx, config = {}) {
         : "";
     return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), ctx.get("roundMinimal"));
   };
+  /** 首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
+   *  整段覆盖时不再追加（兼容旧配置）；guidanceForget 可覆盖默认遗忘指引。 */
+  const forgetGuidanceText = (agent) => {
+    const current = source();
+    if (current === null || typeof current !== "object" || current.enabled === false) return "";
+    const legacy =
+      current !== null && typeof current === "object" && typeof current.guidance === "string"
+        ? current.guidance.trim()
+        : "";
+    if (legacy.length > 0) return ""; // 旧字段 guidance：整段覆盖（兼容旧配置）
+    const settings = getSettings();
+    let kazSettings;
+    try {
+      kazSettings = settings === undefined ? undefined : settings.get(settingsNamespace("kaz-mode"));
+    } catch {
+      kazSettings = undefined;
+    }
+    const forget =
+      current !== null && typeof current === "object" && typeof current.guidanceForget === "string"
+        ? current.guidanceForget
+        : "";
+    return composeForgetGuidance(ctx.get("toolGrouping"), kazSettings, { forget }, agent, ctx.get("tools"), ctx.get("roundMinimal"));
+  };
   /** 尝试把本插件给模型发送的信息上报给 round-display 显示插件（best-effort）。
    *  服务不存在时静默跳过，不影响主流程。 */
   function reportRoundDisplay(agent, content) {
@@ -637,12 +701,18 @@ export async function apply(ctx, config = {}) {
     return "";
   }
 
-  /** 会话里是否已发生第一次工具调用。 */
-  function hasToolCall(agent) {
+  /** 会话里是否已发生第一次工具调用；传入 toolName 时只匹配指定工具。 */
+  function hasToolCall(agent, toolName) {
     try {
       const events = agent?.session?.events;
       if (!Array.isArray(events)) return false;
-      return events.some((event) => event !== null && typeof event === "object" && event.type === "tool/call");
+      return events.some((event) => {
+        if (event === null || typeof event !== "object" || event.type !== "tool/call") return false;
+        if (toolName === undefined) return true;
+        const data = event.data;
+        const name = data !== null && typeof data === "object" ? data.name : undefined;
+        return name === toolName || event.name === toolName;
+      });
     } catch {
       return false;
     }
@@ -737,6 +807,42 @@ export async function apply(ctx, config = {}) {
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
   });
 
+  // ---- 遗忘指引：首次 memory_search 之后以上下文消息注入一次 ----
+  // 提醒模型清理已完成、不再需要保留的任务记忆；每会话只注入一次，跨重启去重
+  // 与固定指引同机制（persistedForgetGuidanceInjected / hasInjectedBefore）。
+  ctx.on("agent/pre-step", async (payload, next) => {
+    const decision = await next();
+    if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
+    const agent = payload?.agent;
+    if (agent === null || agent === undefined || typeof agent !== "object") return decision;
+    if (forgetGuidanceInjected.has(agent)) return decision;
+    // 跨重启去重：该会话此前已注入过遗忘指引 → 跳过。
+    if (agent.id !== undefined && persistedForgetGuidanceInjected.has(String(agent.id))) return decision;
+    // 最终防线：会话日志里已出现过 kaz-memory 遗忘指引记录 → 跳过。
+    if (hasInjectedBefore(agent, "forget-guidance")) return decision;
+    // 首次 memory_search 之后才注入。
+    if (!hasToolCall(agent, "memory_search")) return decision;
+    const text = forgetGuidanceText(agent);
+    if (typeof text !== "string" || text.trim().length === 0) return decision;
+    let message;
+    try {
+      message = createUserMessage({
+        content: [{ type: "text", text }],
+        source: { kind: "plugin", plugin: "kaz-memory", form: "forget-guidance" },
+      });
+    } catch (error) {
+      ctx.logger.warn(`[kaz-memory] 构造遗忘指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
+      return decision;
+    }
+    forgetGuidanceInjected.set(agent, true);
+    if (agent.id !== undefined) {
+      persistedForgetGuidanceInjected.add(String(agent.id));
+      persistInjected();
+    }
+    reportRoundDisplay(agent, text);
+    return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
+  });
+
   // ---- 组装层兜底：无条件移除基础英文记忆指引（tool:memory）----
   // kaz-memory 不再注册 tool:memory:kaz-memory 系统提示段；固定指引改为首轮
   // 工具调用后以上下文消息注入。这里保留全模式兜底：任何会话、任何模式都
@@ -750,12 +856,12 @@ export async function apply(ctx, config = {}) {
     return next();
   });
 
-  // ---- 四工具（与 @max-null/dsh-memory 同名同 schema 同行为） ----
+  // ---- 五工具（与 @max-null/dsh-memory 同名同 schema 同行为；memory_update 为扩展） ----
   ctx.tools.register(
     defineTool({
       name: "memory_save",
       description:
-        "记录一条跨会话记忆作为「建议」（suggested）。它不会自动生效——必须由人在 Web 面板确认后才变为 auto；模型不得把建议当作已确认。namespace=project 时存入当前项目文件夹（<项目>/.dsh/storages/memory_project.json）。",
+        "记录一条跨会话记忆作为「待确认」（pending）。它不会自动生效——必须由人在 Web 面板确认后才变为 applied；模型不得把待确认记忆当作已生效。namespace=project 时存入当前项目文件夹（<项目>/.dsh/storages/memory_project.json）。",
       parameters: {
         content: { type: "string", required: true, description: "记忆正文（纯文本）。" },
         namespace: { type: "string", enum: ["global", "project"], description: "适用范围：global 全局 / project 项目文件夹；默认 global。" },
@@ -781,12 +887,40 @@ export async function apply(ctx, config = {}) {
 
   ctx.tools.register(
     defineTool({
+      name: "memory_update",
+      description:
+        "按 id 修改一条已存在的记忆：可更新正文 content、标签 keywords、标题 name。修改 applied 记忆的正文时，该记忆会自动降级为 pending，需要人工再次确认；只改标签/标题不会降级。id 取自 memory_list 或 memory_search。",
+      parameters: {
+        id: { type: "string", required: true, description: "要修改的记忆 id（取自 memory_list 或 memory_search）。" },
+        content: { type: "string", description: "新的记忆正文（纯文本）。" },
+        keywords: { type: "array", items: { type: "string" }, description: "新的标签数组；留空数组可清空标签。" },
+        name: { type: "string", description: "新的标题/名称；留空字符串可清空并回退到从正文自动推导。" },
+      },
+      output: {
+        schema: RECORD_SCHEMA,
+        render: (_args, value) => renderJson(value),
+      },
+      execute(args, _exec) {
+        return Promise.resolve(
+          memory.update(String(args.id), {
+            ...(args.content === undefined ? {} : { content: args.content }),
+            ...(args.keywords === undefined ? {} : { keywords: args.keywords }),
+            ...(args.name === undefined ? {} : { name: args.name }),
+          }),
+        ).then(recordValue);
+      },
+      presentCall: (args) => present("更新记忆", "other", args.id),
+    }),
+  );
+
+  ctx.tools.register(
+    defineTool({
       name: "memory_list",
       description:
         "列出所有记忆，每条只返回 id/namespace/status/autoLoad/名称（名称取标题行或首行、超长截断 ≤140 字），不含正文和 keywords。想看全文用 memory_search。",
       parameters: {
         namespace: { type: "string", enum: ["global", "project"], description: "限定某个命名空间；project = 当前项目文件夹的记忆。" },
-        status: { type: "string", enum: ["suggested", "auto", "suggest"], description: "限定某个状态。" },
+        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "限定某个状态。" },
       },
       output: {
         schema: { type: "array", items: LIST_RECORD_SCHEMA },
@@ -813,7 +947,7 @@ export async function apply(ctx, config = {}) {
       parameters: {
         query: { type: "string", required: true, description: "关键字查询。" },
         namespace: { type: "string", enum: ["global", "project"], description: "限定某个命名空间；project = 当前项目文件夹的记忆。" },
-        status: { type: "string", enum: ["suggested", "auto", "suggest"], description: "限定某个状态。" },
+        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "限定某个状态。" },
       },
       output: {
         schema: { type: "array", items: HIT_SCHEMA },

@@ -2,7 +2,7 @@
  * The memory service (`ctx.memory`): durable plaintext records over two
  * storage roots — `global` in the harness home, `project` in the current
  * project folder (`.dsh/`), so project memory follows the repository. A record
- * is always created `suggested` and becomes effective only through `setStatus`.
+ * is always created `pending` and becomes effective only through `setStatus`.
  *
  * Project memory is PER-PROJECT-FOLDER: each distinct project root gets its
  * own `memory_project.json` under `<project>/.dsh/storages/`, opened lazily
@@ -29,9 +29,20 @@ import { bm25Scores } from "./bm25.js";
 export function MemoryId(id) {
     return id;
 }
+/** 旧状态 → 新状态兼容映射：suggested→pending、suggest→ignored、auto→applied。 */
+const STATUS_ALIASES = {
+    suggested: 'pending',
+    suggest: 'ignored',
+    auto: 'applied',
+};
+/** 把任意旧/新状态值规整为新状态值；未知值原样返回。 */
+export function normalizeStatus(status) {
+    return STATUS_ALIASES[status] ?? status;
+}
 const blockSchema = z.object({
     namespace: z.enum(['global', 'project']),
-    status: z.enum(['suggested', 'auto', 'suggest']),
+    // 同时接受旧值，保证旧 JSON 可读；对外统一返回 pending/ignored/applied。
+    status: z.enum(['pending', 'ignored', 'applied', 'suggested', 'suggest', 'auto']),
     autoLoad: z.boolean().default(false),
     name: z.string().default(''),
     content: z.string(),
@@ -60,7 +71,12 @@ function deriveName(content, max = 140) {
     return head.length > max ? head.slice(0, max) + '…' : head;
 }
 function toRecord(id, block, projectRoot) {
-    return { id: MemoryId(id), ...block, ...(projectRoot === undefined ? {} : { projectRoot }) };
+    return {
+        id: MemoryId(id),
+        ...block,
+        status: normalizeStatus(block.status),
+        ...(projectRoot === undefined ? {} : { projectRoot }),
+    };
 }
 /** Harness-home root for `global` memories. */
 function globalRoot() {
@@ -168,14 +184,14 @@ export class MemoryEngine extends Service {
     projectRoots() {
         return [...this.projectEntries.keys()];
     }
-    /** Create one record in `suggested` status — never self-promoting. */
+    /** Create one record in `pending` status — never self-promoting. */
     async remember(input) {
         const namespace = input.namespace ?? 'global';
         const id = randomUUID();
         const now = Date.now();
         const block = {
             namespace,
-            status: 'suggested',
+            status: 'pending',
             autoLoad: false,
             name: deriveName(input.content),
             content: input.content,
@@ -198,8 +214,9 @@ export class MemoryEngine extends Service {
     }
     async list(filter = {}) {
         const records = await this.allRecords(filter?.namespace, filter?.projectRoot);
+        const status = filter?.status === undefined ? undefined : normalizeStatus(filter.status);
         return records.filter(record =>
-            (filter?.status === undefined || record.status === filter.status) &&
+            (status === undefined || record.status === status) &&
             (filter?.autoLoad === undefined || (record.autoLoad === true) === (filter.autoLoad === true)));
     }
     async search(query, filter = {}) {
@@ -226,31 +243,71 @@ export class MemoryEngine extends Service {
         return false;
     }
     async setStatus(id, status) {
+        const next = normalizeStatus(status);
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
-            const updated = { ...global, status, updatedAt: Date.now() };
+            const updated = { ...global, status: next, updatedAt: Date.now() };
             await this.requireTable('global').put(id, updated);
             const record = toRecord(id, updated);
-            this.ctx.emit('memory/changed', { operation: 'status', id, status });
+            this.ctx.emit('memory/changed', { operation: 'status', id, status: next });
             return record;
         }
         for (const [root, entry] of this.projectEntries) {
             const block = entry.table.get(id);
             if (block !== undefined) {
-                const updated = { ...block, status, updatedAt: Date.now() };
+                const updated = { ...block, status: next, updatedAt: Date.now() };
                 await entry.table.put(id, updated);
                 const record = toRecord(id, updated, root);
-                this.ctx.emit('memory/changed', { operation: 'status', id, status, projectRoot: root });
+                this.ctx.emit('memory/changed', { operation: 'status', id, status: next, projectRoot: root });
                 return record;
             }
         }
         throw new Error(`cannot set status of unknown memory '${id}'`);
     }
+    /**
+     * Update an existing record's content / keywords / name.
+     * If an `applied` record's content changes, it is demoted to `pending` so a
+     * human can re-confirm the new body; metadata-only edits keep the status.
+     */
+    async update(id, patch = {}) {
+        const applyPatch = (block) => {
+            const contentChanged = typeof patch.content === 'string' && patch.content !== block.content;
+            const content = contentChanged ? patch.content : block.content;
+            const name = typeof patch.name === 'string'
+                ? patch.name.trim()
+                : (contentChanged ? deriveName(content) : block.name);
+            const keywords = Array.isArray(patch.keywords)
+                ? patch.keywords.map((keyword) => String(keyword).toLowerCase())
+                : block.keywords;
+            const currentStatus = normalizeStatus(block.status);
+            const status = currentStatus === 'applied' && contentChanged ? 'pending' : currentStatus;
+            return { ...block, content, name, keywords, status, updatedAt: Date.now() };
+        };
+        const global = this.requireTable('global').get(id);
+        if (global !== undefined) {
+            const updated = applyPatch(global);
+            await this.requireTable('global').put(id, updated);
+            const record = toRecord(id, updated);
+            this.ctx.emit('memory/changed', { operation: 'updated', id, record });
+            return record;
+        }
+        for (const [root, entry] of this.projectEntries) {
+            const block = entry.table.get(id);
+            if (block !== undefined) {
+                const updated = applyPatch(block);
+                await entry.table.put(id, updated);
+                const record = toRecord(id, updated, root);
+                this.ctx.emit('memory/changed', { operation: 'updated', id, record, projectRoot: root });
+                return record;
+            }
+        }
+        throw new Error(`cannot update unknown memory '${id}'`);
+    }
     /** Mark one record as auto-loading (injected when memory_search first becomes usable) or not. */
     async setAutoLoad(id, autoLoad) {
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
-            const updated = { ...global, autoLoad: autoLoad === true, updatedAt: Date.now() };
+            const updated = { ...global, status: normalizeStatus(global.status), autoLoad: autoLoad === true, updatedAt: Date.now() };
             await this.requireTable('global').put(id, updated);
             const record = toRecord(id, updated);
             this.ctx.emit('memory/changed', { operation: 'autoLoad', id, autoLoad: updated.autoLoad });
@@ -259,7 +316,7 @@ export class MemoryEngine extends Service {
         for (const [root, entry] of this.projectEntries) {
             const block = entry.table.get(id);
             if (block !== undefined) {
-                const updated = { ...block, autoLoad: autoLoad === true, updatedAt: Date.now() };
+                const updated = { ...block, status: normalizeStatus(block.status), autoLoad: autoLoad === true, updatedAt: Date.now() };
                 await entry.table.put(id, updated);
                 const record = toRecord(id, updated, root);
                 this.ctx.emit('memory/changed', { operation: 'autoLoad', id, autoLoad: updated.autoLoad, projectRoot: root });
@@ -271,7 +328,7 @@ export class MemoryEngine extends Service {
     /** Rename one record (display name persisted in JSON). */
     async setName(id, name) {
         const clean = String(name ?? '').trim();
-        const update = (block) => ({ ...block, name: clean, updatedAt: Date.now() });
+        const update = (block) => ({ ...block, status: normalizeStatus(block.status), name: clean, updatedAt: Date.now() });
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
             const updated = update(global);

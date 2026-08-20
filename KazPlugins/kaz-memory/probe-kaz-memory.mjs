@@ -56,7 +56,7 @@ function makeMemoryEngine(records) {
       const rec = {
         id: "new-" + (list.length + 1),
         namespace: input.namespace ?? "global",
-        status: "suggested",
+        status: "pending",
         content: input.content,
         keywords: input.keywords ?? [],
         createdAt: Date.now(),
@@ -70,6 +70,17 @@ function makeMemoryEngine(records) {
       const before = list.length;
       list = list.filter((r) => r.id !== id);
       return Promise.resolve(list.length < before);
+    },
+    update(id, patch = {}) {
+      const rec = list.find((r) => r.id === id);
+      if (rec === undefined) return Promise.reject(new Error(`cannot update unknown memory '${id}'`));
+      const contentChanged = typeof patch.content === "string" && patch.content !== rec.content;
+      if (contentChanged) rec.content = patch.content;
+      if (Array.isArray(patch.keywords)) rec.keywords = patch.keywords.map((k) => String(k).toLowerCase());
+      if (typeof patch.name === "string") rec.name = patch.name.trim();
+      if (contentChanged && (rec.status === "applied" || rec.status === "auto")) rec.status = "pending";
+      rec.updatedAt = Date.now();
+      return Promise.resolve(rec);
     },
     setStatus(id, status) {
       const rec = list.find((r) => r.id === id);
@@ -144,7 +155,7 @@ const records = [
   {
     id: "m1",
     namespace: "global",
-    status: "auto",
+    status: "applied",
     name: "关于 Kaczev 的相处约定",
     content: "# 关于 Kaczev 的相处约定\n\n- 任何时候都可以重启 dsh；\n- 喜欢鲸鱼（蹭蹭）（戳戳）。",
     keywords: ["kaczev", "鲸鱼"],
@@ -154,7 +165,7 @@ const records = [
   {
     id: "m2",
     namespace: "project",
-    status: "suggested",
+    status: "pending",
     content: "项目约定：PowerShell 中文编码坑\n\n读写中文文件必须 -Encoding UTF8。",
     keywords: ["powershell", "编码"],
     createdAt: now - 1000,
@@ -164,7 +175,7 @@ const records = [
   {
     id: "m3",
     namespace: "global",
-    status: "auto",
+    status: "applied",
     content: "没有标题的记忆内容，第一行就是很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长的正文。",
     keywords: ["long"],
     createdAt: now - 3000,
@@ -173,7 +184,7 @@ const records = [
   {
     id: "m4",
     namespace: "project",
-    status: "auto",
+    status: "applied",
     content: "# 另一个项目的约定\n\n仅属于 projB 的记忆。",
     keywords: ["projb"],
     createdAt: now - 500,
@@ -277,6 +288,8 @@ check("① 超长名称截断到 140 字 + …", listAll.every((item) => item.na
 check("① namespace 过滤生效", (await listTool.execute({ namespace: "project" }, execProjA)).every((item) => item.namespace === "project"));
 const projBList = await listTool.execute({}, execProjB);
 check("① 项目 B 上下文只看到全局 + B 自己的项目记忆（m1/m3/m4）", Array.isArray(projBList) && projBList.length === 3 && projBList.some((item) => item.id === "m4") && !projBList.some((item) => item.id === "m2"));
+check("① memory_list 默认不按 status/autoLoad 过滤（pending 与 applied 都返回，autoLoad 字段恒为 boolean）", listAll.some((item) => item.status === "pending") && listAll.some((item) => item.status === "applied") && listAll.every((item) => typeof item.autoLoad === "boolean"));
+check("① memory_list status=applied 过滤只回 applied", (await listTool.execute({ status: "applied" }, execProjA)).every((item) => item.status === "applied"));
 
 // ② memory_search：返回全文，且项目隔离生效
 const searchTool = registeredTools.get("memory_search");
@@ -320,6 +333,36 @@ function guidanceTextOf(decision) {
 function hasGuidance(decision) {
   return guidanceTextOf(decision).length > 0;
 }
+function forgetGuidanceTextOf(decision) {
+  const messages = Array.isArray(decision?.messages) ? decision.messages : [];
+  for (const message of messages) {
+    const source = message !== null && typeof message === "object" ? message.source : undefined;
+    const isForgetSource =
+      source !== null &&
+      typeof source === "object" &&
+      source.kind === "plugin" &&
+      source.plugin === "kaz-memory" &&
+      source.form === "forget-guidance";
+    const blocks = message !== null && typeof message === "object" ? message.content : undefined;
+    if (Array.isArray(blocks)) {
+      for (const block of blocks) {
+        if (
+          block !== null &&
+          typeof block === "object" &&
+          block.type === "text" &&
+          typeof block.text === "string" &&
+          (isForgetSource || block.text.includes("We need to forget memories (memory_forget)"))
+        ) {
+          return block.text;
+        }
+      }
+    }
+  }
+  return "";
+}
+function hasForgetGuidance(decision) {
+  return forgetGuidanceTextOf(decision).length > 0;
+}
 async function runPreStep(agent, step = 2, messages = []) {
   const handlers = listeners.get("agent/pre-step") ?? [];
   let decision = { kind: "enter", messages };
@@ -348,6 +391,19 @@ check(
 const preAgain = await runPreStep(afterToolAgent, 3);
 check("③ 同会话只注入一次", hasGuidance(preAgain) === false);
 
+// ③d 首次 memory_search 后注入遗忘指引（固定指引仍照常，各自只一次）
+const searchToolAgent = { id: "guidance-search-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+const preSearchTool = await runPreStep(searchToolAgent, 2);
+check("③d 首次 memory_search 后注入遗忘指引", hasForgetGuidance(preSearchTool) === true);
+check("③d 遗忘指引使用 [标题] > < 消息格式", forgetGuidanceTextOf(preSearchTool).startsWith("[kaz-memory guidance]") && forgetGuidanceTextOf(preSearchTool).includes("\n>\n") && forgetGuidanceTextOf(preSearchTool).trimEnd().endsWith("<"));
+check("③d 遗忘指引包含 memory_forget 清理已完成任务", forgetGuidanceTextOf(preSearchTool).includes("We need to forget memories (memory_forget)"));
+const preSearchToolAgain = await runPreStep(searchToolAgent, 3);
+check("③d 同会话遗忘指引只注入一次", hasForgetGuidance(preSearchToolAgain) === false);
+const searchDataAgent = { id: "guidance-search-data", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", data: { name: "memory_search" } }] } };
+check("③d tool/call 的 data.name 也能触发遗忘指引", hasForgetGuidance(await runPreStep(searchDataAgent, 2)) === true);
+const pwshAgentForget = { id: "guidance-pwsh-no-forget", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+check("③d 非 memory_search 工具调用不触发遗忘指引", hasForgetGuidance(await runPreStep(pwshAgentForget, 2)) === false);
+
 // ③b guidanceHead 覆盖总述行；guidanceSearch 等字段保留兼容但不再生效
 await settings.update("kaz-memory", { guidanceHead: "Custom head line", guidanceSearch: "Custom search line" });
 await settle();
@@ -370,6 +426,21 @@ await settings.update("kaz-memory", { guidance: "" });
 await settle();
 const dynamicAgent = { id: "guidance-dynamic", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
 check("③c 清空旧字段后恢复动态拼装", guidanceTextOf(await runPreStep(dynamicAgent, 2)).startsWith("[kaz-memory guidance]"));
+
+// ③d2 guidanceForget 覆盖遗忘指引；旧字段 guidance 整段覆盖时不再追加
+await settings.update("kaz-memory", { guidanceForget: "Custom forget line" });
+await settle();
+const customForgetAgent = { id: "guidance-forget-custom", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+const gForget = forgetGuidanceTextOf(await runPreStep(customForgetAgent, 2));
+check("③d2 guidanceForget 覆盖遗忘指引", gForget.includes("Custom forget line") && !gForget.includes("We need to forget memories (memory_forget)"));
+await settings.update("kaz-memory", { guidanceForget: "" });
+await settle();
+await settings.update("kaz-memory", { guidance: "整段覆盖的指引文本" });
+await settle();
+const legacyForgetAgent = { id: "guidance-forget-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+check("③d2 旧字段 guidance 整段覆盖时不追加遗忘指引", hasForgetGuidance(await runPreStep(legacyForgetAgent, 2)) === false);
+await settings.update("kaz-memory", { guidance: "" });
+await settle();
 
 // ④ RPC list：只回元数据（含 name/autoLoad，无正文），按 updatedAt 倒序
 check("④ RPC 通道已注册", typeof rpcHandler === "function");
@@ -394,6 +465,16 @@ const afterSaveB = await listTool.execute({ namespace: "project" }, execProjB);
 const afterSaveA = await listTool.execute({ namespace: "project" }, execProjA);
 check("⑥ 项目 B 能看到新记忆、项目 A 看不到", afterSaveB.some((item) => item.id === saved.id) && !afterSaveA.some((item) => item.id === saved.id));
 
+// ⑥b memory_update：可改正文/标签/标题；applied 正文变更降级 pending
+const updateTool = registeredTools.get("memory_update");
+check("⑥b memory_update 已注册", updateTool !== undefined);
+const metaOnly = await updateTool.execute({ id: "m1", keywords: ["kaczev", "鲸鱼", "updated"], name: "新标题" }, execProjA);
+check("⑥b 只改标签/标题时 applied 保持 applied", metaOnly !== undefined && metaOnly.status === "applied" && metaOnly.keywords.includes("updated") && metaOnly.name === "新标题");
+const contentChange = await updateTool.execute({ id: "m1", content: "# 关于 Kaczev 的新内容\n\n更新后的正文。" }, execProjA);
+check("⑥b 修改 applied 正文后降级为 pending", contentChange !== undefined && contentChange.status === "pending" && contentChange.content.includes("新内容"));
+const unknownUpdate = await updateTool.execute({ id: "no-such-id" }, execProjA).then(() => null, () => "rejected");
+check("⑥b 不存在的 id 会拒绝", unknownUpdate === "rejected");
+
 // ⑦ RPC list paths + openFolder
 check("⑦ RPC list paths.global 出全局记忆文件夹", listRpc.ok === true && listRpc.value.paths.global === "C:/mock/.dsh/storages");
 check("⑦ RPC list paths.project 出当前项目记忆文件夹", listRpc.ok === true && typeof listRpc.value.paths.project === "string" && listRpc.value.paths.project.endsWith("/.dsh/storages") && listRpc.value.paths.project.includes("projA"));
@@ -409,10 +490,12 @@ check("⑧ RPC list(project=projB) 显示 m4 不含 m2", listB !== null && listB
 check("⑧ RPC list paths.project 指向新项目文件夹", listB.ok === true && typeof listB.value.paths.project === "string" && listB.value.paths.project.includes("projB"));
 
 // ⑧b RPC 状态 / 自动载入 / 改名 / 删除
-const statusRpc = await rpcHandler("status", { id: "m2", status: "auto", project: "C:/projA" });
-check("⑧b RPC status 把 m2 置为 auto", statusRpc !== null && statusRpc.ok === true && statusRpc.value.status === "auto");
+const statusRpc = await rpcHandler("status", { id: "m2", status: "applied", project: "C:/projA" });
+check("⑧b RPC status 把 m2 置为 applied", statusRpc !== null && statusRpc.ok === true && statusRpc.value.status === "applied");
 const autoRpc = await rpcHandler("autoLoad", { id: "m2", autoLoad: true, project: "C:/projA" });
 check("⑧b RPC autoLoad 把 m2 置为自动载入", autoRpc !== null && autoRpc.ok === true && autoRpc.value.autoLoad === true);
+const listAfterAuto = await listTool.execute({}, execProjA);
+check("⑧b memory_list 同时包含 autoLoad=true 与 autoLoad=false 的记忆", listAfterAuto.some((item) => item.id === "m2" && item.autoLoad === true) && listAfterAuto.some((item) => item.autoLoad === false));
 const renameRpc = await rpcHandler("rename", { id: "m1", name: "关于 Kaczev 的新名字", project: "C:/projA" });
 check("⑧b RPC rename 修改 m1 名称", renameRpc !== null && renameRpc.ok === true && renameRpc.value.name === "关于 Kaczev 的新名字");
 const forgetRpc = await rpcHandler("forget", { id: "m3", project: "C:/projA" });
@@ -425,6 +508,8 @@ const forgetDisabledAgent = { id: "guidance-forget-disabled", session: { header:
 const g8 = guidanceTextOf(await runPreStep(forgetDisabledAgent, 2));
 check("⑨ memory_forget 被禁用、memory_search 可用时仍发固定提示", g8.includes("We need to search the memory (memory_search)"));
 check("⑨ 固定提示不含任何工具说明行", !g8.includes("memory_search：") && !g8.includes("memory_forget："));
+const forgetDisabledSearchAgent = { id: "guidance-forget-disabled-search", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+check("⑨ memory_forget 被禁用时不发遗忘指引", hasForgetGuidance(await runPreStep(forgetDisabledSearchAgent, 2)) === false);
 base.get = originalGet;
 
 // ⑨b memory_search 单独被禁用（其余记忆工具仍可用）→ 不发指引
@@ -478,7 +563,7 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
 // ⑫ 自动载入：每会话一次 + 跨重启持久化（2026-08-19 修复）
 {
   const autoRecords = [
-    { id: "auto-1", namespace: "global", status: "auto", autoLoad: true, name: "Auto Mem", content: "# Auto Mem\n\nAuto content.", keywords: [], createdAt: 1, updatedAt: 1 },
+    { id: "auto-1", namespace: "global", status: "applied", autoLoad: true, name: "Auto Mem", content: "# Auto Mem\n\nAuto content.", keywords: [], createdAt: 1, updatedAt: 1 },
   ];
   const storePath = join(tmpdir(), "km-auto-" + Date.now() + ".json");
   const agentA = { id: "session-test-A", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 2 } }] } };
@@ -559,7 +644,7 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   // 自动载入门控（独立 harness，捕获注册期 settings 实例）
   const storeOff = join(tmpdir(), "km-off-" + Date.now() + ".json");
   const offRecords = [
-    { id: "auto-off", namespace: "global", status: "auto", autoLoad: true, name: "Auto Mem", content: "# Auto Mem\n\nAuto content.", keywords: [], createdAt: 1, updatedAt: 1 },
+    { id: "auto-off", namespace: "global", status: "applied", autoLoad: true, name: "Auto Mem", content: "# Auto Mem\n\nAuto content.", keywords: [], createdAt: 1, updatedAt: 1 },
   ];
   const engineOff = makeMemoryEngine(offRecords);
   const lnsOff = new Map();

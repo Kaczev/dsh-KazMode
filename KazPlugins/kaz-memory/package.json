@@ -1,7 +1,7 @@
 {
   "name": "kaz-memory",
   "version": "0.1.0",
-  "description": "Kaz 记忆插件：跨会话明文记忆（memory_save/list/search/forget 四工具 + 人工确认闸门 + 每条记忆可标记「自动载入」）——已确认且标记自动载入的记忆会在 memory_search 首次可用时以上下文注入方式自动注入一次（如 round-minimal 第二轮），其余记忆靠模型主动 memory_search 获取；项目记忆按项目文件夹隔离（<项目>/.dsh/storages/memory_project.json），项目根从 agent 会话 cwd 解析；客户端半在会话头部提供「记忆」按钮、待确认面板、自动载入开关与「打开记忆文件夹」按钮（面板经 portal 定位不被侧边栏裁剪）。",
+  "description": "Kaz 记忆插件：跨会话明文记忆（memory_save/update/list/search/forget 五工具 + 人工确认闸门 + 每条记忆可标记「自动载入」）——已确认且标记自动载入的记忆会在 memory_search 首次可用时以上下文注入方式自动注入一次（如 round-minimal 第二轮），其余记忆靠模型主动 memory_search 获取；项目记忆按项目文件夹隔离（<项目>/.dsh/storages/memory_project.json），项目根从 agent 会话 cwd 解析；客户端半在会话头部提供「记忆」按钮、待确认面板、自动载入开关与「打开记忆文件夹」按钮（面板经 portal 定位不被侧边栏裁剪）。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

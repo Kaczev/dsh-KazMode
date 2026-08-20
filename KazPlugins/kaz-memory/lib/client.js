@@ -22,8 +22,8 @@ window.__ModuleLoader__.load({
 		const inject = ["slots", "connection", "settingsScope"];
 
 		function statusLabel(status) {
-			if (status === "auto") return "已生效";
-			if (status === "suggest") return "已忽略";
+			if (status === "applied" || status === "auto") return "已生效";
+			if (status === "ignored" || status === "suggest") return "已忽略";
 			return "待确认";
 		}
 
@@ -76,6 +76,8 @@ window.__ModuleLoader__.load({
 .kzm-act-danger{border-color:rgba(220,38,38,.45);color:#dc2626}
 .kzm-section-title{display:flex;align-items:center;gap:8px;margin:6px 0 0;font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary)}
 .kzm-status{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);flex:none}
+.kzm-status[data-status="applied"]{color:#16a34a;border-color:rgba(22,163,74,.45)}
+.kzm-status[data-status="pending"]{color:#d97706;border-color:rgba(217,119,6,.45)}
 .kzm-status[data-status="auto"]{color:#16a34a;border-color:rgba(22,163,74,.45)}
 .kzm-status[data-status="suggested"]{color:#d97706;border-color:rgba(217,119,6,.45)}
 .kzm-autoload-badge{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid rgba(139,92,246,.55);color:#8b5cf6;flex:none;font-weight:600}
@@ -193,7 +195,7 @@ window.__ModuleLoader__.load({
 					return () => clearInterval(timer);
 				}, [refresh]);
 
-				const pending = memories.filter((item) => item.status === "suggested");
+				const pending = memories.filter((item) => item.status === "pending" || item.status === "suggested");
 
 				const run = async (endpoint, id, extra) => {
 					setBusy(true);
@@ -239,7 +241,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"模型只能提交「建议」，是否生效由你决定：确认生效（auto）/ 忽略（suggest）/ 删除。数据（含名称）全部存在记忆 JSON 文件里；「自动载入」的记忆会在 memory_search 首次可用时自动注入上下文（每会话一次）。",
+						"模型只能提交「待确认」，是否生效由你决定：确认生效（applied）/ 忽略（ignored）/ 删除。数据（含名称）全部存在记忆 JSON 文件里；「自动载入」的记忆会在对话开始时自动注入上下文（每会话一次）。",
 						loadErrorMsg.length > 0 &&
 							createElement(
 								"p",
@@ -319,12 +321,12 @@ window.__ModuleLoader__.load({
 								),
 								createElement(
 									"button",
-									{ type: "button", className: "kzm-act kzm-act-good", disabled: busy, onClick: () => void run("status", item.id, { status: "auto" }) },
+									{ type: "button", className: "kzm-act kzm-act-good", disabled: busy, onClick: () => void run("status", item.id, { status: "applied" }) },
 									"确认生效",
 								),
 								createElement(
 									"button",
-									{ type: "button", className: "kzm-act", disabled: busy, onClick: () => void run("status", item.id, { status: "suggest" }) },
+									{ type: "button", className: "kzm-act", disabled: busy, onClick: () => void run("status", item.id, { status: "ignored" }) },
 									"忽略",
 								),
 								createElement(
@@ -458,7 +460,7 @@ window.__ModuleLoader__.load({
 					return () => clearInterval(timer);
 				}, [refreshCount]);
 
-				const count = memories.filter((item) => item.status === "suggested").length;
+				const count = memories.filter((item) => item.status === "pending" || item.status === "suggested").length;
 
 				const rootRef = useRef(null);
 				const [panelPos, setPanelPos] = useState(null);

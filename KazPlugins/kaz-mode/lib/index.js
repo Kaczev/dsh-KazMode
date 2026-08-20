@@ -81,7 +81,7 @@ const DEFAULT_TOOL_WHITELIST = [
   "workflow", "ralph",
   "ask_user_question", "todo_write", "web_search",
   "str_replace_editor",
-  "memory_save", "memory_list", "memory_search", "memory_forget",
+  "memory_save", "memory_list", "memory_search", "memory_forget", "memory_update"
 ];
 
 /** 进入 Kaz 时默认关闭的被管理插件 id 清单（当前为空——全部默认启用）。 */
