@@ -1,3 +1,14 @@
+# Kaz模式说明
+
+本模式的基本思路是维持极简模式的提示词，同时首轮工具被调用之前与极简模式几乎相同
+拥有记忆组件，模型在相同话题下越用越好用（因为有些过去得到的经验模型会存下来）
+
+各插件目录下都有README.md，写明了它们的作用
+
+默认不开启（不需要开启）：
+kaz-diag // 给模型加入一个可以汇报Kaz模式状态的工具，调试的时候用
+thinking-anchor // 使用提示词提醒模型要遵循We need思维，用英语思考（无需开启，因为我发现不开启也是这样）
+
 # dsh-KazMode —— Kaz 模式全家桶
 
 本仓库保存 **Kaz 模式全家桶**：Kaczev 在 dsh（DeepSeek Harness）里使用的全部插件和 `kaz` 预设。  
@@ -11,13 +22,14 @@
 
 ## 1. 仓库内容
 
-仓库根目录已经包含全家桶的两个源文件夹：
+仓库根目录已经包含全家桶的主要源文件夹（另有两个可选工具/预设目录）：
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（10 个插件）
+├── KazPlugins/                     # 插件全家桶（11 个插件）
 │   ├── deepseek-default-model/
 │   ├── first-round-hints/
+│   ├── kaz-agent-preset-display/
 │   ├── kaz-diag/
 │   ├── kaz-memory/
 │   ├── kaz-mode/
@@ -26,9 +38,14 @@ dsh-KazMode/
 │   ├── round-display/
 │   ├── round-minimal/
 │   └── thinking-anchor/
-└── kaz/                            # kaz 预设（不是 KazPlugins/kaz-mode/kaz-preset）
-    ├── preset.yml
-    └── agent.cordis.yml
+├── kaz/                            # kaz 预设（不是 KazPlugins/kaz-mode/kaz-preset）
+│   ├── preset.yml
+│   └── agent.cordis.yml
+├── 其它好用的工具/                   # 可选：DSH 实用插件
+│   └── dsh-deepseek-balance/
+└── 其它好用的预设/                   # 可选：实验性 Router 预设
+    ├── router-spec/
+    └── router-standard/
 ```
 
 插件清单与作用：
@@ -40,6 +57,7 @@ dsh-KazMode/
 | `plugin-filter` | `plugin-filter` | 工具过滤：移除或禁用指定工具 |
 | `thinking-anchor` | `thinking-anchor` | 思考锚点：新对话注入完整思考协议，之后每轮短提醒 |
 | `first-round-hints` | `first-round-hints` | 首轮注入 pwsh 使用要点等提示 |
+| `kaz-agent-preset-display` | `kaz-agent-preset-display` | 修正新对话 hero 上 agent preset 按钮显示；默认常驻开启，不受 Kaz 模式开关影响 |
 | `output-beep` | `output-beep` | 模型输出完毕 / 提问时播放提示音 |
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 默认模型参数：provider / model / reasoningEffort / generation_kwargs |
@@ -100,6 +118,7 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "first-round-hints": "file:KazPlugins/first-round-hints",
+"kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
 "kaz-diag": "file:KazPlugins/kaz-diag",
 "kaz-memory": "file:KazPlugins/kaz-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
@@ -119,6 +138,7 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
   "dependencies": {
     "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
     "first-round-hints": "file:KazPlugins/first-round-hints",
+    "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
     "kaz-diag": "file:KazPlugins/kaz-diag",
     "kaz-memory": "file:KazPlugins/kaz-memory",
     "kaz-mode": "file:KazPlugins/kaz-mode",
@@ -169,6 +189,12 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund
           - tool-subagent-report
           - codex
           - claude-code
+
+- insert:
+    - id: kaz-agent-preset-display
+      name: kaz-agent-preset-display
+      config:
+        enabled: true
 
 - insert:
     - id: round-minimal
@@ -309,6 +335,9 @@ kaz-memory:
 kaz-diag:
   enabled: false
 
+kaz-agent-preset-display:
+  enabled: true
+
 first-round-hints:
   enabled: true
   message: ""
@@ -331,7 +360,7 @@ round-display:
 2. **强刷浏览器页面**（Ctrl+F5 或 Cmd+Shift+R），让客户端插件生效。
 3. 在预设选择器中选择 **Kaz 模式**（`kaz`）。
 4. 验证：
-   - `dsh --profile web --dump-config` 能看到 `kaz-mode`、`round-minimal`、`plugin-filter`、`kaz-memory`、`deepseek-default-model` 等组合行；
+   - `dsh --profile web --dump-config` 能看到 `kaz-mode`、`round-minimal`、`plugin-filter`、`kaz-memory`、`kaz-agent-preset-display`、`deepseek-default-model` 等组合行；
    - 新对话系统提示词固定为 `You are a helpful software engineer assistant.`；
    - 首次工具调用前工具面只有 `pwsh` + `str_replace_editor`；
    - 第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
@@ -340,7 +369,19 @@ round-display:
 
 ---
 
-## 4. DeepSeek 安装时最容易踩的坑
+## 4. 其它好用的工具/预设（可选）
+
+以下内容不是 Kaz 模式的必需部分，按需使用：
+
+| 路径 | 说明 | 安装提示 |
+| --- | --- | --- |
+| `其它好用的工具/dsh-deepseek-balance/` | DeepSeek 账户余额悬浮挂件（独立 DSH Web 插件） | 安装方式见该目录内 `README.md` |
+| `其它好用的预设/router-spec/` | 实验性 Router Spec 预设 | 复制到 `%USERPROFILE%\.dsh\.agent-presets\router-spec\` |
+| `其它好用的预设/router-standard/` | 实验性 Router Standard 预设 | 复制到 `%USERPROFILE%\.dsh\.agent-presets\router-standard\` |
+
+---
+
+## 5. DeepSeek 安装时最容易踩的坑
 
 - **把插件复制到 `plugins` 而不是 `KazPlugins`**：`package.json` 里写的是 `file:KazPlugins/...`，目录不对会找不到包或装成两份。
 - **把预设复制成 `KazPlugins/kaz-mode/kaz-preset`**：那是插件内置的预设副本，不是仓库根目录的 `kaz/` 预设源；预设发现不会递归扫描。
@@ -352,17 +393,19 @@ round-display:
 
 ---
 
-## 5. 相关文件说明
+## 6. 相关文件说明
 
 | 路径 | 说明 |
 | --- | --- |
 | `KazPlugins/<插件名>/package.json` | 每个插件的 npm 包入口 |
 | `KazPlugins/<插件名>/lib/index.js` | 插件宿主逻辑（ESM） |
 | `KazPlugins/<插件名>/lib/client.js` | 部分插件的 Web 客户端逻辑 |
-| `KazPlugins/<插件名>/README.md` | 各插件独立说明 |
+| `KazPlugins/<插件名>/README.md` | 部分插件的独立说明 |
 | `KazPlugins/kaz-mode/kaz-preset/` | kaz-mode 内置的预设副本（安装预设时不从这里取） |
 | `kaz/preset.yml` | `kaz` 预设的显示名称与描述 |
 | `kaz/agent.cordis.yml` | `kaz` 预设的完整 Cordis 组合定义 |
+| `其它好用的工具/` | 可选独立 DSH 工具/插件 |
+| `其它好用的预设/` | 可选实验性 Router 预设 |
 
 ---
 
