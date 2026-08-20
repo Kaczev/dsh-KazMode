@@ -362,6 +362,22 @@ window.__ModuleLoader__.load({
 				return typeof value.default === "string" ? value.default : undefined;
 			}
 
+			/**
+			 * 空白会话没有显式 agentPreset 时，按会话 id 缓存“出现时捕获的默认预设”。
+			 * UI 面板和会话视图联动共用同一份缓存，避免两边捕获时机不同导致显示与实际开关不一致。
+			 */
+			const capturedBlankPresets = new Map();
+			function blankDefaultPresetFor(sessionId) {
+				if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+				if (!capturedBlankPresets.has(sessionId)) {
+					const snap = presetScope !== null ? presetScope.getSnapshot() : null;
+					const captured = currentPresetOf(snap);
+					if (captured === undefined) return null;
+					capturedBlankPresets.set(sessionId, captured);
+				}
+				return capturedBlankPresets.get(sessionId);
+			}
+
 			// ---- 小组件 ----
 			function Toggle({ checked, onChange, disabled, title }) {
 				return createElement("button", {
@@ -1032,6 +1048,15 @@ window.__ModuleLoader__.load({
 				const writable = writableOf(kazSnap);
 				const { sessionId, summary } = useCurrentSession();
 
+				// 有会话（含空白的新建对话）就按“对话”处理：编辑会写入会话专属覆盖。
+				const hasSession = summary !== null && summary !== undefined;
+				const isBlank = hasSession && summary.blank === true;
+				const inEstablished = hasSession && !isBlank;
+				// 空白会话没有显式 agentPreset 时，只在该空白会话出现时捕获一次
+				// agent-presets.default；之后设置里默认预设变化不再影响当前面板。
+				const blankSessionKey = !inEstablished && hasSession ? sessionId : null;
+				const blankDefaultPreset = blankSessionKey !== null ? blankDefaultPresetFor(blankSessionKey) : null;
+
 				const [stateData, setStateData] = useState(null);
 				const refresh = useCallback(async () => {
 					setStateData(null);
@@ -1044,19 +1069,17 @@ window.__ModuleLoader__.load({
 
 				const defaults = stateData !== null && stateData.defaults !== undefined ? stateData.defaults : { nonKaz: {}, kaz: {} };
 				const sessionOverrides = stateData !== null && stateData.session !== null && typeof stateData.session === "object" ? stateData.session : {};
-				// 有会话（含空白的新建对话）就按“对话”处理：编辑会写入会话专属覆盖。
-				const hasSession = summary !== null && summary !== undefined;
-				const isBlank = hasSession && summary.blank === true;
-				const inEstablished = hasSession && !isBlank;
 				// 新建对话页面优先使用空白会话上已暂存/已应用的 agentPreset；
-				// 取不到时再回退到 agent-presets.default。
+				// 取不到时用空白会话出现时捕获的默认预设（不再实时跟随设置）。
 				const newConversationPreset = !inEstablished && hasSession && typeof summary.agentPreset === "string"
 					? summary.agentPreset
 					: undefined;
 				const effectiveKazEnabled = inEstablished
 					? kazEnabled
-					: (newConversationPreset !== undefined ? newConversationPreset === KAZ_PRESET_ID : preset === KAZ_PRESET_ID);
-				const displayPreset = inEstablished ? preset : (newConversationPreset !== undefined ? newConversationPreset : preset);
+					: (newConversationPreset !== undefined ? newConversationPreset === KAZ_PRESET_ID : (blankDefaultPreset !== null ? blankDefaultPreset === KAZ_PRESET_ID : false));
+				const displayPreset = inEstablished
+					? (typeof summary.agentPreset === "string" ? summary.agentPreset : preset)
+					: (newConversationPreset !== undefined ? newConversationPreset : (blankDefaultPreset !== null ? blankDefaultPreset : preset));
 				const mode = effectiveKazEnabled ? "kaz" : "nonKaz";
 				const baseMap = defaults[mode] || {};
 				const effectiveMap = {};
@@ -1225,15 +1248,19 @@ window.__ModuleLoader__.load({
 				const kazValue = valueOf(kazSnap);
 				const preset = currentPresetOf(presetSnap);
 				const kazEnabled = kazValue !== null && kazValue.enabled === true;
-				const { summary } = useCurrentSession();
+				const { sessionId, summary } = useCurrentSession();
 				const isBlank = summary !== null && summary !== undefined && summary.blank === true;
 				const inConversation = summary !== null && summary !== undefined && !isBlank;
+				// 空白会话没有显式 agentPreset 时，只在该空白会话出现时捕获一次
+				// agent-presets.default；之后设置里默认预设变化不再影响当前面板。
+				const blankSessionKey = !inConversation && summary !== null ? sessionId : null;
+				const blankDefaultPreset = blankSessionKey !== null ? blankDefaultPresetFor(blankSessionKey) : null;
 				const newConversationPreset = !inConversation && summary !== null && typeof summary.agentPreset === "string"
 					? summary.agentPreset
 					: undefined;
 				const effectiveKazEnabled = inConversation
 					? kazEnabled
-					: (newConversationPreset !== undefined ? newConversationPreset === KAZ_PRESET_ID : preset === KAZ_PRESET_ID);
+					: (newConversationPreset !== undefined ? newConversationPreset === KAZ_PRESET_ID : (blankDefaultPreset !== null ? blankDefaultPreset === KAZ_PRESET_ID : preset === KAZ_PRESET_ID));
 				const isKaz = preset === KAZ_PRESET_ID;
 				const drifted = isKaz && !effectiveKazEnabled;
 				const compact = wide === false;
@@ -1350,7 +1377,8 @@ window.__ModuleLoader__.load({
 			// 当前查看的会话预设驱动 kaz-mode.enabled：侧边栏切换对话
 			// （A 会话 = Kaz、B 会话 = 极简）时自动同步开关，主机联动随之
 			// 启停插件；同时通过 RPC 把当前会话的插件状态应用到宿主。
-			// 无会话（新对话 hero）或会话未记录预设时不动。
+			// 空白会话没有显式 agentPreset 时，只在第一次看到这个空白会话时
+			// 捕获当时的默认预设并同步一次；之后设置里默认预设变化不再影响它。
 			ctx.inject(["conversation", "sessions"], (scope) => {
 				sessionListBinding = {
 					subscribe: (listener) => scope.sessions.list.subscribe(listener),
@@ -1367,13 +1395,27 @@ window.__ModuleLoader__.load({
 						lastAppliedSessionId = current;
 						void rpcCall("applySession", { sessionId: current });
 					}
-					if (summary === undefined || typeof summary.agentPreset !== "string") return;
 					if (kazScope === null) return;
 					const snap = kazScope.getSnapshot();
 					if (!writableOf(snap)) return;
+
+					// 已有会话 / 空白会话显式选择：以会话自己的 agentPreset 为准。
+					// 空白会话没有显式 agentPreset 时，只在第一次看到这个空白会话时
+					// 捕获当时的默认预设并同步一次；之后设置里默认预设变化不再影响它。
+					let targetPreset;
+					if (summary !== undefined && typeof summary.agentPreset === "string") {
+						targetPreset = summary.agentPreset;
+					} else if (typeof current === "string" && current.length > 0 && summary !== undefined && summary.blank === true) {
+						const captured = blankDefaultPresetFor(current);
+						if (captured === null) return; // 默认预设还没就绪，等下一次 sync
+						targetPreset = captured;
+					} else {
+						return;
+					}
+
 					const value = valueOf(snap);
 					const enabled = value !== null && typeof value === "object" ? value.enabled === true : false;
-					const next = summary.agentPreset === KAZ_PRESET_ID;
+					const next = targetPreset === KAZ_PRESET_ID;
 					if (enabled === next) return;
 					kazScope.set("enabled", next).catch(() => {});
 				};

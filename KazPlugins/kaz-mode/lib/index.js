@@ -675,13 +675,6 @@ export default {
       }
     }
 
-    /** 按 agent-presets.default 同步（previousPreset 的记录由 settings/updated 监听器负责）。 */
-    async function syncFromPreset() {
-      const preset = currentPreset();
-      if (preset === undefined) return;
-      await syncEnabledForPreset(preset);
-    }
-
     /** 记录最近一个非 kaz 预设（按钮"关闭 Kaz"时切回的目标）。 */
     async function recordPreviousPreset(preset) {
       const settings = getSettings();
@@ -920,9 +913,9 @@ export default {
 
     handleChange();
 
-    // 预设联动：监听 agent-presets 命名空间的变化（预设选择器 / 右上角按钮
-    // 写入 default 字段都会触发）。从 prev 里拿到"切换前的预设"记录到
-    // previousPreset，再按新预设同步 kaz-mode.enabled。
+    // 默认预设监听：agent-presets.default 只作为“新建下一个会话”的默认值，
+    // 不驱动当前会话/当前面板。因此这里只维护 previousPreset，不再同步
+    // kaz-mode.enabled（否则改设置里的默认预设会连带改当前会话和插件面板）。
     ctx.on("settings/updated", (ns, next, prev) => {
       try {
         if (ns !== PRESETS_NAMESPACE) return;
@@ -935,9 +928,8 @@ export default {
             recordPreviousPreset(prevPreset);
           }
         }
-        syncFromPreset();
       } catch (error) {
-        ctx.logger.warn(`[kaz-mode] 预设联动处理失败：${safeMessage(error)}`);
+        ctx.logger.warn(`[kaz-mode] 默认预设监听处理失败：${safeMessage(error)}`);
       }
     });
 
@@ -948,10 +940,15 @@ export default {
       void syncEnabledForPreset(agentPreset);
     });
 
-    // 启动时同步：若默认预设已是 kaz（例如重启前就选着），则开启联动。
+    // 启动时同步：只在还没有活跃会话时用默认预设初始化 kaz-mode.enabled；
+    // 若已有当前会话，则交给会话自己的 agentPreset 驱动，避免默认预设覆盖当前会话。
     let startupSynced = false;
     const syncStartupOnce = () => {
       if (startupSynced) return;
+      if (activeSession !== null) {
+        startupSynced = true;
+        return;
+      }
       const preset = currentPreset();
       if (preset === undefined) return;
       startupSynced = true;
