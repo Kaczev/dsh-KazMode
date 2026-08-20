@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
 
 		function apply(ctx) {
 			// ---- 局部样式（随 dsh 主题） ----
-			const css = ".rd-root{position:relative;display:inline-flex;flex-direction:column;align-items:flex-end;font-family:Inter,var(--dsw-font-family)}\n.rd-button{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;line-height:1;white-space:nowrap}\n.rd-button:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-button[data-open=\"true\"]{border-color:var(--dsw-alias-label-tertiary)}\n.rd-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary);flex:none}\n.rd-root[data-count=\"true\"] .rd-dot{background:#16a34a}\n.rd-chevron{color:var(--dsw-alias-label-tertiary);font-size:10px;flex:none}\n.rd-portal{position:fixed;z-index:1300}\n.rd-portal .rd-panel{position:static;top:auto;bottom:auto;left:auto;right:auto;width:100%;box-sizing:border-box}\n.rd-panel{max-height:70vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:8px}\n.rd-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}\n.rd-badge{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);flex:none}\n.rd-note{font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:1.5;margin:2px 0 4px}\n.rd-group{border-top:1px solid var(--dsw-alias-border-l2);padding-top:6px;display:flex;flex-direction:column;gap:4px}\n.rd-group:first-of-type{border-top:none;padding-top:0}\n.rd-group-head{display:flex;align-items:center;gap:8px}\n.rd-plugin{font-size:11px;color:#8b5cf6;border:1px solid rgba(139,92,246,.5);border-radius:8px;padding:1px 6px;flex:none;font-weight:600}\n.rd-turn{font-size:11px;color:var(--dsw-alias-label-tertiary);flex:1;text-align:right}\n.rd-content{font-size:12px;color:var(--dsw-alias-label-primary);line-height:1.6;white-space:pre-wrap;word-break:break-word;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));margin:0}\n.rd-act{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px}\n.rd-act:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-act:disabled{cursor:not-allowed;opacity:.55}\n.rd-tab{display:flex;gap:4px;margin:0}\n.rd-tab-btn{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-tertiary);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px}\n.rd-tab-btn[data-on=\"true\"]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-tertiary)}\n";
+			const css = ".rd-root{position:relative;display:inline-flex;flex-direction:column;align-items:flex-end;font-family:Inter,var(--dsw-font-family)}\n.rd-button{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;line-height:1;white-space:nowrap}\n.rd-button:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-button[data-open=\"true\"]{border-color:var(--dsw-alias-label-tertiary)}\n.rd-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary);flex:none}\n.rd-root[data-count=\"true\"] .rd-dot{background:#16a34a}\n.rd-chevron{color:var(--dsw-alias-label-tertiary);font-size:10px;flex:none}\n.rd-portal{position:fixed;z-index:1300}\n.rd-portal .rd-panel{position:static;top:auto;bottom:auto;left:auto;right:auto;width:100%;box-sizing:border-box}\n.rd-panel{max-height:70vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:8px;transition:opacity .16s ease,transform .16s ease}\n.rd-portal.rd-opening .rd-panel{opacity:1;transform:translateY(0)}\n.rd-portal.rd-closing .rd-panel{opacity:0;transform:translateY(-6px)}\n.rd-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}\n.rd-badge{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);flex:none}\n.rd-note{font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:1.5;margin:2px 0 4px}\n.rd-group{border-top:1px solid var(--dsw-alias-border-l2);padding-top:6px;display:flex;flex-direction:column;gap:4px}\n.rd-group:first-of-type{border-top:none;padding-top:0}\n.rd-group-head{display:flex;align-items:center;gap:8px}\n.rd-plugin{font-size:11px;color:#8b5cf6;border:1px solid rgba(139,92,246,.5);border-radius:8px;padding:1px 6px;flex:none;font-weight:600}\n.rd-turn{font-size:11px;color:var(--dsw-alias-label-tertiary);flex:1;text-align:right}\n.rd-content{font-size:12px;color:var(--dsw-alias-label-primary);line-height:1.6;white-space:pre-wrap;word-break:break-word;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));margin:0}\n.rd-act{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px}\n.rd-act:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-act:disabled{cursor:not-allowed;opacity:.55}\n.rd-tab{display:flex;gap:4px;margin:0}\n.rd-tab-btn{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-tertiary);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px}\n.rd-tab-btn[data-on=\"true\"]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-tertiary)}\n";
 			const tagId = "round-display/styles";
 			if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 				const tag = document.createElement("style");
@@ -223,10 +223,36 @@ window.__ModuleLoader__.load({
 			 */
 			function RoundDisplayButton(props) {
 				const [open, setOpen] = useState(false);
+				const [closing, setClosing] = useState(false);
+				const closeTimer = useRef(null);
 				const sessionId = sessionIdOf(props);
 
 				const rootRef = useRef(null);
 				const [panelPos, setPanelPos] = useState(null);
+
+				const closePanel = useCallback(() => {
+					if (!open) return;
+					setClosing(true);
+					if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+					closeTimer.current = setTimeout(() => {
+						setOpen(false);
+						setClosing(false);
+					}, 160);
+				}, [open]);
+
+				const openPanel = useCallback(() => {
+					if (closeTimer.current !== null) {
+						clearTimeout(closeTimer.current);
+						closeTimer.current = null;
+					}
+					setClosing(false);
+					setOpen(true);
+				}, []);
+
+				useEffect(() => () => {
+					if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+				}, []);
+
 				useLayoutEffect(() => {
 					if (!open) return;
 					const update = () => {
@@ -250,6 +276,18 @@ window.__ModuleLoader__.load({
 					return () => window.removeEventListener("resize", update);
 				}, [open]);
 
+				// 点击面板外的空白区域时平滑收起（与 Kaz 面板、kaz-memory 面板一致）。
+				useEffect(() => {
+					if (!open) return;
+					const onMouseDown = (event) => {
+						if (rootRef.current !== null && rootRef.current.contains(event.target)) return;
+						if (event.target !== null && event.target !== undefined && typeof event.target.closest === "function" && event.target.closest(".rd-panel") !== null) return;
+						closePanel();
+					};
+					document.addEventListener("mousedown", onMouseDown);
+					return () => document.removeEventListener("mousedown", onMouseDown);
+				}, [open, closePanel]);
+
 				return createElement(
 					"div",
 					{ ref: rootRef, className: "rd-root", "data-count": "true" },
@@ -260,18 +298,24 @@ window.__ModuleLoader__.load({
 							className: "rd-button",
 							"data-open": open ? "true" : "false",
 							title: open ? "收起本轮插件注入面板" : "查看本轮 Kaz 插件给模型发送的信息",
-							onClick: () => setOpen((v) => !v),
+							onClick: () => {
+								if (open) closePanel();
+								else openPanel();
+							},
 						},
 						createElement("span", { className: "rd-dot" }),
 						createElement("span", { className: "rd-label" }, "本轮注入"),
 						createElement("span", { className: "rd-chevron" }, open ? "▲" : "▼"),
 					),
-					open &&
+					(open || closing) &&
 						createPortal(
 							createElement(
 								"div",
-								{ className: "rd-portal", style: panelPos !== null ? panelPos : undefined },
-								createElement(RoundDisplayPanel, { sessionId: sessionId, onClose: () => setOpen(false) }),
+								{
+									className: "rd-portal " + (closing ? "rd-closing" : "rd-opening"),
+									style: panelPos !== null ? panelPos : undefined,
+								},
+								createElement(RoundDisplayPanel, { sessionId: sessionId, onClose: closePanel }),
 							),
 							document.body,
 						),
