@@ -363,16 +363,16 @@ function forgetGuidanceTextOf(decision) {
 function hasForgetGuidance(decision) {
   return forgetGuidanceTextOf(decision).length > 0;
 }
-async function runPreStep(agent, step = 2, messages = []) {
+async function runPreStep(agent, step = 2, messages = [], turn = 1) {
   const handlers = listeners.get("agent/pre-step") ?? [];
   let decision = { kind: "enter", messages };
   for (let i = handlers.length - 1; i >= 0; i -= 1) {
-    decision = await handlers[i]({ step, agent }, async () => decision);
+    decision = await handlers[i]({ step, turn, agent }, async () => decision);
   }
   return decision;
 }
-const beforeToolAgent = { id: "guidance-before-tool", session: { header: { cwd: "C:/projA" }, events: [] } };
-const afterToolAgent = { id: "guidance-after-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const beforeToolAgent = { id: "guidance-before-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }] } };
+const afterToolAgent = { id: "guidance-after-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 
 const preBefore = await runPreStep(beforeToolAgent, 2);
 check("③ 首次工具调用前不注入指引", hasGuidance(preBefore) === false);
@@ -380,7 +380,7 @@ const preAfter = await runPreStep(afterToolAgent, 2);
 const guidanceText = guidanceTextOf(preAfter);
 check("③ 首轮工具调用后注入指引", hasGuidance(preAfter) === true);
 check("③ 指引使用 [标题] > < 消息格式", guidanceText.startsWith("[kaz-memory guidance]") && guidanceText.includes("\n>\n") && guidanceText.trimEnd().endsWith("<"));
-check("③ 指引含主动行动式总述行（先查记忆 + 存重要事实）", guidanceText.includes("We need to search the memory (memory_search)") && guidanceText.includes("save important facts we learn (memory_save)"));
+check("③ 指引含主动行动式总述行（先查记忆 + 存重要事实）", guidanceText.includes("We need to search the memory (memory_search)") && guidanceText.includes("save memories (memory_save)"));
 check(
   "③ 指引只含固定总述行（无四工具说明行）",
   !guidanceText.includes("memory_search：") &&
@@ -388,56 +388,69 @@ check(
     !guidanceText.includes("memory_list：") &&
     !guidanceText.includes("memory_forget："),
 );
-const preAgain = await runPreStep(afterToolAgent, 3);
-check("③ 同会话只注入一次", hasGuidance(preAgain) === false);
+const preAgain = await runPreStep(afterToolAgent, 3, [], 1);
+check("③ 同一轮内不重复注入", hasGuidance(preAgain) === false);
+const preNextTurn = await runPreStep(afterToolAgent, 1, [], 2);
+check("③ 首次发送后的下一轮开头重复注入固定指引", hasGuidance(preNextTurn) === true);
+const preNextTurnLater = await runPreStep(afterToolAgent, 2, [], 2);
+check("③ 下一轮非开头 step 不重复注入", hasGuidance(preNextTurnLater) === false);
+const resumedHeadAgent = { id: "guidance-resumed", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "user/message", data: { source: { kind: "plugin", plugin: "kaz-memory", form: "guidance" }, content: [{ type: "text", text: "[kaz-memory guidance]" }] } }, { type: "turn/start", data: { turn: 2 } }] } };
+check("③ 重启后从会话历史推导首次发送轮次并在下一轮开头重复", hasGuidance(await runPreStep(resumedHeadAgent, 1, [], 2)) === true);
 
-// ③d 首次 memory_search 后注入遗忘指引（固定指引仍照常，各自只一次）
-const searchToolAgent = { id: "guidance-search-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+// ③d 每轮首次 memory_search 后注入遗忘指引
+const searchToolAgent = { id: "guidance-search-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 const preSearchTool = await runPreStep(searchToolAgent, 2);
 check("③d 首次 memory_search 后注入遗忘指引", hasForgetGuidance(preSearchTool) === true);
 check("③d 遗忘指引使用 [标题] > < 消息格式", forgetGuidanceTextOf(preSearchTool).startsWith("[kaz-memory guidance]") && forgetGuidanceTextOf(preSearchTool).includes("\n>\n") && forgetGuidanceTextOf(preSearchTool).trimEnd().endsWith("<"));
 check("③d 遗忘指引包含 memory_forget 清理已完成任务", forgetGuidanceTextOf(preSearchTool).includes("We need to forget memories (memory_forget)"));
-const preSearchToolAgain = await runPreStep(searchToolAgent, 3);
-check("③d 同会话遗忘指引只注入一次", hasForgetGuidance(preSearchToolAgain) === false);
-const searchDataAgent = { id: "guidance-search-data", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", data: { name: "memory_search" } }] } };
+const preSearchToolAgain = await runPreStep(searchToolAgent, 3, [], 1);
+check("③d 同一轮内遗忘指引只注入一次", hasForgetGuidance(preSearchToolAgain) === false);
+const searchDataAgent = { id: "guidance-search-data", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", data: { name: "memory_search" } }] } };
 check("③d tool/call 的 data.name 也能触发遗忘指引", hasForgetGuidance(await runPreStep(searchDataAgent, 2)) === true);
-const pwshAgentForget = { id: "guidance-pwsh-no-forget", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const pwshAgentForget = { id: "guidance-pwsh-no-forget", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③d 非 memory_search 工具调用不触发遗忘指引", hasForgetGuidance(await runPreStep(pwshAgentForget, 2)) === false);
+const searchAgainTurnAgent = { id: "guidance-search-again-turn", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }, { type: "turn/start", data: { turn: 2 } }, { type: "tool/call", name: "memory_search" }] } };
+const preSearchTurn1 = await runPreStep(searchAgainTurnAgent, 2, [], 1);
+check("③d 第 1 轮 memory_search 后注入遗忘指引", hasForgetGuidance(preSearchTurn1) === true);
+const preSearchTurn2 = await runPreStep(searchAgainTurnAgent, 2, [], 2);
+check("③d 第 2 轮再次 memory_search 后仍注入遗忘指引", hasForgetGuidance(preSearchTurn2) === true);
+const preSearchTurn2Again = await runPreStep(searchAgainTurnAgent, 3, [], 2);
+check("③d 第 2 轮内不重复注入遗忘指引", hasForgetGuidance(preSearchTurn2Again) === false);
 
 // ③b guidanceHead 覆盖总述行；guidanceSearch 等字段保留兼容但不再生效
 await settings.update("kaz-memory", { guidanceHead: "Custom head line", guidanceSearch: "Custom search line" });
 await settle();
-const headAgent = { id: "guidance-head", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const headAgent = { id: "guidance-head", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 const gHead = guidanceTextOf(await runPreStep(headAgent, 2));
 check("③b guidanceHead 覆盖总述行", gHead.includes("Custom head line") && !gHead.includes("search the memory (memory_search)"));
 check("③b guidanceSearch 不再生效（工具细节并入工具描述）", !gHead.includes("Custom search line") && !gHead.includes("memory_search："));
 check("③b 其余工具说明行不再发送", !gHead.includes("memory_save：") && !gHead.includes("memory_forget："));
 await settings.update("kaz-memory", { guidanceHead: "", guidanceSearch: "" });
 await settle();
-const defaultAgent = { id: "guidance-default", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const defaultAgent = { id: "guidance-default", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③b 清空后恢复内置默认", guidanceTextOf(await runPreStep(defaultAgent, 2)).includes("search the memory (memory_search)"));
 
 // ③c 旧字段 guidance（整段覆盖）仍优先
 await settings.update("kaz-memory", { guidance: "整段覆盖的指引文本" });
 await settle();
-const legacyAgent = { id: "guidance-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const legacyAgent = { id: "guidance-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③c 旧字段 guidance 整段覆盖", guidanceTextOf(await runPreStep(legacyAgent, 2)) === "整段覆盖的指引文本");
 await settings.update("kaz-memory", { guidance: "" });
 await settle();
-const dynamicAgent = { id: "guidance-dynamic", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const dynamicAgent = { id: "guidance-dynamic", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③c 清空旧字段后恢复动态拼装", guidanceTextOf(await runPreStep(dynamicAgent, 2)).startsWith("[kaz-memory guidance]"));
 
 // ③d2 guidanceForget 覆盖遗忘指引；旧字段 guidance 整段覆盖时不再追加
 await settings.update("kaz-memory", { guidanceForget: "Custom forget line" });
 await settle();
-const customForgetAgent = { id: "guidance-forget-custom", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+const customForgetAgent = { id: "guidance-forget-custom", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 const gForget = forgetGuidanceTextOf(await runPreStep(customForgetAgent, 2));
 check("③d2 guidanceForget 覆盖遗忘指引", gForget.includes("Custom forget line") && !gForget.includes("We need to forget memories (memory_forget)"));
 await settings.update("kaz-memory", { guidanceForget: "" });
 await settle();
 await settings.update("kaz-memory", { guidance: "整段覆盖的指引文本" });
 await settle();
-const legacyForgetAgent = { id: "guidance-forget-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+const legacyForgetAgent = { id: "guidance-forget-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 check("③d2 旧字段 guidance 整段覆盖时不追加遗忘指引", hasForgetGuidance(await runPreStep(legacyForgetAgent, 2)) === false);
 await settings.update("kaz-memory", { guidance: "" });
 await settle();
@@ -504,17 +517,17 @@ check("⑧b RPC forget 删除 m3", forgetRpc !== null && forgetRpc.ok === true &
 // ⑨ memory_forget 被禁用、但 memory_search 仍可用（注册 + schemas 都有）→ 仍发指引
 const originalGet = base.get;
 base.get = (name) => (name === "toolGrouping" ? { isRegistered: (n) => n !== "memory_forget" } : originalGet(name));
-const forgetDisabledAgent = { id: "guidance-forget-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const forgetDisabledAgent = { id: "guidance-forget-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 const g8 = guidanceTextOf(await runPreStep(forgetDisabledAgent, 2));
 check("⑨ memory_forget 被禁用、memory_search 可用时仍发固定提示", g8.includes("We need to search the memory (memory_search)"));
 check("⑨ 固定提示不含任何工具说明行", !g8.includes("memory_search：") && !g8.includes("memory_forget："));
-const forgetDisabledSearchAgent = { id: "guidance-forget-disabled-search", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "memory_search" }] } };
+const forgetDisabledSearchAgent = { id: "guidance-forget-disabled-search", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 check("⑨ memory_forget 被禁用时不发遗忘指引", hasForgetGuidance(await runPreStep(forgetDisabledSearchAgent, 2)) === false);
 base.get = originalGet;
 
 // ⑨b memory_search 单独被禁用（其余记忆工具仍可用）→ 不发指引
 base.get = (name) => (name === "toolGrouping" ? { isRegistered: (n) => n !== "memory_search" } : originalGet(name));
-const searchDisabledAgent = { id: "guidance-search-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const searchDisabledAgent = { id: "guidance-search-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("⑨b memory_search 单独被禁用时不发指引（其余记忆工具可用也不发）", hasGuidance(await runPreStep(searchDisabledAgent, 2)) === false);
 base.get = originalGet;
 
@@ -530,13 +543,13 @@ base.get = (name) =>
             .map((name) => ({ name, description: "", parameters: {} })),
       }
     : originalGet(name);
-const noSchemaAgent = { id: "guidance-no-schema", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const noSchemaAgent = { id: "guidance-no-schema", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("⑨c memory_search 不在 schemas 时不发指引", hasGuidance(await runPreStep(noSchemaAgent, 2)) === false);
 base.get = originalGet;
 
 // ⑩ 四个工具全被禁用 → 不发指引
 base.get = (name) => (name === "toolGrouping" ? { isRegistered: () => false } : originalGet(name));
-const allDisabledAgent = { id: "guidance-all-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+const allDisabledAgent = { id: "guidance-all-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("⑩ 四个工具全被禁用时不发指引", hasGuidance(await runPreStep(allDisabledAgent, 2)) === false);
 base.get = originalGet;
 
@@ -634,11 +647,11 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   // 指引门控（主 harness）
   await settings.update("kaz-memory", { enabled: false });
   await settle();
-  const disabledGuidanceAgent = { id: "guidance-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+  const disabledGuidanceAgent = { id: "guidance-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
   check("⑬ 关闭后记忆指引为空", hasGuidance(await runPreStep(disabledGuidanceAgent, 2)) === false);
   await settings.update("kaz-memory", { enabled: true });
   await settle();
-  const enabledGuidanceAgent = { id: "guidance-enabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "tool/call", name: "pwsh" }] } };
+  const enabledGuidanceAgent = { id: "guidance-enabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
   check("⑬ 重新开启后指引恢复", guidanceTextOf(await runPreStep(enabledGuidanceAgent, 2)).startsWith("[kaz-memory guidance]"));
 
   // 自动载入门控（独立 harness，捕获注册期 settings 实例）

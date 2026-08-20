@@ -1,12 +1,12 @@
 # kaz-memory —— 带「自动载入」的独立记忆插件
 
-与 `@max-null/dsh-memory` 同功能的跨会话明文记忆；默认**不注入记忆正文**，但首轮工具调用后会注入一条记忆指引，首次使用 `memory_search` 后会再注入一条清理遗忘指引；对每条记忆可标记「自动载入」，在**对话开始时**自动注入一次（2026-08 重构：不再等 memory_search 首次可用）：
+与 `@max-null/dsh-memory` 同功能的跨会话明文记忆；默认**不注入记忆正文**，但首轮工具调用后会注入一条记忆指引，并在后续每一轮开头重复注入；每一轮首次使用 `memory_search` 后会再注入一条清理遗忘指引；对每条记忆可标记「自动载入」，在**对话开始时**自动注入一次（2026-08 重构：不再等 memory_search 首次可用）：
 
 | | @max-null/dsh-memory | kaz-memory |
 | --- | --- | --- |
 | 引擎 / 存储 | MemoryEngine，`$DSH_HOME/storages/memory.json`（global）+ `<cwd>/.dsh/storages/memory_project.json`（project） | **vendored 同一引擎（MIT），格式不变**；global 存 `$DSH_HOME/storages/memory.json`，project 按**项目文件夹**各存一份 `<项目>/.dsh/storages/memory_project.json`（2026-08-17 起不再用 `process.cwd()`） |
 | 五工具 | memory_save / memory_update / memory_list / memory_search / memory_forget | `memory_update` 可更新正文/标签/标题；`memory_list` 只返回 id/namespace/status/名称（不含正文与 keywords），memory_search 返回全文 |
-| 固定指引 | tool:memory | 首轮工具调用后以上下文消息注入一次固定指引；首次 `memory_search` 后再注入一次遗忘指引；已确认且标记自动载入的记忆会在对话开始时自动注入一次；之后需要更完整/精确记忆时主动 memory_search |
+| 固定指引 | tool:memory | 首轮工具调用后以上下文消息注入固定指引，并从下一轮起在每轮开头重复注入；每轮首次 `memory_search` 后注入一次遗忘指引；已确认且标记自动载入的记忆会在对话开始时自动注入一次；之后需要更完整/精确记忆时主动 memory_search |
 | 上下文注入 | `memory:recall` 把 applied 记忆逐条注入系统提示 | **按需注入一次**：已确认（applied）且标记「自动载入」（autoLoad）的记忆，在**对话开始**（首个 pre-step）以上下文注入方式注入一次；其余记忆靠模型主动 memory_search |
 | 人工确认闸门 | setStatus 仅存于服务层，**无 UI / 工具 / CLI（断头路）** | 客户端半：会话头部「记忆」按钮（Kaz 按钮左侧，order -2）+ 面板（待确认：确认生效/忽略/删除；**全部记忆：点标题按需取全文 / 改名 / 删除**），经**专用 Connection RPC 通道 `/kaz-memory`（loopback）**读写——settings.yaml 不再承载任何记忆存储信息；模型没有任何对应工具 |
 
@@ -56,17 +56,17 @@
   `document.body`，按按钮矩形 fixed 定位、自动在视口内收拢（宽度不足时向上/
   向左回退），侧边栏再窄也不会挡住面板。
 - **消息格式（2026-08-17 起精简；2026-08-21 改为主动行动式措辞；2026-08-22
-  改为首轮工具调用后注入）**：记忆指引
-  是**首轮工具调用之后以上下文消息注入一次**的**固定短提示**——`[kaz-memory guidance] / > / 内容 / <` 信封格式，只发
+  改为首轮工具调用后注入，后续每轮开头重复）**：记忆指引
+  是**首轮工具调用之后以上下文消息注入、并从下一轮起在每轮开头重复**的**固定短提示**——`[kaz-memory guidance] / > / 内容 / <` 信封格式，只发
   一行 We need 风格英文总述（**主动行动式**：任务开始时先用 memory_search 查记忆、
   学到重要事实后用 memory_save 存下来——而不是等遇到难题才想起记忆）；记忆工具
   的具体用法由各工具描述自带，不再逐行重复 A/B/C/D。**仅当 memory_search 在当前
   环境确实可调用时发送**（存在且可直接使用，或 Code Mode 下经 run_code SDK 可调用；
   注册了但工具面/白名单不含它、首轮极简等不可调用场景一律不发）；不可用即返回空串，
-  不向模型发无意义的指引。**首次 `memory_search` 之后**还会以同一信封格式再注入
+  不向模型发无意义的指引。**每一轮第一次 `memory_search` 之后**还会以同一信封格式再注入
   **一条遗忘指引**（`We need to forget memories (memory_forget) related to tasks that
   have been completed and no longer need to be retained.`），提醒模型清理已完成且不再
-  需要保留的任务记忆；该指引同样每会话只注入一次，且仅在 `memory_search` 与
+  需要保留的任务记忆；该指引按 turn 注入，每个 turn 内只注入一次，且仅在 `memory_search` 与
   `memory_forget` 都可用时发送。Kaz 模式会滤掉 systemPrompt 段，因此固定指引不再注册
   `tool:memory:kaz-memory` 系统提示段，改为 `agent/pre-step` 合成用户消息注入；
   部署基础英文记忆指引段（`tool:memory`）仍在组装层**无条件移除**。
@@ -78,7 +78,7 @@
   `guidance`（旧字段，整段覆盖，非空时完全取代固定提示与遗忘指引，兼容保留）与
   `guidanceHead`（固定提示总述行覆盖，留空 = 内置默认）与
   `guidanceForget`（遗忘指引覆盖，留空 = 内置默认；此前保留兼容但不再生效，
-  现随首次 memory_search 后的遗忘指引恢复生效）；`guidanceSearch` /
+  现随每轮首次 memory_search 后的遗忘指引恢复生效）；`guidanceSearch` /
   `guidanceSave` / `guidanceList` 仍保留兼容但**不再生效**（工具细节
   已并入各工具描述）。Kaz 模式面板的 kaz-memory 行提供 `enabled` 开关与
   `guidanceHead` 配置入口。
@@ -158,9 +158,10 @@ node "$env:USERPROFILE\.dsh\profiles\web\plugins\kaz-memory\probe-engine.mjs"
 9. 项目记忆按项目隔离：在 A 工作区 `memory_save(namespace=project)` 后，
    A 工作区的 `memory_list`/`memory_search` 能看到，B 工作区看不到；json 落在
    `<A>/.dsh/storages/memory_project.json`，且桌面不再出现 `.dsh`。
-10. 首次调用 `memory_search` 后，会话中注入一次遗忘指引（`[kaz-memory guidance]` 信封、
-    `We need to forget memories (memory_forget) ...`）；非 memory_search 工具调用不会触发；
-    `memory_forget` 不可用或插件关闭时不发。
+10. 每一轮第一次调用 `memory_search` 后，注入一次遗忘指引（`[kaz-memory guidance]` 信封、
+    `We need to forget memories (memory_forget) ...`），每个 turn 内不重复；非 memory_search
+    工具调用不会触发；`memory_forget` 不可用或插件关闭时不发。固定指引首轮工具调用后注入，
+    并从下一轮起在每轮开头重复注入。
 11. `memory_update` 可按 id 修改正文/标签/标题；修改 `applied` 记忆的正文后状态降级为
     `pending`，只改标签/标题保持 `applied`；不存在的 id 报错。
 

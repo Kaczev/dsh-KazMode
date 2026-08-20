@@ -4,9 +4,12 @@
 //   * ctx.memory 引擎 + memory_save / memory_update / memory_list / memory_search /
 //     memory_forget 五工具（引擎 vendored 自 @max-null/dsh-memory，MIT，存储位置与格式不变）
 //   * 每条记忆 JSON 里持久化 name（保存/确认时自动从正文生成，面板可改名）
-//   * tool:memory 固定指引在首轮工具调用之后以上下文消息注入一次；首次
-//     memory_search 之后会再注入一次遗忘指引（memory_forget 清理已完成任务）；
-//     已确认且标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）
+//   * tool:memory 固定指引在首轮工具调用之后以上下文消息注入；第一次发送该
+//     指引的轮次记为 n，从第 n+1 轮起的每个 turn 开头（step === 1）都会再次注入
+//     同一固定指引；
+//   * 每一轮对话第一次调用 memory_search 之后，都会注入一次遗忘指引
+//     （memory_forget 清理已完成任务）；
+//   * 已确认且标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）
 //     以上下文注入方式注入一次（2026-08 重构：不再等 memory_search 首次可用）
 //   * memory_list 只返回 id/namespace/status/autoLoad/名称，不返回正文与
 //     keywords——避免列表调用把记忆灌进上下文；memory_search 才返回全文。
@@ -146,7 +149,7 @@ const GUIDANCE_HEAD = [
   "We need to save memories (memory_save) with a summary name and concise, sharp content — shared with the user, persists across conversations."
 ].join("\n");
 
-/** 首次 memory_search 之后注入的遗忘指引（每次会话一次）。 */
+/** 每轮首次 memory_search 之后注入的遗忘指引。 */
 const GUIDANCE_FORGET = [
  "We need to forget memories (memory_forget) related to tasks that have been completed and no longer need to be retained.",
  "We need to update memories (memory_update) when the stored content is incorrect, when the content needs to be changed, or when the memory's name or keywords are no longer accurate."
@@ -234,7 +237,7 @@ function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc,
 }
 
 /**
- * 拼装首次 memory_search 之后注入的 [kaz-memory guidance] 上下文消息：
+ * 拼装每轮首次 memory_search 之后注入的 [kaz-memory guidance] 上下文消息：
  *  提醒模型用 memory_forget 清理已完成、不再需要保留的任务记忆。
  *  仅在 memory_search 与 memory_forget 当前环境都确实可调用时发送。
  *
@@ -261,7 +264,7 @@ const SETTINGS_SCHEMA = z.object({
   /** 固定提示总述行覆盖：留空 = 内置默认。 */
   guidanceHead: z.string().default(""),
   /** 以下三个字段保留兼容（2026-08-17 起不再生效）：工具细节已并入各工具描述。
-   *  guidanceForget 自首次 memory_search 遗忘指引起恢复生效（覆盖默认遗忘指引）。 */
+   *  guidanceForget 自每轮首次 memory_search 遗忘指引起恢复生效（覆盖默认遗忘指引）。 */
   guidanceSearch: z.string().default(""),
   guidanceSave: z.string().default(""),
   guidanceList: z.string().default(""),
@@ -417,21 +420,18 @@ export async function apply(ctx, config = {}) {
     return lastProjectRoot;
   }
 
-  // ---- 自动载入 + 固定指引：已注入标记持久化 ----
+  // ---- 自动载入：已注入标记持久化 ----
   // 2026-08-19 修复（Kaczev 报告）：autoLoadInjected 是进程内 WeakMap，dsh 重启
   // 后清空，恢复的会话会把 memory_search 误判为「首次可用」而重复注入。修复：
   // 把已注入的 agent id 持久化到 <DSH_HOME>/storages/kaz-memory-auto-injected.json
   // （默认 ~/.dsh/storages；config.autoInjectedStore 可覆盖，探针用临时文件），
   // 重启后同一会话不再注入。仅在实际注入成功后才落标。
-  // 2026-08-21 扩展：固定指引（[kaz-memory guidance]）的 guidanceInjected 同样
-  // 是进程内 WeakMap，重启后也会重复注入；这里把两种注入标记一起持久化。
+  // 固定指引与遗忘指引改为按 turn 重复注入，不再做「每会话一次」的持久化去重。
   const AUTO_INJECTED_STORE =
     typeof config.autoInjectedStore === "string" && config.autoInjectedStore.trim().length > 0
       ? config.autoInjectedStore.trim()
       : join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", "kaz-memory-auto-injected.json");
   const persistedInjected = new Set();
-  const persistedGuidanceInjected = new Set();
-  const persistedForgetGuidanceInjected = new Set();
   try {
     if (existsSync(AUTO_INJECTED_STORE)) {
       // 兼容手工编辑/工具写入时可能带上的 UTF-8 BOM（﻿）
@@ -445,22 +445,6 @@ export async function apply(ctx, config = {}) {
         // 兼容 PowerShell ConvertTo-Json 单元素数组被解包成字符串的写法
         persistedInjected.add(parsed.agents);
       }
-      if (parsed !== null && typeof parsed === "object" && Array.isArray(parsed.guidanceAgents)) {
-        for (const id of parsed.guidanceAgents) {
-          if (typeof id === "string" && id.length > 0) persistedGuidanceInjected.add(id);
-        }
-      } else if (parsed !== null && typeof parsed === "object" && typeof parsed.guidanceAgents === "string" && parsed.guidanceAgents.length > 0) {
-        // 兼容 PowerShell ConvertTo-Json 单元素数组被解包成字符串的写法
-        persistedGuidanceInjected.add(parsed.guidanceAgents);
-      }
-      if (parsed !== null && typeof parsed === "object" && Array.isArray(parsed.forgetGuidanceAgents)) {
-        for (const id of parsed.forgetGuidanceAgents) {
-          if (typeof id === "string" && id.length > 0) persistedForgetGuidanceInjected.add(id);
-        }
-      } else if (parsed !== null && typeof parsed === "object" && typeof parsed.forgetGuidanceAgents === "string" && parsed.forgetGuidanceAgents.length > 0) {
-        // 兼容 PowerShell ConvertTo-Json 单元素数组被解包成字符串的写法
-        persistedForgetGuidanceInjected.add(parsed.forgetGuidanceAgents);
-      }
     }
   } catch (error) {
     ctx.logger.warn(`[kaz-memory] 读取注入标记失败：${error instanceof Error ? error.message : String(error)}`);
@@ -473,8 +457,6 @@ export async function apply(ctx, config = {}) {
         JSON.stringify(
           {
             agents: [...persistedInjected].sort(),
-            guidanceAgents: [...persistedGuidanceInjected].sort(),
-            forgetGuidanceAgents: [...persistedForgetGuidanceInjected].sort(),
             updatedAt: Date.now(),
           },
           null,
@@ -487,23 +469,23 @@ export async function apply(ctx, config = {}) {
     }
   }
   const autoLoadInjected = new WeakMap();
-  const guidanceInjected = new WeakMap();
-  const forgetGuidanceInjected = new WeakMap();
+  /** 进程内缓存：某 agent 首次注入固定指引的 turn；用于避免重复扫描事件。 */
+  const guidanceFirstTurnCache = new WeakMap();
+  /** 进程内缓存：某 agent 最近一次已注入遗忘指引的 turn。 */
+  const forgetInjectedTurn = new WeakMap();
 
-  // 加载时预标记现有 agent（thinking-anchor 同款）：自动载入和固定指引都视为
-  // 已注入。重启后恢复的会话即使不在持久化标记里（例如标记文件晚于会话创建、
+  // 加载时预标记现有 agent（thinking-anchor 同款）：自动载入视为已注入。
+  // 重启后恢复的会话即使不在持久化标记里（例如标记文件晚于会话创建、
   // 或 id 格式差异），也不会被重复注入；持久化标记继续兜底「重启后晚于插件
-  // 加载才恢复的会话」。注意：遗忘指引是新功能，不预标记旧会话——旧会话若
-  // 首次使用 memory_search 仍应收到一次；重复注入由 hasInjectedBefore 兜底。
+  // 加载才恢复的会话」。固定指引/遗忘指引不再预标记——新行为按 turn 注入，
+  // 恢复的会话也能从后续轮次开始收到提醒。
   try {
     const agents = ctx.get("agents");
     if (agents !== undefined && agents !== null && typeof agents.list === "function") {
       for (const agent of agents.list()) {
         if (agent !== null && typeof agent === "object" && agent.id !== undefined) {
           autoLoadInjected.set(agent, true);
-          guidanceInjected.set(agent, true);
           persistedInjected.add(String(agent.id));
-          persistedGuidanceInjected.add(String(agent.id));
         }
       }
       persistInjected();
@@ -622,9 +604,9 @@ export async function apply(ctx, config = {}) {
     ctx.logger.warn("[kaz-memory] connection 服务不可用，面板 RPC 通道未注册（仅工具与自动载入可用）");
   }
 
-  // ---- 首轮工具调用后的指引注入：settings 里 guidance 留空则发固定总述行
+  // ---- 固定指引文本：settings 里 guidance 留空则发固定总述行
   // （工具细节由工具描述自带，不再重复 A/B/C/D 行）；仅在 memory_search 当前
-  // 环境可调用时，以合成用户消息注入一次。Kaz 模式会把 systemPrompt 段全部滤掉，
+  // 环境可调用时以合成用户消息注入。Kaz 模式会把 systemPrompt 段全部滤掉，
   // 所以这里不再注册 tool:memory:kaz-memory 段，改为 pre-step 上下文注入。----
   const guidanceText = (agent) => {
     const current = source();
@@ -648,7 +630,7 @@ export async function apply(ctx, config = {}) {
         : "";
     return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), ctx.get("roundMinimal"));
   };
-  /** 首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
+  /** 每轮首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
    *  整段覆盖时不再追加（兼容旧配置）；guidanceForget 可覆盖默认遗忘指引。 */
   const forgetGuidanceText = (agent) => {
     const current = source();
@@ -701,18 +683,94 @@ export async function apply(ctx, config = {}) {
     return "";
   }
 
+  /** 从 tool/call 事件里取工具名（兼容 event.name 与 event.data.name）。 */
+  function toolCallNameOf(event) {
+    if (event === null || typeof event !== "object" || event.type !== "tool/call") return undefined;
+    const data = event.data;
+    const name = data !== null && typeof data === "object" ? data.name : undefined;
+    return typeof name === "string" ? name : typeof event.name === "string" ? event.name : undefined;
+  }
+
   /** 会话里是否已发生第一次工具调用；传入 toolName 时只匹配指定工具。 */
   function hasToolCall(agent, toolName) {
     try {
       const events = agent?.session?.events;
       if (!Array.isArray(events)) return false;
       return events.some((event) => {
-        if (event === null || typeof event !== "object" || event.type !== "tool/call") return false;
-        if (toolName === undefined) return true;
-        const data = event.data;
-        const name = data !== null && typeof data === "object" ? data.name : undefined;
-        return name === toolName || event.name === toolName;
+        const name = toolCallNameOf(event);
+        if (name === undefined) return false;
+        return toolName === undefined || name === toolName;
       });
+    } catch {
+      return false;
+    }
+  }
+
+  /** 指定 turn 内是否已发生过工具调用；传入 toolName 时只匹配指定工具。 */
+  function hasToolCallInTurn(agent, toolName, turn) {
+    try {
+      const events = agent?.session?.events;
+      if (!Array.isArray(events)) return false;
+      let turnStartIndex = -1;
+      for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        if (
+          event !== null &&
+          typeof event === "object" &&
+          event.type === "turn/start" &&
+          event.data !== null &&
+          typeof event.data === "object" &&
+          event.data.turn === turn
+        ) {
+          turnStartIndex = index;
+        }
+      }
+      if (turnStartIndex === -1) return false;
+      for (let index = turnStartIndex + 1; index < events.length; index += 1) {
+        const name = toolCallNameOf(events[index]);
+        if (name !== undefined && (toolName === undefined || name === toolName)) return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 指定 turn 内是否已注入过 kaz-memory 的指定 form 消息。
+   * 用于跨重启/同 turn 内防重复：以 turn/start 事件切分轮次。
+   */
+  function hasInjectedInTurn(agent, form, turn) {
+    try {
+      const events = agent?.session?.events;
+      if (!Array.isArray(events)) return false;
+      let turnStartIndex = -1;
+      for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        if (
+          event !== null &&
+          typeof event === "object" &&
+          event.type === "turn/start" &&
+          event.data !== null &&
+          typeof event.data === "object" &&
+          event.data.turn === turn
+        ) {
+          turnStartIndex = index;
+        }
+      }
+      if (turnStartIndex === -1) return false;
+      for (let index = turnStartIndex + 1; index < events.length; index += 1) {
+        const event = events[index];
+        if (event === null || typeof event !== "object" || event.type !== "user/message") continue;
+        const data = event.data;
+        if (data === null || typeof data !== "object") continue;
+        const source = data.source;
+        if (source === null || typeof source !== "object") continue;
+        if (source.kind !== "plugin" || source.plugin !== "kaz-memory") continue;
+        if (form !== undefined && source.form !== form) continue;
+        return true;
+      }
+      return false;
     } catch {
       return false;
     }
@@ -720,8 +778,8 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 会话日志里是否已注入过 kaz-memory 的消息（自动载入 recall 或固定指引 guidance）。
-   * 这是跨重启去重的最终防线：无论标记文件是否及时写入、agent 是否在插件加载时
-   * 已被枚举到，只要会话历史里已经出现过 kaz-memory 的注入记录，就不再注入。
+   * 这是自动载入跨重启去重的最终防线：只要会话历史里已经出现过 kaz-memory 的注入记录，
+   * 就不再注入。
    */
   function hasInjectedBefore(agent, form) {
     try {
@@ -739,6 +797,49 @@ export async function apply(ctx, config = {}) {
       });
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * 首次发送固定指引（source.form === "guidance"）所在的轮次。
+   * 从会话事件里直接推导：找到第一条 guidance 用户消息，再找它前面最近的 turn/start。
+   * 找不到返回 undefined。
+   */
+  function firstGuidanceTurnOf(agent) {
+    try {
+      const events = agent?.session?.events;
+      if (!Array.isArray(events)) return undefined;
+      let firstIndex = -1;
+      for (let index = 0; index < events.length; index += 1) {
+        const event = events[index];
+        if (event === null || typeof event !== "object" || event.type !== "user/message") continue;
+        const data = event.data;
+        if (data === null || typeof data !== "object") continue;
+        const source = data.source;
+        if (source === null || typeof source !== "object") continue;
+        if (source.kind === "plugin" && source.plugin === "kaz-memory" && source.form === "guidance") {
+          firstIndex = index;
+          break;
+        }
+      }
+      if (firstIndex === -1) return undefined;
+      let turn = 0;
+      for (let index = 0; index <= firstIndex; index += 1) {
+        const event = events[index];
+        if (
+          event !== null &&
+          typeof event === "object" &&
+          event.type === "turn/start" &&
+          event.data !== null &&
+          typeof event.data === "object" &&
+          typeof event.data.turn === "number"
+        ) {
+          turn = event.data.turn;
+        }
+      }
+      return turn > 0 ? turn : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -770,21 +871,47 @@ export async function apply(ctx, config = {}) {
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, recall] : decision.messages };
   });
 
-  // ---- 固定指引：首轮工具调用之后以上下文消息注入一次 ----
+  // ---- 固定指引：首次工具调用后注入；之后每个 turn 开头重复注入 ----
+  // 记第一次发送固定指引的轮次为 n，则第 n+1、n+2、……轮都在对话开始
+  // （agent/pre-step，step === 1）再次注入同一固定指引。首次发送仍保持旧语义：
+  // 在会话已有第一次 tool/call 后的某个 pre-step 以合成用户消息注入一次。
   // Kaz 模式固定系统提示词会滤掉所有非 persona 段，因此固定指引不再注册
-  // systemPrompt.section；改为在会话已有第一次 tool/call 后的某个 pre-step
-  // 以合成用户消息注入一次（round-display 同步上报）。
+  // systemPrompt.section；改为 agent/pre-step 合成用户消息注入（round-display 同步上报）。
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
     const agent = payload?.agent;
     if (agent === null || agent === undefined || typeof agent !== "object") return decision;
-    if (guidanceInjected.has(agent)) return decision;
-    // 跨重启去重：该会话此前已注入过固定指引 → 跳过。
-    if (agent.id !== undefined && persistedGuidanceInjected.has(String(agent.id))) return decision;
-    // 最终防线：会话日志里已出现过 kaz-memory 固定指引记录 → 跳过。
-    if (hasInjectedBefore(agent, "guidance")) return decision;
-    // 首轮工具调用之后才注入：此时 memory_search 已进入工具面。
+    const turn = payload?.turn;
+    if (typeof turn !== "number" || turn <= 0) return decision;
+
+    let firstTurn = guidanceFirstTurnCache.has(agent)
+      ? guidanceFirstTurnCache.get(agent)
+      : firstGuidanceTurnOf(agent);
+    if (firstTurn !== undefined) {
+      guidanceFirstTurnCache.set(agent, firstTurn);
+      // 已发送过：只在后续轮次的 turn 开头重复。
+      if (payload.step !== 1) return decision;
+      if (turn <= firstTurn) return decision;
+      // 跨重启/同 turn 防重复：会话事件里当前轮已注入过就不再注入。
+      if (hasInjectedInTurn(agent, "guidance", turn)) return decision;
+      const text = guidanceText(agent);
+      if (typeof text !== "string" || text.trim().length === 0) return decision;
+      let message;
+      try {
+        message = createUserMessage({
+          content: [{ type: "text", text }],
+          source: { kind: "plugin", plugin: "kaz-memory", form: "guidance" },
+        });
+      } catch (error) {
+        ctx.logger.warn(`[kaz-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
+        return decision;
+      }
+      reportRoundDisplay(agent, text);
+      return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
+    }
+
+    // 首次发送：首轮工具调用之后才注入，此时 memory_search 已进入工具面。
     if (!hasToolCall(agent)) return decision;
     const text = guidanceText(agent);
     if (typeof text !== "string" || text.trim().length === 0) return decision;
@@ -798,30 +925,28 @@ export async function apply(ctx, config = {}) {
       ctx.logger.warn(`[kaz-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
       return decision;
     }
-    guidanceInjected.set(agent, true);
-    if (agent.id !== undefined) {
-      persistedGuidanceInjected.add(String(agent.id));
-      persistInjected();
-    }
+    guidanceFirstTurnCache.set(agent, turn);
     reportRoundDisplay(agent, text);
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
   });
 
-  // ---- 遗忘指引：首次 memory_search 之后以上下文消息注入一次 ----
-  // 提醒模型清理已完成、不再需要保留的任务记忆；每会话只注入一次，跨重启去重
-  // 与固定指引同机制（persistedForgetGuidanceInjected / hasInjectedBefore）。
+  // ---- 遗忘指引：每一轮首次 memory_search 之后注入一次 ----
+  // 提醒模型清理已完成、不再需要保留的任务记忆；按 turn 切分，每个 turn 内
+  // 只注入一次，跨重启/同 turn 由会话事件里的 forget-guidance 记录兜底。
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
     const agent = payload?.agent;
     if (agent === null || agent === undefined || typeof agent !== "object") return decision;
-    if (forgetGuidanceInjected.has(agent)) return decision;
-    // 跨重启去重：该会话此前已注入过遗忘指引 → 跳过。
-    if (agent.id !== undefined && persistedForgetGuidanceInjected.has(String(agent.id))) return decision;
-    // 最终防线：会话日志里已出现过 kaz-memory 遗忘指引记录 → 跳过。
-    if (hasInjectedBefore(agent, "forget-guidance")) return decision;
-    // 首次 memory_search 之后才注入。
-    if (!hasToolCall(agent, "memory_search")) return decision;
+    const turn = payload?.turn;
+    if (typeof turn !== "number" || turn <= 0) return decision;
+    if (forgetInjectedTurn.get(agent) === turn) return decision;
+    if (hasInjectedInTurn(agent, "forget-guidance", turn)) {
+      forgetInjectedTurn.set(agent, turn);
+      return decision;
+    }
+    // 当前轮第一次 memory_search 之后才注入。
+    if (!hasToolCallInTurn(agent, "memory_search", turn)) return decision;
     const text = forgetGuidanceText(agent);
     if (typeof text !== "string" || text.trim().length === 0) return decision;
     let message;
@@ -834,11 +959,7 @@ export async function apply(ctx, config = {}) {
       ctx.logger.warn(`[kaz-memory] 构造遗忘指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
       return decision;
     }
-    forgetGuidanceInjected.set(agent, true);
-    if (agent.id !== undefined) {
-      persistedForgetGuidanceInjected.add(String(agent.id));
-      persistInjected();
-    }
+    forgetInjectedTurn.set(agent, turn);
     reportRoundDisplay(agent, text);
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
   });
