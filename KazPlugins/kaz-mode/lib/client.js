@@ -136,7 +136,6 @@ window.__ModuleLoader__.load({
 		const KAZ_FIELDS = [
 			{ key: "minimalTools", kind: "list", label: "minimalTools（工具面·极简基底：首次工具调用前保留的最小工具，逗号分隔）" },
 			{ key: "toolWhitelist", kind: "list", label: "toolWhitelist（Kaz 全部工具白名单：手动增删工具就在这里改，逗号分隔；kaz-memory 关闭时其工具自动移出，kaz-diag 开启时自动加入 kaz_mode_status）" },
-			{ key: "defaultDisabledPlugins", kind: "list", label: "defaultDisabledPlugins（进入 Kaz 时默认关闭的插件 id，逗号分隔；仍可在面板手动开启）" },
 		];
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
@@ -599,12 +598,6 @@ window.__ModuleLoader__.load({
 				const enabled = value !== null && typeof value === "object" ? value.enabled !== false : false;
 				const writable = writableOf(snap);
 				const missing = value === null;
-				const kazSnap = useScope(kazScope);
-				const kazValue = valueOf(kazSnap);
-				const defaultOff =
-					kazValue !== null &&
-					Array.isArray(kazValue.defaultDisabledPlugins) &&
-					kazValue.defaultDisabledPlugins.includes(plugin.id);
 
 				return createElement(
 					"div",
@@ -616,7 +609,7 @@ window.__ModuleLoader__.load({
 							"span",
 							{ className: "kzm-name", title: plugin.tag || plugin.id },
 							plugin.name,
-							createElement("span", { className: "kzm-tag" }, "  " + plugin.tag + (defaultOff ? "  · Kaz 默认关闭" : "")),
+							createElement("span", { className: "kzm-tag" }, "  " + plugin.tag),
 						),
 						createElement(StateBadge, { state: missing ? "missing" : enabled ? "on" : "off" }),
 						createElement(Toggle, {

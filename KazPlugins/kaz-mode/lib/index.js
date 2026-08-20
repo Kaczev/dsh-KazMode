@@ -23,8 +23,7 @@
 //          kaz-diag 开启 → kaz_mode_status 自动加入白名单。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
-//      再按会话/默认状态应用；defaultDisabledPlugins 默认关闭清单里的插件例外
-//      （当前为空）。变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用。
+//      再按会话/默认状态应用。变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用。
 //   4) 预设联动：Kaz 模式已注册为 agent preset（id: kaz）。default 切到 "kaz"
 //      或会话切换到 kaz 时把 kaz-mode.enabled 置 true（触发上面的插件联动）；
 //      切到其它预设 / 其它会话时置 false。同时把最近一个非 kaz 预设记录到
@@ -83,9 +82,6 @@ const DEFAULT_TOOL_WHITELIST = [
   "str_replace_editor",
   "memory_save", "memory_list", "memory_search", "memory_forget", "memory_update"
 ];
-
-/** 进入 Kaz 时默认关闭的被管理插件 id 清单（当前为空——全部默认启用）。 */
-const DEFAULT_DISABLED_PLUGINS = [];
 
 /** 被管理的插件（id 与 settings.yaml 命名空间一致）。 */
 const MANAGED_PLUGINS = [
@@ -150,8 +146,6 @@ const RPC_CHANNEL = "/kaz-mode";
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(false),
   managedPlugins: z.array(z.string()).default(MANAGED_PLUGINS.map((plugin) => plugin.id)),
-  /** 进入 Kaz 时默认关闭的被管理插件 id 清单（当前为空，全部默认启用）。 */
-  defaultDisabledPlugins: z.array(z.string()).default([...DEFAULT_DISABLED_PLUGINS]),
   /** Kaz 工具面·极简基底（首阶段与全量阶段始终保留的最小工具集）。 */
   minimalTools: z.array(z.string()).default([...DEFAULT_MINIMAL_TOOLS]),
   /** Kaz 工具面·白名单（= Kaz 全部工具的手动编辑点），热改生效。 */
@@ -173,7 +167,6 @@ const SETTINGS_SCHEMA = z.object({
  *  不预置，避免把本机的联动状态带到新机器。 */
 export const DEFAULT_SECTION = {
   enabled: true,
-  defaultDisabledPlugins: [...DEFAULT_DISABLED_PLUGINS],
   toolWhitelist: [...DEFAULT_TOOL_WHITELIST],
 };
 // ---------------------------------------------------------------------------
@@ -401,14 +394,12 @@ function normalizeConfig(raw) {
       : [...fallback];
   const minimalTools = stringList(value.minimalTools, DEFAULT_MINIMAL_TOOLS);
   const toolWhitelist = stringList(value.toolWhitelist, DEFAULT_TOOL_WHITELIST);
-  const defaultDisabledPlugins = stringList(value.defaultDisabledPlugins, DEFAULT_DISABLED_PLUGINS);
   const saved = value.savedPluginStates && typeof value.savedPluginStates === "object" ? value.savedPluginStates : {};
   return {
     enabled: value.enabled === true,
     minimalTools,
     toolWhitelist,
     managedPlugins: managed,
-    defaultDisabledPlugins,
     previousPreset:
       typeof value.previousPreset === "string" && value.previousPreset.trim().length > 0
         ? value.previousPreset.trim()
@@ -501,16 +492,12 @@ export default {
       return snapshot;
     }
 
-    /** 联动启用：把尚未启用的被管理插件置为 enabled=true（defaultDisabledPlugins
-     *  默认关闭清单内的插件跳过）。返回实际写入个数。 */
+    /** 联动启用：把尚未启用的被管理插件置为 enabled=true。返回实际写入个数。 */
     async function forceEnableManaged() {
       const settings = getSettings();
       if (settings === undefined) return 0;
-      const current = source();
-      const disabledByDefault = new Set(current.defaultDisabledPlugins);
       let count = 0;
       for (const plugin of managedList()) {
-        if (disabledByDefault.has(plugin.id)) continue;
         const state = readPluginState(plugin.id);
         if (state === null || state.enabled === true) continue;
         try {
@@ -519,29 +506,6 @@ export default {
           ctx.logger.info(`[kaz-mode] 联动启用 ${plugin.id}`);
         } catch (error) {
           ctx.logger.warn(`[kaz-mode] 联动启用 ${plugin.id} 失败：${safeMessage(error)}`);
-        }
-      }
-      return count;
-    }
-
-    /** 联动默认关闭：进入 Kaz 时把 defaultDisabledPlugins 清单内的插件置为
-     *  enabled=false（仅"进入 Kaz"瞬间执行一次；用户之后手动开启的保持开启）。 */
-    async function forceDisableDefaultManaged() {
-      const settings = getSettings();
-      if (settings === undefined) return 0;
-      const current = source();
-      const disabledByDefault = new Set(current.defaultDisabledPlugins);
-      let count = 0;
-      for (const plugin of managedList()) {
-        if (!disabledByDefault.has(plugin.id)) continue;
-        const state = readPluginState(plugin.id);
-        if (state === null || state.enabled === false) continue;
-        try {
-          await settings.update(settingsNamespace(plugin.id), { enabled: false });
-          count += 1;
-          ctx.logger.info(`[kaz-mode] 联动默认关闭 ${plugin.id}（Kaz 模式默认关闭清单）`);
-        } catch (error) {
-          ctx.logger.warn(`[kaz-mode] 联动默认关闭 ${plugin.id} 失败：${safeMessage(error)}`);
         }
       }
       return count;
@@ -612,7 +576,7 @@ export default {
     /**
      * 联动主流程：enabled=true（进入 Kaz）→ 快照 + 按会话/默认状态应用插件；
      * enabled=false（关闭 / 切走）→ 按会话/非 Kaz 默认状态应用插件。
-     * 若尚无客户端告知的活跃会话，则回退到旧的强制启用/默认关闭行为，保证
+     * 若尚无客户端告知的活跃会话，则回退到旧的强制启用行为，保证
      * 纯 settings.yaml 使用方式仍然可用。
      */
     let linkRunPending = false;
@@ -644,10 +608,9 @@ export default {
                 `[kaz-mode] Kaz 模式已开启：已按会话 ${activeSession.sessionId} 应用插件状态；原始状态快照已保存。`,
               );
             } else {
-              await forceDisableDefaultManaged();
               const enabledCount = await forceEnableManaged();
               ctx.logger.info(
-                `[kaz-mode] Kaz 模式已开启：联动启用 ${enabledCount} 个插件（默认关闭清单已跳过）；原始状态快照已保存。`,
+                `[kaz-mode] Kaz 模式已开启：联动启用 ${enabledCount} 个插件；原始状态快照已保存。`,
               );
             }
           } else {

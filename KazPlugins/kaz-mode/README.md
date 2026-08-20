@@ -80,8 +80,6 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 - **开启 Kaz 模式**：先把被管理插件在 `settings.yaml` 里的原始 `enabled` 状态快照到
   `kaz-mode.savedPluginStates`（持久化），再把它们全部自动启用（已启用的不动；
   未加载的插件跳过）。
-- **默认关闭清单（`defaultDisabledPlugins`）**：当前为空（全部默认启用）。需要时把
-  插件 id 加进数组，进入 Kaz 的瞬间会把这些插件置为 `enabled: false`。
 - **关闭 Kaz 模式**：各插件的 `enabled` 保持当前状态、不做改动（只有"进入 Kaz"才
   强制启用；用户在 Kaz 模式下手动关闭的保持关闭）。
 - 面板里的单个开关是独立的：Kaz 模式开启期间，你可以单独开/关某个插件，改动即时生效。
@@ -107,7 +105,6 @@ kaz-mode:
   enabled: false                      # 总开关（由预设联动驱动，勿手改）
   minimalTools: [ pwsh, str_replace_editor ]
   toolWhitelist: [ ... ]              # ★ Kaz 全部工具列表（手动编辑点）
-  defaultDisabledPlugins: []          # 进入 Kaz 时默认关闭的插件 id
   previousPreset: router-standard     # 按钮"关闭 Kaz"时切回的目标（自动维护）
   savedPluginStates: {}               # 联动快照（自动维护，勿手改）
 ```

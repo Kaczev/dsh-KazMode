@@ -20,6 +20,21 @@
         ],
         "createdAt": 1787184452140,
         "updatedAt": 1787185212233
+      },
+      "f585940d-519a-4b0a-b03f-b7e2219111c1": {
+        "namespace": "project",
+        "status": "applied",
+        "autoLoad": false,
+        "name": "kaz-mode 已移除 defaultDisabledPlugins 配置（2026-?）：index.js 不再定义/读取该字段，client.js 面板不再显示该项，settings.yaml 已删除该行，README/probe/kaz-diag 状态报告已同步清理。插件…",
+        "content": "kaz-mode 已移除 defaultDisabledPlugins 配置（2026-?）：index.js 不再定义/读取该字段，client.js 面板不再显示该项，settings.yaml 已删除该行，README/probe/kaz-diag 状态报告已同步清理。插件开启/关闭现在由会话级状态（kaz-session-states.json / 面板单独开关）控制。",
+        "keywords": [
+          "kaz-mode",
+          "defaultdisabledplugins",
+          "插件联动",
+          "kaz面板"
+        ],
+        "createdAt": 1787198732557,
+        "updatedAt": 1787199027169
       }
     }
   }

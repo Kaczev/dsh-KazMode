@@ -11,7 +11,7 @@
 - **固定系统提示词**（`You are a helpful software engineer assistant.`）；
 - **被管理插件启停**：thinking-anchor / round-minimal / plugin-filter / output-beep /
   round-display / deepseek-default-model / kaz-memory / kaz-diag，含开启 Kaz 前的
-  原始状态快照与默认关闭清单；
+  原始状态快照；
 - **Kaz 工具面**：minimalTools 极简基底 + toolWhitelist 白名单（= Kaz 全部工具的
   手动编辑点），并给出动态调整后的实际工具面：
   - kaz-memory 关闭 → 四个记忆工具自动移出；

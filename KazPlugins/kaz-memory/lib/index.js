@@ -143,7 +143,7 @@ function present(title, kind, rawInput) {
  *  而不是等到"遇到难题"才想起记忆。 */
 const GUIDANCE_HEAD = [
   "We need to search the memory (memory_search) at the start of a task for relevant information",
-  "We need to save important facts we learn (memory_save) — the memory is shared with the user and persists across conversations."
+  "We need to save memories (memory_save) with a summary name and concise, sharp content — shared with the user, persists across conversations."
 ].join("\n");
 
 /** 首次 memory_search 之后注入的遗忘指引（每次会话一次）。 */

@@ -301,13 +301,9 @@ export default {
 
       lines.push("[插件联动]");
       const saved = kazSettings?.savedPluginStates ?? {};
-      const disabledByDefault = new Set(Array.isArray(kazSettings?.defaultDisabledPlugins) ? kazSettings.defaultDisabledPlugins : []);
       for (const plugin of managedList()) {
         const state = readPluginState(plugin.id);
         lines.push(`  • ${plugin.label}`);
-        if (disabledByDefault.has(plugin.id)) {
-          lines.push("      Kaz 默认关闭清单（defaultDisabledPlugins）：进入 Kaz 时置为禁用，仍可在面板手动开启");
-        }
         if (state === null) {
           lines.push("      状态: 未加载（settings 未注册，该插件行可能未挂载）");
         } else {
