@@ -22,7 +22,7 @@
 import {
   applyPersona, bandFor, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
   isComplexTask,
-} from './router-core.mjs'
+} from './router-core-v8.mjs'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'router-bootstrap'
