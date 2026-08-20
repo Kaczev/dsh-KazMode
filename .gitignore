@@ -1,3 +1,5 @@
 *.zip
 /.dsh
+/.dsh
 /.dsh/storages
+.dsh/storages/memory_project.json
