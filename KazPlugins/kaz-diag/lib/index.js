@@ -126,7 +126,10 @@ export default {
       setSource: (getValue) => {
         source = () => ({ enabled: getValue()?.enabled !== false });
       },
-      onChange: () => {},
+      // 关键：settings 热重载（含用户层在启动后到达）必须重新评估工具注册——
+      // 否则 kaz_mode_status 只在启动瞬间按默认 enabled=true 注册一次，
+      // 之后 enabled:false 永远不会注销它（kaz-memory 同款写法）。
+      onChange: () => handleChange(),
     });
 
     const initial = source();

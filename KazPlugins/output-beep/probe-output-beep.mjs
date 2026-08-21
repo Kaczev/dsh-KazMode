@@ -4,7 +4,7 @@
 //   ③ 主会话 idle（非子代理）触发播放提示音（会真响一次 880Hz/250ms）；
 //   ④ 子代理 idle（默认 includeSubagents=false）不触发播放（不抛错）。
 // 运行：node output-beep/probe-output-beep.mjs
-import { apply, name } from "file:///C:/Users/Kaczev/.dsh/profiles/web/plugins/output-beep/lib/index.js";
+import { apply, name } from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/output-beep/lib/index.js";
 
 let failures = 0;
 function check(label, ok) {
