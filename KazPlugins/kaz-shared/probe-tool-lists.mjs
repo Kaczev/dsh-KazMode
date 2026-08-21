@@ -17,7 +17,7 @@ function check(label, ok) {
 }
 
 // ① 常量齐全（单一事实源：各处副本都已删除）
-check("① DEFAULT_FIRST_ROUND_TOOLS 存在", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 2);
+check("① DEFAULT_FIRST_ROUND_TOOLS = [pwsh, read, edit]（首轮自洽组合）", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 3 && DEFAULT_FIRST_ROUND_TOOLS[0] === "pwsh" && DEFAULT_FIRST_ROUND_TOOLS.includes("read") && DEFAULT_FIRST_ROUND_TOOLS.includes("edit"));
 check("① DEFAULT_DISABLED_TOOLS 存在", Array.isArray(DEFAULT_DISABLED_TOOLS) && DEFAULT_DISABLED_TOOLS.includes("tool-cordis"));
 check("① MANAGED_PLUGINS / FIXED_PERSONA 存在", Array.isArray(MANAGED_PLUGINS) && typeof FIXED_PERSONA === "string");
 const exports0 = await import("./lib/tool-lists.js");
@@ -25,9 +25,12 @@ check("① 已移除群组 API / DEFAULT_ 前缀常量", !("registerGroup" in ex
 
 // ② TOOL_WHITELIST：Kaz 模式下允许出现的全部工具（含记忆六工具与诊断工具）
 const SIX_MEMORY = ["memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"];
-check("② TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "str_replace_editor", "web_search"].every((t) => TOOL_WHITELIST.includes(t)));
+check("② TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "glob", "grep", "web_search"].every((t) => TOOL_WHITELIST.includes(t)));
 check("② TOOL_WHITELIST 含记忆六工具", SIX_MEMORY.every((t) => TOOL_WHITELIST.includes(t)));
 check("② TOOL_WHITELIST 含诊断工具 kaz_mode_status", TOOL_WHITELIST.includes("kaz_mode_status"));
+const REMOVED_2026_08_21 = ["read_image", "ralph", "workflow", "create_goal", "get_goal", "update_goal", "str_replace_editor"];
+check("② 已按 2026-08-21 决定移除 read_image/ralph/workflow/goal/str_replace_editor", REMOVED_2026_08_21.every((t) => !TOOL_WHITELIST.includes(t)));
+check("② web_search 保留（复用 DeepSeek key，实测可用）", TOOL_WHITELIST.includes("web_search"));
 check("② TOOL_WHITELIST 去重且有序", new Set(TOOL_WHITELIST).size === TOOL_WHITELIST.length);
 
 // ③ effectiveToolWhitelist：白名单是唯一闸门（原样去重，不做任何加减）
@@ -45,7 +48,7 @@ check("③ 白名单缺失/为空时回退 TOOL_WHITELIST", fallback.length === 
 const full = computeSurface({
   toolWhitelist: [...TOOL_WHITELIST],
   minimalPhase: false,
-  firstRoundTools: ["pwsh", "str_replace_editor"],
+  firstRoundTools: ["pwsh", "read", "edit"],
 });
 check("④ 全量阶段 = 有效白名单（含记忆/诊断工具）", full.has("pwsh") && full.has("read") && full.has("memory_search") && full.has("kaz_mode_status"));
 const restricted = computeSurface({ toolWhitelist: ["pwsh", "edit"], minimalPhase: false });
@@ -53,11 +56,11 @@ check("④ 用户收窄白名单后全量阶段只含清单内工具", restricte
 const first = computeSurface({
   toolWhitelist: TOOL_WHITELIST,
   minimalPhase: true,
-  firstRoundTools: ["pwsh", "str_replace_editor"],
+  firstRoundTools: ["pwsh", "read", "edit"],
 });
-check("④ 首阶段仅保留 firstRoundTools（白名单再全也不进首阶段）", first.size === 2 && first.has("pwsh") && first.has("str_replace_editor") && !first.has("memory_search"));
+check("④ 首阶段仅保留 firstRoundTools（白名单再全也不进首阶段）", first.size === 3 && first.has("pwsh") && first.has("read") && first.has("edit") && !first.has("memory_search"));
 const firstFallback = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [] });
-check("④ 首阶段 firstRoundTools 为空时回退 DEFAULT_FIRST_ROUND_TOOLS", firstFallback.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstFallback.has("pwsh") && firstFallback.has("str_replace_editor"));
+check("④ 首阶段 firstRoundTools 为空时回退 DEFAULT_FIRST_ROUND_TOOLS", firstFallback.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstFallback.has("pwsh") && firstFallback.has("read") && firstFallback.has("edit"));
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

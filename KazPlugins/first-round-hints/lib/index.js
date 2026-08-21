@@ -30,7 +30,7 @@ const DEFAULT_MESSAGE = [
   "- Encoding: do not read UTF-8 files with Get-Content (CJK becomes mojibake) — use the read tool.",
   "- PowerShell JSON: ConvertTo-Json flattens single-element arrays to a bare string (use -AsArray or build the JSON manually); Set-Content -Encoding UTF8 adds a BOM that breaks JSON.parse (strip /^\\uFEFF/ or write with node).",
   "<",
-  "[first-round-hints edit EIO]",
+  "[first-round-hints EIO]",
   ">",
   "- If write/edit reports 'Error: ReplaceFileW EIO (Win32 1175)', retry the exact same edit once — it is an intermittent Windows FS error.",
   "<",
@@ -38,6 +38,10 @@ const DEFAULT_MESSAGE = [
   ">",
   "- We need to ask the user for clarification when the task goal or context is ambiguous.",
   "- we need to ask the user to resolve conflicts when multiple requirements cannot be satisfied simultaneously.",
+  "<",
+  "[first-round-hints web_search]",
+  ">",
+  "- We should avoid web_search when we have sufficient information.",
   "<",
 ].join("\n");
 

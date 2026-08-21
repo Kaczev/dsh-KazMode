@@ -25,8 +25,10 @@
 // 本模块零依赖、无副作用导入。
 // ===========================================================================
 
-/** round-minimal 首阶段工具白名单默认值（首次工具调用前仅保留这些）。 */
-export const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "str_replace_editor"];
+/** round-minimal 首阶段工具白名单默认值（首次工具调用前仅保留这些）。
+ *  2026-08-21（Kaczev 决定）：pwsh + read + edit——edit 受"先 read 后 edit"
+ *  的文件观察策略约束，必须与 read 成对出现，首轮才能自洽地看/改文件。 */
+export const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "read", "edit"];
 
 /** plugin-filter 默认禁用清单（插件/工具名，大小写不敏感匹配）。 */
 export const DEFAULT_DISABLED_TOOLS = ["tool-cordis", "tool-subagent-report", "codex", "claude-code"];
@@ -52,20 +54,20 @@ export const MANAGED_PLUGINS = [
  * skill）+ pwsh + str_replace_editor + kaz-memory 六工具 + kaz-diag 的
  * kaz_mode_status。白名单是唯一闸门：不在清单里的工具即使被注册也不会进入
  * Kaz 工具列表。
+ * 2026-08-21（Kaczev 决定）移除：read_image（模型不支持图片输入）、ralph（仅
+ * 显式请求）、workflow（重型编排）、create_goal/get_goal/update_goal（长周期目标）、
+ * str_replace_editor（与 edit/write/read 重叠，仅 insert 独有且日常少用）。
+ * 子代理几乎不使用，去掉subagent, subagent_fork, list_agents, send_message, interrupt_agent,
  * 用户 settings.yaml 的 kaz-mode.toolWhitelist 是手动编辑点，始终优先；
  * Kaz 面板的「toolWhitelist」输入直接读写该设置（热重载生效）。
  */
 export const TOOL_WHITELIST = [
-  "pwsh",
-  "read", "write", "edit", "read_image", "glob", "grep",
-  "job_list", "job_output", "job_kill",
-  "create_goal", "get_goal", "update_goal",
-  "subagent", "subagent_fork", "list_agents", "send_message", "interrupt_agent",
-  "workflow", "ralph",
-  "ask_user_question", "todo_write", "web_search",
-  "str_replace_editor",
-  "memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget",
-  "kaz_mode_status",
+  "pwsh", // windows PowerShell（跨平台）——首轮工具必选
+  "read", "write", "edit", "glob", "grep", // 文件读写/编辑/搜索
+  "job_list", "job_output", "job_kill", // 后台任务管理
+  "ask_user_question", "todo_write", "web_search", // 交互/待办/搜索
+  "memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget", // kaz-memory 六工具
+  "kaz_mode_status", // kaz-diag 的工具：Kaz 模式状态报告
 ];
 
 /** 清理 + 去重工具名列表（保留顺序）。 */
