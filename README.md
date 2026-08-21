@@ -64,7 +64,7 @@ dsh-KazMode/
 | 插件目录 | 插件 id / name | 作用 |
 | --- | --- | --- |
 | `kaz-mode` | `kaz-mode` | Kaz 模式超级模式：预设联动 + 会话头部按钮 + 集中管理面板 |
-| `round-minimal` | `round-minimal` | 首阶段极简：首次工具调用前只暴露 `pwsh` / `str_replace_editor` |
+| `round-minimal` | `round-minimal` | 首阶段极简：首次工具调用前只暴露 `pwsh` / `read` / `edit` |
 | `plugin-filter` | `plugin-filter` | 工具过滤：移除或禁用指定工具 |
 | `thinking-anchor` | `thinking-anchor` | 思考锚点：新对话注入完整思考协议，之后每轮短提醒 |
 | `first-round-hints` | `first-round-hints` | 首轮注入 pwsh 使用要点等提示 |
@@ -72,7 +72,7 @@ dsh-KazMode/
 | `output-beep` | `output-beep` | 模型输出完毕 / 提问时播放提示音 |
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 默认模型参数：provider / model / reasoningEffort / generation_kwargs |
-| `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/list/search/forget` + 自动载入 |
+| `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
 | `kaz-diag` | `kaz-diag` | 诊断工具 `kaz_mode_status`（只读状态报告） |
 
 ---
@@ -288,7 +288,8 @@ round-minimal:
   enabled: true
   firstRoundTools:
     - pwsh
-    - str_replace_editor
+    - read
+    - edit
   includeSubagents: false
   showPolicy: false
 
@@ -300,30 +301,21 @@ kaz-mode:
       read,
       write,
       edit,
-      read_image,
       glob,
       grep,
       job_list,
       job_output,
       job_kill,
-      create_goal,
-      get_goal,
-      update_goal,
-      subagent,
-      subagent_fork,
-      list_agents,
-      send_message,
-      interrupt_agent,
-      workflow,
-      ralph,
       ask_user_question,
       todo_write,
       web_search,
-      str_replace_editor,
       memory_save,
+      memory_update,
       memory_list,
       memory_search,
-      memory_forget
+      memory_detail,
+      memory_forget,
+      kaz_mode_status
     ]
   defaultDisabledPlugins: []
   previousPreset: router-standard
@@ -374,7 +366,7 @@ round-display:
 4. 验证：
    - `dsh --profile web --dump-config` 能看到 `kaz-mode`、`round-minimal`、`plugin-filter`、`kaz-memory`、`kaz-agent-preset-display`、`deepseek-default-model` 等组合行；
    - 新对话系统提示词固定为 `You are a helpful software engineer assistant.`；
-   - 首次工具调用前工具面只有 `pwsh` + `str_replace_editor`；
+   - 首次工具调用前工具面只有 `pwsh` + `read` + `edit`；
    - 第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
    - 若开启 `kaz-diag`，工具列表里出现 `kaz_mode_status`；
    - Kaz 面板出现各被管理插件的开关行。

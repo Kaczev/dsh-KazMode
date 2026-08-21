@@ -1,2 +1,2 @@
 name: Kaz 模式
-description: Kaczev 的专属模式：系统提示词固定为 "You are a helpful software engineer assistant."，工具面两阶段——首次工具调用前仅 pwsh + str_replace_editor，之后恢复 Kaz 全部工具（标准模式工具除 bash 与 skill + pwsh + str_replace_editor + kaz-memory 工具，手动编辑点在 settings.yaml 的 kaz-mode.toolWhitelist）；由 kaz-mode 联动管理 thinking-anchor（消息注入）/ round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag。
+description: 工具面两阶段——首次工具调用前仅 pwsh + read + edit，首次调用后恢复 Kaz 全部工具（toolWhitelist 白名单为唯一闸门，含记忆六工具与 kaz_mode_status）。固定系统提示词为 "You are a helpful software engineer assistant."，拥有跨会话记忆功能。

@@ -293,10 +293,14 @@ export default {
       );
       lines.push("");
 
-      lines.push("[前置插件]（Kaz 模式的核心依赖，必须存在）");
+      lines.push("[前置插件]（Kaz 模式工具面 / 记忆的关键依赖）");
       for (const id of ["round-minimal", "plugin-filter", "kaz-memory"]) {
-        const loaded = readPluginState(id) !== null;
-        lines.push(`  ${loaded ? "✓" : "✗"} ${id}${loaded ? "" : "（未加载——前置缺失！）"}`);
+        const state = readPluginState(id);
+        if (state === null) {
+          lines.push(`  ✗ ${id}（未加载——前置缺失！）`);
+        } else {
+          lines.push(`  ✓ ${id}（${state.enabled ? "已启用" : "已加载但关闭"}）`);
+        }
       }
       lines.push("");
 
@@ -373,10 +377,9 @@ export default {
       return lines.join("\n");
     }
 
-    /** 方案 A：kaz_mode_status 常驻注册（不再随 enabled 全局注销）。会话级
-     *  可见性由 kaz-mode 在每个请求的组装/执行层按 agent 会话状态计算：
-     *  本插件关闭的会话里该工具不进工具面、调用被拒；后台运行的其它会话
-     *  不受切换对话影响。enabled 开关仍作用于报告内容（按会话判定）。 */
+    /** kaz_mode_status 注册跟随 kaz-diag.enabled（2026-08-21 修复，恢复文档语义）：
+     *  enabled=true 时注册，enabled=false 时完全注销（不只是移出 Kaz 工具面），
+     *  热重载生效。会话级可见性仍由 kaz-mode 在组装/执行层按 agent 会话计算。 */
     let toolDisposer = null;
     function installTool() {
       if (toolDisposer !== null) return;
@@ -411,12 +414,14 @@ export default {
       toolDisposer = null;
     }
     function handleChange() {
+      const enabled = source().enabled !== false;
+      if (enabled) installTool();
+      else uninstallTool();
       ctx.logger.info(
-        `[kaz-diag] 配置已生效：enabled=${source().enabled}` +
-          `（工具常驻注册，会话级可见性由 kaz-mode 按 agent 会话过滤）`,
+        `[kaz-diag] 配置已生效：enabled=${enabled ? "true" : "false"}` +
+          `（kaz_mode_status 已${enabled ? "注册" : "完全注销"}；会话级可见性由 kaz-mode 按 agent 会话过滤）`,
       );
     }
-    installTool();
 
     ctx.effect(() => () => {
       uninstallTool();

@@ -234,14 +234,14 @@ function present(title, kind, rawInput) {
  *  而不是等到"遇到难题"才想起记忆。 */
 const GUIDANCE_HEAD = [
   "We need to search the memory (memory_search) at the start of a task for relevant information.",
-  "We need to save memories (memory_save) with a name, a one-line summary and concise, sharp content — shared with the user, persists across conversations."
+  "We need to save memories (memory_save) with concise and sharp content that captures the reasoned solutions and key insights we've derived — so we can reference them when facing similar problems in the future."
 ].join("\n");
 
 /** 每轮首次 memory_search 之后注入的遗忘指引。 */
 const GUIDANCE_FORGET = [
  "We need to get details of memories (memory_detail) when we need more information about a specific memory.",
- "We need to forget memories (memory_forget) related to tasks that have been completed and no longer need to be retained.",
- "We need to update memories (memory_update) when the stored content is incorrect, when the content needs to be changed, or when the memory's name or keywords are no longer accurate."
+ "We need to forget memories (memory_forget) that are no longer relevant, including approaches that turned out to be ineffective, solutions that have been superseded, or tasks that have been completed and no longer need to be retained.",
+ "We need to update memories (memory_update) when the stored content is incorrect, when the content needs to be revised, or when the memory's name or keywords are no longer accurate — and also when we discover that a previously saved approach or solution is ineffective, outdated, or can be improved."
 ].join("\n");
 
 /** 判断某个记忆工具当前是否可用：
@@ -1283,10 +1283,11 @@ export async function apply(ctx, config = {}) {
     }),
 ];
 
-  // ---- 方案 A：六工具常驻注册（不再随 enabled 全局注销）。会话级可见性由
-  // kaz-mode 在每个请求的组装/执行层按 agent 会话状态计算：kaz-memory 关闭
-  // 的会话里记忆工具不进工具面、调用被拒；正在后台运行的其它会话不受影响。
-  // enabled 开关仍作用于记忆指引（经 kazMode 服务按会话判定）。----
+  // ---- 六工具注册跟随 kaz-memory.enabled（2026-08-21 修复，恢复文档语义）：
+  // enabled=true 时注册，enabled=false 时完全注销（不只是移出 Kaz 工具面），
+  // 热重载生效——任何模式下关闭本插件都不再出现记忆工具。会话级可见性
+  // 仍由 kaz-mode 在组装/执行层按 agent 会话计算：启用的会话里记忆工具
+  // 进工具面、关闭的会话里被过滤/拒绝；正在后台运行的其它会话不受影响。----
   let toolDisposers = [];
   function installTools() {
     if (toolDisposers.length > 0) return;
@@ -1309,9 +1310,12 @@ export async function apply(ctx, config = {}) {
     toolDisposers = [];
   }
   function handleChange() {
+    const enabled = source()?.enabled !== false;
+    if (enabled) installTools();
+    else uninstallTools();
     ctx.logger.info(
-      `[kaz-memory] 配置已生效：enabled=${source()?.enabled === false ? "false" : "true"}` +
-        `（工具常驻注册，会话级可见性由 kaz-mode 按 agent 会话过滤）`,
+      `[kaz-memory] 配置已生效：enabled=${enabled ? "true" : "false"}` +
+        `（六工具${enabled ? "已注册" : "已完全注销"}；会话级可见性由 kaz-mode 按 agent 会话过滤）`,
     );
   }
 
@@ -1359,8 +1363,8 @@ export async function apply(ctx, config = {}) {
     },
   );
 
-  // 初始注册（常驻）：插件一挂载即注册六工具；热重载不再改变注册状态。
-  installTools();
+  // 初始注册交给 handleChange（installSettingsWithDefaults 的 onChange 会同步
+  // 调用一次）：enabled=true 时注册六工具，关闭时完全注销。
   ctx.effect(() => () => {
     uninstallTools();
   });

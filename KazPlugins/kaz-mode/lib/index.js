@@ -39,6 +39,7 @@ import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import {
   TOOL_WHITELIST,
   DEFAULT_FIRST_ROUND_TOOLS,
@@ -113,10 +114,12 @@ for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
 
 /** 会话级插件状态文件名（放在项目 .dsh/ 下）。 */
 const SESSION_STATES_FILE = "kaz-session-states.json";
-/** 两个模式的默认设置文件名（放在 C:\\Users\\Kaczev\\.dsh\\storages 下）。 */
+/** 两个模式的默认设置文件名（放在 DSH_HOME/storages 下，缺省 ~/.dsh/storages）。
+ *  2026-08-21 修复：原实现硬编码为作者机器的 C:\Users\Kaczev\.dsh\storages，
+ *  换机/分享时读写会落到错误路径；现在用 DSH_HOME 解析，并支持 config.storageDir 覆盖。 */
 const DEFAULTS_FILE_NAME = "kaz-defaults.json";
-const STORAGE_DIR = "C:\\Users\\Kaczev\\.dsh\\storages";
-const DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
+let STORAGE_DIR = join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages");
+let DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/kaz-mode";
 
@@ -318,12 +321,6 @@ function loadStateFile(cwd, logger) {
   };
 }
 
-/** 会话键消毒（防止路径穿越）。 */
-function sanitizeKey(key) {
-  const cleaned = String(key ?? "").replace(/[^A-Za-z0-9_-]/g, "_");
-  return cleaned.length > 0 ? cleaned : "default";
-}
-
 /** 从 agent 会话头解析项目工作区根目录。 */
 function workspaceOfAgent(agent) {
   try {
@@ -335,27 +332,6 @@ function workspaceOfAgent(agent) {
     // fall through
   }
   return process.cwd();
-}
-
-/** 从 agent 会话头解析会话作用域键（子代理归入父会话）。 */
-function sessionKeyOfAgent(agent) {
-  try {
-    const header = agent?.session?.header;
-    if (header !== null && header !== undefined && typeof header === "object") {
-      if (typeof header.parentSession === "string" && header.parentSession.trim().length > 0) {
-        return sanitizeKey(header.parentSession);
-      }
-      if (typeof header.id === "string" && header.id.trim().length > 0) {
-        return sanitizeKey(header.id);
-      }
-    }
-    if (typeof agent?.id === "string" && agent.id.trim().length > 0) {
-      return sanitizeKey(agent.id);
-    }
-  } catch {
-    // fall through
-  }
-  return "default";
 }
 
 /** 归一化任意来源（组合行 config / settings 解析值）的配置。 */
@@ -402,6 +378,12 @@ export default {
     // 组合行 config 作为 base 层；settings.yaml 用户层优先（热重载）。
     const entry = normalizeConfig(config);
     let source = () => entry;
+
+    // config.storageDir 覆盖默认设置文件目录（探针/换机可用），默认 DSH_HOME/storages。
+    if (typeof config.storageDir === "string" && config.storageDir.trim().length > 0) {
+      STORAGE_DIR = config.storageDir.trim();
+      DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
+    }
 
     /** 联动事务防重入：一次联动（快照+启用 / 恢复+清空）未结束前不重复触发。 */
     let linking = false;
@@ -570,10 +552,23 @@ export default {
           lastEnabledState = enabledNow;
           if (enabledNow) {
             if (entering) {
+              // 快照 = 开启 Kaz 前被管理插件的原始状态。只补录「尚无快照」的插件，
+              // 不覆盖已保存的快照——否则第二次进入 Kaz 时快照到的是上次退出被
+              // 应用成 nonKaz 默认后的状态，并非真正的原始状态（2026-08-21 修复）。
               const saved = await snapshotPluginStates();
               const settings = getSettings();
-              if (Object.keys(saved).length > 0 && settings !== undefined) {
-                await settings.update(NAMESPACE, { savedPluginStates: saved });
+              const currentSettings = source();
+              const existing =
+                currentSettings.savedPluginStates !== null &&
+                typeof currentSettings.savedPluginStates === "object"
+                  ? currentSettings.savedPluginStates
+                  : {};
+              const merged = { ...existing };
+              for (const [id, state] of Object.entries(saved)) {
+                if (merged[id] === undefined || merged[id] === null) merged[id] = state;
+              }
+              if (Object.keys(merged).length > 0 && settings !== undefined) {
+                await settings.update(NAMESPACE, { savedPluginStates: merged });
               }
             }
             if (activeSession !== null) {
@@ -1166,6 +1161,34 @@ export default {
             await applyEffectiveState(cwd, sessionId);
           }
           return { ok: true, value: { defaults: data.defaults } };
+        }
+
+        if (endpoint === "clearSession") {
+          // 清除某会话的全部专属覆盖 → 生效状态回落到当前模式默认
+          // （Kaz 会话回落到 Kaz 默认，非 Kaz 会话回落到非 Kaz 默认）。
+          const { cwd, data } = loadSessionData(sessionId);
+          delete data.sessions[sessionId];
+          saveSessions(cwd, data.sessions, ctx.logger);
+          activeSession = { sessionId, cwd };
+          await applyEffectiveState(cwd, sessionId);
+          return { ok: true, value: { session: data.sessions[sessionId] ?? null } };
+        }
+
+        if (endpoint === "clearSessionPlugin") {
+          // 清除某会话里单个插件的专属覆盖（该插件回落到当前模式默认）。
+          const pluginId = typeof input.pluginId === "string" ? input.pluginId : "";
+          if (pluginId.length === 0) return rpcFail("缺少 pluginId");
+          const { cwd, data } = loadSessionData(sessionId);
+          if (data.sessions[sessionId] !== undefined && data.sessions[sessionId] !== null && typeof data.sessions[sessionId] === "object") {
+            delete data.sessions[sessionId][pluginId];
+            if (Object.keys(data.sessions[sessionId]).length === 0) {
+              delete data.sessions[sessionId];
+            }
+            saveSessions(cwd, data.sessions, ctx.logger);
+          }
+          activeSession = { sessionId, cwd };
+          await applyEffectiveState(cwd, sessionId);
+          return { ok: true, value: { session: data.sessions[sessionId] ?? null } };
         }
 
         return rpcFail("unknown endpoint '" + String(endpoint) + "'");

@@ -15,8 +15,7 @@
   },
   "files": [
     "lib/index.js",
-    "lib/client.js",
-    "kaz-defaults.json"
+    "lib/client.js"
   ],
   "dsh": {
     "client": {

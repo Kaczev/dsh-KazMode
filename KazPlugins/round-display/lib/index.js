@@ -2,17 +2,16 @@
 // ===========================================================================
 // 「每轮注入显示」插件（Kaz 模式附属）——只负责显示，不向模型注入任何内容：
 //
-//   1) 被动捕获：监听 system-prompt/assemble 瀑布，在最终组装里读取非空的
-//      已知插件段（thinking-anchor:policy / tool:memory:kaz-memory），按 agent ×
-//      轮次存档。段文本在瀑布后已求值，读到即最终注入内容。
-//   2) 主动上报：发布 roundDisplay 服务（report 接口），其它要发送信息的插件
-//      在发送时尝试调用 ctx.get("roundDisplay")?.report({ agent, plugin, title, content })
+//   1) 主动上报：发布 roundDisplay 服务（report 接口），其它要发送信息的插件
+//      在发送时调用 ctx.get("roundDisplay")?.report({ agent, plugin, title, content })
 //      告诉本插件要显示（best-effort：服务不存在时静默跳过，不影响主流程）。
-//      上报内容与被动捕获按 (plugin, content) 去重，避免同一条显示两次。
-//   3) 面板通道：专用 RPC（/round-display，loopback）——list 返回当前轮
+//      （2026-08-21：删除旧的"被动捕获组装段"逻辑——thinking-anchor / kaz-memory
+//      已改为消息注入，且 kaz-mode 会把非 persona 提示段滤掉，组装层根本读不到
+//      它们的段；现在所有展示内容全部来自各插件的主动 report。）
+//   2) 面板通道：专用 RPC（/round-display，loopback）——list 返回当前轮
 //      （最近 turn/start 的 data.turn；每次用户发一条消息 = 一轮）的注入记录，
 //      history 返回全部轮次，供客户端面板轮询显示。
-//   4) 持久化（2026-08-21）：记录按 agent × 轮次落盘到
+//   3) 持久化（2026-08-21）：记录按 agent × 轮次落盘到
 //      <DSH_HOME>/storages/round-display-records.json（config.recordsStore 可覆盖，
 //      探针用临时文件），dsh 重启后恢复——重启后 history 仍能看到此前各轮的
 //      注入记录，当前轮记录照常追加。写入防抖（1s），卸载时 flush。
@@ -32,15 +31,6 @@ const NAMESPACE = settingsNamespace("round-display");
 
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/round-display";
-
-/** 已知插件段 → 插件显示名（被动捕获的归属表；report 主动上报不受此表限制）。 */
-const SECTION_PLUGIN = {
-  "thinking-anchor:policy": "thinking-anchor",
-  "tool:memory:kaz-memory": "kaz-memory",
-};
-
-/** 组装结果里忽略的内置段（不是插件注入的信息）。 */
-const IGNORED_SECTIONS = new Set(["harness:identity", "deployment:persona"]);
 
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
@@ -141,8 +131,9 @@ function currentTurnOf(agent) {
 
 export default {
   name: "round-display",
-  // systemPrompt：组装瀑布监听；connection：面板 RPC 通道。
-  inject: ["systemPrompt", "connection"],
+  // connection：面板 RPC 通道。（2026-08-21：不再监听 system-prompt/assemble——
+  // 被动捕获段已删除，展示内容全部来自各插件的主动 report。）
+  inject: ["connection"],
   apply(ctx, config = {}) {
     const entry = { enabled: config.enabled !== false };
     let source = () => entry;
@@ -299,34 +290,6 @@ export default {
       };
     }, "round-display: 发布 roundDisplay 上报服务");
 
-    // -----------------------------------------------------------------------
-    // 2) 被动捕获：组装瀑布结束后读最终 sections（已知插件段，含 kaz-mode 首轮
-    //    保留/注入的段——读到即该轮实际注入模型的内容）
-    // -----------------------------------------------------------------------
-    ctx.on("system-prompt/assemble", async (assembly, context, next) => {
-      const result = await next();
-      if (source().enabled !== true) return result;
-      try {
-        const agent = context !== null && typeof context === "object" ? context.agent : undefined;
-        if (agent === undefined || agent === null || typeof agent !== "object") return result;
-        const sections =
-          result !== null && typeof result === "object" && Array.isArray(result.sections) ? result.sections : [];
-        for (const section of sections) {
-          if (section === null || typeof section !== "object") continue;
-          const name = typeof section.name === "string" ? section.name : "";
-          if (IGNORED_SECTIONS.has(name)) continue;
-          const plugin = SECTION_PLUGIN[name];
-          if (plugin === undefined) continue; // 未知段不显示（只关注 Kaz 插件）
-          const text = typeof section.text === "string" ? section.text : "";
-          if (text.trim().length === 0) continue;
-          record(agent, plugin, name, text);
-        }
-      } catch (error) {
-        ctx.logger.debug("[round-display] 捕获组装段失败：" + (error instanceof Error ? error.message : String(error)));
-      }
-      return result;
-    });
-
     // ---- agent 销毁时清理记录（内存删除 + 落盘同步，避免重启后回退） ----
     ctx.on("agent/disposed", (payload) => {
       const id = payload !== null && typeof payload === "object" ? payload.agent?.id : undefined;
@@ -340,7 +303,7 @@ export default {
     loadRecords();
 
     // -----------------------------------------------------------------------
-    // 3) 面板 RPC 通道（/round-display，loopback）：list = 当前轮；history = 全部轮
+    // 2) 面板 RPC 通道（/round-display，loopback）：list = 当前轮；history = 全部轮
     // -----------------------------------------------------------------------
     function rpcFail(message) {
       return { ok: false, error: { code: "internal", message: String(message), details: {} } };

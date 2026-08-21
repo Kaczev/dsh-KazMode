@@ -49,7 +49,7 @@ window.__ModuleLoader__.load({
 				tag: "首阶段极简 · 首次工具调用后恢复",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
-					{ key: "firstRoundTools", kind: "list", label: "firstRoundTools（首次工具调用前的工具白名单，逗号分隔）" },
+					{ key: "firstRoundTools", kind: "list", nonEmpty: true, label: "firstRoundTools（首次工具调用前的工具白名单，逗号分隔；不能为空——为空会导致首轮没有任何工具，永远无法触发「首次调用后恢复全部工具」）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走首阶段极简）" },
 				],
 			},
@@ -93,9 +93,9 @@ window.__ModuleLoader__.load({
 					{ key: "provider", kind: "text", label: "provider（提供方路由）" },
 					{ key: "model", kind: "text", label: "model（默认模型）" },
 					{ key: "reasoningEffort", kind: "select", label: "reasoningEffort（默认思考强度）", options: ["low", "medium", "high"] },
-					{ key: "generation_kwargs", path: ["temperature"], kind: "number", label: "temperature（采样温度；官方默认 1）" },
-					{ key: "generation_kwargs", path: ["top_p"], kind: "number", label: "top_p（核采样；官方默认 1）" },
-					{ key: "generation_kwargs", path: ["repetition_penalty"], kind: "number", label: "repetition_penalty（重复惩罚；官方默认 1）" },
+					{ key: "generation_kwargs", path: ["temperature"], kind: "number", step: 0.1, min: 0, max: 2, label: "temperature（采样温度；官方默认 1；范围 0~2，步长 0.1）" },
+					{ key: "generation_kwargs", path: ["top_p"], kind: "number", step: 0.1, min: 0, max: 1, label: "top_p（核采样；官方默认 1；范围 0~1，步长 0.1）" },
+					{ key: "generation_kwargs", path: ["repetition_penalty"], kind: "number", step: 0.1, min: 1, max: 2, label: "repetition_penalty（重复惩罚；官方默认 1；范围 1~2，步长 0.1）" },
 				],
 			},
 			{
@@ -527,6 +527,10 @@ window.__ModuleLoader__.load({
 								if (draft === null) return;
 								const trimmed = draft.trim();
 								if (trimmed === "") {
+									if (field.nonEmpty === true) {
+										setError("该列表不能为空（为空 = 首轮没有任何工具）");
+										return;
+									}
 									commit(undefined, true); // 清空 → unset，恢复继承默认值
 									return;
 								}
@@ -534,6 +538,10 @@ window.__ModuleLoader__.load({
 									.split(",")
 									.map((part) => part.trim())
 									.filter((part) => part.length > 0);
+								if (field.nonEmpty === true && parsed.length === 0) {
+									setError("该列表不能为空（为空 = 首轮没有任何工具）");
+									return;
+								}
 								commit(parsed);
 							},
 						});
@@ -593,6 +601,8 @@ window.__ModuleLoader__.load({
 							className: "kzm-input",
 							type: "number",
 							step: field.step || "any",
+							min: typeof field.min === "number" ? field.min : undefined,
+							max: typeof field.max === "number" ? field.max : undefined,
 							value: text,
 							disabled: !writable,
 							onChange: (event) => setDraft(event.target.value),
@@ -607,7 +617,18 @@ window.__ModuleLoader__.load({
 									setError("必须是数字");
 									return;
 								}
-								commit(parsed);
+								let value = parsed;
+								if (typeof field.min === "number") value = Math.max(field.min, value);
+								if (typeof field.max === "number") value = Math.min(field.max, value);
+								if (value !== parsed) {
+									const clampHint =
+										(field.min !== undefined ? "下限 " + field.min : "") +
+										(field.min !== undefined && field.max !== undefined ? "，" : "") +
+										(field.max !== undefined ? "上限 " + field.max : "");
+									setError("超出允许范围（" + clampHint + "），已自动截取");
+									setTimeout(() => setError(null), 2500);
+								}
+								commit(value);
 							},
 						});
 						break;
@@ -671,7 +692,7 @@ window.__ModuleLoader__.load({
 							plugin.name,
 							createElement("span", { className: "kzm-tag" }, "  " + plugin.tag),
 						),
-						createElement(StateBadge, { state: missing ? "missing" : enabled ? "on" : "off" }),
+						missing === true && createElement(StateBadge, { state: "missing" }),
 						createElement(Toggle, {
 							checked: enabled,
 							onChange: (next) => {
@@ -746,7 +767,6 @@ window.__ModuleLoader__.load({
 							"kaz-mode",
 							createElement("span", { className: "kzm-tag" }, "  本插件 · 超级模式"),
 						),
-						createElement(StateBadge, { state: kazEnabled ? "on" : "off" }),
 						createElement(
 							"button",
 							{
@@ -857,6 +877,10 @@ window.__ModuleLoader__.load({
 								if (draft === null) return;
 								const trimmed = draft.trim();
 								if (trimmed === "") {
+									if (field.nonEmpty === true) {
+										setError("该列表不能为空（为空 = 首轮没有任何工具）");
+										return;
+									}
 									commit(undefined, true);
 									return;
 								}
@@ -864,6 +888,10 @@ window.__ModuleLoader__.load({
 									.split(",")
 									.map((part) => part.trim())
 									.filter((part) => part.length > 0);
+								if (field.nonEmpty === true && parsed.length === 0) {
+									setError("该列表不能为空（为空 = 首轮没有任何工具）");
+									return;
+								}
 								commit(parsed);
 							},
 						});
@@ -894,6 +922,8 @@ window.__ModuleLoader__.load({
 							className: "kzm-input",
 							type: "number",
 							step: field.step || "any",
+							min: typeof field.min === "number" ? field.min : undefined,
+							max: typeof field.max === "number" ? field.max : undefined,
 							value: text,
 							disabled: disabled === true,
 							onChange: (event) => setDraft(event.target.value),
@@ -908,7 +938,18 @@ window.__ModuleLoader__.load({
 									setError("必须是数字");
 									return;
 								}
-								commit(parsed);
+								let value = parsed;
+								if (typeof field.min === "number") value = Math.max(field.min, value);
+								if (typeof field.max === "number") value = Math.min(field.max, value);
+								if (value !== parsed) {
+									const clampHint =
+										(field.min !== undefined ? "下限 " + field.min : "") +
+										(field.min !== undefined && field.max !== undefined ? "，" : "") +
+										(field.max !== undefined ? "上限 " + field.max : "");
+									setError("超出允许范围（" + clampHint + "），已自动截取");
+									setTimeout(() => setError(null), 2500);
+								}
+								commit(value);
 							},
 						});
 						break;
@@ -953,7 +994,7 @@ window.__ModuleLoader__.load({
 			}
 
 			/** 默认/会话层级中的一行插件状态（含可展开的详细配置编辑）。 */
-			function StatePluginRow({ plugin, state, overridden, onPatch, disabled }) {
+			function StatePluginRow({ plugin, state, overridden, onPatch, onRestorePlugin, disabled }) {
 				const [cfgOpen, setCfgOpen] = useState(false);
 				const enabled = state !== null && typeof state === "object" ? state.enabled !== false : false;
 				const missing = state === null || state === undefined;
@@ -967,10 +1008,22 @@ window.__ModuleLoader__.load({
 							"span",
 							{ className: "kzm-state-name", title: plugin.tag || plugin.id },
 							plugin.name,
-							plugin.tag !== undefined && createElement("span", { className: "kzm-tag" }, "  " + plugin.tag),
 							overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
+							plugin.tag !== undefined && createElement("span", { className: "kzm-tag" }, "  " + plugin.tag),
 						),
-						createElement(StateBadge, { state: missing ? "missing" : enabled ? "on" : "off" }),
+						missing === true && createElement(StateBadge, { state: "missing" }),
+						overridden === true && onRestorePlugin !== undefined &&
+							createElement(
+								"button",
+								{
+									type: "button",
+									className: "kzm-reset-btn",
+									title: "清除该插件的专属设置，恢复为当前模式默认设置",
+									disabled: disabled === true,
+									onClick: () => onRestorePlugin(plugin.id),
+								},
+								"恢复默认",
+							),
 						createElement(Toggle, {
 							checked: enabled,
 							onChange: (next) => onPatch(plugin.id, { enabled: next }),
@@ -1036,8 +1089,10 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			/** 三个层级的设置区块：a=非 Kaz 默认，b=Kaz 默认，c=当前对话专属。 */
-			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onSetNonKazDefault, onSetKazDefault, disabled, plugins = PLUGINS, restoreDrifted }) {
+			/** 三个层级的设置区块：a=非 Kaz 默认，b=Kaz 默认，c=当前对话专属。
+			 *  onRestore：区块级「恢复」按钮（默认段 = 重置该模式默认；专属段 = 清除全部专属覆盖）。
+			 *  restoreLabel：按钮文案（默认「恢复原设置」）。onRestorePlugin：专属段里单行插件的恢复。 */
+			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onRestorePlugin, restoreLabel, onSetNonKazDefault, onSetKazDefault, disabled, plugins = PLUGINS, restoreDrifted }) {
 				return createElement(
 					"div",
 					{ className: "kzm-state-section" },
@@ -1054,11 +1109,11 @@ window.__ModuleLoader__.load({
 									"data-drifted": restoreDrifted === true ? "true" : "false",
 									title: restoreDrifted === true
 										? "当前默认设置与代码内出厂默认不一致；点击将恢复为出厂设置"
-										: "恢复为代码内出厂设置",
+										: (restoreLabel !== undefined ? "点击恢复默认设置" : "恢复为代码内出厂设置"),
 									onClick: onRestore,
 									disabled: disabled === true,
 								},
-								"恢复原设置",
+								restoreLabel || "恢复原设置",
 							),
 					),
 					createElement("p", { className: "kzm-state-desc" }, desc),
@@ -1086,6 +1141,7 @@ window.__ModuleLoader__.load({
 							state: stateMap !== null && stateMap !== undefined ? stateMap[plugin.id] : undefined,
 							overridden: overriddenMap !== undefined && overriddenMap[plugin.id] === true,
 							onPatch,
+							onRestorePlugin,
 							disabled,
 						}),
 					),
@@ -1211,6 +1267,34 @@ window.__ModuleLoader__.load({
 					[sessionId],
 				);
 
+				// 清除当前对话的全部专属覆盖 → 回落到当前模式默认
+				// （Kaz 会话回落到 Kaz 默认，非 Kaz 会话回落到非 Kaz 默认）。
+				const clearSessionOverrides = useCallback(
+					async () => {
+						if (!sessionId) return null;
+						if (typeof window !== "undefined" && !window.confirm("确定清除当前对话的全部专属设置，恢复为当前模式默认设置吗？")) return null;
+						const res = await rpcCall("clearSession", { sessionId });
+						if (res !== null) {
+							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+						}
+						return res;
+					},
+					[sessionId],
+				);
+
+				// 清除当前对话里单个插件的专属覆盖 → 该插件回落到当前模式默认。
+				const clearSessionPluginOverride = useCallback(
+					async (pluginId) => {
+						if (!sessionId) return null;
+						const res = await rpcCall("clearSessionPlugin", { sessionId, pluginId });
+						if (res !== null) {
+							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+						}
+						return res;
+					},
+					[sessionId],
+				);
+
 				const sessionTitle = summary !== null && summary !== undefined && typeof summary.title === "string" && summary.title.trim().length > 0
 					? summary.title
 					: "当前对话";
@@ -1267,10 +1351,13 @@ window.__ModuleLoader__.load({
 							? createElement(StateSection, {
 								key: "session-" + (sessionId || ""),
 								title: sessionTitle + " 专属设置",
-								desc: "当前对话的插件状态，覆盖默认设置；可直接修改，也可设为非 Kaz / Kaz 默认。",
+								desc: "当前对话的插件状态，覆盖默认设置；可直接修改，也可设为非 Kaz / Kaz 默认。「恢复默认设置」会清除全部专属覆盖，回落到当前模式默认（Kaz 对话回落到 Kaz 默认，非 Kaz 对话回落到非 Kaz 默认）。",
 								stateMap: effectiveMap,
 								overriddenMap,
 								onPatch: patchSession,
+								onRestore: () => clearSessionOverrides(),
+								restoreLabel: "恢复默认设置",
+								onRestorePlugin: (pluginId) => clearSessionPluginOverride(pluginId),
 								onSetNonKazDefault: () => setAsDefault("nonKaz"),
 								onSetKazDefault: () => setAsDefault("kaz"),
 								disabled: !writable,
@@ -1471,7 +1558,12 @@ window.__ModuleLoader__.load({
 				const sync = () => {
 					const state = scope.sessions.list.getSnapshot();
 					const current = state !== null && state !== undefined ? state.current : undefined;
-					const summary = current !== undefined && state !== null && state.byId !== null && typeof state.byId === "object" ? state.byId[current] : undefined;
+					const byId = state !== null && state !== undefined && state.byId !== null && typeof state.byId === "object" ? state.byId : {};
+					const summary = current !== undefined ? byId[current] : undefined;
+					// 会话销毁时清理 capturedBlankPresets 缓存，避免只增不减（2026-08-21）。
+					for (const key of [...capturedBlankPresets.keys()]) {
+						if (!Object.prototype.hasOwnProperty.call(byId, key)) capturedBlankPresets.delete(key);
+					}
 					// 只有当前会话 id 真正变化时才向宿主应用该会话的插件状态，
 					// 避免 sessions 列表的频繁细碎更新导致反复写 settings.yaml。
 					if (typeof current === "string" && current.length > 0 && current !== lastAppliedSessionId) {

@@ -193,18 +193,25 @@ export function apply(ctx, config = {}) {
 
   /** 本实例是否真的向官方 agent-default-model 段写过值；避免插件一开始就是关闭时误恢复。 */
   let everSynced = false;
+  /** 本实例在本进程内写进官方段的键（关闭时只还原本插件写过的键，不碰其它键）。 */
+  const syncedKeys = new Set();
 
-  /** 把官方 agent-default-model 段恢复到官方默认值（provider/model，不带 reasoningEffort）。
-   *  只在本插件确实启用过/写过官方段后执行，避免插件一开始就是关闭时误清空用户配置。 */
+  /** 把官方 agent-default-model 段中本插件写过的键恢复到插件默认值。
+   *  2026-08-21 修复：原来用 settings.replace 整体覆盖，会丢掉官方段里用户/其它
+   *  来源的键（如 reasoningEffort）；现在只 update 本插件写过的键，其余键原样保留。 */
   async function restoreOfficial() {
     if (!everSynced) return;
     const settings = getSettings();
     if (settings === undefined) return;
-    const target = { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL };
+    const patch = {};
+    if (syncedKeys.has("provider")) patch.provider = DEFAULT_PROVIDER;
+    if (syncedKeys.has("model")) patch.model = DEFAULT_MODEL;
+    if (syncedKeys.has("reasoningEffort")) patch.reasoningEffort = DEFAULT_REASONING_EFFORT;
+    if (Object.keys(patch).length === 0) return;
     try {
-      await settings.replace(OFFICIAL_NS, target);
+      await settings.update(OFFICIAL_NS, patch);
       ctx.logger?.info?.(
-        "[deepseek-default-model] 插件已关闭，恢复 agent-default-model 到官方默认值: " + JSON.stringify(target),
+        "[deepseek-default-model] 插件已关闭，恢复 agent-default-model 中本插件写过的键: " + JSON.stringify(patch),
       );
     } catch (error) {
       ctx.logger?.warn?.(
@@ -244,6 +251,7 @@ export function apply(ctx, config = {}) {
     }
     if (Object.keys(patch).length === 0) return;
     everSynced = true;
+    for (const key of Object.keys(patch)) syncedKeys.add(key);
     try {
       await settings.update(OFFICIAL_NS, patch);
       ctx.logger?.info?.(
@@ -270,6 +278,7 @@ export function apply(ctx, config = {}) {
       }
       if (Object.keys(patch).length === 0) return;
       everSynced = true;
+      for (const key of Object.keys(patch)) syncedKeys.add(key);
       const write = settings.update(OFFICIAL_NS, patch);
       if (write !== null && typeof write.then === "function") {
         void write.then(
