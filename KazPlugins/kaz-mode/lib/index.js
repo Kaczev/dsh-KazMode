@@ -45,7 +45,10 @@ import {
   DEFAULT_DISABLED_TOOLS,
   FIXED_PERSONA,
   MANAGED_PLUGINS,
+  MEMORY_TOOLS,
+  DIAG_TOOL,
   computeSurface,
+  effectiveToolWhitelist,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -699,14 +702,73 @@ export default {
       return false;
     }
 
+    // -----------------------------------------------------------------------
+    // 会话级解析（方案 A：工具面按 agent 会话计算，不再全局注册/注销）。
+    // kaz-memory / kaz-diag 的工具常驻注册；本插件在每个请求的组装/执行层
+    // 按 agent 的会话状态决定它们是否进入该会话的工具面——切换对话不再
+    // 影响后台正在运行的会话。
+    // -----------------------------------------------------------------------
+
+    /** 从 agent 会话头解析原始会话 id（子代理归入父会话）；读不到返回 ""。
+     *  与 RPC 使用的会话状态文件键一致（原始 id，不做 sanitize）。 */
+    function agentSessionIdOf(agent) {
+      try {
+        const header = agent?.session?.header;
+        if (header !== null && header !== undefined && typeof header === "object") {
+          if (typeof header.parentSession === "string" && header.parentSession.trim().length > 0) {
+            return header.parentSession;
+          }
+          if (typeof header.id === "string" && header.id.trim().length > 0) {
+            return header.id;
+          }
+        }
+      } catch {
+        // fall through
+      }
+      if (typeof agent?.id === "string" && agent.id.trim().length > 0) return agent.id;
+      return "";
+    }
+
+    /** 该 agent 的会话是否为 Kaz 模式：以会话头记录的 agentPreset 为准
+     *  （子代理继承父会话）；无显式预设时回退全局开关。 */
+    function agentKazEnabled(agent) {
+      try {
+        const preset = agent?.session?.header?.agentPreset;
+        if (typeof preset === "string" && preset.trim().length > 0) return preset === KAZ_PRESET_ID;
+      } catch {
+        // fall through
+      }
+      return source().enabled === true;
+    }
+
+    /** 读取 agent 会话的生效插件状态 map（专属覆盖 > 该会话所在模式的默认）。 */
+    function agentEffectiveStates(agent) {
+      const sessionId = agentSessionIdOf(agent);
+      if (sessionId.length === 0) return {};
+      try {
+        const cwd = resolveSessionCwd(sessionId);
+        const data = loadStateFile(cwd, ctx.logger);
+        return effectivePluginStates(data, sessionId, agentKazEnabled(agent));
+      } catch (error) {
+        ctx.logger.debug(`[kaz-mode] 读取 agent 会话状态失败：${safeMessage(error)}`);
+        return {};
+      }
+    }
+
     /**
-     * 计算某代理此刻的 Kaz 工具面（Set）——全部交给 kaz-shared 的
-     * computeSurface：白名单来自 settings（用户优先），群组（kaz-memory /
-     * kaz-diag 的工具）由 kaz-shared 注册表按各自 enabled 动态加入/排除；
-     * round-minimal 首阶段信号由本插件读取并传入。
+     * 计算某 agent 此刻的 Kaz 工具面（Set）——全部交给 kaz-shared 的
+     * computeSurface：白名单来自 settings（用户优先），再按该 agent 会话的
+     * kaz-memory / kaz-diag 生效状态动态剔除对应工具；round-minimal 首阶段
+     * 信号由本插件读取并传入。
      */
-    function allowedToolSet(agent) {
-      const current = source();
+    function kazSurfaceFor(agent, current, states) {
+      const whitelist = new Set(effectiveToolWhitelist(current.toolWhitelist));
+      if (states["kaz-memory"]?.enabled === false) {
+        for (const tool of MEMORY_TOOLS) whitelist.delete(tool);
+      }
+      if (states["kaz-diag"]?.enabled === false) {
+        whitelist.delete(DIAG_TOOL);
+      }
       const minimalPhase = isMinimalAgent(agent) === true;
       let firstRoundTools = [];
       if (minimalPhase) {
@@ -721,67 +783,154 @@ export default {
         }
       }
       return computeSurface({
-        toolWhitelist: current.toolWhitelist,
+        toolWhitelist: [...whitelist],
         minimalPhase,
         firstRoundTools,
       });
     }
 
-    // 组装层：过滤工具列表 + 固定系统提示词。
-    //   系统提示词 = 固定 persona 一句（+ 计划模式段）；其余提示段一律过滤。
-    //   工具面（kaz-shared computeSurface）：首阶段（round-minimal 信号）仅保留
-    //   firstRoundTools（为空回退 DEFAULT_FIRST_ROUND_TOOLS）；首次工具调用后 =
-    //   有效白名单（settings.toolWhitelist ∪ 已启用群组，含 kaz-memory / kaz-diag
-    //   的动态增减）。
+    /** 非 Kaz 会话：记忆/诊断工具是否可见只取决于该会话的插件开关（其余交还宿主）。 */
+    function nonKazToolVisible(states, name) {
+      if (MEMORY_TOOLS.includes(name)) return states["kaz-memory"]?.enabled !== false;
+      if (name === DIAG_TOOL) return states["kaz-diag"]?.enabled !== false;
+      return true;
+    }
+
+    /**
+     * kazMode 服务（供 kaz-memory / kaz-diag 按会话查询工具面与插件状态）：
+     *   - kazEnabled(agent)     该 agent 会话是否 Kaz 模式；
+     *   - pluginEnabled(agent, pluginId)  该 agent 会话某被管理插件是否启用；
+     *   - toolVisible(agent, name)  该 agent 会话里某工具是否在工具面内；
+     *   - surfaceOf(agent)      Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
+     */
+    const kazModeService = {
+      kazEnabled: (agent) => agentKazEnabled(agent),
+      pluginEnabled: (agent, pluginId) => {
+        const states = agentEffectiveStates(agent);
+        const state = states[pluginId];
+        return state === null || state === undefined || typeof state !== "object" || state.enabled !== false;
+      },
+      toolVisible: (agent, name) => {
+        if (agent === null || agent === undefined || typeof agent !== "object") return true;
+        const current = source();
+        const states = agentEffectiveStates(agent);
+        if (agentKazEnabled(agent)) {
+          return kazSurfaceFor(agent, current, states).has(name);
+        }
+        return nonKazToolVisible(states, name);
+      },
+      surfaceOf: (agent) => {
+        if (agent === null || agent === undefined || typeof agent !== "object") return null;
+        if (!agentKazEnabled(agent)) return null;
+        return kazSurfaceFor(agent, source(), agentEffectiveStates(agent));
+      },
+    };
+    ctx.effect(() => {
+      const disposeService = ctx.provide("kazMode", kazModeService);
+      return () => {
+        if (typeof disposeService === "function") disposeService();
+      };
+    }, "kaz-mode: 发布 kazMode 会话工具面服务");
+
+    // 组装层：按 agent 会话过滤工具列表 + Kaz 会话固定系统提示词。
+    //   Kaz 会话：工具面 = kazSurfaceFor（白名单 - 该会话禁用的记忆/诊断工具，
+    //   首阶段仅 firstRoundTools）；系统提示词收敛为固定 persona + 计划模式段。
+    //   非 Kaz 会话：只移除该会话禁用的记忆/诊断工具（kaz-memory/kaz-diag 的
+    //   工具常驻注册，标准模式不能露出），其余工具交还宿主标准工具面。
+    //   每个请求组装时实时计算 → 后台运行的会话不受切换对话影响。
     ctx.on("system-prompt/assemble", function (assembly, context, next) {
       const current = source();
-      if (current.enabled !== true) return next();
       const agent = context?.agent;
-      const allowed = allowedToolSet(agent);
-      assembly.tools = assembly.tools.filter((tool) => {
-        if (tool === null || typeof tool !== "object") return false;
-        return allowed.has(tool.name);
-      });
-      // 固定系统提示词：只保留 persona（文本固定为 FIXED_PERSONA）+ 计划模式段。
-      const planSection = assembly.sections.find(
-        (section) =>
-          section !== null &&
-          typeof section === "object" &&
-          typeof section.name === "string" &&
-          /plan/i.test(section.name),
-      );
-      const kept = [];
-      if (planSection !== undefined) kept.push(planSection);
-      let personaKept = false;
-      for (const section of assembly.sections) {
-        if (section === null || typeof section !== "object" || section.name !== PERSONA_SECTION) continue;
-        if (typeof section.text === "string") section.text = FIXED_PERSONA;
-        kept.push(section);
-        personaKept = true;
+      const hasAgent = agent !== null && agent !== undefined && typeof agent === "object";
+      const kazEnabled = hasAgent ? agentKazEnabled(agent) : current.enabled === true;
+
+      if (kazEnabled) {
+        const states = hasAgent ? agentEffectiveStates(agent) : {};
+        const allowed = kazSurfaceFor(agent, current, states);
+        assembly.tools = assembly.tools.filter((tool) => {
+          if (tool === null || typeof tool !== "object") return false;
+          return allowed.has(tool.name);
+        });
+        // 固定系统提示词：只保留 persona（文本固定为 FIXED_PERSONA）+ 计划模式段。
+        const planSection = assembly.sections.find(
+          (section) =>
+            section !== null &&
+            typeof section === "object" &&
+            typeof section.name === "string" &&
+            /plan/i.test(section.name),
+        );
+        const kept = [];
+        if (planSection !== undefined) kept.push(planSection);
+        let personaKept = false;
+        for (const section of assembly.sections) {
+          if (section === null || typeof section !== "object" || section.name !== PERSONA_SECTION) continue;
+          if (typeof section.text === "string") section.text = FIXED_PERSONA;
+          kept.push(section);
+          personaKept = true;
+        }
+        if (!personaKept) {
+          kept.push({ name: PERSONA_SECTION, order: 0, text: FIXED_PERSONA });
+        }
+        assembly.sections = kept;
+        return next();
       }
-      if (!personaKept) {
-        kept.push({ name: PERSONA_SECTION, order: 0, text: FIXED_PERSONA });
+
+      // 非 Kaz 会话：仅剔除该会话禁用的记忆/诊断工具。
+      if (hasAgent) {
+        const states = agentEffectiveStates(agent);
+        const remove = new Set();
+        if (states["kaz-memory"]?.enabled === false) {
+          for (const tool of MEMORY_TOOLS) remove.add(tool);
+        }
+        if (states["kaz-diag"]?.enabled === false) {
+          remove.add(DIAG_TOOL);
+        }
+        if (remove.size > 0) {
+          assembly.tools = assembly.tools.filter((tool) => {
+            if (tool === null || typeof tool !== "object") return true;
+            return !remove.has(tool.name);
+          });
+        }
       }
-      assembly.sections = kept;
       return next();
     });
 
-    // 执行层：白名单外调用拒绝（纵深防御）。内部调用（无 agent）放行，
-    // 避免误伤宿主侧的程序化调用。
+    // 执行层：按 agent 会话拒绝工具面外调用（纵深防御）。内部调用（无 agent）
+    // 放行，避免误伤宿主侧的程序化调用。
     ctx.on("tools/pre-execute", (exec, next) => {
-      const current = source();
-      if (current.enabled !== true) return next();
       const agent = exec?.agent;
       if (agent === null || agent === undefined || typeof agent !== "object") return next();
       const name = exec?.name;
       if (typeof name !== "string") return next();
-      if (!allowedToolSet(agent).has(name)) {
-        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（不在 Kaz 工具面内）`);
+      const current = source();
+      const states = agentEffectiveStates(agent);
+
+      if (agentKazEnabled(agent)) {
+        if (!kazSurfaceFor(agent, current, states).has(name)) {
+          ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（不在该会话 Kaz 工具面内）`);
+          return {
+            kind: "deny",
+            reason:
+              `工具 "${name}" 不在本会话 Kaz 模式工具面内（toolWhitelist + 已启用记忆/诊断插件）。` +
+              `如需使用，请在 settings.yaml 的 kaz-mode.toolWhitelist 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
+          };
+        }
+        return next();
+      }
+
+      // 非 Kaz 会话：记忆/诊断工具按会话开关拒绝（常驻注册但该会话不可用）。
+      if (MEMORY_TOOLS.includes(name) && states["kaz-memory"]?.enabled === false) {
+        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（本会话 kaz-memory 已关闭）`);
         return {
           kind: "deny",
-          reason:
-            `工具 "${name}" 不在 Kaz 模式工具面内（toolWhitelist + 已启用群组）。` +
-            `如需使用，请在 settings.yaml 的 kaz-mode.toolWhitelist 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
+          reason: `工具 "${name}" 在本会话不可用（kaz-memory 已关闭）；如需使用请在本会话的 Kaz 面板开启 kaz-memory。`,
+        };
+      }
+      if (name === DIAG_TOOL && states["kaz-diag"]?.enabled === false) {
+        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（本会话 kaz-diag 已关闭）`);
+        return {
+          kind: "deny",
+          reason: `工具 "${name}" 在本会话不可用（kaz-diag 已关闭）；如需使用请在本会话的 Kaz 面板开启 kaz-diag。`,
         };
       }
       return next();

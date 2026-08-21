@@ -274,15 +274,24 @@ function toolAvailable(name, grouping, kazSettings) {
  *      "在 schemas 里" 即代表"当前环境能经 run_code 调用"。
  *  读不到的服务 / 设置一律按"不受限制"处理；判定失败按"不可用"处理。
  */
-function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc) {
-  if (!toolAvailable("memory_search", grouping, kazSettings)) return false;
+function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc, kazModeSvc) {
   if (roundMinimalSvc !== undefined && roundMinimalSvc !== null && typeof roundMinimalSvc.isMinimal === "function") {
     try {
       if (roundMinimalSvc.isMinimal(agent) === true) return false;
     } catch {
-      // 判定失败不阻断，交给 schemas 检查兜底
+      // 判定失败不阻断，交给工具面检查兜底
     }
   }
+  // 方案 A：kazMode 服务存在时按 agent 会话的工具面判定（该会话 kaz-memory
+  // 关闭 / 不在白名单 / 首阶段极简都会被排除）；服务缺失时回退旧逻辑。
+  if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.toolVisible === "function") {
+    try {
+      return kazModeSvc.toolVisible(agent, "memory_search") === true;
+    } catch {
+      return false;
+    }
+  }
+  if (!toolAvailable("memory_search", grouping, kazSettings)) return false;
   try {
     const schemas =
       toolsSvc !== undefined && toolsSvc !== null && typeof toolsSvc.schemas === "function"
@@ -307,7 +316,7 @@ function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinim
  *
  *  overrides.head：总述行覆盖（空 = 内置默认）。
  */
-function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc) {
+function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc, kazModeSvc) {
   const head =
     overrides !== null &&
     typeof overrides === "object" &&
@@ -315,7 +324,7 @@ function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc,
     overrides.head.trim().length > 0
       ? overrides.head.trim()
       : GUIDANCE_HEAD;
-  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc)) return "";
+  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc, kazModeSvc)) return "";
   return ["[kaz-memory guidance]", ">", head, "<"].join("\n");
 }
 
@@ -326,9 +335,17 @@ function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc,
  *
  *  overrides.forget：guidanceForget 覆盖（留空 = 内置默认）。
  */
-function composeForgetGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc) {
-  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc)) return "";
-  if (!toolAvailable("memory_forget", grouping, kazSettings)) return "";
+function composeForgetGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc, kazModeSvc) {
+  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc, kazModeSvc)) return "";
+  if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.toolVisible === "function") {
+    try {
+      if (kazModeSvc.toolVisible(agent, "memory_forget") !== true) return "";
+    } catch {
+      return "";
+    }
+  } else if (!toolAvailable("memory_forget", grouping, kazSettings)) {
+    return "";
+  }
   const line =
     overrides !== null &&
     typeof overrides === "object" &&
@@ -698,11 +715,23 @@ export async function apply(ctx, config = {}) {
   // ---- 固定指引文本：settings 里 guidance 留空则发固定总述行
   // （工具细节由工具描述自带，不再重复 A/B/C/D 行）；仅在 memory_search 当前
   // 环境可调用时以合成用户消息注入。Kaz 模式会把 systemPrompt 段全部滤掉，
-  // 所以这里不再注册 tool:memory:kaz-memory 段，改为 pre-step 上下文注入。----
+  // 所以这里不再注册 tool:memory:kaz-memory 段，改为 pre-step 上下文注入。
+  // 方案 A：kazMode 服务存在时按 agent 会话判定工具可用性（后台会话不受
+  // 切换对话影响）；服务缺失时回退全局 enabled 兜底。----
+  const getKazModeSvc = () => {
+    try {
+      const svc = ctx.get("kazMode");
+      return svc !== undefined && svc !== null && typeof svc.toolVisible === "function" ? svc : null;
+    } catch {
+      return null;
+    }
+  };
   const guidanceText = (agent) => {
     const current = source();
-    // 组件总开关：关闭时不注入任何记忆指引（round-display 上报随内容为空自然跳过）。
-    if (current === null || typeof current !== "object" || current.enabled === false) return "";
+    const kazModeSvc = getKazModeSvc();
+    // 组件总开关（kazMode 服务缺失时的全局兜底；服务存在时由
+    // composeGuidance → toolVisible 按 agent 会话判定）。
+    if (kazModeSvc === null && (current === null || typeof current !== "object" || current.enabled === false)) return "";
     const legacy =
       current !== null && typeof current === "object" && typeof current.guidance === "string"
         ? current.guidance.trim()
@@ -719,13 +748,14 @@ export async function apply(ctx, config = {}) {
       current !== null && typeof current === "object" && typeof current.guidanceHead === "string"
         ? current.guidanceHead
         : "";
-    return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), ctx.get("roundMinimal"));
+    return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), ctx.get("roundMinimal"), kazModeSvc);
   };
   /** 每轮首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
    *  整段覆盖时不再追加（兼容旧配置）；guidanceForget 可覆盖默认遗忘指引。 */
   const forgetGuidanceText = (agent) => {
     const current = source();
-    if (current === null || typeof current !== "object" || current.enabled === false) return "";
+    const kazModeSvc = getKazModeSvc();
+    if (kazModeSvc === null && (current === null || typeof current !== "object" || current.enabled === false)) return "";
     const legacy =
       current !== null && typeof current === "object" && typeof current.guidance === "string"
         ? current.guidance.trim()
@@ -742,7 +772,7 @@ export async function apply(ctx, config = {}) {
       current !== null && typeof current === "object" && typeof current.guidanceForget === "string"
         ? current.guidanceForget
         : "";
-    return composeForgetGuidance(ctx.get("toolGrouping"), kazSettings, { forget }, agent, ctx.get("tools"), ctx.get("roundMinimal"));
+    return composeForgetGuidance(ctx.get("toolGrouping"), kazSettings, { forget }, agent, ctx.get("tools"), ctx.get("roundMinimal"), kazModeSvc);
   };
   /** 尝试把本插件给模型发送的信息上报给 round-display 显示插件（best-effort）。
    *  服务不存在时静默跳过，不影响主流程。 */
@@ -1253,10 +1283,10 @@ export async function apply(ctx, config = {}) {
     }),
 ];
 
-  // ---- 注册 / 注销跟随 enabled 开关（kaz-diag 同款模式）：关闭 = 六工具完全
-  // 注销（任何模式都不再出现，不占工具列表/上下文）；开启 = 全部注册。热重载。
-  // 是否进入 Kaz 工具面由 kaz-shared 的白名单（唯一闸门，含记忆六工具）决定，
-  // 本插件无需向 kaz-shared 发信。----
+  // ---- 方案 A：六工具常驻注册（不再随 enabled 全局注销）。会话级可见性由
+  // kaz-mode 在每个请求的组装/执行层按 agent 会话状态计算：kaz-memory 关闭
+  // 的会话里记忆工具不进工具面、调用被拒；正在后台运行的其它会话不受影响。
+  // enabled 开关仍作用于记忆指引（经 kazMode 服务按会话判定）。----
   let toolDisposers = [];
   function installTools() {
     if (toolDisposers.length > 0) return;
@@ -1279,10 +1309,10 @@ export async function apply(ctx, config = {}) {
     toolDisposers = [];
   }
   function handleChange() {
-    const current = source();
-    const enabled = current === null || typeof current !== "object" || current.enabled !== false;
-    if (enabled) installTools();
-    else uninstallTools();
+    ctx.logger.info(
+      `[kaz-memory] 配置已生效：enabled=${source()?.enabled === false ? "false" : "true"}` +
+        `（工具常驻注册，会话级可见性由 kaz-mode 按 agent 会话过滤）`,
+    );
   }
 
   /** 在文件管理器中打开一个文件夹（先确保目录存在；探针可用 config.openFolder 覆盖）。 */
@@ -1329,9 +1359,8 @@ export async function apply(ctx, config = {}) {
     },
   );
 
-  // 初始注册：settings 服务未挂载时按 entry 默认（enabled: true）注册；
-  // settings 挂载 / 热重载后由 onChange → handleChange 同步开关。
-  handleChange();
+  // 初始注册（常驻）：插件一挂载即注册六工具；热重载不再改变注册状态。
+  installTools();
   ctx.effect(() => () => {
     uninstallTools();
   });

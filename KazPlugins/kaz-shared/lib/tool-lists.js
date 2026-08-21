@@ -33,6 +33,19 @@ export const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "read", "edit"];
 /** plugin-filter 默认禁用清单（插件/工具名，大小写不敏感匹配）。 */
 export const DEFAULT_DISABLED_TOOLS = ["tool-cordis", "tool-subagent-report", "codex", "claude-code"];
 
+/** kaz-memory 六个记忆工具名（会话级可见性由 kaz-mode 按 agent 会话计算）。 */
+export const MEMORY_TOOLS = [
+  "memory_save",
+  "memory_update",
+  "memory_list",
+  "memory_search",
+  "memory_detail",
+  "memory_forget",
+];
+
+/** kaz-diag 的状态工具名（会话级可见性由 kaz-mode 按 agent 会话计算）。 */
+export const DIAG_TOOL = "kaz_mode_status";
+
 /** Kaz 模式固定系统提示词（persona 唯一文本）。 */
 export const FIXED_PERSONA = "You are a helpful software engineer assistant.";
 
@@ -66,8 +79,8 @@ export const TOOL_WHITELIST = [
   "read", "write", "edit", "glob", "grep", // 文件读写/编辑/搜索
   "job_list", "job_output", "job_kill", // 后台任务管理
   "ask_user_question", "todo_write", "web_search", // 交互/待办/搜索
-  "memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget", // kaz-memory 六工具
-  "kaz_mode_status", // kaz-diag 的工具：Kaz 模式状态报告
+  ...MEMORY_TOOLS, // kaz-memory 六工具
+  DIAG_TOOL, // kaz-diag 的工具：Kaz 模式状态报告
 ];
 
 /** 清理 + 去重工具名列表（保留顺序）。 */

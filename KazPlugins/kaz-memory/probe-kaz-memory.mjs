@@ -243,6 +243,17 @@ const toolsMock = {
   },
 };
 
+/** mock kazMode 服务（方案 A）：toolVisible 由 mockKazVisible 表驱动（缺省 = 可见）。
+ *  测试通过 mockKazVisible.set(name, bool) 模拟「该会话 kaz-memory 的某个记忆工具
+ *  是否在工具面内」。 */
+const mockKazVisible = new Map();
+const mockKazMode = {
+  kazEnabled: () => true,
+  pluginEnabled: () => true,
+  toolVisible: (_agent, name) => mockKazVisible.get(name) !== false,
+  surfaceOf: () => new Set([...registeredTools.keys()]),
+};
+
 const base = {
   fiber: { state: 0 },
   logger: { info: () => {}, warn: (...a) => console.log("[mock:warn]", ...a), debug: () => {} },
@@ -267,6 +278,7 @@ const base = {
     if (name === "memory") return memory;
     if (name === "agents") return mockAgents;
     if (name === "tools") return toolsMock;
+    if (name === "kazMode") return mockKazMode;
     if (name === "connection") {
       return {
         rpc: {
@@ -576,44 +588,48 @@ check("⑧b RPC rename 修改 m1 名称", renameRpc !== null && renameRpc.ok ===
 const forgetRpc = await rpcHandler("forget", { id: "m3", project: "C:/projA" });
 check("⑧b RPC forget 删除 m3", forgetRpc !== null && forgetRpc.ok === true && forgetRpc.value.deleted === true);
 
-// ⑨ memory_forget 被禁用、但 memory_search 仍可用（注册 + schemas 都有）→ 仍发指引
-const originalGet = base.get;
-base.get = (name) => (name === "toolGrouping" ? { isRegistered: (n) => n !== "memory_forget" } : originalGet(name));
+// ⑨ 会话工具面里 memory_forget 不可见、但 memory_search 可见（方案 A：
+// kazMode.toolVisible 判定）→ 仍发总述指引，不发遗忘指引
+mockKazVisible.set("memory_search", true);
+mockKazVisible.set("memory_forget", false);
 const forgetDisabledAgent = { id: "guidance-forget-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 const g8 = guidanceTextOf(await runPreStep(forgetDisabledAgent, 2));
-check("⑨ memory_forget 被禁用、memory_search 可用时仍发固定提示", g8.includes("We need to search the memory (memory_search)"));
+check("⑨ memory_search 可见、memory_forget 不可见时仍发固定提示", g8.includes("We need to search the memory (memory_search)"));
 check("⑨ 固定提示不含任何工具说明行", !g8.includes("memory_search：") && !g8.includes("memory_forget："));
 const forgetDisabledSearchAgent = { id: "guidance-forget-disabled-search", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
-check("⑨ memory_forget 被禁用时不发遗忘指引", hasForgetGuidance(await runPreStep(forgetDisabledSearchAgent, 2)) === false);
-base.get = originalGet;
+check("⑨ memory_forget 不可见时不发遗忘指引", hasForgetGuidance(await runPreStep(forgetDisabledSearchAgent, 2)) === false);
+mockKazVisible.clear();
 
-// ⑨b memory_search 单独被禁用（其余记忆工具仍可用）→ 不发指引
-base.get = (name) => (name === "toolGrouping" ? { isRegistered: (n) => n !== "memory_search" } : originalGet(name));
+// ⑨b 会话工具面里 memory_search 单独不可见（其余记忆工具仍可用）→ 不发指引
+mockKazVisible.set("memory_search", false);
 const searchDisabledAgent = { id: "guidance-search-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-check("⑨b memory_search 单独被禁用时不发指引（其余记忆工具可用也不发）", hasGuidance(await runPreStep(searchDisabledAgent, 2)) === false);
-base.get = originalGet;
+check("⑨b memory_search 按会话不可见时不发指引（其余记忆工具可用也不发）", hasGuidance(await runPreStep(searchDisabledAgent, 2)) === false);
+mockKazVisible.clear();
 
-// ⑨c memory_search 不在当前环境 schemas（注册了但工具面不含它，如作用域移除）
-//     → 不发指引（当前环境确实调不到它）
+// ⑨c kazMode 服务缺失时回退旧 schemas 判定：memory_search 不在 schemas → 不发指引
+const originalGet = base.get;
 base.get = (name) =>
-  name === "tools"
-    ? {
-        register: toolsMock.register,
-        schemas: () =>
-          [...registeredTools.keys()]
-            .filter((n) => n !== "memory_search")
-            .map((name) => ({ name, description: "", parameters: {} })),
-      }
-    : originalGet(name);
+  name === "kazMode"
+    ? undefined
+    : name === "tools"
+      ? {
+          register: toolsMock.register,
+          schemas: () =>
+            [...registeredTools.keys()]
+              .filter((n) => n !== "memory_search")
+              .map((name) => ({ name, description: "", parameters: {} })),
+        }
+      : originalGet(name);
 const noSchemaAgent = { id: "guidance-no-schema", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-check("⑨c memory_search 不在 schemas 时不发指引", hasGuidance(await runPreStep(noSchemaAgent, 2)) === false);
+check("⑨c kazMode 服务缺失时回退 schemas 判定：memory_search 不在 schemas 不发指引", hasGuidance(await runPreStep(noSchemaAgent, 2)) === false);
 base.get = originalGet;
 
-// ⑩ 四个工具全被禁用 → 不发指引
-base.get = (name) => (name === "toolGrouping" ? { isRegistered: () => false } : originalGet(name));
+// ⑩ 会话工具面里 memory_search 与 memory_forget 都不可见 → 不发指引
+mockKazVisible.set("memory_search", false);
+mockKazVisible.set("memory_forget", false);
 const allDisabledAgent = { id: "guidance-all-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-check("⑩ 四个工具全被禁用时不发指引", hasGuidance(await runPreStep(allDisabledAgent, 2)) === false);
-base.get = originalGet;
+check("⑩ memory_search 与 memory_forget 都不可见时不发指引", hasGuidance(await runPreStep(allDisabledAgent, 2)) === false);
+mockKazVisible.clear();
 
 // ⑪ 组装层兜底：无条件移除基础英文 tool:memory 指引段（全模式生效）
 const asmListeners = listeners.get("system-prompt/assemble") ?? [];
@@ -704,17 +720,20 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   rmSync(storePath, { force: true });
 }
 
-// ⑬ enabled 总开关（Kaz 面板开关）：关闭时指引为空、自动载入不注入；开启恢复
+// ⑬ 会话级总开关（方案 A：kazMode 服务按 agent 会话判定）：该会话 kaz-memory
+// 关闭（mock toolVisible=false）→ 指引为空；开启 → 指引恢复。自动载入仍走
+// 全局 settings 门控（独立 harness，见下）。
 {
-  // 指引门控（主 harness）
-  await settings.update("kaz-memory", { enabled: false });
+  // 指引门控（主 harness：kazMode mock 模拟该会话 kaz-memory 开关）
+  mockKazVisible.set("memory_search", false);
+  mockKazVisible.set("memory_forget", false);
   await settle();
   const disabledGuidanceAgent = { id: "guidance-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-  check("⑬ 关闭后记忆指引为空", hasGuidance(await runPreStep(disabledGuidanceAgent, 2)) === false);
-  await settings.update("kaz-memory", { enabled: true });
+  check("⑬ 会话 kaz-memory 关闭后记忆指引为空", hasGuidance(await runPreStep(disabledGuidanceAgent, 2)) === false);
+  mockKazVisible.clear();
   await settle();
   const enabledGuidanceAgent = { id: "guidance-enabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-  check("⑬ 重新开启后指引恢复", guidanceTextOf(await runPreStep(enabledGuidanceAgent, 2)).startsWith("[kaz-memory guidance]"));
+  check("⑬ 会话 kaz-memory 开启后指引恢复", guidanceTextOf(await runPreStep(enabledGuidanceAgent, 2)).startsWith("[kaz-memory guidance]"));
 
   // 自动载入门控（独立 harness，捕获注册期 settings 实例）
   const storeOff = join(tmpdir(), "km-off-" + Date.now() + ".json");
@@ -761,16 +780,17 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   rmSync(storeOff, { force: true });
 }
 
-// ⑮ enabled 总开关 = 六工具完全注销（不只是移出 Kaz 工具面；任何模式都不再出现）
+// ⑮ 方案 A：六工具常驻注册——enabled 开关不再全局注销工具；会话级可见性由
+// kaz-mode 组装/执行层按 agent 会话过滤（kazMode.toolVisible 判定）
 {
   const SIX = ["memory_save", "memory_update", "memory_list", "memory_search", "memory_detail", "memory_forget"];
-  check("⑮ 初始（enabled=true）六工具已注册", SIX.every((n) => registeredTools.has(n)));
+  check("⑮ 初始六工具已注册", SIX.every((n) => registeredTools.has(n)));
   await settings.update("kaz-memory", { enabled: false });
   await settle();
-  check("⑮ 关闭后六工具完全注销", SIX.every((n) => !registeredTools.has(n)));
+  check("⑮ 关闭后六工具仍保持注册（会话级过滤，不做全局注销）", SIX.every((n) => registeredTools.has(n)));
   await settings.update("kaz-memory", { enabled: true });
   await settle();
-  check("⑮ 重新开启后六工具恢复注册", SIX.every((n) => registeredTools.has(n)));
+  check("⑮ 重新开启后六工具仍注册", SIX.every((n) => registeredTools.has(n)));
 }
 
 // ⑭ BM25 评分单元检查（vendored okapibm25 + lib/bm25.js）

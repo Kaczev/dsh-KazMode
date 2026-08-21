@@ -24,7 +24,6 @@ import {
   TOOL_WHITELIST,
   MANAGED_PLUGINS,
   FIXED_PERSONA,
-  effectiveToolWhitelist,
   computeSurface,
 } from "kaz-shared";
 
@@ -199,11 +198,6 @@ export default {
         : TOOL_WHITELIST;
     }
 
-    /** 有效白名单 = kaz-shared 计算（settings.toolWhitelist，白名单是唯一闸门）。 */
-    function effectiveWhitelist() {
-      return new Set(effectiveToolWhitelist(kazToolWhitelist()));
-    }
-
     /** 该代理是否处于首阶段极简：完全由 round-minimal 服务判定；
      *  服务缺失或禁用 → 无首阶段（不自行兜底）。 */
     function isMinimalAgent(agent) {
@@ -231,10 +225,24 @@ export default {
       return false;
     }
 
+    /** 读取 kazMode 服务（kaz-mode 方案 A：按 agent 会话判定工具面）；缺失返回 null。 */
+    function kazModeServiceOf() {
+      try {
+        const svc = ctx.get("kazMode");
+        return svc !== undefined && svc !== null && typeof svc.kazEnabled === "function" ? svc : null;
+      } catch {
+        return null;
+      }
+    }
+
     /** 生成完整状态报告。 */
     function buildReport(agent = undefined) {
       const kazSettings = readNamespace(settingsNamespace("kaz-mode"));
-      const kazEnabled = kazSettings !== undefined && kazSettings !== null && kazSettings.enabled === true;
+      const kazModeSvc = kazModeServiceOf();
+      const kazEnabled =
+        kazModeSvc !== null
+          ? kazModeSvc.kazEnabled(agent) === true
+          : kazSettings !== undefined && kazSettings !== null && kazSettings.enabled === true;
       const lines = [];
       lines.push("kaz-mode 状态报告（kaz-diag）");
       lines.push("==================================================");
@@ -292,11 +300,9 @@ export default {
       }
       lines.push("");
 
-      lines.push("[Kaz 工具面]（toolWhitelist 白名单是唯一闸门，由 kaz-shared 管理）");
+      lines.push("[Kaz 工具面]（toolWhitelist 白名单是唯一闸门；记忆/诊断工具按 agent 会话过滤）");
       const whitelist = kazToolWhitelist();
       lines.push(`  手动白名单 toolWhitelist（Kaz 全部工具的唯一闸门，settings.yaml 的 kaz-mode.toolWhitelist，Kaz 面板可编辑）: [${whitelist.join(", ")}]`);
-      const effective = effectiveWhitelist();
-      lines.push(`  有效白名单（${effective.size} 个）: ${[...effective].sort().join(", ") || "（无）"}`);
 
       let firstRoundTools = [];
       try {
@@ -308,7 +314,16 @@ export default {
       } catch {
         // 保持空数组（computeSurface 回退 DEFAULT_FIRST_ROUND_TOOLS）
       }
-      const surface = computeSurface({ toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools });
+      const fallbackSurface = computeSurface({ toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools });
+      let sessionSurface = null;
+      if (kazModeSvc !== null && kazEnabled && typeof kazModeSvc.surfaceOf === "function") {
+        try {
+          sessionSurface = kazModeSvc.surfaceOf(agent);
+        } catch {
+          sessionSurface = null;
+        }
+      }
+      const surface = sessionSurface !== null && sessionSurface !== undefined ? sessionSurface : fallbackSurface;
       const schemas = [];
       try {
         const toolsSvc = ctx.get("tools");
@@ -319,16 +334,31 @@ export default {
         // 保持空
       }
       const registered = new Set(schemas.map((schema) => schema?.name).filter((n) => typeof n === "string"));
-      const surfaceNames = [...surface].sort();
-      const mounted = surfaceNames.filter((name) => registered.has(name));
-      const unmounted = surfaceNames.filter((name) => !registered.has(name));
-      lines.push(
-        `  当前工具面（定义 ${surfaceNames.length} 个，实际已注册 ${mounted.length} 个）: ${mounted.join(", ") || "（无）"}`,
-      );
-      if (unmounted.length > 0) {
-        lines.push(`  定义中但未挂载（不计入实际工具面）: ${unmounted.join(", ")}`);
+      if (kazEnabled) {
+        const surfaceNames = [...surface].sort();
+        const mounted = surfaceNames.filter((name) => registered.has(name));
+        const unmounted = surfaceNames.filter((name) => !registered.has(name));
+        lines.push(
+          `  当前工具面（定义 ${surfaceNames.length} 个，实际已注册 ${mounted.length} 个）: ${mounted.join(", ") || "（无）"}`,
+        );
+        if (unmounted.length > 0) {
+          lines.push(`  定义中但未挂载（不计入实际工具面）: ${unmounted.join(", ")}`);
+        }
+      } else {
+        const mem =
+          kazModeSvc !== null && typeof kazModeSvc.pluginEnabled === "function"
+            ? kazModeSvc.pluginEnabled(agent, "kaz-memory")
+            : readPluginState("kaz-memory")?.enabled !== false;
+        const diag =
+          kazModeSvc !== null && typeof kazModeSvc.pluginEnabled === "function"
+            ? kazModeSvc.pluginEnabled(agent, "kaz-diag")
+            : readPluginState("kaz-diag")?.enabled !== false;
+        lines.push(
+          `  当前为 非 Kaz 会话：工具面由标准模式决定；本会话 kaz-memory=${mem ? "启用" : "关闭"}（记忆工具${mem ? "可见" : "已过滤"}）、` +
+            `kaz-diag=${diag ? "启用" : "关闭"}（kaz_mode_status${diag ? "可见" : "已过滤"}）。`,
+        );
       }
-      lines.push("  子代理会话: 同样适用 Kaz 工具面（host 平面监听器对所有 agent 生效）");
+      lines.push("  子代理会话: 同样按各自会话判定工具面（host 平面监听器对所有 agent 生效）");
       lines.push("");
 
       lines.push("[round-minimal 信号]（首次工具调用前 = 首阶段极简）");
@@ -343,13 +373,13 @@ export default {
       return lines.join("\n");
     }
 
-    /** 注册 / 注销状态工具（跟随 enabled 开关热重载）。
-     *  是否进入 Kaz 工具面由 kaz-shared 的白名单（唯一闸门，含 kaz_mode_status）
-     *  决定，本插件无需向 kaz-shared 发信。 */
+    /** 方案 A：kaz_mode_status 常驻注册（不再随 enabled 全局注销）。会话级
+     *  可见性由 kaz-mode 在每个请求的组装/执行层按 agent 会话状态计算：
+     *  本插件关闭的会话里该工具不进工具面、调用被拒；后台运行的其它会话
+     *  不受切换对话影响。enabled 开关仍作用于报告内容（按会话判定）。 */
     let toolDisposer = null;
     function installTool() {
       if (toolDisposer !== null) return;
-      if (source().enabled !== true) return;
       try {
         toolDisposer = ctx.tools.register(
           defineTool({
@@ -381,12 +411,12 @@ export default {
       toolDisposer = null;
     }
     function handleChange() {
-      const enabled = source().enabled === true;
-      if (enabled) installTool();
-      else uninstallTool();
-      ctx.logger.info(`[kaz-diag] 配置已生效：enabled=${source().enabled}`);
+      ctx.logger.info(
+        `[kaz-diag] 配置已生效：enabled=${source().enabled}` +
+          `（工具常驻注册，会话级可见性由 kaz-mode 按 agent 会话过滤）`,
+      );
     }
-    handleChange();
+    installTool();
 
     ctx.effect(() => () => {
       uninstallTool();

@@ -1,0 +1,223 @@
+// kaz-mode 探针（方案 A 重构后）：按 agent 会话计算工具面，不做全局注销。
+// 覆盖：
+//   ① kazMode 服务：kazEnabled / pluginEnabled / toolVisible 按 agent 会话判定；
+//   ② 组装层：Kaz 会话按白名单过滤（记忆/诊断工具按该会话开关增减）+ persona 固定；
+//   ③ 组装层：非 Kaz 会话只移除该会话禁用的记忆/诊断工具（标准工具保留）；
+//   ④ 执行层：Kaz 会话拒绝白名单外调用；非 Kaz 会话拒绝已禁用插件的工具；
+//   ⑤ 记忆/诊断工具常驻注册——工具面完全由会话状态计算，不随全局 enabled 注销。
+// 运行：node kaz-mode/probe-kaz-mode.mjs
+import plugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/kaz-mode/lib/index.js";
+import { FIXED_PERSONA } from "kaz-shared";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+let failures = 0;
+function check(label, ok) {
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}`);
+  if (!ok) failures += 1;
+}
+
+const TMP = mkdtempSync(join(tmpdir(), "kzm-probe-"));
+mkdirSync(join(TMP, ".dsh"), { recursive: true });
+const SESSION_FILE = join(TMP, ".dsh", "kaz-session-states.json");
+
+// 会话：agentPreset 决定 Kaz/非 Kaz；会话状态文件决定 kaz-memory/kaz-diag 开关。
+const SESSIONS = {
+  "s-kaz": { agentPreset: "kaz", states: { "kaz-memory": { enabled: true }, "kaz-diag": { enabled: false } } },
+  "s-kaz-nomem": { agentPreset: "kaz", states: { "kaz-memory": { enabled: false }, "kaz-diag": { enabled: true } } },
+  "s-plain": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: false }, "kaz-diag": { enabled: false } } },
+  "s-plain-mem": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: true }, "kaz-diag": { enabled: false } } },
+};
+{
+  const sessionsJson = { version: 1, sessions: {} };
+  for (const [id, info] of Object.entries(SESSIONS)) sessionsJson.sessions[id] = info.states;
+  writeFileSync(SESSION_FILE, JSON.stringify(sessionsJson, null, 2), "utf8");
+}
+
+const agentOf = (id) => ({
+  id,
+  session: { header: { id, cwd: TMP, agentPreset: SESSIONS[id].agentPreset }, events: [] },
+});
+
+// ---- mock settings ----
+function makeSettings() {
+  const userSections = new Map();
+  const bases = new Map();
+  const watches = new Map();
+  const resolve = (ns) => ({ ...(bases.get(ns) ?? {}), ...(userSections.get(ns) ?? {}) });
+  const commit = (ns) => {
+    for (const cb of watches.get(ns) ?? []) {
+      try {
+        cb(resolve(ns), undefined);
+      } catch {
+        // ignore
+      }
+    }
+  };
+  return {
+    register(ns, _schema, opts = {}) {
+      bases.set(ns, opts.base ?? {});
+      return {
+        get: () => resolve(ns),
+        watch: (cb) => {
+          if (!watches.has(ns)) watches.set(ns, []);
+          watches.get(ns).push(cb);
+          return () => {};
+        },
+        update: (patch) => {
+          userSections.set(ns, { ...(userSections.get(ns) ?? {}), ...patch });
+          commit(ns);
+          return Promise.resolve();
+        },
+        replace: (section) => {
+          userSections.set(ns, { ...section });
+          commit(ns);
+          return Promise.resolve();
+        },
+      };
+    },
+    get: (ns) => resolve(ns),
+    update(ns, patch) {
+      userSections.set(ns, { ...(userSections.get(ns) ?? {}), ...patch });
+      commit(ns);
+      return Promise.resolve();
+    },
+    describe: () => [],
+  };
+}
+
+// ---- mock ctx ----
+const listeners = new Map();
+const provided = {};
+const agentsBySession = new Map();
+for (const [id, info] of Object.entries(SESSIONS)) {
+  agentsBySession.set(id, { id, session: { header: { id, cwd: TMP, agentPreset: info.agentPreset } } });
+}
+const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search", "kaz_mode_status"];
+
+const settings = makeSettings();
+const ctx = {
+  fiber: { state: 0 },
+  logger: { info: () => {}, warn: (...a) => console.log("[mock:warn]", ...a), debug: () => {} },
+  on(event, fn) {
+    if (!listeners.has(event)) listeners.set(event, []);
+    listeners.get(event).push(fn);
+    return () => {};
+  },
+  effect(fn) {
+    const dispose = fn();
+    return () => {
+      if (typeof dispose === "function") dispose();
+    };
+  },
+  provide(name, value) {
+    provided[name] = value;
+    return () => {
+      delete provided[name];
+    };
+  },
+  get(name) {
+    if (name in provided) return provided[name];
+    if (name === "settings") return settings;
+    if (name === "agents") return { get: (sid) => agentsBySession.get(sid) ?? undefined };
+    return undefined;
+  },
+  inject(deps, cb) {
+    if (deps.includes("settings")) cb({ ...ctx, settings });
+  },
+};
+
+plugin.apply(ctx, { enabled: true, toolWhitelist: [...WHITELIST] });
+const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+await settle();
+
+// ① kazMode 服务按 agent 会话判定
+const kazMode = provided["kazMode"];
+check("① kazMode 服务已提供", kazMode !== undefined && typeof kazMode.toolVisible === "function");
+const sKaz = agentOf("s-kaz");
+const sKazNomem = agentOf("s-kaz-nomem");
+const sPlain = agentOf("s-plain");
+const sPlainMem = agentOf("s-plain-mem");
+check("① kazEnabled(kaz 会话)=true", kazMode.kazEnabled(sKaz) === true);
+check("① kazEnabled(非 kaz 会话)=false", kazMode.kazEnabled(sPlain) === false);
+check("① pluginEnabled(s-kaz, kaz-memory)=true", kazMode.pluginEnabled(sKaz, "kaz-memory") === true);
+check("① pluginEnabled(s-kaz-nomem, kaz-memory)=false", kazMode.pluginEnabled(sKazNomem, "kaz-memory") === false);
+check("① toolVisible(s-kaz, memory_search)=true（记忆开）", kazMode.toolVisible(sKaz, "memory_search") === true);
+check("① toolVisible(s-kaz, kaz_mode_status)=false（诊断关）", kazMode.toolVisible(sKaz, "kaz_mode_status") === false);
+check("① toolVisible(s-kaz-nomem, memory_search)=false（记忆关）", kazMode.toolVisible(sKazNomem, "memory_search") === false);
+check("① toolVisible(s-kaz-nomem, kaz_mode_status)=true（诊断开）", kazMode.toolVisible(sKazNomem, "kaz_mode_status") === true);
+check("① toolVisible(s-plain, memory_search)=false（非 Kaz 记忆关）", kazMode.toolVisible(sPlain, "memory_search") === false);
+check("① toolVisible(s-plain-mem, memory_search)=true（非 Kaz 记忆开）", kazMode.toolVisible(sPlainMem, "memory_search") === true);
+check("① toolVisible(s-plain, web_search)=true（非 Kaz 其它工具放行）", kazMode.toolVisible(sPlain, "web_search") === true);
+
+// ② 组装层：Kaz 会话
+const runAssemble = async (agent, tools) => {
+  const listener = listeners.get("system-prompt/assemble")[0];
+  const assembly = {
+    tools: tools.map((name) => ({ name })),
+    sections: [{ name: "deployment:persona", text: "p" }],
+    contexts: [],
+    variables: {},
+  };
+  await listener(assembly, { agent }, () => assembly);
+  return assembly.tools.map((t) => t.name);
+};
+const ALL_TOOLS = [...WHITELIST, "workflow", "subagent"];
+const kazNames = await runAssemble(sKaz, ALL_TOOLS);
+check("② Kaz 会话：白名单外工具被移除（workflow/subagent）", !kazNames.includes("workflow") && !kazNames.includes("subagent"));
+check("② Kaz 会话：白名单内工具保留（read/memory_search/web_search）", kazNames.includes("read") && kazNames.includes("memory_search") && kazNames.includes("web_search"));
+check("② Kaz 会话：kaz_mode_status 被过滤（该会话 kaz-diag 关）", !kazNames.includes("kaz_mode_status"));
+const kazNomemNames = await runAssemble(sKazNomem, ALL_TOOLS);
+check("② Kaz 会话（记忆关）：记忆工具被过滤", !kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save"));
+check("② Kaz 会话（诊断开）：kaz_mode_status 保留", kazNomemNames.includes("kaz_mode_status"));
+
+// ③ 组装层：非 Kaz 会话
+const plainNames = await runAssemble(sPlain, ALL_TOOLS);
+check("③ 非 Kaz 会话（记忆关）：记忆工具被移除", !plainNames.includes("memory_search") && !plainNames.includes("memory_save"));
+check("③ 非 Kaz 会话：kaz_mode_status 被移除（诊断关）", !plainNames.includes("kaz_mode_status"));
+check("③ 非 Kaz 会话：标准工具保留（workflow/subagent/web_search）", plainNames.includes("workflow") && plainNames.includes("subagent") && plainNames.includes("web_search"));
+const plainMemNames = await runAssemble(sPlainMem, ALL_TOOLS);
+check("③ 非 Kaz 会话（记忆开）：记忆工具保留", plainMemNames.includes("memory_search"));
+check("③ 非 Kaz 会话（记忆开）：kaz_mode_status 仍移除（诊断关）", !plainMemNames.includes("kaz_mode_status"));
+
+// ④ 执行层
+const gate = listeners.get("tools/pre-execute")[0];
+const runGate = async (agent, name) => gate({ name, agent }, async () => ({ kind: "allow" }));
+const denyWorkflow = await runGate(sKaz, "workflow");
+check("④ Kaz 会话：拒绝白名单外工具（workflow）", denyWorkflow.kind === "deny");
+const allowMem = await runGate(sKaz, "memory_search");
+check("④ Kaz 会话：放行记忆工具（memory_search）", allowMem.kind === "allow");
+const denyMemPlain = await runGate(sPlain, "memory_search");
+check("④ 非 Kaz 会话（记忆关）：拒绝 memory_search", denyMemPlain.kind === "deny");
+const allowMemPlain = await runGate(sPlainMem, "memory_search");
+check("④ 非 Kaz 会话（记忆开）：放行 memory_search", allowMemPlain.kind === "allow");
+const denyDiag = await runGate(sPlain, "kaz_mode_status");
+check("④ 非 Kaz 会话（诊断关）：拒绝 kaz_mode_status", denyDiag.kind === "deny");
+const internalCall = await gate({ name: "workflow" }, async () => ({ kind: "allow" }));
+check("④ 无 agent 的内部调用放行", internalCall.kind === "allow");
+
+// ⑤ 工具面完全由会话状态计算（常驻注册语义：不看全局 enabled 注销）
+check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）", kazMode.toolVisible(sKaz, "memory_search") === true && kazMode.toolVisible(sPlain, "memory_search") === false);
+
+// ⑥ 组装层 persona 固定（Kaz 会话）
+{
+  const listener = listeners.get("system-prompt/assemble")[0];
+  const assembly = {
+    tools: [{ name: "pwsh" }],
+    sections: [
+      { name: "deployment:persona", text: "other" },
+      { name: "thinking-anchor:policy", text: "anchor" },
+    ],
+    contexts: [],
+    variables: {},
+  };
+  await listener(assembly, { agent: sKaz }, () => assembly);
+  const persona = assembly.sections.find((s) => s.name === "deployment:persona");
+  check("⑥ Kaz 会话 persona 固定为 FIXED_PERSONA", persona !== undefined && persona.text === FIXED_PERSONA);
+  check("⑥ Kaz 会话过滤其它提示段", assembly.sections.length === 1);
+}
+
+rmSync(TMP, { recursive: true, force: true });
+console.log(failures === 0 ? "\nKAZ-MODE PROBE OK" : `\nKAZ-MODE PROBE FAILED (${failures} 项失败)`);
+process.exit(failures === 0 ? 0 : 1);
