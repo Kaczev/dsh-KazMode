@@ -729,9 +729,11 @@ export async function apply(ctx, config = {}) {
   const guidanceText = (agent) => {
     const current = source();
     const kazModeSvc = getKazModeSvc();
-    // 组件总开关（kazMode 服务缺失时的全局兜底；服务存在时由
-    // composeGuidance → toolVisible 按 agent 会话判定）。
-    if (kazModeSvc === null && (current === null || typeof current !== "object" || current.enabled === false)) return "";
+    // 总开关（硬闸门，2026-08-21 修复）：插件自身 enabled=false 时一律不注入，
+    // 不因 kazMode 服务存在而绕过——否则 Kaz 模式默认（kaz-defaults.json 里
+    // kaz-memory.enabled=true）会让"用户已在 settings.yaml 关闭 kaz-memory"的
+    // 新对话仍然收到指引注入。
+    if (current === null || typeof current !== "object" || current.enabled === false) return "";
     const legacy =
       current !== null && typeof current === "object" && typeof current.guidance === "string"
         ? current.guidance.trim()
@@ -755,7 +757,8 @@ export async function apply(ctx, config = {}) {
   const forgetGuidanceText = (agent) => {
     const current = source();
     const kazModeSvc = getKazModeSvc();
-    if (kazModeSvc === null && (current === null || typeof current !== "object" || current.enabled === false)) return "";
+    // 总开关（硬闸门，同 guidanceText）：自身 enabled=false 时一律不注入。
+    if (current === null || typeof current !== "object" || current.enabled === false) return "";
     const legacy =
       current !== null && typeof current === "object" && typeof current.guidance === "string"
         ? current.guidance.trim()

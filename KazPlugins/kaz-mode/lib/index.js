@@ -758,10 +758,12 @@ export default {
      */
     function kazSurfaceFor(agent, current, states) {
       const whitelist = new Set(effectiveToolWhitelist(current.toolWhitelist));
-      if (states["kaz-memory"]?.enabled === false) {
+      // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
+      // 才保留记忆/诊断工具，避免新对话/未落盘状态被误判为启用。
+      if (states["kaz-memory"]?.enabled !== true) {
         for (const tool of MEMORY_TOOLS) whitelist.delete(tool);
       }
-      if (states["kaz-diag"]?.enabled === false) {
+      if (states["kaz-diag"]?.enabled !== true) {
         whitelist.delete(DIAG_TOOL);
       }
       const minimalPhase = isMinimalAgent(agent) === true;
@@ -784,10 +786,12 @@ export default {
       });
     }
 
-    /** 非 Kaz 会话：记忆/诊断工具是否可见只取决于该会话的插件开关（其余交还宿主）。 */
+    /** 非 Kaz 会话：记忆/诊断工具是否可见只取决于该会话的插件开关（其余交还宿主）。
+     *  2026-08-21 加固：状态缺失（undefined）按「禁用」处理——原先 `!== false`
+     *  会把新对话/未落盘状态的会话误判为启用，导致 kaz-memory 在已关闭时仍注入指引。 */
     function nonKazToolVisible(states, name) {
-      if (MEMORY_TOOLS.includes(name)) return states["kaz-memory"]?.enabled !== false;
-      if (name === DIAG_TOOL) return states["kaz-diag"]?.enabled !== false;
+      if (MEMORY_TOOLS.includes(name)) return states["kaz-memory"]?.enabled === true;
+      if (name === DIAG_TOOL) return states["kaz-diag"]?.enabled === true;
       return true;
     }
 
@@ -806,7 +810,8 @@ export default {
         return state === null || state === undefined || typeof state !== "object" || state.enabled !== false;
       },
       toolVisible: (agent, name) => {
-        if (agent === null || agent === undefined || typeof agent !== "object") return true;
+        // 无 agent / 会话状态缺失时按「不可见」处理（2026-08-21 加固，避免误判为启用）。
+        if (agent === null || agent === undefined || typeof agent !== "object") return false;
         const current = source();
         const states = agentEffectiveStates(agent);
         if (agentKazEnabled(agent)) {
@@ -871,13 +876,14 @@ export default {
       }
 
       // 非 Kaz 会话：仅剔除该会话禁用的记忆/诊断工具。
+      // 状态缺失按禁用处理（`!== true`），与新会话判定保持一致。
       if (hasAgent) {
         const states = agentEffectiveStates(agent);
         const remove = new Set();
-        if (states["kaz-memory"]?.enabled === false) {
+        if (states["kaz-memory"]?.enabled !== true) {
           for (const tool of MEMORY_TOOLS) remove.add(tool);
         }
-        if (states["kaz-diag"]?.enabled === false) {
+        if (states["kaz-diag"]?.enabled !== true) {
           remove.add(DIAG_TOOL);
         }
         if (remove.size > 0) {
