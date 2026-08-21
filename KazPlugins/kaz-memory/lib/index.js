@@ -44,7 +44,7 @@ import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { MemoryEngine } from "./engine.js";
-import { registerGroup, setGroupEnabled, unregisterGroup, effectiveToolWhitelist, DEFAULT_TOOL_WHITELIST } from "kaz-shared";
+import { effectiveToolWhitelist, TOOL_WHITELIST } from "kaz-shared";
 
 export { MemoryEngine, MemoryId } from "./engine.js";
 export { bm25Scores, bm25ScoresAsync, tokenize } from "./bm25.js";
@@ -233,25 +233,17 @@ const GUIDANCE_FORGET = [
 /** 判断某个记忆工具当前是否可用：
  *  1) 注册检查：plugin-filter / 组合移除会让工具不在注册表（工具面过滤后也不可见）；
  *  2) Kaz 工具面检查：kaz-mode.enabled=true 时，工具必须在 kaz-shared 的
- *     有效白名单（settings.toolWhitelist ∪ 已启用群组 − 已停用群组）里才可见
- *     （组装层会过滤掉白名单外工具；本插件启用时自己的六工具经群组已在其中）。
+ *     有效白名单（settings.toolWhitelist，白名单是唯一闸门——含全部记忆工具；
+ *     本插件关闭时工具已注销，注册检查先行拦截）里才可见。
  *  读不到的服务 / 设置一律按"不受限制"处理。 */
 function toolAvailable(name, grouping, kazSettings) {
   const groupingOk = grouping !== undefined && grouping !== null && typeof grouping.isRegistered === "function";
   if (groupingOk && grouping.isRegistered(name) !== true) return false;
   if (kazSettings !== undefined && kazSettings !== null && typeof kazSettings === "object" && kazSettings.enabled === true) {
     const whitelist = effectiveToolWhitelist(
-      Array.isArray(kazSettings.toolWhitelist) ? kazSettings.toolWhitelist : DEFAULT_TOOL_WHITELIST,
+      Array.isArray(kazSettings.toolWhitelist) ? kazSettings.toolWhitelist : TOOL_WHITELIST,
     );
-    if (!whitelist.includes(name)) {
-      const viaGroup =
-        whitelist.includes("kaz-memory") &&
-        groupingOk &&
-        typeof grouping.groupOf === "function" &&
-        grouping.groupOf(name) !== null &&
-        grouping.groupOf(name).groupId === "kaz-memory";
-      if (!viaGroup) return false;
-    }
+    if (!whitelist.includes(name)) return false;
   }
   return true;
 }
@@ -1238,12 +1230,8 @@ export async function apply(ctx, config = {}) {
 
   // ---- 注册 / 注销跟随 enabled 开关（kaz-diag 同款模式）：关闭 = 六工具完全
   // 注销（任何模式都不再出现，不占工具列表/上下文）；开启 = 全部注册。热重载。
-  // 同时向 kaz-shared"发信"：声明本插件工具组并随 enabled 通知开关——
-  // Kaz 工具面里记忆工具的加入/排除由此决定（声明始终存在，开关跟随设置）。----
-  registerGroup("kaz-memory", {
-    tools: toolDefs.map((def) => def.name),
-    label: "kaz-memory",
-  });
+  // 是否进入 Kaz 工具面由 kaz-shared 的白名单（唯一闸门，含记忆六工具）决定，
+  // 本插件无需向 kaz-shared 发信。----
   let toolDisposers = [];
   function installTools() {
     if (toolDisposers.length > 0) return;
@@ -1268,7 +1256,6 @@ export async function apply(ctx, config = {}) {
   function handleChange() {
     const current = source();
     const enabled = current === null || typeof current !== "object" || current.enabled !== false;
-    setGroupEnabled("kaz-memory", enabled);
     if (enabled) installTools();
     else uninstallTools();
   }
@@ -1322,6 +1309,5 @@ export async function apply(ctx, config = {}) {
   handleChange();
   ctx.effect(() => () => {
     uninstallTools();
-    unregisterGroup("kaz-memory");
   });
 }

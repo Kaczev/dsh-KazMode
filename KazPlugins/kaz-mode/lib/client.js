@@ -148,7 +148,7 @@ window.__ModuleLoader__.load({
 
 		/** kaz-mode 自身的面板配置字段（不提供 enabled 开关——它由预设驱动）。 */
 		const KAZ_FIELDS = [
-			{ key: "toolWhitelist", kind: "list", label: "toolWhitelist（Kaz 全部工具白名单：手动增删工具就在这里改，逗号分隔；kaz-memory 关闭时其工具自动移出，kaz-diag 开启时自动加入 kaz_mode_status）" },
+			{ key: "toolWhitelist", kind: "listarea", label: "toolWhitelist（Kaz 全部工具的唯一闸门：每行一个工具名，或逗号分隔；含记忆六工具与 kaz_mode_status——不在清单里的工具即使已注册也不会出现在工具列表）" },
 		];
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
@@ -530,6 +530,34 @@ window.__ModuleLoader__.load({
 								}
 								const parsed = trimmed
 									.split(",")
+									.map((part) => part.trim())
+									.filter((part) => part.length > 0);
+								commit(parsed);
+							},
+						});
+						break;
+					}
+					case "listarea": {
+						// 多行工具清单：每行一个（也接受逗号分隔）；显示生效值（合并默认），
+						// 适合长清单（如 toolWhitelist 的 31 个工具）。
+						const text = draft !== null ? draft : Array.isArray(current) ? current.join("\n") : "";
+						editor = createElement("textarea", {
+							className: "kzm-input kzm-textarea",
+							style: { minHeight: "180px", lineHeight: "1.5" },
+							value: text,
+							disabled: !writable,
+							placeholder: "每行一个工具名（也接受逗号分隔）；留空 = 恢复默认清单",
+							spellCheck: false,
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								const trimmed = draft.trim();
+								if (trimmed === "") {
+									commit(undefined, true); // 清空 → unset，恢复继承默认值
+									return;
+								}
+								const parsed = trimmed
+									.split(/[\n,]+/)
 									.map((part) => part.trim())
 									.filter((part) => part.length > 0);
 								commit(parsed);

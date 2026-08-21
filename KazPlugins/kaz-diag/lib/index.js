@@ -21,15 +21,11 @@ import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import {
-  DEFAULT_TOOL_WHITELIST,
+  TOOL_WHITELIST,
   MANAGED_PLUGINS,
   FIXED_PERSONA,
-  registerGroup,
-  setGroupEnabled,
-  unregisterGroup,
   effectiveToolWhitelist,
   computeSurface,
-  listGroups,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-diag: 段。 */
@@ -197,10 +193,10 @@ export default {
       const kazSettings = readNamespace(settingsNamespace("kaz-mode"));
       return Array.isArray(kazSettings?.toolWhitelist)
         ? kazSettings.toolWhitelist.filter((t) => typeof t === "string" && t.length > 0)
-        : DEFAULT_TOOL_WHITELIST;
+        : TOOL_WHITELIST;
     }
 
-    /** 有效白名单 = kaz-shared 计算（settings.toolWhitelist ∪ 已启用群组 − 已停用群组）。 */
+    /** 有效白名单 = kaz-shared 计算（settings.toolWhitelist，白名单是唯一闸门）。 */
     function effectiveWhitelist() {
       return new Set(effectiveToolWhitelist(kazToolWhitelist()));
     }
@@ -293,17 +289,9 @@ export default {
       }
       lines.push("");
 
-      lines.push("[Kaz 工具面]（toolWhitelist 白名单 + 群组，均由 kaz-shared 管理）");
+      lines.push("[Kaz 工具面]（toolWhitelist 白名单是唯一闸门，由 kaz-shared 管理）");
       const whitelist = kazToolWhitelist();
-      lines.push(`  手动白名单 toolWhitelist（Kaz 全部工具的手动编辑点，settings.yaml 的 kaz-mode.toolWhitelist）: [${whitelist.join(", ")}]`);
-      const groups = listGroups();
-      lines.push(
-        `  工具群组（kaz-shared 注册表，随各自 enabled 加入/排除）: ${
-          groups.length > 0
-            ? groups.map((g) => `${g.id}=${g.enabled ? "开" : "关"}（${g.tools.join("/") || "无工具"}）`).join("；")
-            : "（无）"
-        }`,
-      );
+      lines.push(`  手动白名单 toolWhitelist（Kaz 全部工具的唯一闸门，settings.yaml 的 kaz-mode.toolWhitelist，Kaz 面板可编辑）: [${whitelist.join(", ")}]`);
       const effective = effectiveWhitelist();
       lines.push(`  有效白名单（${effective.size} 个）: ${[...effective].sort().join(", ") || "（无）"}`);
 
@@ -353,12 +341,8 @@ export default {
     }
 
     /** 注册 / 注销状态工具（跟随 enabled 开关热重载）。
-     *  同时向 kaz-shared"发信"：声明 kaz_mode_status 工具组并随 enabled 通知
-     *  开关——Kaz 工具面里本工具的加入/排除由此决定。 */
-    registerGroup("kaz-diag", {
-      tools: ["kaz_mode_status"],
-      label: "kaz-diag",
-    });
+     *  是否进入 Kaz 工具面由 kaz-shared 的白名单（唯一闸门，含 kaz_mode_status）
+     *  决定，本插件无需向 kaz-shared 发信。 */
     let toolDisposer = null;
     function installTool() {
       if (toolDisposer !== null) return;
@@ -368,7 +352,7 @@ export default {
           defineTool({
             name: "kaz_mode_status",
             description:
-              "只读报告 Kaz 模式当前状态：Kaz 模式开关、固定系统提示词、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（toolWhitelist 白名单 + kaz-shared 工具群组动态调整）、round-minimal 首阶段信号。无需任何参数。",
+              "只读报告 Kaz 模式当前状态：Kaz 模式开关、固定系统提示词、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（toolWhitelist 白名单是唯一闸门）、round-minimal 首阶段信号。无需任何参数。",
             parameters: {},
             output: {
               schema: { type: "string" },
@@ -395,7 +379,6 @@ export default {
     }
     function handleChange() {
       const enabled = source().enabled === true;
-      setGroupEnabled("kaz-diag", enabled);
       if (enabled) installTool();
       else uninstallTool();
       ctx.logger.info(`[kaz-diag] 配置已生效：enabled=${source().enabled}`);
@@ -404,7 +387,6 @@ export default {
 
     ctx.effect(() => () => {
       uninstallTool();
-      unregisterGroup("kaz-diag");
     });
   },
 };

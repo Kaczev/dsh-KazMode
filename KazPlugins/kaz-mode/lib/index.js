@@ -16,13 +16,13 @@
 //        - 首次工具调用前（round-minimal 首阶段信号）：仅保留 round-minimal
 //          首轮工具集 firstRoundTools（为空回退 DEFAULT_FIRST_ROUND_TOOLS）；
 //        - 首次工具调用后：恢复 Kaz 全部工具 = effectiveToolWhitelist
-//          （= settings.toolWhitelist 用户白名单 ∪ 已启用群组的工具 − 已停用
-//          群组的工具）。白名单默认值来自 kaz-shared；
+//          （= settings.toolWhitelist 用户白名单，白名单是唯一闸门——含记忆/
+//          诊断工具；已注册但不在清单里的工具不进入工具列表）。白名单默认值
+//          TOOL_WHITELIST 来自 kaz-shared；
 //          settings.yaml 的 kaz-mode.toolWhitelist 是手动编辑点
-//          （热改生效，用户配置始终优先）。不再有 minimalTools 概念。
-//        - 动态调整：kaz-memory / kaz-diag 各自以群组"发信"注册工具并随
-//          enabled 加入/排除（关闭时 kaz-memory 还把工具完全注销）；无需本
-//          插件维护任何工具名清单。
+//          （热改生效，用户配置始终优先）。不再有 minimalTools / 群组加减。
+//        - 记忆/诊断工具是否真正出现 ⇔ 插件 enabled 时注册到 harness（关闭时
+//          kaz-memory/kaz-diag 把工具完全注销）且名字在白名单里。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
 //      再按会话/默认状态应用。变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用。
@@ -40,7 +40,7 @@ import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  DEFAULT_TOOL_WHITELIST,
+  TOOL_WHITELIST,
   DEFAULT_FIRST_ROUND_TOOLS,
   DEFAULT_DISABLED_TOOLS,
   FIXED_PERSONA,
@@ -121,8 +121,8 @@ const RPC_CHANNEL = "/kaz-mode";
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(false),
   managedPlugins: z.array(z.string()).default(MANAGED_PLUGINS.map((plugin) => plugin.id)),
-  /** Kaz 工具面·白名单（= Kaz 全部工具的手动编辑点），热改生效。 */
-  toolWhitelist: z.array(z.string()).default([...DEFAULT_TOOL_WHITELIST]),
+  /** Kaz 工具面·白名单（= Kaz 全部工具的唯一闸门，含记忆/诊断工具），热改生效。 */
+  toolWhitelist: z.array(z.string()).default([...TOOL_WHITELIST]),
   /** 最近一个非 kaz 预设（按钮"关闭 Kaz"时切回的目标，由预设联动自动维护）。 */
   previousPreset: z.string().default(FALLBACK_PRESET_ID),
   savedPluginStates: z
@@ -140,7 +140,7 @@ const SETTINGS_SCHEMA = z.object({
  *  不预置，避免把本机的联动状态带到新机器。 */
 export const DEFAULT_SECTION = {
   enabled: true,
-  toolWhitelist: [...DEFAULT_TOOL_WHITELIST],
+  toolWhitelist: [...TOOL_WHITELIST],
 };
 // ---------------------------------------------------------------------------
 // settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
@@ -365,7 +365,7 @@ function normalizeConfig(raw) {
     Array.isArray(raw)
       ? raw.filter((item) => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
       : [...fallback];
-  const toolWhitelist = stringList(value.toolWhitelist, DEFAULT_TOOL_WHITELIST);
+  const toolWhitelist = stringList(value.toolWhitelist, TOOL_WHITELIST);
   const saved = value.savedPluginStates && typeof value.savedPluginStates === "object" ? value.savedPluginStates : {};
   return {
     enabled: value.enabled === true,

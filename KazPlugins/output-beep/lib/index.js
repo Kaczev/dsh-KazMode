@@ -124,30 +124,39 @@ function safeMessage(error) {
  * 播放一次 Windows 提示音。
  * 优先用 System.Media.SoundPlayer 播放内存合成的正弦波 WAV（44.1kHz 16bit
  * mono，支持 frequency/duration）——不依赖可见控制台，隐藏窗口/后台进程下
- * 也可靠（Win10/11 上 [console]::beep 在隐藏控制台里会静默失效）；
- * SoundPlayer 失败时回退 [console]::beep（老式路径）。
+ * 也可靠；SoundPlayer 失败时回退 [console]::beep（老式路径，隐藏窗口下可能
+ * 静默）。块 ID（RIFF/WAVE/fmt /data）用 ASCII 编码写入，避免字节序写反
+ * 导致 "The wave header is corrupt"（2026-08-21 修复：此前 0x57415645 等
+ * 小端魔数把 WAVE/fmt /data 写成了 EVAW/" tmf"/atad）。
  */
 function playBeep(frequency, duration, logger) {
   const freq = Math.min(MAX_FREQUENCY, Math.max(MIN_FREQUENCY, Math.round(Number(frequency) || DEFAULT_FREQUENCY)));
   const dur = Math.max(1, Math.round(Number(duration) || DEFAULT_DURATION));
   const command =
     `$f=${freq};$d=${dur};$sr=44100;$n=[int]($sr*$d/1000);` +
+    `$enc=[System.Text.Encoding]::ASCII;` +
     `$ms=New-Object System.IO.MemoryStream;$w=New-Object System.IO.BinaryWriter($ms);` +
-    `$w.Write([int]0x46464952);$w.Write([int](36+$n*2));$w.Write([int]0x57415645);` +
-    `$w.Write([int]0x666d7420);$w.Write([int]16);$w.Write([int16]1);$w.Write([int16]1);` +
+    `$w.Write($enc.GetBytes('RIFF'));$w.Write([int](36+$n*2));$w.Write($enc.GetBytes('WAVE'));` +
+    `$w.Write($enc.GetBytes('fmt '));$w.Write([int]16);$w.Write([int16]1);$w.Write([int16]1);` +
     `$w.Write([int]$sr);$w.Write([int]($sr*2));$w.Write([int16]2);$w.Write([int16]16);` +
-    `$w.Write([int]0x64617461);$w.Write([int]($n*2));` +
+    `$w.Write($enc.GetBytes('data'));$w.Write([int]($n*2));` +
     `$amp=[int](32767*0.4);for($i=0;$i -lt $n;$i++){ $v=[int]($amp*[math]::Sin(2*[math]::PI*$f*$i/$sr)); $w.Write([int16]$v) };` +
     `$w.Flush();$w.BaseStream.Position=0;` +
-    `try{ $p=[System.Media.SoundPlayer]::new($w.BaseStream); $p.PlaySync() }catch{ [console]::beep($f,$d) };` +
+    `try{ $p=[System.Media.SoundPlayer]::new($w.BaseStream); $p.PlaySync(); Write-Output 'SP_OK' }` +
+    `catch{ Write-Output ('SP_ERR: '+$_.Exception.Message); try{ [console]::beep($f,$d); Write-Output 'BEEP_OK' }catch{ Write-Output ('BEEP_ERR: '+$_.Exception.Message) } };` +
     `$w.Close()`;
   execFile(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", command],
     { windowsHide: true, timeout: 8000 },
-    (error) => {
-      if (error) logger?.warn?.(`[output-beep] 播放提示音失败: ${safeMessage(error)}`);
-      else logger?.info?.(`[output-beep] 已播放提示音 (freq=${freq}Hz, dur=${dur}ms)`);
+    (error, stdout, stderr) => {
+      const out = String(stdout || "").trim();
+      const err = String(stderr || "").trim();
+      if (error) {
+        logger?.warn?.(`[output-beep] 播放提示音失败: ${safeMessage(error)}${out ? " | " + out : ""}${err ? " | stderr: " + err : ""}`);
+      } else {
+        logger?.info?.(`[output-beep] 提示音结果: ${out || "ok"} (freq=${freq}Hz, dur=${dur}ms)`);
+      }
     },
   );
 }
