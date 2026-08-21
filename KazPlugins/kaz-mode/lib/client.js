@@ -281,6 +281,17 @@ window.__ModuleLoader__.load({
 			/** 已清理过 kaz-session-states 的归档会话 id（避免重复 RPC；2026-08-21）。 */
 			const cleanedArchivedIds = new Set();
 
+			/** 广播「生效状态已变化」：kaz-memory / round-display 面板据此立即刷新显隐。
+			 *  触发点：Kaz 面板状态 RPC 成功、会话联动切模式成功。 */
+			function notifyEffectiveChanged() {
+				if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+				try {
+					window.dispatchEvent(new Event("kaz-mode:effective-changed"));
+				} catch {
+					// 忽略
+				}
+			}
+
 			// ---- hooks ----
 			const scopeBindings = new WeakMap();
 			function useScope(scope) {
@@ -1143,17 +1154,6 @@ window.__ModuleLoader__.load({
 				}
 				const hasOverrides = PLUGINS.some((plugin) => overriddenMap[plugin.id] === true);
 
-				// 广播「生效状态已变化」：kaz-memory / round-display 面板据此立即刷新显隐，
-				// 替代轮询（2026-08-21）。
-				const notifyEffectiveChanged = () => {
-					if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
-					try {
-						window.dispatchEvent(new Event("kaz-mode:effective-changed"));
-					} catch {
-						// 忽略
-					}
-				};
-
 				const patchSession = useCallback(
 					async (pluginId, patch) => {
 						if (!sessionId) return null;
@@ -1562,7 +1562,9 @@ window.__ModuleLoader__.load({
 					const enabled = value !== null && typeof value === "object" ? value.enabled === true : false;
 					const next = targetPreset === KAZ_PRESET_ID;
 					if (enabled === next) return;
-					kazScope.set("enabled", next).catch(() => {});
+					kazScope.set("enabled", next)
+						.then(() => notifyEffectiveChanged()) // 切模式后让记忆/round-display 面板刷新显隐
+						.catch(() => {});
 				};
 				scope.effect(() => {
 					sync();
