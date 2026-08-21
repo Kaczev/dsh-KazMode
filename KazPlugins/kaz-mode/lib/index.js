@@ -37,7 +37,7 @@
 
 import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -285,31 +285,60 @@ function saveDefaults(defaults, logger) {
   }
 }
 
+/** 会话状态文件新路径：<项目>/.dsh/storages/kaz-session-states.json（2026-08-21
+ *  与 kaz-memory 的 memory_project.json 同目录约定；旧路径 <项目>/.dsh/ 仅迁移用）。 */
+function sessionStatesPath(cwd) {
+  return join(cwd, ".dsh", "storages", SESSION_STATES_FILE);
+}
+function legacySessionStatesPath(cwd) {
+  return join(cwd, ".dsh", SESSION_STATES_FILE);
+}
+
 /** 读取项目目录下的会话专属状态；不存在或损坏时返回空对象。 */
 function loadSessions(cwd, logger) {
-  const file = join(cwd, ".dsh", SESSION_STATES_FILE);
-  try {
-    if (!existsSync(file)) return {};
+  const tryRead = (file) => {
+    if (!existsSync(file)) return null;
     let raw = readFileSync(file, "utf8");
     if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
     const parsed = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object") return {};
     return parsed.sessions !== null && typeof parsed.sessions === "object" ? parsed.sessions : {};
+  };
+  try {
+    const current = tryRead(sessionStatesPath(cwd));
+    if (current !== null) return current;
+    // 旧路径迁移：读到旧文件即返回（下次 save 会写到新路径并删除旧文件）。
+    const legacy = tryRead(legacySessionStatesPath(cwd));
+    if (legacy !== null) {
+      logger?.info?.("[kaz-mode] 检测到旧路径会话状态文件，将在下次写入时迁移到 .dsh/storages/");
+      return legacy;
+    }
+    return {};
   } catch (error) {
     logger?.warn?.("[kaz-mode] 读取会话状态文件失败：" + safeMessage(error));
     return {};
   }
 }
 
-/** 写回项目目录下的会话专属状态。 */
+/** 写回项目目录下的会话专属状态（.dsh/storages/；写成功后删除旧路径残留）。 */
 function saveSessions(cwd, sessions, logger) {
-  const dir = join(cwd, ".dsh");
+  const dir = join(cwd, ".dsh", "storages");
   const file = join(dir, SESSION_STATES_FILE);
   try {
     mkdirSync(dir, { recursive: true });
     writeFileSync(file, JSON.stringify({ version: 1, sessions }, null, 2) + "\n", "utf8");
   } catch (error) {
     logger?.warn?.("[kaz-mode] 写入会话状态文件失败：" + safeMessage(error));
+    return;
+  }
+  try {
+    const legacy = legacySessionStatesPath(cwd);
+    if (existsSync(legacy)) {
+      unlinkSync(legacy);
+      logger?.info?.("[kaz-mode] 已迁移会话状态文件到 .dsh/storages/（删除旧路径文件）");
+    }
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 删除旧路径会话状态文件失败（不影响新文件）：" + safeMessage(error));
   }
 }
 
