@@ -80,7 +80,8 @@ function installSettingsWithDefaults(ctx, ns, schema, entry, defaults, hooks) {
       if (isUnloading(ctx)) return;
       hooks.onChange();
     });
-    ensureSettingsDefaults(sctx.settings, ns, defaults, ctx.logger);
+    // 纯方案 A（2026-08-21）：不再自愈写 settings.yaml——生效配置由
+    // kazMode.pluginConfig 提供，settings.yaml 插件段仅作 standalone 兜底。
   });
 }
 

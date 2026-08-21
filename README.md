@@ -258,40 +258,22 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund
 
 ### 3.6 编辑 `%USERPROFILE%\.dsh\settings.yaml`
 
-按需加入或合并以下 Kaz 相关配置（这些段保存后大多可热重载；`cordis.patch.yml` 的改动仍需重启）：
+纯方案 A（2026-08-21）：被管理插件（thinking-anchor / round-minimal / plugin-filter /
+output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag /
+first-round-hints）的生效配置由 kazMode 服务读取：
+- `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认）
+- `<项目>/.dsh/kaz-session-states.json`（会话专属覆盖）
+
+settings.yaml **不再承载这些插件的段**（插件自愈写入已关闭），只需保留：
 
 ```yaml
-# 可选：把默认预设直接设为 kaz；也可在 UI 的预设选择器里手动选
-# agent-presets:
-#   default: kaz
+agent-presets:
+  default: kaz
 
 agent-default-model:
   provider: deepseek-official
   model: deepseek-v4-flash
   reasoningEffort: high
-
-thinking-anchor:
-  enabled: true
-  instruction: ""
-  turnReminder: ""
-
-plugin-filter:
-  enabled: true
-  mode: remove
-  disabledTools:
-    - tool-cordis
-    - tool-subagent-report
-    - codex
-    - claude-code
-
-round-minimal:
-  enabled: true
-  firstRoundTools:
-    - pwsh
-    - read
-    - edit
-  includeSubagents: false
-  showPolicy: false
 
 kaz-mode:
   enabled: true
@@ -317,46 +299,16 @@ kaz-mode:
       memory_forget,
       kaz_mode_status
     ]
-  defaultDisabledPlugins: []
   previousPreset: router-standard
   # savedPluginStates 由 kaz-mode 自动维护，新装可省略
 
-deepseek-default-model:
-  enabled: true
-  provider: deepseek-official
-  model: deepseek-v4-flash
-  reasoningEffort: high
-  generation_kwargs:
-    temperature: 0.2
-    top_p: 0.9
-    repetition_penalty: 1.2
-
-kaz-memory:
-  guidance: ""
-  enabled: true
-  guidanceHead: ""
-
-kaz-diag:
-  enabled: false
-
 kaz-agent-preset-display:
-  enabled: true
-
-first-round-hints:
-  enabled: true
-  message: ""
-
-output-beep:
-  enabled: true
-  includeSubagents: false
-  frequency: 1000
-  duration: 300
-
-round-display:
   enabled: true
 ```
 
-> `agent-presets.default` 是否改为 `kaz` 取决于你是否希望新会话默认进入 Kaz 模式；也可以保持其它预设，之后在会话的预设选择器里手动选“Kaz 模式”。
+> 被管理插件在 **Kaz 面板**（专属设置 / 默认设置）里改，改动落到上面两个 json，
+> **不会写进 settings.yaml**。`agent-presets.default` 是否设为 `kaz` 取决于你是否
+> 希望新会话默认进入 Kaz 模式。
 
 ### 3.7 重启 dsh 并验证
 
@@ -370,6 +322,11 @@ round-display:
    - 第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
    - 若开启 `kaz-diag`，工具列表里出现 `kaz_mode_status`；
    - Kaz 面板出现各被管理插件的开关行。
+
+> **纯方案 A 的核验点**：开一个 Kaz 对话、再开一个非 Kaz 对话来回切换，并在 Kaz
+> 面板改「专属设置/默认设置」——`settings.yaml` 里除 `kaz-mode:` / `agent-default-model:` /
+> `agent-presets:` / `kaz-agent-preset-display:` 外**不应新增或改写任何被管理插件的段**；
+> 改动只落在 `kaz-defaults.json` 与 `kaz-session-states.json`。
 
 ---
 
