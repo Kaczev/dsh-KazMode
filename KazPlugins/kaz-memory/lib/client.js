@@ -34,11 +34,19 @@ window.__ModuleLoader__.load({
 			return parts.length > 0 ? parts[parts.length - 1] : path;
 		}
 
-		function fmtTime(ts) {
-			if (typeof ts !== "number") return "";
-			const d = new Date(ts);
+		function fmtDate(d) {
 			const p = (n) => String(n).padStart(2, "0");
 			return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+		}
+
+		/** 时间戳格式化：接受新格式（ISO 字符串）与旧格式（毫秒数字）。 */
+		function fmtTime(ts) {
+			if (typeof ts === "number" && Number.isFinite(ts)) return fmtDate(new Date(ts));
+			if (typeof ts === "string" && ts.length > 0) {
+				const d = new Date(ts);
+				if (!isNaN(d.getTime())) return fmtDate(d);
+			}
+			return "";
 		}
 
 		function apply(ctx) {
@@ -297,7 +305,7 @@ window.__ModuleLoader__.load({
 								item.autoLoad === true
 									? createElement("span", { className: "kzm-autoload-badge" }, "自动载入")
 									: null,
-								createElement("span", { className: "kzm-item-when" }, "建议于 " + fmtTime(item.createdAt)),
+								createElement("span", { className: "kzm-item-when" }, "建议于 " + fmtTime(item.created_at)),
 							),
 							createElement(
 								"span",
@@ -359,7 +367,7 @@ window.__ModuleLoader__.load({
 								item.autoLoad === true
 									? createElement("span", { className: "kzm-autoload-badge" }, "自动载入")
 									: null,
-								createElement("span", { className: "kzm-item-when" }, fmtTime(item.updatedAt)),
+								createElement("span", { className: "kzm-item-when" }, fmtTime(item.updated_at)),
 							),
 							createElement(
 								"span",

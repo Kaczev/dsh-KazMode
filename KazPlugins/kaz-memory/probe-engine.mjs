@@ -5,7 +5,7 @@
 //   ③ search / setStatus / forget 跨项目域正确；
 //   ④ 文件确实落在 <项目>/.dsh/storages/memory_project.json 与 <全局>/storages/memory.json。
 // 运行：node kaz-memory/probe-engine.mjs
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
@@ -48,7 +48,7 @@ check("search 项目隔离", hitA.some((h) => h.record.id === a.id) && !hitB.som
 
 await memory.setStatus(b.id, "auto");
 const listB2 = await memory.list({ projectRoot: projB });
-check("setStatus 生效", listB2.find((r) => r.id === b.id).status === "auto");
+check("setStatus 生效（auto 归一化为 applied）", listB2.find((r) => r.id === b.id).status === "applied");
 check("forget A 的项目记忆", (await memory.forget(a.id)) === true);
 check("forget 后 A 不再有该记忆", !(await memory.list({ projectRoot: projA })).some((r) => r.id === a.id));
 
@@ -58,6 +58,33 @@ const fileG = join(globalRoot, "memory.json");
 check("项目 A 记忆文件落在项目文件夹", existsSync(fileA));
 check("项目 B 记忆文件落在项目文件夹", existsSync(fileB));
 check("全局记忆文件落在全局 storages", existsSync(fileG));
+
+// JsonStorageBackend 的落盘是异步 flush 的，先让事件循环转一下再读文件。
+await new Promise((resolve) => setTimeout(resolve, 100));
+
+// 新格式落盘：ISO 字符串时间戳、无旧数字键、含 summary（2026-08 升级）
+// 注意：记录 a 已在上文 forget，用仍在库里的项目记录 b 校验文件格式。
+const rawB = JSON.parse(readFileSync(fileB, "utf8"));
+const blockB = rawB.tables.blocks[b.id];
+check("新格式：写盘含 created_at/updated_at（ISO 字符串，updated ≥ created）", typeof blockB.created_at === "string" && typeof blockB.updated_at === "string" && blockB.updated_at >= blockB.created_at && Number.isFinite(Date.parse(blockB.created_at)));
+check("新格式：不再写旧数字时间戳", !("createdAt" in blockB) && !("updatedAt" in blockB));
+check("新格式：summary 字段存在（未提供时为空串）", typeof blockB.summary === "string" && blockB.summary === "");
+
+// 旧格式兼容：数字时间戳读取时迁移为 ISO；缺失 summary 回退空串
+const table = memory.tableFor("global");
+await table.put("legacy-1", {
+  namespace: "global",
+  status: "applied",
+  autoLoad: false,
+  name: "Legacy",
+  content: "旧格式记录",
+  keywords: [],
+  createdAt: 1700000000000,
+  updatedAt: 1700000001000,
+});
+const legacy = await memory.get("legacy-1");
+check("旧格式记录读取时迁移为 ISO 时间戳", typeof legacy.created_at === "string" && legacy.created_at.startsWith("2023-") && typeof legacy.updated_at === "string" && legacy.updated_at.startsWith("2023-"));
+check("旧格式记录 summary 回退空串", legacy.summary === "");
 
 // 只读不建目录（Kaczev 2026-08-17 的 bug：JsonStorageBackend 一打开域就 mkdir，
 // 之前镜像读操作会在没有真实项目根时去桌面建出空的 .dsh/storages）。

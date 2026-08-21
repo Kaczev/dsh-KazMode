@@ -1,9 +1,20 @@
-// kaz-memory —— 独立记忆插件（自动载入 + RPC 面板通道）
+// kaz-memory —— 独立记忆插件（BM25 检索 + 摘要 + 自动载入 + RPC 面板通道）
 // ===========================================================================
-// 与 @max-null/dsh-memory 同功能的跨会话明文记忆：
-//   * ctx.memory 引擎 + memory_save / memory_update / memory_list / memory_search /
-//     memory_forget 五工具（引擎 vendored 自 @max-null/dsh-memory，MIT，存储位置与格式不变）
-//   * 每条记忆 JSON 里持久化 name（保存/确认时自动从正文生成，面板可改名）
+// 与 @max-null/dsh-memory 同功能的跨会话明文记忆（引擎 vendored 自
+// @max-null/dsh-memory，MIT，存储位置与格式兼容），2026-08 升级：
+//   * ctx.memory 引擎 + memory_save / memory_update / memory_list /
+//     memory_search / memory_detail / memory_forget 六工具
+//   * 每条记忆 JSON 持久化：id / name / keywords / summary / content /
+//     created_at / updated_at（ISO 字符串）；旧记录（createdAt/updatedAt
+//     毫秒数字、无 summary）读取时自动迁移，写回时落新格式
+//   * memory_search = BM25 相关性排序（vendored okapibm25，离线可用；
+//     k1/b 可在 settings.yaml 的 kaz-memory.bm25 段调整），返回
+//     id/name/summary/keywords/score（不含 content），支持 limit/offset
+//     分页与 namespace/status 过滤；评分异步分块计算不阻塞主线程
+//   * memory_detail（新增）：按 id 分片读取完整 content
+//   * memory_save 必填 name / keywords / content / summary（summary 由模型
+//     在保存时提供，插件不生成）
+//   * 所有工具描述与参数说明为英文（模型推理用英文）
 //   * tool:memory 固定指引在首轮工具调用之后以上下文消息注入；第一次发送该
 //     指引的轮次记为 n，从第 n+1 轮起的每个 turn 开头（step === 1）都会再次注入
 //     同一固定指引；
@@ -12,7 +23,8 @@
 //   * 已确认且标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）
 //     以上下文注入方式注入一次（2026-08 重构：不再等 memory_search 首次可用）
 //   * memory_list 只返回 id/namespace/status/autoLoad/名称，不返回正文与
-//     keywords——避免列表调用把记忆灌进上下文；memory_search 才返回全文。
+//     keywords——避免列表调用把记忆灌进上下文；看全文用 memory_search 的
+//     summary + memory_detail。
 //   * 项目记忆按项目文件夹隔离（2026-08-17）：project 记忆写在
 //     <项目文件夹>/.dsh/storages/memory_project.json，项目根从 agent 会话 cwd
 //     （exec.agent.session.header.cwd）解析——不再用 dsh 进程的 process.cwd()。
@@ -34,7 +46,7 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { MemoryEngine } from "./engine.js";
 
 export { MemoryEngine, MemoryId } from "./engine.js";
-export { bm25Scores, tokenize } from "./bm25.js";
+export { bm25Scores, bm25ScoresAsync, tokenize } from "./bm25.js";
 
 export const name = "kaz-memory";
 export const inject = ["storage", "systemPrompt", "tools", "connection"];
@@ -51,19 +63,38 @@ const RECORD_SCHEMA = {
     status: { type: "string", required: true, enum: ["pending", "ignored", "applied"] },
     autoLoad: { type: "boolean", required: true },
     name: { type: "string", required: true },
+    summary: { type: "string", required: true },
     content: { type: "string", required: true },
     keywords: { type: "array", required: true, items: { type: "string" } },
-    createdAt: { type: "number", required: true },
-    updatedAt: { type: "number", required: true },
+    created_at: { type: "string", required: true },
+    updated_at: { type: "string", required: true },
   },
 };
 
-const HIT_SCHEMA = {
+/** memory_search 的返回项：只给摘要信息（id/name/summary/keywords/score），不含 content。 */
+const SEARCH_HIT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    record: { ...RECORD_SCHEMA, required: true },
+    id: { type: "string", required: true },
+    name: { type: "string", required: true },
+    summary: { type: "string", required: true },
+    keywords: { type: "array", required: true, items: { type: "string" } },
     score: { type: "number", required: true },
+  },
+};
+
+/** memory_detail 的返回项（分片读取）。 */
+const DETAIL_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    id: { type: "string", required: true },
+    name: { type: "string", required: true },
+    summary: { type: "string", required: true },
+    content_preview: { type: "string", required: true },
+    total_length: { type: "number", required: true },
+    has_more: { type: "boolean", required: true },
   },
 };
 
@@ -100,10 +131,11 @@ function recordValue(record) {
     status: record.status,
     name: typeof record.name === "string" && record.name.length > 0 ? record.name : nameOf(record.content),
     autoLoad: record.autoLoad === true,
+    summary: typeof record.summary === "string" ? record.summary : "",
     content: record.content,
     keywords: record.keywords,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
+    created_at: record.created_at,
+    updated_at: record.updated_at,
   };
 }
 
@@ -118,19 +150,61 @@ function nameValue(record) {
   };
 }
 
-/** 面板列表项：memory_list 字段 + 时间戳 + 所属项目路径（仅 project 记忆）。 */
+/** 面板列表项：memory_list 字段 + summary + ISO 时间戳 + 所属项目路径（仅 project 记忆）。 */
 function metaValue(record) {
   return {
     ...nameValue(record),
     autoLoad: record.autoLoad === true,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
+    summary: typeof record.summary === "string" ? record.summary : "",
+    created_at: record.created_at,
+    updated_at: record.updated_at,
     project: record.namespace === "project" && typeof record.projectRoot === "string" ? record.projectRoot : "",
   };
 }
 
-function hitValue(hit) {
-  return { record: recordValue(hit.record), score: hit.score };
+/** memory_search 命中项：只给摘要信息，不给 content。 */
+function searchHitValue(hit) {
+  return {
+    id: String(hit.record.id),
+    name: typeof hit.record.name === "string" && hit.record.name.length > 0 ? hit.record.name : nameOf(hit.record.content),
+    summary: typeof hit.record.summary === "string" ? hit.record.summary : "",
+    keywords: Array.isArray(hit.record.keywords) ? hit.record.keywords : [],
+    score: Number(hit.score),
+  };
+}
+
+/** memory_detail 返回：从 offset 起截取 limit 个字符；offset 超出正文时返回空串并提示。 */
+function detailValue(record, offset, limit) {
+  const content = typeof record.content === "string" ? record.content : "";
+  const start = Number.isFinite(Number(offset)) ? Math.max(0, Math.trunc(Number(offset))) : 0;
+  const len = Number.isFinite(Number(limit)) ? Math.min(5000, Math.max(0, Math.trunc(Number(limit)))) : 500;
+  const preview = start >= content.length ? "" : content.slice(start, start + len);
+  return {
+    id: String(record.id),
+    name: typeof record.name === "string" && record.name.length > 0 ? record.name : nameOf(record.content),
+    summary: typeof record.summary === "string" ? record.summary : "",
+    content_preview: preview,
+    total_length: content.length,
+    has_more: start + len < content.length,
+  };
+}
+
+/** 整数钳制：非法值回退 fallback，超出 [min, max] 截断。 */
+function clampInt(value, fallback, min, max) {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+/** 从 settings 段读取 BM25 参数（kaz-memory.bm25.k1 / b），缺省 1.2 / 0.75。 */
+function bm25Of(current) {
+  const section =
+    current !== null && typeof current === "object" && current.bm25 !== null && typeof current.bm25 === "object"
+      ? current.bm25
+      : {};
+  const k1 = typeof section.k1 === "number" && Number.isFinite(section.k1) ? section.k1 : 1.2;
+  const b = typeof section.b === "number" && Number.isFinite(section.b) ? section.b : 0.75;
+  return { k1, b };
 }
 
 function renderJson(value) {
@@ -146,7 +220,7 @@ function present(title, kind, rawInput) {
  *  而不是等到"遇到难题"才想起记忆。 */
 const GUIDANCE_HEAD = [
   "We need to search the memory (memory_search) at the start of a task for relevant information",
-  "We need to save memories (memory_save) with a summary name and concise, sharp content — shared with the user, persists across conversations."
+  "We need to save memories (memory_save) with a name, a one-line summary and concise, sharp content — shared with the user, persists across conversations."
 ].join("\n");
 
 /** 每轮首次 memory_search 之后注入的遗忘指引。 */
@@ -269,12 +343,20 @@ const SETTINGS_SCHEMA = z.object({
   guidanceSave: z.string().default(""),
   guidanceList: z.string().default(""),
   guidanceForget: z.string().default(""),
+  /** BM25 检索参数（memory_search 相关性评分用）：改 settings.yaml 生效，无需 UI。 */
+  bm25: z
+    .object({
+      k1: z.number().default(1.2),
+      b: z.number().default(0.75),
+    })
+    .default({ k1: 1.2, b: 0.75 }),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
 export const DEFAULT_SECTION = {
   guidance: "",
   enabled: true,
+  bm25: { k1: 1.2, b: 0.75 },
 };
 // ---------------------------------------------------------------------------
 // settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
@@ -544,7 +626,7 @@ export async function apply(ctx, config = {}) {
         return {
           ok: true,
           value: {
-            memories: records.map(metaValue).sort((a, b) => b.updatedAt - a.updatedAt),
+            memories: records.map(metaValue).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at))),
             paths: {
               global: memory.globalStoragesRoot(),
               project: memory.projectStoragesRoot(project),
@@ -977,27 +1059,39 @@ export async function apply(ctx, config = {}) {
     return next();
   });
 
-  // ---- 五工具（与 @max-null/dsh-memory 同名同 schema 同行为；memory_update 为扩展） ----
+  // ---- 六工具（与 @max-null/dsh-memory 同名同 schema 同行为；memory_update /
+  // memory_detail 为扩展）。描述与参数说明为英文（模型推理用英文）。----
   ctx.tools.register(
     defineTool({
       name: "memory_save",
       description:
-        "记录一条跨会话记忆作为「待确认」（pending）。它不会自动生效——必须由人在 Web 面板确认后才变为 applied；模型不得把待确认记忆当作已生效。namespace=project 时存入当前项目文件夹（<项目>/.dsh/storages/memory_project.json）。",
+        'Save one cross-session memory as "pending" (待确认). It does NOT take effect automatically — a human must confirm it in the web panel before it becomes "applied"; never treat a pending memory as effective. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json).',
       parameters: {
-        content: { type: "string", required: true, description: "记忆正文（纯文本）。" },
-        namespace: { type: "string", enum: ["global", "project"], description: "适用范围：global 全局 / project 项目文件夹；默认 global。" },
-        keywords: { type: "array", items: { type: "string" }, description: "供 memory_search 检索的显式锚点词。" },
+        name: { type: "string", required: true, description: "Short title for the memory (<=140 chars)." },
+        keywords: { type: "array", items: { type: "string" }, required: true, description: "Anchor keywords used by memory_search (BM25)." },
+        content: { type: "string", required: true, description: "Full memory content (plain text)." },
+        summary: { type: "string", required: true, description: "One-sentence summary (~100 chars), written by you when saving; it is the only summary text shown in memory_search results." },
+        namespace: { type: "string", enum: ["global", "project"], description: "Scope: global (harness home) / project (current project folder); default global." },
       },
       output: {
         schema: RECORD_SCHEMA,
         render: (_args, value) => renderJson(value),
       },
       execute(args, exec) {
+        const name = typeof args.name === "string" ? args.name.trim() : "";
+        const summary = typeof args.summary === "string" ? args.summary.trim() : "";
+        const content = typeof args.content === "string" ? args.content : "";
+        if (name.length === 0) return Promise.reject(new Error("memory_save: name must not be empty"));
+        if (summary.length === 0) return Promise.reject(new Error("memory_save: summary must not be empty"));
+        if (content.length === 0) return Promise.reject(new Error("memory_save: content must not be empty"));
+        if (!Array.isArray(args.keywords)) return Promise.reject(new Error("memory_save: keywords must be an array"));
         return Promise.resolve(
           memory.remember({
-            content: args.content,
+            name,
+            keywords: args.keywords,
+            content,
+            summary,
             ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
-            ...(args.keywords === undefined ? {} : { keywords: args.keywords }),
             projectRoot: projectRootOf(exec),
           }),
         ).then(recordValue);
@@ -1010,12 +1104,13 @@ export async function apply(ctx, config = {}) {
     defineTool({
       name: "memory_update",
       description:
-        "按 id 修改一条已存在的记忆：可更新正文 content、标签 keywords、标题 name。修改 applied 记忆的正文时，该记忆会自动降级为 pending，需要人工再次确认；只改标签/标题不会降级。id 取自 memory_list 或 memory_search。",
+        'Update an existing memory by id: content, keywords, name and/or summary. Changing the content of an "applied" memory demotes it back to "pending" for human re-confirmation; metadata-only edits (name / keywords / summary) keep the status. id comes from memory_list or memory_search.',
       parameters: {
-        id: { type: "string", required: true, description: "要修改的记忆 id（取自 memory_list 或 memory_search）。" },
-        content: { type: "string", description: "新的记忆正文（纯文本）。" },
-        keywords: { type: "array", items: { type: "string" }, description: "新的标签数组；留空数组可清空标签。" },
-        name: { type: "string", description: "新的标题/名称；留空字符串可清空并回退到从正文自动推导。" },
+        id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
+        content: { type: "string", description: "New memory content (plain text)." },
+        keywords: { type: "array", items: { type: "string" }, description: "New anchor keywords; pass [] to clear." },
+        name: { type: "string", description: 'New title; pass "" to fall back to deriving it from the content.' },
+        summary: { type: "string", description: "New one-sentence summary (~100 chars)." },
       },
       output: {
         schema: RECORD_SCHEMA,
@@ -1027,6 +1122,7 @@ export async function apply(ctx, config = {}) {
             ...(args.content === undefined ? {} : { content: args.content }),
             ...(args.keywords === undefined ? {} : { keywords: args.keywords }),
             ...(args.name === undefined ? {} : { name: args.name }),
+            ...(args.summary === undefined ? {} : { summary: args.summary }),
           }),
         ).then(recordValue);
       },
@@ -1038,10 +1134,10 @@ export async function apply(ctx, config = {}) {
     defineTool({
       name: "memory_list",
       description:
-        "列出所有记忆，每条只返回 id/namespace/status/autoLoad/名称（名称取标题行或首行、超长截断 ≤140 字），不含正文和 keywords。想看全文用 memory_search。",
+        "List all memories; each entry contains only id/namespace/status/autoLoad/name (title line or first line, truncated to 140 chars) — no content and no keywords. Use memory_search for relevance hits, memory_detail for the full content of a single memory.",
       parameters: {
-        namespace: { type: "string", enum: ["global", "project"], description: "限定某个命名空间；project = 当前项目文件夹的记忆。" },
-        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "限定某个状态。" },
+        namespace: { type: "string", enum: ["global", "project"], description: "Restrict to a namespace; project = current project folder." },
+        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "Restrict to a status." },
       },
       output: {
         schema: { type: "array", items: LIST_RECORD_SCHEMA },
@@ -1064,24 +1160,37 @@ export async function apply(ctx, config = {}) {
     defineTool({
       name: "memory_search",
       description:
-        "按关键字检索记忆并返回全文。确定性字面匹配——未命中即表示没有任何已存储的词与查询匹配。",
+        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score — content is NOT included; use memory_detail to read the full content of a hit. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the kaz-memory.bm25 settings section. Returns an empty array when nothing matches; errors when the query is empty.",
       parameters: {
-        query: { type: "string", required: true, description: "关键字查询。" },
-        namespace: { type: "string", enum: ["global", "project"], description: "限定某个命名空间；project = 当前项目文件夹的记忆。" },
-        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "限定某个状态。" },
+        query: { type: "string", required: true, description: "Search query (BM25 over content + summary + keywords)." },
+        limit: { type: "number", description: "Max hits to return (default 10, max 100)." },
+        offset: { type: "number", description: "Hits to skip for pagination (default 0, max 1000)." },
+        namespace: { type: "string", enum: ["global", "project"], description: "Restrict to a namespace; project = current project folder." },
+        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "Restrict to a status." },
       },
       output: {
-        schema: { type: "array", items: HIT_SCHEMA },
+        schema: { type: "array", items: SEARCH_HIT_SCHEMA },
         render: (_args, value) => renderJson(value),
       },
       execute(args, exec) {
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        if (query.length === 0) {
+          return Promise.reject(new Error("memory_search: query must not be empty"));
+        }
+        const bm25 = bm25Of(source());
+        const limit = clampInt(args.limit, 10, 1, 100);
+        const offset = clampInt(args.offset, 0, 0, 1000);
         return Promise.resolve(
-          memory.search(args.query, {
-            ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
-            ...(args.status === undefined ? {} : { status: args.status }),
-            projectRoot: projectRootOf(exec),
-          }),
-        ).then((hits) => hits.map(hitValue));
+          memory.search(
+            query,
+            {
+              ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+              ...(args.status === undefined ? {} : { status: args.status }),
+              projectRoot: projectRootOf(exec),
+            },
+            bm25,
+          ),
+        ).then((hits) => hits.slice(offset, offset + limit).map(searchHitValue));
       },
       presentCall: (args) => present("搜索记忆", "read", args.query),
     }),
@@ -1089,10 +1198,37 @@ export async function apply(ctx, config = {}) {
 
   ctx.tools.register(
     defineTool({
-      name: "memory_forget",
-      description: "按 id 删除一条记忆。主人可删除任意记忆。",
+      name: "memory_detail",
+      description:
+        "Read the full content of a single memory by id, with chunked reading. Returns id, name, summary, content_preview (limit chars starting at offset), total_length and has_more. Errors if the id does not exist; if offset is beyond the content length, content_preview is an empty string (total_length tells you the real size) and has_more is false. Use memory_search or memory_list first to obtain ids.",
       parameters: {
-        id: { type: "string", required: true, description: "要删除的记忆 id（取自 memory_list 或 memory_search）。" },
+        id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
+        offset: { type: "number", description: "Character offset to start reading from (default 0)." },
+        limit: { type: "number", description: "Max characters to read (default 500, max 5000)." },
+      },
+      output: {
+        schema: DETAIL_SCHEMA,
+        render: (_args, value) => renderJson(value),
+      },
+      execute(args, exec) {
+        return Promise.resolve(
+          memory.get(String(args.id), { projectRoot: projectRootOf(exec) }),
+        ).then((record) => {
+          if (record === undefined) throw new Error(`memory '${String(args.id)}' not found`);
+          return detailValue(record, args.offset, args.limit);
+        });
+      },
+      presentCall: (args) => present("查看记忆详情", "read", args.id),
+    }),
+  );
+
+  ctx.tools.register(
+    defineTool({
+      name: "memory_forget",
+      description:
+        "Delete one memory by id. The owner can delete any memory (pending, ignored or applied). id comes from memory_list or memory_search.",
+      parameters: {
+        id: { type: "string", required: true, description: "Memory id to delete (from memory_list or memory_search)." },
       },
       output: {
         schema: { type: "object", additionalProperties: false, properties: { deleted: { type: "boolean", required: true } } },
@@ -1138,6 +1274,7 @@ export async function apply(ctx, config = {}) {
       guidanceSave: "",
       guidanceList: "",
       guidanceForget: "",
+      bm25: { k1: 1.2, b: 0.75 },
     },
     DEFAULT_SECTION,
     {

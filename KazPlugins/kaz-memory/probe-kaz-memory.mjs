@@ -25,6 +25,7 @@ function makeMemoryEngine(records) {
   let list = [...records];
   const projectRootMatch = (r, filter) =>
     r.namespace === "global" || filter.projectRoot === undefined || r.projectRoot === filter.projectRoot;
+  const iso = (n) => new Date(n).toISOString();
   return {
     globalStoragesRoot() {
       return "C:/mock/.dsh/storages";
@@ -40,6 +41,9 @@ function makeMemoryEngine(records) {
           projectRootMatch(r, filter),
       );
     },
+    get(id, _filter = {}) {
+      return Promise.resolve(list.find((r) => String(r.id) === String(id)));
+    },
     search(query, filter = {}) {
       const q = String(query ?? "").toLowerCase();
       return list
@@ -47,20 +51,34 @@ function makeMemoryEngine(records) {
           (r) =>
             (filter.namespace === undefined || r.namespace === filter.namespace) &&
             (filter.status === undefined || r.status === filter.status) &&
-            projectRootMatch(r, filter) &&
-            (r.content.toLowerCase().includes(q) || (r.keywords ?? []).some((k) => String(k).toLowerCase().includes(q))),
+            projectRootMatch(r, filter),
         )
-        .map((r) => ({ record: r, score: 1 }));
+        .map((r) => {
+          // mock 相关性：命中词数越多分数越高（供排序/分页断言用）
+          const terms = (q.match(/[a-z0-9]+|[\u3400-\u9fff]/g) ?? []).filter((t) => t.length > 0);
+          const score = terms.reduce((sum, t) => {
+            const inContent = (r.content ?? "").toLowerCase().split(t).length - 1;
+            const inKeywords = (r.keywords ?? []).filter((k) => k.includes(t)).length;
+            return sum + inContent * 10 + inKeywords;
+          }, 0);
+          return { record: r, score };
+        })
+        .filter((hit) => hit.score > 0)
+        .sort((a, b) => b.score - a.score);
     },
     remember(input) {
+      const now = Date.now();
       const rec = {
         id: "new-" + (list.length + 1),
         namespace: input.namespace ?? "global",
         status: "pending",
+        autoLoad: false,
+        name: typeof input.name === "string" && input.name.trim().length > 0 ? input.name.trim() : String(input.content ?? "").split("\n")[0].slice(0, 140),
+        summary: typeof input.summary === "string" ? input.summary : "",
         content: input.content,
-        keywords: input.keywords ?? [],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        keywords: (input.keywords ?? []).map((k) => String(k).toLowerCase()),
+        created_at: iso(now),
+        updated_at: iso(now),
         projectRoot: input.projectRoot,
       };
       list.push(rec);
@@ -78,23 +96,24 @@ function makeMemoryEngine(records) {
       if (contentChanged) rec.content = patch.content;
       if (Array.isArray(patch.keywords)) rec.keywords = patch.keywords.map((k) => String(k).toLowerCase());
       if (typeof patch.name === "string") rec.name = patch.name.trim();
+      if (typeof patch.summary === "string") rec.summary = patch.summary;
       if (contentChanged && (rec.status === "applied" || rec.status === "auto")) rec.status = "pending";
-      rec.updatedAt = Date.now();
+      rec.updated_at = iso(Date.now());
       return Promise.resolve(rec);
     },
     setStatus(id, status) {
       const rec = list.find((r) => r.id === id);
-      if (rec !== undefined) rec.status = status;
+      if (rec !== undefined) { rec.status = status; rec.updated_at = iso(Date.now()); }
       return Promise.resolve(rec);
     },
     setAutoLoad(id, autoLoad) {
       const rec = list.find((r) => r.id === id);
-      if (rec !== undefined) { rec.autoLoad = autoLoad === true; rec.updatedAt = Date.now(); }
+      if (rec !== undefined) { rec.autoLoad = autoLoad === true; rec.updated_at = iso(Date.now()); }
       return Promise.resolve(rec);
     },
     setName(id, name) {
       const rec = list.find((r) => r.id === id);
-      if (rec !== undefined) { rec.name = String(name ?? "").trim(); rec.updatedAt = Date.now(); }
+      if (rec !== undefined) { rec.name = String(name ?? "").trim(); rec.updated_at = iso(Date.now()); }
       return Promise.resolve(rec);
     },
   };
@@ -151,44 +170,50 @@ function makeSettings() {
 }
 
 const now = Date.now();
+const iso = (n) => new Date(n).toISOString();
 const records = [
   {
     id: "m1",
     namespace: "global",
     status: "applied",
     name: "关于 Kaczev 的相处约定",
+    summary: "与 Kaczev 的相处约定：可随时重启 dsh，喜欢鲸鱼与亲昵互动。",
     content: "# 关于 Kaczev 的相处约定\n\n- 任何时候都可以重启 dsh；\n- 喜欢鲸鱼（蹭蹭）（戳戳）。",
     keywords: ["kaczev", "鲸鱼"],
-    createdAt: now - 2000,
-    updatedAt: now - 2000,
+    created_at: iso(now - 2000),
+    updated_at: iso(now - 2000),
   },
   {
     id: "m2",
     namespace: "project",
     status: "pending",
+    summary: "项目约定：读写中文文件必须用 -Encoding UTF8。",
     content: "项目约定：PowerShell 中文编码坑\n\n读写中文文件必须 -Encoding UTF8。",
     keywords: ["powershell", "编码"],
-    createdAt: now - 1000,
-    updatedAt: now - 1000,
+    created_at: iso(now - 1000),
+    updated_at: iso(now - 1000),
     projectRoot: "C:/projA",
   },
   {
     id: "m3",
     namespace: "global",
     status: "applied",
+    summary: "没有标题的旧记忆，正文第一行很长。",
     content: "没有标题的记忆内容，第一行就是很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长的正文。",
     keywords: ["long"],
-    createdAt: now - 3000,
-    updatedAt: now,
+    created_at: iso(now - 3000),
+    updated_at: iso(now),
   },
   {
     id: "m4",
     namespace: "project",
     status: "applied",
+    name: "另一个项目的约定",
+    summary: "仅属于 projB 的项目记忆。",
     content: "# 另一个项目的约定\n\n仅属于 projB 的记忆。",
     keywords: ["projb"],
-    createdAt: now - 500,
-    updatedAt: now - 500,
+    created_at: iso(now - 500),
+    updated_at: iso(now - 500),
     projectRoot: "C:/projB",
   },
 ];
@@ -291,15 +316,30 @@ check("① 项目 B 上下文只看到全局 + B 自己的项目记忆（m1/m3/m
 check("① memory_list 默认不按 status/autoLoad 过滤（pending 与 applied 都返回，autoLoad 字段恒为 boolean）", listAll.some((item) => item.status === "pending") && listAll.some((item) => item.status === "applied") && listAll.every((item) => typeof item.autoLoad === "boolean"));
 check("① memory_list status=applied 过滤只回 applied", (await listTool.execute({ status: "applied" }, execProjA)).every((item) => item.status === "applied"));
 
-// ② memory_search：返回全文，且项目隔离生效
+// ② memory_search：BM25 摘要命中（不含 content），项目隔离生效，分页与错误处理
 const searchTool = registeredTools.get("memory_search");
 check("② memory_search 已注册", searchTool !== undefined);
 const hits = await searchTool.execute({ query: "Kaczev" }, execProjA);
-check("② search 命中 m1 且含完整 content", hits.length >= 1 && hits.some((hit) => hit.record.content.includes("任何时候都可以重启 dsh")));
+check("② search 命中 m1 且不含 content", hits.length >= 1 && hits.some((hit) => hit.id === "m1") && hits.every((hit) => !("content" in hit)));
+check("② 命中项含 id/name/summary/keywords/score", hits.length >= 1 && hits.every((hit) => typeof hit.id === "string" && typeof hit.name === "string" && typeof hit.summary === "string" && Array.isArray(hit.keywords) && typeof hit.score === "number"));
+check("② 命中项带 summary", hits.some((hit) => hit.id === "m1" && typeof hit.summary === "string" && hit.summary.length > 0));
 const hitsB = await searchTool.execute({ query: "projb" }, execProjA);
 check("② 在项目 A 搜不到项目 B 的记忆", hitsB.length === 0);
 const hitsB2 = await searchTool.execute({ query: "projb" }, execProjB);
-check("② 在项目 B 能搜到项目 B 的记忆", hitsB2.length >= 1 && hitsB2.some((hit) => hit.record.content.includes("仅属于 projB")));
+check("② 在项目 B 能搜到项目 B 的记忆", hitsB2.length >= 1 && hitsB2.some((hit) => hit.id === "m4"));
+check("② 结果按分数降序", hits.every((hit, index) => index === 0 || hits[index - 1].score >= hit.score));
+const multiHits = await searchTool.execute({ query: "约定" }, execProjA);
+check("② 多记录命中（m1/m2 均含「约定」）", multiHits.length >= 2);
+const page1 = await searchTool.execute({ query: "约定", limit: 1 }, execProjA);
+const page2 = await searchTool.execute({ query: "约定", limit: 1, offset: 1 }, execProjA);
+check("② 分页：limit=1 只回 1 条", Array.isArray(page1) && page1.length === 1);
+check("② 分页：offset=1 跳过第一条", page2.length >= 1 && page1[0].id !== page2[0].id);
+const noHit = await searchTool.execute({ query: "zzz-绝无此词" }, execProjA);
+check("② 无命中返回空数组而不是错误", Array.isArray(noHit) && noHit.length === 0);
+const emptyQuery = await searchTool.execute({ query: "   " }, execProjA).then(() => null, () => "rejected");
+check("② 空查询报错", emptyQuery === "rejected");
+const namespaceFiltered = await searchTool.execute({ query: "编码", namespace: "project" }, execProjA);
+check("② namespace 过滤仍生效", namespaceFiltered.every((hit) => hit.id === "m2"));
 
 // ③ 固定指引：首轮工具调用后以合成用户消息注入一次
 // （settings.guidance 留空 → 按工具可用性动态拼装）
@@ -455,38 +495,57 @@ check("③d2 旧字段 guidance 整段覆盖时不追加遗忘指引", hasForget
 await settings.update("kaz-memory", { guidance: "" });
 await settle();
 
-// ④ RPC list：只回元数据（含 name/autoLoad，无正文），按 updatedAt 倒序
+// ④ RPC list：只回元数据（含 name/summary/autoLoad，无正文），按 updated_at 倒序
 check("④ RPC 通道已注册", typeof rpcHandler === "function");
 const listRpc = await rpcHandler("list", { project: "C:/projA" });
 check("④ RPC list 成功", listRpc !== null && listRpc.ok === true);
 check("④ RPC list 返回 3 条且无正文与 keywords", listRpc.ok === true && Array.isArray(listRpc.value.memories) && listRpc.value.memories.length === 3 && listRpc.value.memories.every((item) => !("content" in item) && !("keywords" in item) && typeof item.name === "string" && typeof item.autoLoad === "boolean"));
-check("④ RPC list 按 updatedAt 倒序（第一条是 m3）", listRpc.ok === true && listRpc.value.memories[0] !== undefined && listRpc.value.memories[0].id === "m3");
+check("④ RPC list 时间戳为 ISO 字符串（created_at/updated_at，无旧数字键）", listRpc.ok === true && listRpc.value.memories.every((item) => typeof item.created_at === "string" && typeof item.updated_at === "string" && !("createdAt" in item) && !("updatedAt" in item)));
+check("④ RPC list 按 updated_at 倒序（第一条是 m3）", listRpc.ok === true && listRpc.value.memories[0] !== undefined && listRpc.value.memories[0].id === "m3");
 check("④ 项目记忆的列表项带所属项目路径", listRpc.ok === true && listRpc.value.memories.some((item) => item.id === "m2" && item.project === "C:/projA"));
 check("④ 全局记忆的列表项 project 为空", listRpc.ok === true && listRpc.value.memories.every((item) => item.namespace !== "global" || item.project === ""));
 check("④ 存储的 name 优先于正文推导", listRpc.ok === true && listRpc.value.memories.some((item) => item.id === "m1" && item.name === "关于 Kaczev 的相处约定"));
+check("④ RPC list 项带 summary", listRpc.ok === true && listRpc.value.memories.every((item) => typeof item.summary === "string"));
 
 // ⑤ RPC open：按 id 取正文
 const openRpc = await rpcHandler("open", { id: "m1", project: "C:/projA" });
 check("⑤ RPC open 带回 m1 正文", openRpc !== null && openRpc.ok === true && openRpc.value.id === "m1" && openRpc.value.content.includes("任何时候都可以重启"));
 
-// ⑥ memory_save(namespace=project) 写入调用者项目根
+// ⑥ memory_save：必填 name/keywords/summary；namespace=project 写入调用者项目根
 const saveTool = registeredTools.get("memory_save");
 check("⑥ memory_save 已注册", saveTool !== undefined);
-const saved = await saveTool.execute({ content: "临时探针记忆", namespace: "project" }, execProjB);
-check("⑥ 保存到项目 B 成功且返回 record", saved !== undefined && saved.id !== undefined && saved.namespace === "project");
+const saved = await saveTool.execute({ name: "临时探针记忆", keywords: ["probe", "临时"], summary: "探针保存的临时记忆。", content: "临时探针记忆", namespace: "project" }, execProjB);
+check("⑥ 保存到项目 B 成功且返回 record（含 summary 与 ISO 时间戳）", saved !== undefined && saved.id !== undefined && saved.namespace === "project" && saved.summary === "探针保存的临时记忆。" && typeof saved.created_at === "string" && typeof saved.updated_at === "string");
+const missingName = await saveTool.execute({ keywords: ["x"], summary: "s", content: "c" }, execProjA).then(() => null, () => "rejected");
+check("⑥ 缺 name 时 memory_save 报错（必填）", missingName === "rejected");
+const missingSummary = await saveTool.execute({ name: "n", keywords: ["x"], content: "c" }, execProjA).then(() => null, () => "rejected");
+check("⑥ 缺 summary 时 memory_save 报错（必填）", missingSummary === "rejected");
 const afterSaveB = await listTool.execute({ namespace: "project" }, execProjB);
 const afterSaveA = await listTool.execute({ namespace: "project" }, execProjA);
 check("⑥ 项目 B 能看到新记忆、项目 A 看不到", afterSaveB.some((item) => item.id === saved.id) && !afterSaveA.some((item) => item.id === saved.id));
 
-// ⑥b memory_update：可改正文/标签/标题；applied 正文变更降级 pending
+// ⑥b memory_update：可改正文/标签/标题/summary；applied 正文变更降级 pending
 const updateTool = registeredTools.get("memory_update");
 check("⑥b memory_update 已注册", updateTool !== undefined);
-const metaOnly = await updateTool.execute({ id: "m1", keywords: ["kaczev", "鲸鱼", "updated"], name: "新标题" }, execProjA);
-check("⑥b 只改标签/标题时 applied 保持 applied", metaOnly !== undefined && metaOnly.status === "applied" && metaOnly.keywords.includes("updated") && metaOnly.name === "新标题");
+const metaOnly = await updateTool.execute({ id: "m1", keywords: ["kaczev", "鲸鱼", "updated"], name: "新标题", summary: "更新后的摘要" }, execProjA);
+check("⑥b 只改标签/标题/summary 时 applied 保持 applied", metaOnly !== undefined && metaOnly.status === "applied" && metaOnly.keywords.includes("updated") && metaOnly.name === "新标题" && metaOnly.summary === "更新后的摘要");
 const contentChange = await updateTool.execute({ id: "m1", content: "# 关于 Kaczev 的新内容\n\n更新后的正文。" }, execProjA);
 check("⑥b 修改 applied 正文后降级为 pending", contentChange !== undefined && contentChange.status === "pending" && contentChange.content.includes("新内容"));
 const unknownUpdate = await updateTool.execute({ id: "no-such-id" }, execProjA).then(() => null, () => "rejected");
 check("⑥b 不存在的 id 会拒绝", unknownUpdate === "rejected");
+
+// ⑥c memory_detail：按 id 分片读取全文
+const detailTool = registeredTools.get("memory_detail");
+check("⑥c memory_detail 已注册", detailTool !== undefined);
+const detail = await detailTool.execute({ id: "m1" }, execProjA);
+check("⑥c 读取 m1：含 name/summary/content_preview/total_length/has_more", detail !== undefined && detail.id === "m1" && typeof detail.name === "string" && typeof detail.summary === "string" && typeof detail.content_preview === "string" && typeof detail.total_length === "number" && typeof detail.has_more === "boolean");
+check("⑥c 正文短于默认 limit=500 时返回全文且 has_more=false", detail.total_length === detail.content_preview.length && detail.has_more === false);
+const detailSlice = await detailTool.execute({ id: "m1", offset: 2, limit: 10 }, execProjA);
+check("⑥c offset/limit 分片：从第 2 个字符起取 10 个字符", detailSlice.content_preview.length === 10 && detailSlice.content_preview === detail.content_preview.slice(2, 12));
+const detailBeyond = await detailTool.execute({ id: "m1", offset: 99999 }, execProjA);
+check("⑥c offset 超出正文返回空串 + has_more=false", detailBeyond.content_preview === "" && detailBeyond.has_more === false && detailBeyond.total_length === detail.total_length);
+const detailUnknown = await detailTool.execute({ id: "no-such-id" }, execProjA).then(() => null, () => "rejected");
+check("⑥c 不存在的 id 报错", detailUnknown === "rejected");
 
 // ⑦ RPC list paths + openFolder
 check("⑦ RPC list paths.global 出全局记忆文件夹", listRpc.ok === true && listRpc.value.paths.global === "C:/mock/.dsh/storages");
@@ -697,6 +756,34 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   const dOn = await preOff({ step: 1, agent: agentOn }, async () => ({ kind: "enter", messages: [] }));
   check("⑬ 重新开启后自动载入恢复注入", hasRecallOff(dOn) === true);
   rmSync(storeOff, { force: true });
+}
+
+// ⑭ BM25 评分单元检查（vendored okapibm25 + lib/bm25.js）
+{
+  const { bm25Scores, bm25ScoresAsync, tokenize } = await import("./lib/bm25.js");
+  const docs = [
+    "鲸鱼 Kaczev 喜欢重启 dsh 任何时候",
+    "项目约定 PowerShell 中文编码 UTF8",
+    "另一个项目的约定 projB",
+  ];
+  const zh = bm25Scores("鲸鱼", docs);
+  check("⑭ 中文查询命中中文文档（BM25 分数 > 0）", zh[0] > 0 && zh[1] === 0 && zh[2] === 0);
+  const mixed = bm25Scores("约定", docs);
+  check("⑭ 相关文档分数高于不相关文档", mixed[2] > mixed[0] && mixed[2] > mixed[1]);
+  const syncScores = bm25Scores("项目 编码", docs);
+  const asyncScores = await bm25ScoresAsync("项目 编码", docs);
+  check("⑭ 异步评分与同步评分一致", syncScores.every((s, i) => Math.abs(s - asyncScores[i]) < 1e-9));
+  const pureCjk = ["纯中文记忆一：关于鲸鱼与相处约定", "另一条纯中文记忆：项目编码约定", "第三条：没有任何英文字符的内容"];
+  const cjk = bm25Scores("鲸鱼", pureCjk);
+  check("⑭ 纯中文语料不产生 NaN（长度归一化兜底）", cjk.every((s) => Number.isFinite(s)) && cjk[0] > 0);
+  const k1up = bm25Scores("约定", docs, { k1: 2.0, b: 0.75 });
+  const b0 = bm25Scores("约定", docs, { k1: 1.2, b: 0 });
+  check("⑭ k1/b 可调（不同参数产生不同分数）", JSON.stringify(k1up) !== JSON.stringify(mixed) && JSON.stringify(b0) !== JSON.stringify(mixed));
+  const empty = bm25Scores("", docs);
+  check("⑭ 空查询返回全 0", empty.every((s) => s === 0));
+  const noDocs = bm25Scores("任意", []);
+  check("⑭ 空语料返回空数组", Array.isArray(noDocs) && noDocs.length === 0);
+  check("⑭ tokenize 对中文按字切分", JSON.stringify(tokenize("鲸鱼 dsh")) === JSON.stringify(["鲸", "鱼", "dsh"]));
 }
 
 rmSync(mainStore, { force: true });

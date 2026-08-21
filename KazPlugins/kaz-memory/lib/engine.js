@@ -24,7 +24,7 @@ import { Service } from '@deepseek-ai/cordis';
 import { z } from 'zod';
 import { defineDomain, domainTable, DomainFacility } from '@deepseek-ai/dsh-storage-domain';
 import { JsonStorageBackend } from '@deepseek-ai/dsh-storage-json';
-import { bm25Scores } from "./bm25.js";
+import { bm25ScoresAsync } from "./bm25.js";
 /** Brand a string as a {@link MemoryId} (compile-time only). */
 export function MemoryId(id) {
     return id;
@@ -45,11 +45,37 @@ const blockSchema = z.object({
     status: z.enum(['pending', 'ignored', 'applied', 'suggested', 'suggest', 'auto']),
     autoLoad: z.boolean().default(false),
     name: z.string().default(''),
+    summary: z.string().default(''),
     content: z.string(),
     keywords: z.array(z.string()),
-    createdAt: z.number(),
-    updatedAt: z.number(),
+    // 新时间戳格式（2026-08 升级）：ISO 字符串（created_at / updated_at）。
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+    // 旧时间戳格式（2026-08 之前，毫秒数字）：读取时迁移为 ISO；写回时不再保留。
+    createdAt: z.number().optional(),
+    updatedAt: z.number().optional(),
 });
+/** ISO 字符串或毫秒数字 → ISO 字符串；其它值返回 undefined。 */
+const isoOf = (value) => {
+    if (typeof value === 'string' && value.length > 0) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return new Date(value).toISOString();
+    return undefined;
+};
+const isoNow = () => new Date().toISOString();
+/** 规整时间戳：新格式优先，旧数字格式迁移为 ISO，缺失时兜底当前时间。 */
+function timestampsOf(block) {
+    const created_at = isoOf(block.created_at) ?? isoOf(block.createdAt) ?? isoNow();
+    const updated_at = isoOf(block.updated_at) ?? isoOf(block.updatedAt) ?? created_at;
+    return { created_at, updated_at };
+}
+/** 写盘块：只保留新格式时间戳（完全迁移——旧数字键不再写回 JSON，读时自动迁移）。 */
+function writtenBlock(block, refreshUpdatedAt = true) {
+    const { created_at, updated_at } = timestampsOf(block);
+    const next = { ...block, created_at, updated_at: refreshUpdatedAt ? isoNow() : created_at };
+    delete next.createdAt;
+    delete next.updatedAt;
+    return next;
+}
 /** Shared table shape; the two domains differ only by name and backend route. */
 function memorySpec(name) {
     return defineDomain({
@@ -71,10 +97,17 @@ function deriveName(content, max = 140) {
     return head.length > max ? head.slice(0, max) + '…' : head;
 }
 function toRecord(id, block, projectRoot) {
+    const { created_at, updated_at } = timestampsOf(block);
+    const { createdAt, updatedAt, ...rest } = block;
     return {
         id: MemoryId(id),
-        ...block,
-        status: normalizeStatus(block.status),
+        ...rest,
+        status: normalizeStatus(rest.status),
+        // 旧记录可能没有 summary/name（绕过 zod 默认值的原始块）：规整为字符串。
+        summary: typeof rest.summary === 'string' ? rest.summary : '',
+        name: typeof rest.name === 'string' ? rest.name : '',
+        created_at,
+        updated_at,
         ...(projectRoot === undefined ? {} : { projectRoot }),
     };
 }
@@ -184,21 +217,21 @@ export class MemoryEngine extends Service {
     projectRoots() {
         return [...this.projectEntries.keys()];
     }
-    /** Create one record in `pending` status — never self-promoting. */
+    /** Create one record in `pending` status — never self-promoting.
+     *  `name` / `summary` are taken from the input when provided (name falls
+     *  back to deriving from the content; summary defaults to ''). */
     async remember(input) {
         const namespace = input.namespace ?? 'global';
         const id = randomUUID();
-        const now = Date.now();
-        const block = {
+        const block = writtenBlock({
             namespace,
             status: 'pending',
             autoLoad: false,
-            name: deriveName(input.content),
+            name: typeof input.name === 'string' && input.name.trim().length > 0 ? input.name.trim() : deriveName(input.content),
+            summary: typeof input.summary === 'string' ? input.summary : '',
             content: input.content,
             keywords: (input.keywords ?? []).map(keyword => keyword.toLowerCase()),
-            createdAt: now,
-            updatedAt: now,
-        };
+        }, false);
         if (namespace === 'project') {
             const root = resolve(input.projectRoot ?? this.defaultProjectRoot());
             const table = await this.ensureProject(root);
@@ -219,14 +252,43 @@ export class MemoryEngine extends Service {
             (status === undefined || record.status === status) &&
             (filter?.autoLoad === undefined || (record.autoLoad === true) === (filter.autoLoad === true)));
     }
-    async search(query, filter = {}) {
+    /** BM25 search (okapibm25 via bm25ScoresAsync, non-blocking for ~1000
+     *  memories). Scores are computed over content + summary + keywords
+     *  (content is the primary field); k1 / b come from the caller (usually
+     *  the `kaz-memory.bm25` settings section). */
+    async search(query, filter = {}, bm25 = {}) {
         const records = await this.list(filter);
-        const docs = records.map(record => `${record.content} ${record.keywords.join(' ')}`);
-        const scores = bm25Scores(query, docs);
+        if (records.length === 0) return [];
+        const docs = records.map((record) =>
+            [record.content, typeof record.summary === 'string' ? record.summary : '', record.keywords.join(' ')]
+                .filter(Boolean)
+                .join(' '),
+        );
+        const scores = await bm25ScoresAsync(query, docs, bm25);
         return records
             .map((record, index) => ({ record, score: scores[index] ?? 0 }))
             .filter(hit => hit.score > 0)
             .sort((left, right) => right.score - left.score);
+    }
+    /** Read a single record by id (global first, then every already-opened
+     *  project domain). Read-only: never opens a new project domain. */
+    async get(id, filter = {}) {
+        const target = String(id);
+        const global = this.requireTable('global').get(target);
+        if (global !== undefined) return toRecord(target, global);
+        const projectRoot = filter?.projectRoot === undefined ? undefined : resolve(filter.projectRoot);
+        if (projectRoot !== undefined) {
+            const entry = this.projectEntries.get(projectRoot);
+            if (entry !== undefined) {
+                const block = entry.table.get(target);
+                if (block !== undefined) return toRecord(target, block, projectRoot);
+            }
+        }
+        for (const [root, entry] of this.projectEntries) {
+            const block = entry.table.get(target);
+            if (block !== undefined) return toRecord(target, block, root);
+        }
+        return undefined;
     }
     async forget(id) {
         if (await this.requireTable('global').delete(id)) {
@@ -246,7 +308,7 @@ export class MemoryEngine extends Service {
         const next = normalizeStatus(status);
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
-            const updated = { ...global, status: next, updatedAt: Date.now() };
+            const updated = writtenBlock({ ...global, status: next });
             await this.requireTable('global').put(id, updated);
             const record = toRecord(id, updated);
             this.ctx.emit('memory/changed', { operation: 'status', id, status: next });
@@ -255,7 +317,7 @@ export class MemoryEngine extends Service {
         for (const [root, entry] of this.projectEntries) {
             const block = entry.table.get(id);
             if (block !== undefined) {
-                const updated = { ...block, status: next, updatedAt: Date.now() };
+                const updated = writtenBlock({ ...block, status: next });
                 await entry.table.put(id, updated);
                 const record = toRecord(id, updated, root);
                 this.ctx.emit('memory/changed', { operation: 'status', id, status: next, projectRoot: root });
@@ -265,9 +327,10 @@ export class MemoryEngine extends Service {
         throw new Error(`cannot set status of unknown memory '${id}'`);
     }
     /**
-     * Update an existing record's content / keywords / name.
+     * Update an existing record's content / keywords / name / summary.
      * If an `applied` record's content changes, it is demoted to `pending` so a
-     * human can re-confirm the new body; metadata-only edits keep the status.
+     * human can re-confirm the new body; metadata-only edits (name / keywords /
+     * summary) keep the status.
      */
     async update(id, patch = {}) {
         const applyPatch = (block) => {
@@ -276,12 +339,13 @@ export class MemoryEngine extends Service {
             const name = typeof patch.name === 'string'
                 ? patch.name.trim()
                 : (contentChanged ? deriveName(content) : block.name);
+            const summary = typeof patch.summary === 'string' ? patch.summary : block.summary;
             const keywords = Array.isArray(patch.keywords)
                 ? patch.keywords.map((keyword) => String(keyword).toLowerCase())
                 : block.keywords;
             const currentStatus = normalizeStatus(block.status);
             const status = currentStatus === 'applied' && contentChanged ? 'pending' : currentStatus;
-            return { ...block, content, name, keywords, status, updatedAt: Date.now() };
+            return writtenBlock({ ...block, content, name, summary, keywords, status });
         };
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
@@ -307,7 +371,7 @@ export class MemoryEngine extends Service {
     async setAutoLoad(id, autoLoad) {
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
-            const updated = { ...global, status: normalizeStatus(global.status), autoLoad: autoLoad === true, updatedAt: Date.now() };
+            const updated = writtenBlock({ ...global, status: normalizeStatus(global.status), autoLoad: autoLoad === true });
             await this.requireTable('global').put(id, updated);
             const record = toRecord(id, updated);
             this.ctx.emit('memory/changed', { operation: 'autoLoad', id, autoLoad: updated.autoLoad });
@@ -316,7 +380,7 @@ export class MemoryEngine extends Service {
         for (const [root, entry] of this.projectEntries) {
             const block = entry.table.get(id);
             if (block !== undefined) {
-                const updated = { ...block, status: normalizeStatus(block.status), autoLoad: autoLoad === true, updatedAt: Date.now() };
+                const updated = writtenBlock({ ...block, status: normalizeStatus(block.status), autoLoad: autoLoad === true });
                 await entry.table.put(id, updated);
                 const record = toRecord(id, updated, root);
                 this.ctx.emit('memory/changed', { operation: 'autoLoad', id, autoLoad: updated.autoLoad, projectRoot: root });
@@ -328,7 +392,7 @@ export class MemoryEngine extends Service {
     /** Rename one record (display name persisted in JSON). */
     async setName(id, name) {
         const clean = String(name ?? '').trim();
-        const update = (block) => ({ ...block, status: normalizeStatus(block.status), name: clean, updatedAt: Date.now() });
+        const update = (block) => writtenBlock({ ...block, status: normalizeStatus(block.status), name: clean });
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
             const updated = update(global);
