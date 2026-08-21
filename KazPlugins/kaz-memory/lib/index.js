@@ -726,13 +726,25 @@ export async function apply(ctx, config = {}) {
       return null;
     }
   };
+
+  /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
+  function liveFor(agent) {
+    try {
+      const svc = ctx.get("kazMode");
+      if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
+        const cfg = svc.pluginConfig(agent, "kaz-memory");
+        if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
+      }
+    } catch {
+      // fall through
+    }
+    return source();
+  }
+
   const guidanceText = (agent) => {
-    const current = source();
+    const current = liveFor(agent);
     const kazModeSvc = getKazModeSvc();
-    // 总开关（硬闸门，2026-08-21 修复）：插件自身 enabled=false 时一律不注入，
-    // 不因 kazMode 服务存在而绕过——否则 Kaz 模式默认（kaz-defaults.json 里
-    // kaz-memory.enabled=true）会让"用户已在 settings.yaml 关闭 kaz-memory"的
-    // 新对话仍然收到指引注入。
+    // 总开关（硬闸门，2026-08-21 修复）：生效 enabled=false 时一律不注入。
     if (current === null || typeof current !== "object" || current.enabled === false) return "";
     const legacy =
       current !== null && typeof current === "object" && typeof current.guidance === "string"
@@ -755,9 +767,9 @@ export async function apply(ctx, config = {}) {
   /** 每轮首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
    *  整段覆盖时不再追加（兼容旧配置）；guidanceForget 可覆盖默认遗忘指引。 */
   const forgetGuidanceText = (agent) => {
-    const current = source();
+    const current = liveFor(agent);
     const kazModeSvc = getKazModeSvc();
-    // 总开关（硬闸门，同 guidanceText）：自身 enabled=false 时一律不注入。
+    // 总开关（硬闸门，同 guidanceText）：生效 enabled=false 时一律不注入。
     if (current === null || typeof current !== "object" || current.enabled === false) return "";
     const legacy =
       current !== null && typeof current === "object" && typeof current.guidance === "string"
@@ -975,8 +987,8 @@ export async function apply(ctx, config = {}) {
     if (payload === null || typeof payload !== "object" || payload.step !== 1) return decision;
     const agent = payload.agent;
     if (agent === null || agent === undefined || typeof agent !== "object") return decision;
-    // 组件总开关：关闭时不做自动载入注入。
-    if (source().enabled === false) return decision;
+    // 组件总开关：按该会话生效配置判定（含 kazMode 会话覆盖）。
+    if (liveFor(agent).enabled === false) return decision;
     if (autoLoadInjected.has(agent)) return decision;
     // 跨重启去重：该会话此前已注入过（持久化标记）→ 跳过。
     if (agent.id !== undefined && persistedInjected.has(String(agent.id))) return decision;

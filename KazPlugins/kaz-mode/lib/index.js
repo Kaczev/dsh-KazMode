@@ -796,18 +796,28 @@ export default {
     }
 
     /**
-     * kazMode 服务（供 kaz-memory / kaz-diag 按会话查询工具面与插件状态）：
-     *   - kazEnabled(agent)     该 agent 会话是否 Kaz 模式；
-     *   - pluginEnabled(agent, pluginId)  该 agent 会话某被管理插件是否启用；
-     *   - toolVisible(agent, name)  该 agent 会话里某工具是否在工具面内；
-     *   - surfaceOf(agent)      Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
+     * kazMode 服务（供被管理插件在使用时刻按 agent 会话读取生效配置）：
+     *   - kazEnabled(agent)            该 agent 会话是否 Kaz 模式；
+     *   - pluginEnabled(agent, pluginId) 该 agent 会话某被管理插件是否启用；
+     *   - pluginConfig(agent, pluginId)  该 agent 会话某插件的【完整生效配置】
+     *     = 工厂默认 + 当前模式默认(kaz-defaults.json) + 会话专属覆盖(kaz-session-states.json)。
+     *     无会话/无覆盖时返回 null，调用方回落到插件自身 settings.yaml。
+     *   - toolVisible(agent, name)    该 agent 会话里某工具是否在工具面内；
+     *   - surfaceOf(agent)            Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
      */
     const kazModeService = {
       kazEnabled: (agent) => agentKazEnabled(agent),
       pluginEnabled: (agent, pluginId) => {
         const states = agentEffectiveStates(agent);
         const state = states[pluginId];
-        return state === null || state === undefined || typeof state !== "object" || state.enabled !== false;
+        return state !== null && state !== undefined && typeof state === "object" && state.enabled === true;
+      },
+      pluginConfig: (agent, pluginId) => {
+        if (agent === null || agent === undefined || typeof agent !== "object") return null;
+        if (typeof pluginId !== "string" || pluginId.length === 0) return null;
+        const states = agentEffectiveStates(agent);
+        const state = states[pluginId];
+        return state !== null && state !== undefined && typeof state === "object" ? { ...state } : null;
       },
       toolVisible: (agent, name) => {
         // 无 agent / 会话状态缺失时按「不可见」处理（2026-08-21 加固，避免误判为启用）。

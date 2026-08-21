@@ -181,15 +181,6 @@ function isSubagent(agent) {
   }
 }
 
-/** 该代理此刻是否处于极简阶段（enabled、非子代理（按配置）、尚无 tool/call）。 */
-function isFirstRound(source, agent) {
-  const current = source();
-  if (current.enabled !== true) return false;
-  if (agent === null || typeof agent !== "object") return false;
-  if (current.includeSubagents !== true && isSubagent(agent)) return false;
-  return !hasToolCall(agent);
-}
-
 export default {
   name: "round-minimal",
   // systemPrompt：监听组装瀑布；tools：监听执行前闸门。
@@ -212,6 +203,29 @@ export default {
       },
     });
 
+    /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
+    function liveFor(agent) {
+      try {
+        const svc = ctx.get("kazMode");
+        if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
+          const cfg = svc.pluginConfig(agent, "round-minimal");
+          if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
+        }
+      } catch {
+        // fall through
+      }
+      return source();
+    }
+
+    /** 该代理此刻是否处于极简阶段（enabled、非子代理（按配置）、尚无 tool/call）。 */
+    function isFirstRound(agent) {
+      const current = liveFor(agent);
+      if (current.enabled !== true) return false;
+      if (agent === null || typeof agent !== "object") return false;
+      if (current.includeSubagents !== true && isSubagent(agent)) return false;
+      return !hasToolCall(agent);
+    }
+
     const initial = source();
     ctx.logger.info(
       `[round-minimal] 已加载：enabled=${initial.enabled}, ` +
@@ -227,7 +241,7 @@ export default {
       version: 1,
       enabled: () => source().enabled === true,
       firstRoundTools: () => (Array.isArray(source().firstRoundTools) ? source().firstRoundTools : []),
-      isMinimal: (agent) => isFirstRound(source, agent),
+      isMinimal: (agent) => isFirstRound(agent),
       turnOf: (agent) => currentTurnOf(agent),
     };
     ctx.effect(() => {
@@ -241,7 +255,7 @@ export default {
     /** 状态变化时推送一次 round-minimal/state 信号；失败不影响主流程。 */
     function signalState(agent) {
       try {
-        const minimal = isFirstRound(source, agent);
+        const minimal = isFirstRound(agent);
         if (lastMinimalState.get(agent) === minimal) return;
         lastMinimalState.set(agent, minimal);
         ctx.emit("round-minimal/state", {
@@ -260,10 +274,10 @@ export default {
     //    host 平面的监听器无 scope 标签，对 agent 作用域的组装同样生效。
     // -----------------------------------------------------------------------
     ctx.on("system-prompt/assemble", function (assembly, context, next) {
-      const current = source();
       signalState(context?.agent);
-      if (current.enabled === true && isFirstRound(source, context?.agent)) {
-        const allow = new Set(roundMinimalService.firstRoundTools());
+      const live = liveFor(context?.agent);
+      if (live.enabled === true && isFirstRound(context?.agent)) {
+        const allow = new Set(Array.isArray(live.firstRoundTools) ? live.firstRoundTools : []);
         assembly.tools = assembly.tools.filter(
           (tool) => tool !== null && typeof tool === "object" && allow.has(tool.name),
         );
@@ -280,11 +294,11 @@ export default {
     //    组装层已让模型看不到其它工具，这里是纵深防御。
     // -----------------------------------------------------------------------
     ctx.on("tools/pre-execute", (exec, next) => {
-      const current = source();
       signalState(exec?.agent);
-      if (current.enabled === true && isFirstRound(source, exec?.agent)) {
+      const live = liveFor(exec?.agent);
+      if (live.enabled === true && isFirstRound(exec?.agent)) {
         const name = exec?.name;
-        const tools = roundMinimalService.firstRoundTools();
+        const tools = Array.isArray(live.firstRoundTools) ? live.firstRoundTools : [];
         if (typeof name === "string" && !tools.includes(name)) {
           ctx.logger.info(
             `[round-minimal] 极简阶段拒绝调用工具 "${name}"（仅允许：${tools.join(", ")}）`,

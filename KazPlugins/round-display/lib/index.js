@@ -238,9 +238,23 @@ export default {
       }, 1000);
     }
 
+    /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
+    function liveFor(agent) {
+      try {
+        const svc = ctx.get("kazMode");
+        if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
+          const cfg = svc.pluginConfig(agent, "round-display");
+          if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
+        }
+      } catch {
+        // fall through
+      }
+      return source();
+    }
+
     /** 记录一条注入：agent + 当前轮次 + (plugin, content) 去重（title 仅展示用）。 */
     function record(agent, plugin, title, content) {
-      if (source().enabled !== true) return;
+      if (liveFor(agent).enabled !== true) return;
       if (agent === null || typeof agent !== "object") return;
       const id = agent.id;
       if (id === undefined) return;

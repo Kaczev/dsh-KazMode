@@ -155,6 +155,20 @@ export default {
       }
     }
 
+    /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
+    function liveFor(agent) {
+      try {
+        const svc = ctx.get("kazMode");
+        if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
+          const cfg = svc.pluginConfig(agent, "first-round-hints");
+          if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
+        }
+      } catch {
+        // fall through
+      }
+      return source();
+    }
+
     // Conversations that started before this plugin loaded are not "new":
     // pre-mark their agents so the message is injected only into conversations
     // that begin while the plugin is active.
@@ -175,7 +189,7 @@ export default {
       if (payload === null || typeof payload !== "object" || payload.step !== 1) return decision;
       const agent = payload.agent;
       if (agent === null || agent === undefined || typeof agent !== "object") return decision;
-      const current = source();
+      const current = liveFor(agent);
       if (current === null || typeof current !== "object" || current.enabled === false) return decision;
       const id = agent.id;
       if (id === undefined) return decision;

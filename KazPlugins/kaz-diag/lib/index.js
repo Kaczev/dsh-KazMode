@@ -285,6 +285,17 @@ export default {
               `${before.hadOverride ? "（用户覆盖）" : "（继承）"}`,
           );
         }
+        // kazMode 服务存在且绑定 agent 时，显示「本会话生效」状态（模式默认+会话覆盖）。
+        if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.pluginConfig === "function" && agent !== undefined) {
+          try {
+            const eff = kazModeSvc.pluginConfig(agent, plugin.id);
+            if (eff !== null && eff !== undefined && typeof eff === "object") {
+              lines.push(`      本会话生效: enabled=${eff.enabled !== false}`);
+            }
+          } catch {
+            // 忽略
+          }
+        }
       }
       lines.push(
         kazEnabled

@@ -197,6 +197,40 @@ export function apply(ctx, config = {}) {
 
   let lastBeepAt = 0;
 
+  /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
+  function liveFor(agent) {
+    try {
+      const svc = ctx.get("kazMode");
+      if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
+        const cfg = svc.pluginConfig(agent, "output-beep");
+        if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
+      }
+    } catch {
+      // fall through
+    }
+    return source();
+  }
+
+  /** 从 session 形态解析对应 agent（session/event 事件只给 session，没有 agent）。 */
+  function sessionAgentOf(session) {
+    try {
+      const id =
+        session !== null && typeof session === "object" && typeof session.id === "string"
+          ? session.id
+          : session?.sessionId;
+      if (typeof id === "string" && id.length > 0) {
+        const agents = ctx.get("agents");
+        if (agents !== undefined && agents !== null && typeof agents.get === "function") {
+          const agent = agents.get(id);
+          if (agent !== undefined && agent !== null) return agent;
+        }
+      }
+    } catch {
+      // fall through
+    }
+    return undefined;
+  }
+
   /** 播放前的统一判定 + 防抖；subagent 参数表示当前事件是否来自子代理。 */
   function handleBeep(current, subagent) {
     if (current === null || typeof current !== "object" || current.enabled !== true) return;
@@ -208,12 +242,12 @@ export function apply(ctx, config = {}) {
   }
 
   function handleIdle(agent) {
-    handleBeep(source(), isSubagent(agent));
+    handleBeep(liveFor(agent), isSubagent(agent));
   }
 
   /** 模型调用 ask_user_question 提问时立即响一声（不等整轮结束 idle）。 */
   function handleAsk(session) {
-    handleBeep(source(), isSubagentSession(session));
+    handleBeep(liveFor(sessionAgentOf(session)), isSubagentSession(session));
   }
 
   // agent 回到 idle = 整个驱动循环结束（可能含多个 turn/step）= 模型输出完毕。

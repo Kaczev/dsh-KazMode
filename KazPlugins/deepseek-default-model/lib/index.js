@@ -191,6 +191,20 @@ export function apply(ctx, config = {}) {
   /** settings 服务惰性获取（apply 阶段可能尚未挂载）。 */
   const getSettings = () => ctx.get("settings");
 
+  /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
+  function liveFor(agent) {
+    try {
+      const svc = ctx.get("kazMode");
+      if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
+        const cfg = svc.pluginConfig(agent, "deepseek-default-model");
+        if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
+      }
+    } catch {
+      // fall through
+    }
+    return source();
+  }
+
   /** 本实例是否真的向官方 agent-default-model 段写过值；避免插件一开始就是关闭时误恢复。 */
   let everSynced = false;
   /** 本实例在本进程内写进官方段的键（关闭时只还原本插件写过的键，不碰其它键）。 */
@@ -366,7 +380,7 @@ export function apply(ctx, config = {}) {
       return proposal;
     }
     if (proposal === null || typeof proposal !== "object") return proposal;
-    const current = source();
+    const current = liveFor(payload?.agent);
     if (current === null || typeof current !== "object" || current.enabled !== true) {
       return proposal;
     }

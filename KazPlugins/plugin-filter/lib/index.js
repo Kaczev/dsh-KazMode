@@ -242,6 +242,25 @@ export default {
         `disabledTools=[${initial.disabledTools.join(", ")}]`,
     );
 
+    /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。
+     *  注意：loader 条目禁用与注册期丢弃（register/get/schemas 补丁）是进程级全局
+     *  行为，没有 agent 上下文，仍由全局 settings 驱动；这里只对组装层 / 执行层
+     *  按 agent 会话判定。 */
+    function liveFor(agent) {
+      try {
+        const svc = ctx.get("kazMode");
+        if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
+          const cfg = svc.pluginConfig(agent, "plugin-filter");
+          if (cfg !== null && cfg !== undefined && typeof cfg === "object") {
+            return normalizeConfig({ ...source(), ...cfg });
+          }
+        }
+      } catch {
+        // fall through
+      }
+      return source();
+    }
+
     // -----------------------------------------------------------------------
     // 模式 remove：插件级禁用 —— 直接禁用命中的 loader 条目（如
     // tool-subagent-report），让插件本体不再加载、dsh 插件列表显示"已停用"。
@@ -367,8 +386,8 @@ export default {
     // 组装层（模型可见的工具列表与 tool:* 指导段）——模式 remove 的最终闸门。
     // 该 waterfall 的返回值是权威的，host 平面的监听器对所有作用域生效。
     // -----------------------------------------------------------------------
-    ctx.on("system-prompt/assemble", function (assembly, _context, next) {
-      const current = source();
+    ctx.on("system-prompt/assemble", function (assembly, context, next) {
+      const current = liveFor(context?.agent);
       if (current.mode === "remove" && current.enabled === true) {
         assembly.tools = assembly.tools.filter(
           (tool) => tool && isBlocked(current, tool.name, undefined) === undefined,
@@ -385,7 +404,7 @@ export default {
     // 执行层——模式 disable：工具保留在列表中，但一切调用在此被拒绝。
     // -----------------------------------------------------------------------
     ctx.on("tools/pre-execute", (exec, next) => {
-      const current = source();
+      const current = liveFor(exec?.agent);
       if (current.mode === "disable" && current.enabled === true) {
         const hit = isBlocked(current, exec?.name, undefined);
         if (hit !== undefined) {
