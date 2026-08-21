@@ -22,9 +22,10 @@
 //     （memory_forget 清理已完成任务）；
 //   * 已确认且标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）
 //     以上下文注入方式注入一次（2026-08 重构：不再等 memory_search 首次可用）
-//   * memory_list 只返回 id/namespace/status/autoLoad/名称，不返回正文与
-//     keywords——避免列表调用把记忆灌进上下文；看全文用 memory_search 的
-//     summary + memory_detail。
+//   * memory_list 只返回 id/name/updated_at/keywords，不返回正文——避免列表
+//     调用把记忆灌进上下文；按时间倒序（updated_at，缺失回退 created_at，
+//     最新在前），limit 控制返回条数；看全文用 memory_search 的 summary +
+//     memory_detail。
 //   * 项目记忆按项目文件夹隔离（2026-08-17）：project 记忆写在
 //     <项目文件夹>/.dsh/storages/memory_project.json，项目根从 agent 会话 cwd
 //     （exec.agent.session.header.cwd）解析——不再用 dsh 进程的 process.cwd()。
@@ -90,25 +91,21 @@ const DETAIL_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    id: { type: "string", required: true },
-    name: { type: "string", required: true },
-    summary: { type: "string", required: true },
     content_preview: { type: "string", required: true },
     total_length: { type: "number", required: true },
     has_more: { type: "boolean", required: true },
   },
 };
 
-/** memory_list 的返回项：只给 id / namespace / status / 名称，不含正文与 keywords。 */
+/** memory_list 的返回项：只给 id / name / updated_at / keywords，不含正文。 */
 const LIST_RECORD_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
     id: { type: "string", required: true },
-    namespace: { type: "string", required: true, enum: ["global", "project"] },
-    status: { type: "string", required: true, enum: ["pending", "ignored", "applied"] },
-    autoLoad: { type: "boolean", required: true },
     name: { type: "string", required: true },
+    updated_at: { type: "string", required: true },
+    keywords: { type: "array", items: { type: "string" }, required: true },
   },
 };
 
@@ -151,6 +148,16 @@ function nameValue(record) {
   };
 }
 
+/** memory_list 工具项：id / name / updated_at / keywords（不含正文与 namespace/status/autoLoad）。 */
+function listValue(record) {
+  return {
+    id: String(record.id),
+    name: typeof record.name === "string" && record.name.length > 0 ? record.name : nameOf(record.content),
+    updated_at: typeof record.updated_at === "string" ? record.updated_at : "",
+    keywords: Array.isArray(record.keywords) ? record.keywords : [],
+  };
+}
+
 /** 面板列表项：memory_list 字段 + summary + ISO 时间戳 + 所属项目路径（仅 project 记忆）。 */
 function metaValue(record) {
   return {
@@ -181,9 +188,6 @@ function detailValue(record, offset, limit) {
   const len = Number.isFinite(Number(limit)) ? Math.min(5000, Math.max(0, Math.trunc(Number(limit)))) : 500;
   const preview = start >= content.length ? "" : content.slice(start, start + len);
   return {
-    id: String(record.id),
-    name: typeof record.name === "string" && record.name.length > 0 ? record.name : nameOf(record.content),
-    summary: typeof record.summary === "string" ? record.summary : "",
     content_preview: preview,
     total_length: content.length,
     has_more: start + len < content.length,
@@ -195,6 +199,15 @@ function clampInt(value, fallback, min, max) {
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
+/** 时间戳数值：ISO 字符串 → 毫秒；缺失/非法按 0（memory_list 排序用，最新在前）。 */
+function timeMs(value) {
+  if (typeof value === "string" && value.length > 0) {
+    const ms = Date.parse(value);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return 0;
 }
 
 /** 从 settings 段读取 BM25 参数（kaz-memory.bm25.k1 / b），缺省 1.2 / 0.75。 */
@@ -1128,23 +1141,34 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_list",
       description:
-        "List all memories; each entry contains only id/namespace/status/autoLoad/name (title line or first line, truncated to 140 chars) — no content and no keywords. Use memory_search for relevance hits, memory_detail for the full content of a single memory.",
+        "List memories sorted by time, newest first (by updated_at, falling back to created_at), limited to limit entries. Each entry contains only id/name/updated_at/keywords (name = title line or first line, truncated to 140 chars) — no content, no namespace/status/autoLoad. Use memory_search for relevance hits, memory_detail for the full content of a single memory.",
       parameters: {
         namespace: { type: "string", enum: ["global", "project"], description: "Restrict to a namespace; project = current project folder." },
         status: { type: "string", enum: ["pending", "ignored", "applied"], description: "Restrict to a status." },
+        limit: { type: "number", description: "Max memories to return (default 10, max 100)." },
       },
       output: {
         schema: { type: "array", items: LIST_RECORD_SCHEMA },
         render: (_args, value) => renderJson(value),
       },
       execute(args, exec) {
+        const limit = clampInt(args.limit, 10, 1, 100);
         return Promise.resolve(
           memory.list({
             ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
             ...(args.status === undefined ? {} : { status: args.status }),
             projectRoot: projectRootOf(exec),
           }),
-        ).then((records) => records.map(nameValue));
+        ).then((records) =>
+          records
+            .slice()
+            .sort(
+              (left, right) =>
+                timeMs(right.updated_at ?? right.created_at) - timeMs(left.updated_at ?? left.created_at),
+            )
+            .slice(0, limit)
+            .map(listValue),
+        );
       },
       presentCall: () => present("列出记忆", "read"),
     }),
@@ -1190,7 +1214,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_detail",
       description:
-        "Read the full content of a single memory by id, with chunked reading. Returns id, name, summary, content_preview (limit chars starting at offset), total_length and has_more. Errors if the id does not exist; if offset is beyond the content length, content_preview is an empty string (total_length tells you the real size) and has_more is false. Use memory_search or memory_list first to obtain ids.",
+        "Read the full content of a single memory by id, with chunked reading. Returns content_preview (limit chars starting at offset), total_length and has_more. Errors if the id does not exist; if offset is beyond the content length, content_preview is an empty string (total_length tells you the real size) and has_more is false. Use memory_search or memory_list first to obtain ids.",
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         offset: { type: "number", description: "Character offset to start reading from (default 0)." },

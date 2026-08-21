@@ -1,5 +1,5 @@
 // kaz-memory 宿主半探针：在 mock ctx 上运行插件，验证：
-//   ① memory_list 只返回 id/namespace/status/名称，不含 content 与 keywords；
+//   ① memory_list 只返回 id/name/updated_at/keywords（不含正文），按 updated_at 倒序 + limit 分页；
 //   ② memory_search 返回完整正文；
 //   ③ 固定指引 tool:memory 用 [标题] > < 消息格式，说明 list 只回名称、search 回全文；
 //   ④ 面板桥接：settings 镜像 memories（仅元数据、按 updatedAt 倒序）+ opened 按需正文（open/close）；
@@ -305,16 +305,19 @@ check("① memory_list 已注册", listTool !== undefined);
 const listAll = await listTool.execute({}, execProjA);
 check("① 项目 A 上下文下返回 3 条（全局 m1/m3 + 项目 A 的 m2）", Array.isArray(listAll) && listAll.length === 3);
 check("① 返回项无 content 字段", listAll.every((item) => !("content" in item)));
-check("① 返回项无 keywords 字段", listAll.every((item) => !("keywords" in item)));
-check("① 返回项有 name 字段", listAll.every((item) => typeof item.name === "string"));
+check("① 返回项含 keywords 字段", listAll.every((item) => Array.isArray(item.keywords)));
+check("① 返回项含 id/name/updated_at 字段", listAll.every((item) => typeof item.id === "string" && typeof item.name === "string" && typeof item.updated_at === "string"));
+check("① updated_at 为 ISO 字符串", listAll.every((item) => !Number.isNaN(Date.parse(item.updated_at))));
 check("① 标题行优先（# 开头的标题作为名称）", listAll.some((item) => item.name === "关于 Kaczev 的相处约定"));
 check("① 无标题取首行", listAll.some((item) => item.name === "项目约定：PowerShell 中文编码坑"));
 check("① 超长名称截断到 140 字 + …", listAll.every((item) => item.name.length <= 141) && listAll.some((item) => item.name.endsWith("…")));
-check("① namespace 过滤生效", (await listTool.execute({ namespace: "project" }, execProjA)).every((item) => item.namespace === "project"));
+check("① 按 updated_at 倒序（最新在前：m3 > m2 > m1）", listAll[0]?.id === "m3" && listAll[1]?.id === "m2" && listAll[2]?.id === "m1");
+check("① limit 生效（limit=2 只回最新 2 条）", (await listTool.execute({ limit: 2 }, execProjA)).length === 2);
+check("① namespace 过滤生效（project 只回 m2）", (await listTool.execute({ namespace: "project" }, execProjA)).every((item) => item.id === "m2"));
 const projBList = await listTool.execute({}, execProjB);
 check("① 项目 B 上下文只看到全局 + B 自己的项目记忆（m1/m3/m4）", Array.isArray(projBList) && projBList.length === 3 && projBList.some((item) => item.id === "m4") && !projBList.some((item) => item.id === "m2"));
-check("① memory_list 默认不按 status/autoLoad 过滤（pending 与 applied 都返回，autoLoad 字段恒为 boolean）", listAll.some((item) => item.status === "pending") && listAll.some((item) => item.status === "applied") && listAll.every((item) => typeof item.autoLoad === "boolean"));
-check("① memory_list status=applied 过滤只回 applied", (await listTool.execute({ status: "applied" }, execProjA)).every((item) => item.status === "applied"));
+check("① 默认不按 status 过滤（applied m1/m3 与 pending m2 都返回）", ["m1", "m2", "m3"].every((id) => listAll.some((item) => item.id === id)));
+check("① status=applied 过滤只回 applied（m1/m3）", (await listTool.execute({ status: "applied" }, execProjA)).every((item) => item.id === "m1" || item.id === "m3"));
 
 // ② memory_search：BM25 摘要命中（不含 content），项目隔离生效，分页与错误处理
 const searchTool = registeredTools.get("memory_search");
@@ -538,7 +541,7 @@ check("⑥b 不存在的 id 会拒绝", unknownUpdate === "rejected");
 const detailTool = registeredTools.get("memory_detail");
 check("⑥c memory_detail 已注册", detailTool !== undefined);
 const detail = await detailTool.execute({ id: "m1" }, execProjA);
-check("⑥c 读取 m1：含 name/summary/content_preview/total_length/has_more", detail !== undefined && detail.id === "m1" && typeof detail.name === "string" && typeof detail.summary === "string" && typeof detail.content_preview === "string" && typeof detail.total_length === "number" && typeof detail.has_more === "boolean");
+check("⑥c 读取 m1：含 content_preview/total_length/has_more（不含 id/name/summary）", detail !== undefined && typeof detail.content_preview === "string" && typeof detail.total_length === "number" && typeof detail.has_more === "boolean" && !("id" in detail) && !("name" in detail) && !("summary" in detail));
 check("⑥c 正文短于默认 limit=500 时返回全文且 has_more=false", detail.total_length === detail.content_preview.length && detail.has_more === false);
 const detailSlice = await detailTool.execute({ id: "m1", offset: 2, limit: 10 }, execProjA);
 check("⑥c offset/limit 分片：从第 2 个字符起取 10 个字符", detailSlice.content_preview.length === 10 && detailSlice.content_preview === detail.content_preview.slice(2, 12));
@@ -567,7 +570,7 @@ check("⑧b RPC status 把 m2 置为 applied", statusRpc !== null && statusRpc.o
 const autoRpc = await rpcHandler("autoLoad", { id: "m2", autoLoad: true, project: "C:/projA" });
 check("⑧b RPC autoLoad 把 m2 置为自动载入", autoRpc !== null && autoRpc.ok === true && autoRpc.value.autoLoad === true);
 const listAfterAuto = await listTool.execute({}, execProjA);
-check("⑧b memory_list 同时包含 autoLoad=true 与 autoLoad=false 的记忆", listAfterAuto.some((item) => item.id === "m2" && item.autoLoad === true) && listAfterAuto.some((item) => item.autoLoad === false));
+check("⑧b memory_list 仍返回被改为自动载入的 m2（autoLoad 不再暴露，按 id 验证）", listAfterAuto.some((item) => item.id === "m2"));
 const renameRpc = await rpcHandler("rename", { id: "m1", name: "关于 Kaczev 的新名字", project: "C:/projA" });
 check("⑧b RPC rename 修改 m1 名称", renameRpc !== null && renameRpc.ok === true && renameRpc.value.name === "关于 Kaczev 的新名字");
 const forgetRpc = await rpcHandler("forget", { id: "m3", project: "C:/projA" });
