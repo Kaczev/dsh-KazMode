@@ -34,12 +34,10 @@
 
 import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { DEFAULT_FIRST_ROUND_TOOLS } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 round-minimal: 段。 */
 const NAMESPACE = settingsNamespace("round-minimal");
-
-/** 极简阶段工具集默认值：pwsh 为 Windows 原生 shell，str_replace_editor 覆盖常用文件编辑。 */
-const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "str_replace_editor"];
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({

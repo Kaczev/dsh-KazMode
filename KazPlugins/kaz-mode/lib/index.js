@@ -12,15 +12,17 @@
 //      仍需生效），其余任何提示段（thinking-anchor / round-minimal 轮次提示 /
 //      kaz-memory 指引 / tool:* 指导段 / 运行时上下文…）一律过滤。任何插件都
 //      不再向 Kaz 会话的 system prompt 注入其它内容。
-//   2) 工具面两阶段：
-//        - 首次工具调用前（round-minimal 首阶段信号）：minimalTools（默认
-//          pwsh、str_replace_editor）∪ round-minimal 首轮工具集；
-//        - 首次工具调用后：恢复 Kaz 全部工具 = minimalTools + toolWhitelist
-//          白名单（= 标准模式全部工具除 bash + pwsh + str_replace_editor +
-//          kaz-memory 六工具）。toolWhitelist 是 Kaz 全部工具的手动编辑点
-//          （settings.yaml 的 kaz-mode.toolWhitelist，热改生效）。
-//        - 动态调整：kaz-memory 关闭 → 其六个记忆工具自动移出白名单（kaz-memory
-//          插件自身也会把工具完全注销）；kaz-diag 开启 → kaz_mode_status 自动加入白名单。
+//   2) 工具面两阶段（工具清单全部由 kaz-shared 的 tool-lists.js 管理）：
+//        - 首次工具调用前（round-minimal 首阶段信号）：仅保留 round-minimal
+//          首轮工具集 firstRoundTools（为空回退 minimalTools）；
+//        - 首次工具调用后：恢复 Kaz 全部工具 = minimalTools + effectiveToolWhitelist
+//          （= settings.toolWhitelist 用户白名单 ∪ 已启用群组的工具 − 已停用
+//          群组的工具）。白名单默认值与极简基底来自 kaz-shared；
+//          settings.yaml 的 kaz-mode.toolWhitelist / minimalTools 是手动编辑点
+//          （热改生效，用户配置始终优先）。
+//        - 动态调整：kaz-memory / kaz-diag 各自以群组"发信"注册工具并随
+//          enabled 加入/排除（关闭时 kaz-memory 还把工具完全注销）；无需本
+//          插件维护任何工具名清单。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
 //      再按会话/默认状态应用。变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用。
@@ -37,6 +39,15 @@ import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import {
+  DEFAULT_MINIMAL_TOOLS,
+  DEFAULT_TOOL_WHITELIST,
+  DEFAULT_FIRST_ROUND_TOOLS,
+  DEFAULT_DISABLED_TOOLS,
+  FIXED_PERSONA,
+  MANAGED_PLUGINS,
+  computeSurface,
+} from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
 const NAMESPACE = settingsNamespace("kaz-mode");
@@ -50,65 +61,29 @@ const KAZ_PRESET_ID = "kaz";
 /** 按钮"关闭 Kaz"时的兜底预设。 */
 const FALLBACK_PRESET_ID = "cordis";
 
-/** Kaz 模式固定系统提示词（persona 唯一文本；其余提示段一律过滤）。 */
-const FIXED_PERSONA = "You are a helpful software engineer assistant.";
-
 /** 固定 persona 段名（与 preset 的 persona 行一致）。 */
 const PERSONA_SECTION = "deployment:persona";
 
-/** Kaz 工具面·极简基底（首阶段与全量阶段始终保留的最小工具集）。 */
-const DEFAULT_MINIMAL_TOOLS = ["pwsh", "str_replace_editor"];
-
-/** kaz-memory 的六工具（kaz-memory 关闭时从 Kaz 工具面自动移除；kaz-memory
- *  插件本身也会在关闭时把工具完全注销，这里是纵深防御的兜底）。 */
-const KAZ_MEMORY_TOOLS = ["memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"];
-
 /**
- * Kaz 工具面·白名单默认值 = Kaz 模式的「全部工具列表」：
- *   标准模式（shipped standard 预设）全部工具（除 bash 与 skill：Windows 上
- *   bash 本就不存在；skill 已按 Kaczev 要求从 Kaz 模式整体移除）
- *   + pwsh + str_replace_editor + kaz-memory 六工具。
- * 这是手动编辑点：以后要加新工具，在 settings.yaml 的 kaz-mode.toolWhitelist
- * 里加工具名即可（热改生效）。kaz_mode_status 不在白名单内——由 kaz-diag 插件
- * 开启时动态加入。
+ * Kaz 工具面全部交给 kaz-shared（lib/tool-lists.js）管理：白名单默认值 /
+ * 极简基底 / 群组注册 / 工具面计算都来自 kaz-shared；kaz-memory 与 kaz-diag
+ * 以群组方式"发信"注册自己的工具并随 enabled 加入/排除。本插件只负责读
+ * settings（用户 toolWhitelist / minimalTools 优先）并在组装层/执行层应用
+ * computeSurface 的结果。记忆工具与 kaz_mode_status 不再硬编码在本文件。
  */
-const DEFAULT_TOOL_WHITELIST = [
-  "pwsh",
-  "read", "write", "edit", "read_image", "glob", "grep",
-  "job_list", "job_output", "job_kill",
-  "create_goal", "get_goal", "update_goal",
-  "subagent", "subagent_fork", "list_agents", "send_message", "interrupt_agent",
-  "workflow", "ralph",
-  "ask_user_question", "todo_write", "web_search",
-  "str_replace_editor",
-  "memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"
-];
-
-/** 被管理的插件（id 与 settings.yaml 命名空间一致）。 */
-const MANAGED_PLUGINS = [
-  { id: "thinking-anchor", label: "thinking-anchor（思考锚点 · 消息注入）" },
-  { id: "round-minimal", label: "round-minimal（首阶段极简 · 首次工具调用后恢复）" },
-  { id: "plugin-filter", label: "plugin-filter（工具过滤）" },
-  { id: "output-beep", label: "output-beep（输出完成提示音）" },
-  { id: "round-display", label: "round-display（每轮注入显示）" },
-  { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 默认参数）" },
-  { id: "kaz-memory", label: "kaz-memory（独立记忆组件）" },
-  { id: "kaz-diag", label: "kaz-diag（诊断 · 状态工具）" },
-  { id: "first-round-hints", label: "first-round-hints（首轮其它消息提示 · 对话开始注入）" },
-];
 
 /** 出厂默认（非 Kaz 模式）：Kaz 插件初始默认全关。 */
 const FACTORY_NON_KAZ_DEFAULTS = {
   "thinking-anchor": { enabled: false, instruction: "", turnReminder: "" },
   "round-minimal": {
     enabled: false,
-    firstRoundTools: ["pwsh", "str_replace_editor"],
+    firstRoundTools: [...DEFAULT_FIRST_ROUND_TOOLS],
     includeSubagents: false,
   },
   "plugin-filter": {
     enabled: false,
     mode: "remove",
-    disabledTools: ["tool-cordis", "tool-subagent-report", "codex", "claude-code"],
+    disabledTools: [...DEFAULT_DISABLED_TOOLS],
   },
   "output-beep": { enabled: false, includeSubagents: false, frequency: 1000, duration: 300 },
   "round-display": { enabled: false },
@@ -741,67 +716,40 @@ export default {
       return !hasToolCall(agent);
     }
 
-    /** kaz-memory 是否启用（读不到按启用处理——未加载时其工具本就不注册）。 */
-    function kazMemoryToolsEnabled() {
-      try {
-        const settings = getSettings();
-        if (settings === undefined) return true;
-        const value = settings.get(settingsNamespace("kaz-memory"));
-        return !(value !== undefined && value !== null && typeof value === "object" && value.enabled === false);
-      } catch {
-        return true;
-      }
-    }
-
-    /** kaz-diag 是否启用（启用时 kaz_mode_status 加入 Kaz 工具面）。 */
-    function kazDiagEnabled() {
-      try {
-        const settings = getSettings();
-        if (settings === undefined) return false;
-        const value = settings.get(settingsNamespace("kaz-diag"));
-        return value !== undefined && value !== null && typeof value === "object" && value.enabled !== false;
-      } catch {
-        return false;
-      }
-    }
-
-    /** 动态调整后的有效白名单：手动白名单 ± kaz-memory / kaz-diag 条件。 */
-    function effectiveWhitelist() {
-      const current = source();
-      const result = new Set(current.toolWhitelist);
-      if (!kazMemoryToolsEnabled()) {
-        for (const tool of KAZ_MEMORY_TOOLS) result.delete(tool);
-      }
-      if (kazDiagEnabled()) result.add("kaz_mode_status");
-      return result;
-    }
-
-    /** 计算某代理此刻的 Kaz 工具面（Set）。首阶段 = minimalTools ∪
-     *  round-minimal 首轮工具集；首次工具调用后 = minimalTools + 有效白名单。 */
+    /**
+     * 计算某代理此刻的 Kaz 工具面（Set）——全部交给 kaz-shared 的
+     * computeSurface：白名单/极简基底来自 settings（用户优先），群组
+     * （kaz-memory / kaz-diag 的工具）由 kaz-shared 注册表按各自 enabled
+     * 动态加入/排除；round-minimal 首阶段信号由本插件读取并传入。
+     */
     function allowedToolSet(agent) {
       const current = source();
-      const allowed = new Set(current.minimalTools);
-      if (isMinimalAgent(agent) === true) {
+      const minimalPhase = isMinimalAgent(agent) === true;
+      let firstRoundTools = [];
+      if (minimalPhase) {
         try {
           const rm = ctx.get("roundMinimal");
           if (rm !== undefined && rm !== null && typeof rm.firstRoundTools === "function") {
-            for (const tool of rm.firstRoundTools()) {
-              if (typeof tool === "string" && tool.length > 0) allowed.add(tool);
-            }
+            const tools = rm.firstRoundTools();
+            if (Array.isArray(tools)) firstRoundTools = tools;
           }
         } catch {
-          // 保持 minimalTools
+          // 保持空数组（computeSurface 回退 minimalTools）
         }
-      } else {
-        for (const tool of effectiveWhitelist()) allowed.add(tool);
       }
-      return allowed;
+      return computeSurface({
+        minimalTools: current.minimalTools,
+        toolWhitelist: current.toolWhitelist,
+        minimalPhase,
+        firstRoundTools,
+      });
     }
 
     // 组装层：过滤工具列表 + 固定系统提示词。
     //   系统提示词 = 固定 persona 一句（+ 计划模式段）；其余提示段一律过滤。
-    //   工具面：首阶段 minimalTools ∪ round-minimal 首轮工具集；首次工具调用后
-    //   minimalTools + 有效白名单。
+    //   工具面（kaz-shared computeSurface）：首阶段（round-minimal 信号）仅保留
+    //   firstRoundTools（为空回退 minimalTools）；首次工具调用后 = minimalTools +
+    //   有效白名单（含已启用群组的工具）。
     ctx.on("system-prompt/assemble", function (assembly, context, next) {
       const current = source();
       if (current.enabled !== true) return next();

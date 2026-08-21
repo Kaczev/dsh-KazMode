@@ -35,13 +35,14 @@ output-beep插件会在模型提问或者输出完之后，让电脑发出“滴
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（11 个插件）
+├── KazPlugins/                     # 插件全家桶（11 个插件 + kaz-shared 依赖包）
 │   ├── deepseek-default-model/
 │   ├── first-round-hints/
 │   ├── kaz-agent-preset-display/
 │   ├── kaz-diag/
 │   ├── kaz-memory/
 │   ├── kaz-mode/
+│   ├── kaz-shared/                  # 依赖包（非插件）：Kaz 工具清单单一事实源
 │   ├── output-beep/
 │   ├── plugin-filter/
 │   ├── round-display/
@@ -131,12 +132,15 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 "kaz-diag": "file:KazPlugins/kaz-diag",
 "kaz-memory": "file:KazPlugins/kaz-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
+"kaz-shared": "file:KazPlugins/kaz-shared",
 "output-beep": "file:KazPlugins/output-beep",
 "plugin-filter": "file:KazPlugins/plugin-filter",
 "round-display": "file:KazPlugins/round-display",
 "round-minimal": "file:KazPlugins/round-minimal",
 "thinking-anchor": "file:KazPlugins/thinking-anchor"
 ```
+
+> **kaz-shared 是必需依赖**（Kaz 模式工具清单单一事实源，见 `KazPlugins/kaz-shared/`）：kaz-mode / kaz-memory / kaz-diag / round-minimal / plugin-filter 都 import 它，漏装会导致这些插件无法加载。它不是 cordis 插件，只是纯模块包。
 
 完整示例：
 
@@ -151,6 +155,7 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
     "kaz-diag": "file:KazPlugins/kaz-diag",
     "kaz-memory": "file:KazPlugins/kaz-memory",
     "kaz-mode": "file:KazPlugins/kaz-mode",
+    "kaz-shared": "file:KazPlugins/kaz-shared",
     "output-beep": "file:KazPlugins/output-beep",
     "plugin-filter": "file:KazPlugins/plugin-filter",
     "round-display": "file:KazPlugins/round-display",

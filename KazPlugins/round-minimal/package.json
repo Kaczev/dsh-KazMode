@@ -13,6 +13,9 @@
     "lib/index.js"
   ],
   "license": "MIT",
+  "dependencies": {
+    "kaz-shared": "file:../kaz-shared"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",

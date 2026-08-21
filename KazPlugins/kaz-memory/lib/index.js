@@ -44,6 +44,7 @@ import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { MemoryEngine } from "./engine.js";
+import { registerGroup, setGroupEnabled, unregisterGroup, DEFAULT_MINIMAL_TOOLS } from "kaz-shared";
 
 export { MemoryEngine, MemoryId } from "./engine.js";
 export { bm25Scores, bm25ScoresAsync, tokenize } from "./bm25.js";
@@ -238,7 +239,7 @@ function toolAvailable(name, grouping, kazSettings) {
   const groupingOk = grouping !== undefined && grouping !== null && typeof grouping.isRegistered === "function";
   if (groupingOk && grouping.isRegistered(name) !== true) return false;
   if (kazSettings !== undefined && kazSettings !== null && typeof kazSettings === "object" && kazSettings.enabled === true) {
-    const minimal = Array.isArray(kazSettings.minimalTools) ? kazSettings.minimalTools : ["pwsh", "str_replace_editor"];
+    const minimal = Array.isArray(kazSettings.minimalTools) ? kazSettings.minimalTools : DEFAULT_MINIMAL_TOOLS;
     const whitelist = Array.isArray(kazSettings.toolWhitelist) ? kazSettings.toolWhitelist : [];
     if (!minimal.includes(name) && !whitelist.includes(name)) {
       const viaGroup =
@@ -1234,7 +1235,13 @@ export async function apply(ctx, config = {}) {
 ];
 
   // ---- 注册 / 注销跟随 enabled 开关（kaz-diag 同款模式）：关闭 = 六工具完全
-  // 注销（任何模式都不再出现，不占工具列表/上下文）；开启 = 全部注册。热重载。----
+  // 注销（任何模式都不再出现，不占工具列表/上下文）；开启 = 全部注册。热重载。
+  // 同时向 kaz-shared"发信"：声明本插件工具组并随 enabled 通知开关——
+  // Kaz 工具面里记忆工具的加入/排除由此决定（声明始终存在，开关跟随设置）。----
+  registerGroup("kaz-memory", {
+    tools: toolDefs.map((def) => def.name),
+    label: "kaz-memory",
+  });
   let toolDisposers = [];
   function installTools() {
     if (toolDisposers.length > 0) return;
@@ -1259,6 +1266,7 @@ export async function apply(ctx, config = {}) {
   function handleChange() {
     const current = source();
     const enabled = current === null || typeof current !== "object" || current.enabled !== false;
+    setGroupEnabled("kaz-memory", enabled);
     if (enabled) installTools();
     else uninstallTools();
   }
@@ -1312,5 +1320,6 @@ export async function apply(ctx, config = {}) {
   handleChange();
   ctx.effect(() => () => {
     uninstallTools();
+    unregisterGroup("kaz-memory");
   });
 }

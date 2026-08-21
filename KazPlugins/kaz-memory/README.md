@@ -72,6 +72,10 @@ kaz-memory:
 
 ## 安装（与其它 KazPlugins 同一套路；okapibm25 已内置，无需联网）
 
+> **依赖 kaz-shared**：kaz-memory 依赖 `KazPlugins/kaz-shared`（Kaz 工具清单单一事实源，纯模块包）。
+> 安装前请确保 `profiles/web/package.json` 里已声明 `"kaz-shared": "file:KazPlugins/kaz-shared"`（见仓库根 README），
+> 且 `profiles/web/node_modules/kaz-shared` junction 存在；漏装会导致本插件无法加载。
+
 ```powershell
 # 1) 复制插件到 web profile（本机实际路径是 KazPlugins）
 Copy-Item ".\kaz-memory" "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-memory" -Recurse -Force
@@ -79,7 +83,7 @@ Copy-Item ".\kaz-memory" "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-memo
 # 2) 在 profile 里注册依赖并建立 node_modules junction（离线，本地 file: 依赖）
 cd "$env:USERPROFILE\.dsh\profiles\web"
 Remove-Item Env:npm_config_allow_scripts   # npm 11 兼容坑
-npm install --legacy-peer-deps --no-audit --no-fund --save ./KazPlugins/kaz-memory
+npm install --legacy-peer-deps --no-audit --no-fund --save ./KazPlugins/kaz-memory ./KazPlugins/kaz-shared
 ```
 
 若 `package.json` 里已声明 `"kaz-memory": "file:KazPlugins/kaz-memory"`，则只需 `npm install --legacy-peer-deps --no-audit --no-fund` 重连 junction；`node_modules/kaz-memory` 会是指向 `KazPlugins/kaz-memory` 的 junction，改源目录即生效。

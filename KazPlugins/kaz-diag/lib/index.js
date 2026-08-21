@@ -20,6 +20,18 @@
 import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import {
+  DEFAULT_TOOL_WHITELIST,
+  DEFAULT_MINIMAL_TOOLS,
+  MANAGED_PLUGINS,
+  FIXED_PERSONA,
+  registerGroup,
+  setGroupEnabled,
+  unregisterGroup,
+  effectiveToolWhitelist,
+  computeSurface,
+  listGroups,
+} from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-diag: 段。 */
 const NAMESPACE = settingsNamespace("kaz-diag");
@@ -27,39 +39,8 @@ const NAMESPACE = settingsNamespace("kaz-diag");
 /** Kaz 模式对应的 agent preset id。 */
 const KAZ_PRESET_ID = "kaz";
 
-/** 被管理插件（与 kaz-mode 的 MANAGED_PLUGINS 一致；报告优先读 kaz-mode.managedPlugins）。 */
-const DEFAULT_MANAGED_PLUGINS = [
-  { id: "thinking-anchor", label: "thinking-anchor（思考锚点 · 消息注入）" },
-  { id: "round-minimal", label: "round-minimal（首阶段极简 · 首次工具调用后恢复）" },
-  { id: "plugin-filter", label: "plugin-filter（工具过滤）" },
-  { id: "output-beep", label: "output-beep（输出完成提示音）" },
-  { id: "round-display", label: "round-display（每轮注入显示）" },
-  { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 默认参数）" },
-  { id: "kaz-memory", label: "kaz-memory（独立记忆组件）" },
-  { id: "kaz-diag", label: "kaz-diag（本插件 · 诊断）" },
-  { id: "first-round-hints", label: "first-round-hints（首轮其它消息提示）" },
-];
-
-/** Kaz 全部工具白名单默认值（标准模式全部工具除 bash 与 skill + pwsh +
- *  str_replace_editor + kaz-memory 四工具；kaz_mode_status 由本插件动态加入，
- *  不在白名单内）。 */
-const DEFAULT_TOOL_WHITELIST = [
-  "pwsh",
-  "read", "write", "edit", "read_image", "glob", "grep",
-  "job_list", "job_output", "job_kill",
-  "create_goal", "get_goal", "update_goal",
-  "subagent", "subagent_fork", "list_agents", "send_message", "interrupt_agent",
-  "workflow", "ralph",
-  "ask_user_question", "todo_write", "web_search",
-  "str_replace_editor",
-  "memory_save", "memory_list", "memory_search", "memory_forget",
-];
-
-/** kaz-memory 的四工具（kaz-memory 关闭时从 Kaz 工具面自动移除）。 */
-const KAZ_MEMORY_TOOLS = ["memory_save", "memory_list", "memory_search", "memory_forget"];
-
 /** 固定系统提示词（kaz-mode 强制，Kaz 模式下系统提示词只有这一句 + 计划模式段）。 */
-const FIXED_PERSONA = "You are a helpful software engineer assistant.";
+// （FIXED_PERSONA 来自 kaz-shared 单一事实源，不再本地维护副本）
 
 const SETTINGS_SCHEMA = z.object({
   /** 总开关：关闭时 kaz_mode_status 不注册、不进入 Kaz 工具面。 */
@@ -197,10 +178,10 @@ export default {
       }
     }
 
-    /** 当前被管理插件清单（优先 kaz-mode.managedPlugins，缺省用内置）。 */
+    /** 当前被管理插件清单（优先 kaz-mode.managedPlugins，缺省用 kaz-shared 目录）。 */
     function managedList() {
       const kazSettings = readNamespace(settingsNamespace("kaz-mode"));
-      const byId = new Map(DEFAULT_MANAGED_PLUGINS.map((p) => [p.id, p.label]));
+      const byId = new Map(MANAGED_PLUGINS.map((p) => [p.id, p.label]));
       const ids =
         kazSettings !== undefined &&
         kazSettings !== null &&
@@ -208,33 +189,21 @@ export default {
         Array.isArray(kazSettings.managedPlugins) &&
         kazSettings.managedPlugins.length > 0
           ? kazSettings.managedPlugins.filter((id) => typeof id === "string" && id.trim().length > 0)
-          : DEFAULT_MANAGED_PLUGINS.map((p) => p.id);
+          : MANAGED_PLUGINS.map((p) => p.id);
       return ids.map((id) => ({ id, label: byId.get(id) ?? id }));
     }
 
-    /** kaz-memory 是否启用（读不到按启用处理——未注册时工具本来就不存在）。 */
-    function kazMemoryEnabled() {
-      const value = readNamespace(settingsNamespace("kaz-memory"));
-      return !(value !== undefined && value !== null && typeof value === "object" && value.enabled === false);
-    }
-
-    /** kaz-diag（本插件）是否启用。 */
-    function kazDiagEnabled() {
-      return source().enabled === true;
-    }
-
-    /** 动态调整后的有效白名单：手动白名单 ± kaz-memory / kaz-diag 条件。 */
-    function effectiveWhitelist() {
+    /** 读取 kaz-mode 的 toolWhitelist（缺省用 kaz-shared 的默认值）。 */
+    function kazToolWhitelist() {
       const kazSettings = readNamespace(settingsNamespace("kaz-mode"));
-      const base = Array.isArray(kazSettings?.toolWhitelist)
+      return Array.isArray(kazSettings?.toolWhitelist)
         ? kazSettings.toolWhitelist.filter((t) => typeof t === "string" && t.length > 0)
         : DEFAULT_TOOL_WHITELIST;
-      const result = new Set(base);
-      if (!kazMemoryEnabled()) {
-        for (const tool of KAZ_MEMORY_TOOLS) result.delete(tool);
-      }
-      if (kazDiagEnabled()) result.add("kaz_mode_status");
-      return result;
+    }
+
+    /** 有效白名单 = kaz-shared 计算（settings.toolWhitelist ∪ 已启用群组 − 已停用群组）。 */
+    function effectiveWhitelist() {
+      return new Set(effectiveToolWhitelist(kazToolWhitelist()));
     }
 
     /** 该代理是否处于首阶段极简（首次工具调用前；子代理除外）。 */
@@ -281,7 +250,7 @@ export default {
       lines.push("==================================================");
       lines.push(
         `配置: enabled=${kazEnabled}` +
-          `, minimalTools=[${Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools.join(", ") : "pwsh, str_replace_editor"}]`,
+          `, minimalTools=[${Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools.join(", ") : DEFAULT_MINIMAL_TOOLS.join(", ")}]`,
       );
       lines.push("");
 
@@ -334,18 +303,25 @@ export default {
       }
       lines.push("");
 
-      lines.push("[Kaz 工具面]（minimalTools 极简基底 + toolWhitelist 白名单）");
+      lines.push("[Kaz 工具面]（minimalTools 极简基底 + toolWhitelist 白名单，均由 kaz-shared 管理）");
       lines.push(
-        `  极简基底 minimalTools: [${Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools.join(", ") : "pwsh, str_replace_editor"}]`,
+        `  极简基底 minimalTools: [${Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools.join(", ") : DEFAULT_MINIMAL_TOOLS.join(", ")}]`,
       );
-      const whitelist = Array.isArray(kazSettings?.toolWhitelist) ? kazSettings.toolWhitelist : DEFAULT_TOOL_WHITELIST;
+      const whitelist = kazToolWhitelist();
       lines.push(`  手动白名单 toolWhitelist（Kaz 全部工具的手动编辑点，settings.yaml 的 kaz-mode.toolWhitelist）: [${whitelist.join(", ")}]`);
+      const groups = listGroups();
+      lines.push(
+        `  工具群组（kaz-shared 注册表，随各自 enabled 加入/排除）: ${
+          groups.length > 0
+            ? groups.map((g) => `${g.id}=${g.enabled ? "开" : "关"}（${g.tools.join("/") || "无工具"}）`).join("；")
+            : "（无）"
+        }`,
+      );
       const effective = effectiveWhitelist();
-      lines.push(`  动态调整: ${kazMemoryEnabled() ? "" : "kaz-memory 关闭 → 已移除 " + KAZ_MEMORY_TOOLS.join("/") + "；"}${kazDiagEnabled() ? "kaz-diag 开启 → 已加入 kaz_mode_status" : "kaz-diag 关闭 → 无 kaz_mode_status"}`);
       lines.push(`  有效白名单（${effective.size} 个）: ${[...effective].sort().join(", ") || "（无）"}`);
 
-      const minimalTools = Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools : ["pwsh", "str_replace_editor"];
-      let firstRoundTools = minimalTools;
+      const minimalTools = Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools : DEFAULT_MINIMAL_TOOLS;
+      let firstRoundTools = [];
       try {
         const rm = ctx.get("roundMinimal");
         if (rm !== undefined && rm !== null && typeof rm.firstRoundTools === "function") {
@@ -353,9 +329,9 @@ export default {
           if (tools.length > 0) firstRoundTools = tools;
         }
       } catch {
-        // 保持 minimalTools
+        // 保持空数组（computeSurface 回退 minimalTools）
       }
-      const surface = new Set(isMinimalAgent(agent) ? [...minimalTools, ...firstRoundTools] : [...minimalTools, ...effective]);
+      const surface = computeSurface({ minimalTools, toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools });
       const schemas = [];
       try {
         const toolsSvc = ctx.get("tools");
@@ -390,7 +366,13 @@ export default {
       return lines.join("\n");
     }
 
-    /** 注册 / 注销状态工具（跟随 enabled 开关热重载）。 */
+    /** 注册 / 注销状态工具（跟随 enabled 开关热重载）。
+     *  同时向 kaz-shared"发信"：声明 kaz_mode_status 工具组并随 enabled 通知
+     *  开关——Kaz 工具面里本工具的加入/排除由此决定。 */
+    registerGroup("kaz-diag", {
+      tools: ["kaz_mode_status"],
+      label: "kaz-diag",
+    });
     let toolDisposer = null;
     function installTool() {
       if (toolDisposer !== null) return;
@@ -400,7 +382,7 @@ export default {
           defineTool({
             name: "kaz_mode_status",
             description:
-              "只读报告 Kaz 模式当前状态：Kaz 模式开关、固定系统提示词、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（minimalTools 极简基底 + toolWhitelist 白名单，含 kaz-memory / kaz-diag 动态调整）、round-minimal 首阶段信号。无需任何参数。",
+              "只读报告 Kaz 模式当前状态：Kaz 模式开关、固定系统提示词、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（minimalTools 极简基底 + toolWhitelist 白名单 + kaz-shared 工具群组动态调整）、round-minimal 首阶段信号。无需任何参数。",
             parameters: {},
             output: {
               schema: { type: "string" },
@@ -426,7 +408,9 @@ export default {
       toolDisposer = null;
     }
     function handleChange() {
-      if (source().enabled === true) installTool();
+      const enabled = source().enabled === true;
+      setGroupEnabled("kaz-diag", enabled);
+      if (enabled) installTool();
       else uninstallTool();
       ctx.logger.info(`[kaz-diag] 配置已生效：enabled=${source().enabled}`);
     }
@@ -434,6 +418,7 @@ export default {
 
     ctx.effect(() => () => {
       uninstallTool();
+      unregisterGroup("kaz-diag");
     });
   },
 };

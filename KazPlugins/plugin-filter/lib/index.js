@@ -42,9 +42,7 @@
 import z from "@deepseek-ai/schemastery";
 import { symbols } from "@deepseek-ai/cordis";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
-
-/** 默认禁用的工具/插件名。 */
-const DEFAULT_DISABLED_TOOLS = ["tool-cordis", "tool-subagent-report", "codex", "claude-code"];
+import { DEFAULT_DISABLED_TOOLS } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 plugin-filter: 段。 */
 const NAMESPACE = settingsNamespace("plugin-filter");
