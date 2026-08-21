@@ -1197,6 +1197,23 @@ export default {
           return { ok: true, value: { session: data.sessions[sessionId] ?? null } };
         }
 
+        if (endpoint === "forgetSession") {
+          // 对话归档/删除时清理 kaz-session-states.json 里该会话的条目（2026-08-21）。
+          // 与 clearSession 不同：只删状态文件条目，不应用插件状态、不改 activeSession。
+          // cwd 由客户端随会话 summary 上报；缺失时经 agents 服务推断（归档会话通常
+          // 仍存活可解析），实在找不到回退 process.cwd()。
+          const cwd = typeof input.cwd === "string" && input.cwd.trim().length > 0
+            ? input.cwd.trim()
+            : resolveSessionCwd(sessionId);
+          const data = loadStateFile(cwd, ctx.logger);
+          if (data.sessions[sessionId] !== undefined && data.sessions[sessionId] !== null) {
+            delete data.sessions[sessionId];
+            saveSessions(cwd, data.sessions, ctx.logger);
+            ctx.logger.info(`[kaz-mode] 已清理归档/删除会话 ${sessionId} 的 kaz-session-states 条目`);
+          }
+          return { ok: true, value: { purged: true, sessionId } };
+        }
+
         return rpcFail("unknown endpoint '" + String(endpoint) + "'");
       } catch (error) {
         ctx.logger.warn(

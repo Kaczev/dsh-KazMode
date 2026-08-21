@@ -279,6 +279,8 @@ window.__ModuleLoader__.load({
 
 			/** 会话列表 binding（由下方 conversation/sessions inject 填充）。 */
 			let sessionListBinding = null;
+			/** 已清理过 kaz-session-states 的归档会话 id（避免重复 RPC；2026-08-21）。 */
+			const cleanedArchivedIds = new Set();
 
 			// ---- hooks ----
 			const scopeBindings = new WeakMap();
@@ -1554,6 +1556,35 @@ window.__ModuleLoader__.load({
 					subscribe: (listener) => scope.sessions.list.subscribe(listener),
 					getSnapshot: () => scope.sessions.list.getSnapshot(),
 				};
+				// workspaces 服务（可选）：其 list 快照带 archivedSessionIds，用于在
+				// 对话归档时清理 kaz-session-states.json（2026-08-21）。拿不到就跳过。
+				let workspaces = null;
+				try {
+					workspaces = ctx.get("workspaces");
+				} catch {
+					workspaces = null;
+				}
+				/** 归档会话清理：新增的归档 id → RPC forgetSession 删除 kaz-session-states 条目。
+				 *  成功后才记账（RPC 失败可随下次 workspaces 变化重试）。 */
+				const cleanupArchived = () => {
+					try {
+						if (workspaces === null || workspaces === undefined || workspaces.list === undefined || workspaces.list === null) return;
+						const ws = workspaces.list.getSnapshot();
+						const archived = ws !== null && ws !== undefined && Array.isArray(ws.archivedSessionIds) ? ws.archivedSessionIds : [];
+						const sessionsState = scope.sessions.list.getSnapshot();
+						const byId = sessionsState !== null && sessionsState !== undefined && sessionsState.byId !== null && typeof sessionsState.byId === "object" ? sessionsState.byId : {};
+						for (const id of archived) {
+							if (cleanedArchivedIds.has(id)) continue;
+							const summary = byId[id];
+							const cwd = summary !== undefined && summary !== null && typeof summary.cwd === "string" ? summary.cwd : "";
+							void rpcCall("forgetSession", { sessionId: id, cwd }).then((res) => {
+								if (res !== null) cleanedArchivedIds.add(id);
+							});
+						}
+					} catch {
+						// 忽略：归档清理失败不影响主流程
+					}
+				};
 				let lastAppliedSessionId = null;
 				const sync = () => {
 					const state = scope.sessions.list.getSnapshot();
@@ -1596,8 +1627,16 @@ window.__ModuleLoader__.load({
 				};
 				scope.effect(() => {
 					sync();
-					const stop = scope.sessions.list.subscribe(() => sync());
-					return stop;
+					cleanupArchived(); // 启动时补清此前已归档的会话
+					const stopSessions = scope.sessions.list.subscribe(() => sync());
+					let stopWorkspaces = () => {};
+					if (workspaces !== null && workspaces !== undefined && workspaces.list !== undefined && workspaces.list !== null && typeof workspaces.list.subscribe === "function") {
+						stopWorkspaces = workspaces.list.subscribe(() => cleanupArchived());
+					}
+					return () => {
+						stopSessions();
+						stopWorkspaces();
+					};
 				});
 			});
 
