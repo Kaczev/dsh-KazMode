@@ -44,7 +44,7 @@ import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { MemoryEngine } from "./engine.js";
-import { registerGroup, setGroupEnabled, unregisterGroup, DEFAULT_MINIMAL_TOOLS } from "kaz-shared";
+import { registerGroup, setGroupEnabled, unregisterGroup, effectiveToolWhitelist, DEFAULT_TOOL_WHITELIST } from "kaz-shared";
 
 export { MemoryEngine, MemoryId } from "./engine.js";
 export { bm25Scores, bm25ScoresAsync, tokenize } from "./bm25.js";
@@ -232,16 +232,18 @@ const GUIDANCE_FORGET = [
 
 /** 判断某个记忆工具当前是否可用：
  *  1) 注册检查：plugin-filter / 组合移除会让工具不在注册表（工具面过滤后也不可见）；
- *  2) Kaz 工具面检查：kaz-mode.enabled=true 时，工具必须在 minimalTools +
- *     toolWhitelist 里才可见（组装层会过滤掉白名单外工具）。
+ *  2) Kaz 工具面检查：kaz-mode.enabled=true 时，工具必须在 kaz-shared 的
+ *     有效白名单（settings.toolWhitelist ∪ 已启用群组 − 已停用群组）里才可见
+ *     （组装层会过滤掉白名单外工具；本插件启用时自己的六工具经群组已在其中）。
  *  读不到的服务 / 设置一律按"不受限制"处理。 */
 function toolAvailable(name, grouping, kazSettings) {
   const groupingOk = grouping !== undefined && grouping !== null && typeof grouping.isRegistered === "function";
   if (groupingOk && grouping.isRegistered(name) !== true) return false;
   if (kazSettings !== undefined && kazSettings !== null && typeof kazSettings === "object" && kazSettings.enabled === true) {
-    const minimal = Array.isArray(kazSettings.minimalTools) ? kazSettings.minimalTools : DEFAULT_MINIMAL_TOOLS;
-    const whitelist = Array.isArray(kazSettings.toolWhitelist) ? kazSettings.toolWhitelist : [];
-    if (!minimal.includes(name) && !whitelist.includes(name)) {
+    const whitelist = effectiveToolWhitelist(
+      Array.isArray(kazSettings.toolWhitelist) ? kazSettings.toolWhitelist : DEFAULT_TOOL_WHITELIST,
+    );
+    if (!whitelist.includes(name)) {
       const viaGroup =
         whitelist.includes("kaz-memory") &&
         groupingOk &&

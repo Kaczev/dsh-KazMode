@@ -120,16 +120,34 @@ function safeMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** 播放一次 Windows 提示音（[console]::beep(freq, duration)）。 */
+/**
+ * 播放一次 Windows 提示音。
+ * 优先用 System.Media.SoundPlayer 播放内存合成的正弦波 WAV（44.1kHz 16bit
+ * mono，支持 frequency/duration）——不依赖可见控制台，隐藏窗口/后台进程下
+ * 也可靠（Win10/11 上 [console]::beep 在隐藏控制台里会静默失效）；
+ * SoundPlayer 失败时回退 [console]::beep（老式路径）。
+ */
 function playBeep(frequency, duration, logger) {
   const freq = Math.min(MAX_FREQUENCY, Math.max(MIN_FREQUENCY, Math.round(Number(frequency) || DEFAULT_FREQUENCY)));
   const dur = Math.max(1, Math.round(Number(duration) || DEFAULT_DURATION));
+  const command =
+    `$f=${freq};$d=${dur};$sr=44100;$n=[int]($sr*$d/1000);` +
+    `$ms=New-Object System.IO.MemoryStream;$w=New-Object System.IO.BinaryWriter($ms);` +
+    `$w.Write([int]0x46464952);$w.Write([int](36+$n*2));$w.Write([int]0x57415645);` +
+    `$w.Write([int]0x666d7420);$w.Write([int]16);$w.Write([int16]1);$w.Write([int16]1);` +
+    `$w.Write([int]$sr);$w.Write([int]($sr*2));$w.Write([int16]2);$w.Write([int16]16);` +
+    `$w.Write([int]0x64617461);$w.Write([int]($n*2));` +
+    `$amp=[int](32767*0.4);for($i=0;$i -lt $n;$i++){ $v=[int]($amp*[math]::Sin(2*[math]::PI*$f*$i/$sr)); $w.Write([int16]$v) };` +
+    `$w.Flush();$w.BaseStream.Position=0;` +
+    `try{ $p=[System.Media.SoundPlayer]::new($w.BaseStream); $p.PlaySync() }catch{ [console]::beep($f,$d) };` +
+    `$w.Close()`;
   execFile(
     "powershell.exe",
-    ["-NoProfile", "-NonInteractive", "-Command", `[console]::beep(${freq},${dur})`],
-    { windowsHide: true, timeout: 5000 },
+    ["-NoProfile", "-NonInteractive", "-Command", command],
+    { windowsHide: true, timeout: 8000 },
     (error) => {
       if (error) logger?.warn?.(`[output-beep] 播放提示音失败: ${safeMessage(error)}`);
+      else logger?.info?.(`[output-beep] 已播放提示音 (freq=${freq}Hz, dur=${dur}ms)`);
     },
   );
 }

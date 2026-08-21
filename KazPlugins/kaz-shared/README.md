@@ -14,16 +14,16 @@ Kaz 模式的工具管理**全部集中在这里**，其它组件不再各自维
 | `unregisterGroup(id)` | kaz-memory / kaz-diag（卸载时） | 注销工具组 |
 | `computeSurface(inputs)` | kaz-mode 组装层 / kaz-diag 报告 | 计算某代理此刻的 Kaz 工具面 |
 | `effectiveToolWhitelist(toolWhitelist)` | kaz-diag 报告等 | 有效白名单（白名单 ∪ 启用群组 − 停用群组） |
-| 常量 | 各插件 | `DEFAULT_TOOL_WHITELIST` / `DEFAULT_MINIMAL_TOOLS` / `DEFAULT_FIRST_ROUND_TOOLS` / `DEFAULT_DISABLED_TOOLS` / `MANAGED_PLUGINS` / `FIXED_PERSONA` |
+| 常量 | 各插件 | `DEFAULT_TOOL_WHITELIST` / `DEFAULT_FIRST_ROUND_TOOLS` / `DEFAULT_DISABLED_TOOLS` / `MANAGED_PLUGINS` / `FIXED_PERSONA` |
 
 ## 工具面语义（2026-08-21 统一）
 
 - **Kaz 模式**（kaz-mode.enabled=true）：
-  - 全量阶段 = `minimalTools` ∪ `effectiveToolWhitelist`；
-  - 首阶段（round-minimal 信号 `minimalPhase=true`）**仅保留 firstRoundTools**（为空回退 minimalTools）——"首次工具调用仅保留 round-minimal 的工具"。
+  - 首阶段（round-minimal 信号 `minimalPhase=true`）**只保留 firstRoundTools**（为空回退 `DEFAULT_FIRST_ROUND_TOOLS`）——"首轮工具一定是 DEFAULT_FIRST_ROUND_TOOLS"，**无交集演算、无 minimalTools 概念**；首阶段极简完全由 round-minimal 定义（round-minimal 缺失/禁用 → 无首阶段，直接全量）。
+  - 全量阶段 = `effectiveToolWhitelist`（settings.toolWhitelist ∪ 已启用群组 − 已停用群组）。
 - **群组规则**：已启用群组的工具总是加入工具面（即使不在白名单里）；已停用群组的工具总是排除（即使写进了白名单）。kaz-memory 六工具与 kaz_mode_status 的加入/排除完全由各自 enabled 决定，无需任何插件硬编码工具名。
 - **非 Kaz 模式**：本模块不干预工具面（由标准模式决定）；kaz-memory / kaz-diag 关闭时已自行注销工具。
-- **用户配置优先**：settings.yaml 的 `toolWhitelist` / `minimalTools` / `firstRoundTools` / `disabledTools` 始终是实际生效值；本模块只提供默认值与计算，不读写设置。
+- **用户配置优先**：settings.yaml 的 `toolWhitelist` / `firstRoundTools` / `disabledTools` 始终是实际生效值；本模块只提供默认值与计算，不读写设置。旧版 `minimalTools` 设置已废弃（不再参与计算）。
 
 ## 安装
 

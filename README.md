@@ -324,9 +324,6 @@ kaz-mode:
       memory_search,
       memory_forget
     ]
-  minimalTools:
-    - pwsh
-    - str_replace_editor
   defaultDisabledPlugins: []
   previousPreset: router-standard
   # savedPluginStates 由 kaz-mode 自动维护，新装可省略

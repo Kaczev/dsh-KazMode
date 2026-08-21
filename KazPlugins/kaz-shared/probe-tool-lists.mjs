@@ -1,7 +1,6 @@
 // kaz-shared 探针：验证 tool-lists.js 的工具清单单一事实源。
 // 运行：node kaz-shared/probe-tool-lists.mjs
 import {
-  DEFAULT_MINIMAL_TOOLS,
   DEFAULT_TOOL_WHITELIST,
   DEFAULT_FIRST_ROUND_TOOLS,
   DEFAULT_DISABLED_TOOLS,
@@ -24,12 +23,12 @@ function check(label, ok) {
   if (!ok) failures += 1;
 }
 
-// ① 常量齐全（单一事实源：各处副本都已删除）
-check("① DEFAULT_MINIMAL_TOOLS 存在", Array.isArray(DEFAULT_MINIMAL_TOOLS) && DEFAULT_MINIMAL_TOOLS.length === 2);
-check("① DEFAULT_FIRST_ROUND_TOOLS 存在", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS));
+// ① 常量齐全（单一事实源：各处副本都已删除；无 DEFAULT_MINIMAL_TOOLS）
+check("① DEFAULT_FIRST_ROUND_TOOLS 存在", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 2);
 check("① DEFAULT_DISABLED_TOOLS 存在", Array.isArray(DEFAULT_DISABLED_TOOLS) && DEFAULT_DISABLED_TOOLS.includes("tool-cordis"));
 check("① DEFAULT_TOOL_WHITELIST 存在（不含记忆工具——它们由群组管理）", Array.isArray(DEFAULT_TOOL_WHITELIST) && DEFAULT_TOOL_WHITELIST.includes("pwsh") && !DEFAULT_TOOL_WHITELIST.some((t) => t.startsWith("memory_")) && !DEFAULT_TOOL_WHITELIST.includes("kaz_mode_status"));
 check("① MANAGED_PLUGINS / FIXED_PERSONA 存在", Array.isArray(MANAGED_PLUGINS) && typeof FIXED_PERSONA === "string");
+check("① 已移除 DEFAULT_MINIMAL_TOOLS", !("DEFAULT_MINIMAL_TOOLS" in (await import("./lib/tool-lists.js"))));
 
 // ② 群组注册 API（"发信"）
 check("② 初始无群组", listGroups().length === 0 && hasGroup("p-memory") === false);
@@ -63,33 +62,31 @@ check("③ 停用后群组工具全部排除（白名单也救不回来）", !ef
 unregisterGroup("p-memory");
 unregisterGroup("p-diag");
 
-// ④ computeSurface：首阶段仅 firstRoundTools；全量 = minimal ∪ 有效白名单
+// ④ computeSurface：首阶段仅 firstRoundTools（无 minimalTools、无交集）；
+//    全量 = effectiveToolWhitelist
 registerGroup("p-memory", { tools: ["memory_save", "memory_search"] });
 setGroupEnabled("p-memory", true);
 const full = computeSurface({
-  minimalTools: ["pwsh", "edit"],
   toolWhitelist: [...DEFAULT_TOOL_WHITELIST, "memory_save"],
   minimalPhase: false,
   firstRoundTools: ["pwsh", "str_replace_editor"],
 });
-check("④ 全量阶段 = minimal + 有效白名单（含启用群组）", full.has("pwsh") && full.has("edit") && full.has("read") && full.has("memory_search") && full.has("memory_save"));
+check("④ 全量阶段 = 有效白名单（含启用群组）", full.has("pwsh") && full.has("edit") && full.has("read") && full.has("memory_search") && full.has("memory_save"));
 const first = computeSurface({
-  minimalTools: ["pwsh", "edit"],
   toolWhitelist: DEFAULT_TOOL_WHITELIST,
   minimalPhase: true,
   firstRoundTools: ["pwsh", "str_replace_editor"],
 });
-check("④ 首阶段仅保留 firstRoundTools（不含 minimal 里的 edit）", first.size === 2 && first.has("pwsh") && first.has("str_replace_editor") && !first.has("edit") && !first.has("read"));
+check("④ 首阶段仅保留 firstRoundTools（无交集、无 minimal 掺入）", first.size === 2 && first.has("pwsh") && first.has("str_replace_editor") && !first.has("read"));
 const firstFallback = computeSurface({
-  minimalTools: ["pwsh", "edit"],
   toolWhitelist: DEFAULT_TOOL_WHITELIST,
   minimalPhase: true,
   firstRoundTools: [],
 });
-check("④ 首阶段 firstRoundTools 为空时回退 minimalTools", firstFallback.has("pwsh") && firstFallback.has("edit"));
+check("④ 首阶段 firstRoundTools 为空时回退 DEFAULT_FIRST_ROUND_TOOLS", firstFallback.has("pwsh") && firstFallback.has("str_replace_editor") && firstFallback.size === DEFAULT_FIRST_ROUND_TOOLS.length);
 unregisterGroup("p-memory");
 const noMinimal = computeSurface({ minimalPhase: false, toolWhitelist: ["read"] });
-check("④ 缺省 minimal 时全量 = 有效白名单", noMinimal.has("read") && noMinimal.size === 1);
+check("④ 全量阶段 = 有效白名单（无多余工具）", noMinimal.has("read") && noMinimal.size === 1);
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

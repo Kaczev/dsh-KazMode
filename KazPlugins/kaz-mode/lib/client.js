@@ -148,7 +148,6 @@ window.__ModuleLoader__.load({
 
 		/** kaz-mode 自身的面板配置字段（不提供 enabled 开关——它由预设驱动）。 */
 		const KAZ_FIELDS = [
-			{ key: "minimalTools", kind: "list", label: "minimalTools（工具面·极简基底：首次工具调用前保留的最小工具，逗号分隔）" },
 			{ key: "toolWhitelist", kind: "list", label: "toolWhitelist（Kaz 全部工具白名单：手动增删工具就在这里改，逗号分隔；kaz-memory 关闭时其工具自动移出，kaz-diag 开启时自动加入 kaz_mode_status）" },
 		];
 
@@ -1192,7 +1191,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"Kaz 模式 = 固定系统提示词（You are a helpful software engineer assistant.）+ 工具面两阶段：首次工具调用前 minimalTools ∪ round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（minimalTools + toolWhitelist 白名单，子代理会话同样适用）；" +
+						"Kaz 模式 = 固定系统提示词（You are a helpful software engineer assistant.）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（toolWhitelist 白名单 + 已启用群组，子代理会话同样适用）；" +
 							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory + kaz-diag；" +
 							"kaz-memory 关闭时其工具自动移出白名单，kaz-diag 开启时 kaz_mode_status 自动加入。",
 					),

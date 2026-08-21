@@ -5,7 +5,7 @@
 //   2) 被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep /
 //      round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停与
 //      开启 Kaz 前的原始状态快照；
-//   3) Kaz 工具面：minimalTools 极简基底 + toolWhitelist 白名单（= Kaz 模式
+//   3) Kaz 工具面：toolWhitelist 白名单 + kaz-shared 工具群组（= Kaz 模式
 //      全部工具的手动编辑点），并给出动态调整后的实际工具面：
 //        - kaz-memory 关闭 → 其四个记忆工具自动移出；
 //        - 本插件（kaz-diag）开启 → kaz_mode_status 自动加入；
@@ -22,7 +22,6 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import {
   DEFAULT_TOOL_WHITELIST,
-  DEFAULT_MINIMAL_TOOLS,
   MANAGED_PLUGINS,
   FIXED_PERSONA,
   registerGroup,
@@ -206,7 +205,8 @@ export default {
       return new Set(effectiveToolWhitelist(kazToolWhitelist()));
     }
 
-    /** 该代理是否处于首阶段极简（首次工具调用前；子代理除外）。 */
+    /** 该代理是否处于首阶段极简：完全由 round-minimal 服务判定；
+     *  服务缺失或禁用 → 无首阶段（不自行兜底）。 */
     function isMinimalAgent(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
       try {
@@ -229,15 +229,6 @@ export default {
       } catch {
         // fall through
       }
-      // round-minimal 服务缺失时的兜底判定：会话里还没有任何 tool/call 事件。
-      try {
-        const events = agent?.session?.events;
-        if (Array.isArray(events)) {
-          return !events.some((event) => event !== null && typeof event === "object" && event.type === "tool/call");
-        }
-      } catch {
-        // fall through
-      }
       return false;
     }
 
@@ -249,8 +240,7 @@ export default {
       lines.push("kaz-mode 状态报告（kaz-diag）");
       lines.push("==================================================");
       lines.push(
-        `配置: enabled=${kazEnabled}` +
-          `, minimalTools=[${Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools.join(", ") : DEFAULT_MINIMAL_TOOLS.join(", ")}]`,
+        `配置: enabled=${kazEnabled}`,
       );
       lines.push("");
 
@@ -303,10 +293,7 @@ export default {
       }
       lines.push("");
 
-      lines.push("[Kaz 工具面]（minimalTools 极简基底 + toolWhitelist 白名单，均由 kaz-shared 管理）");
-      lines.push(
-        `  极简基底 minimalTools: [${Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools.join(", ") : DEFAULT_MINIMAL_TOOLS.join(", ")}]`,
-      );
+      lines.push("[Kaz 工具面]（toolWhitelist 白名单 + 群组，均由 kaz-shared 管理）");
       const whitelist = kazToolWhitelist();
       lines.push(`  手动白名单 toolWhitelist（Kaz 全部工具的手动编辑点，settings.yaml 的 kaz-mode.toolWhitelist）: [${whitelist.join(", ")}]`);
       const groups = listGroups();
@@ -320,7 +307,6 @@ export default {
       const effective = effectiveWhitelist();
       lines.push(`  有效白名单（${effective.size} 个）: ${[...effective].sort().join(", ") || "（无）"}`);
 
-      const minimalTools = Array.isArray(kazSettings?.minimalTools) ? kazSettings.minimalTools : DEFAULT_MINIMAL_TOOLS;
       let firstRoundTools = [];
       try {
         const rm = ctx.get("roundMinimal");
@@ -329,9 +315,9 @@ export default {
           if (tools.length > 0) firstRoundTools = tools;
         }
       } catch {
-        // 保持空数组（computeSurface 回退 minimalTools）
+        // 保持空数组（computeSurface 回退 DEFAULT_FIRST_ROUND_TOOLS）
       }
-      const surface = computeSurface({ minimalTools, toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools });
+      const surface = computeSurface({ toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools });
       const schemas = [];
       try {
         const toolsSvc = ctx.get("tools");
@@ -357,7 +343,7 @@ export default {
       lines.push("[round-minimal 信号]（首次工具调用前 = 首阶段极简）");
       if (agent !== undefined) {
         lines.push(
-          `  当前代理首阶段极简: ${isMinimalAgent(agent) ? "是（工具面 = minimalTools ∪ round-minimal 首轮工具集；首次工具调用后恢复全部工具）" : "否（已恢复 Kaz 全部工具）"}`,
+          `  当前代理首阶段极简: ${isMinimalAgent(agent) ? "是（工具面 = round-minimal 首轮工具集；首次工具调用后恢复全部工具）" : "否（已恢复 Kaz 全部工具）"}`,
         );
       } else {
         lines.push("  （未绑定代理，无法判定当前阶段）");
@@ -382,7 +368,7 @@ export default {
           defineTool({
             name: "kaz_mode_status",
             description:
-              "只读报告 Kaz 模式当前状态：Kaz 模式开关、固定系统提示词、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（minimalTools 极简基底 + toolWhitelist 白名单 + kaz-shared 工具群组动态调整）、round-minimal 首阶段信号。无需任何参数。",
+              "只读报告 Kaz 模式当前状态：Kaz 模式开关、固定系统提示词、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（toolWhitelist 白名单 + kaz-shared 工具群组动态调整）、round-minimal 首阶段信号。无需任何参数。",
             parameters: {},
             output: {
               schema: { type: "string" },

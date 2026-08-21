@@ -10,24 +10,24 @@
 //
 // 工具面语义（2026-08-21 统一）：
 //   - Kaz 模式（kaz-mode.enabled=true）下：
-//       全量阶段 = minimalTools ∪ effectiveToolWhitelist；
 //       首阶段（round-minimal 信号 minimalPhase=true）只保留 firstRoundTools
-//       （为空时回退 minimalTools）——"仅保留 round-minimal 的工具"。
+//       （为空回退 DEFAULT_FIRST_ROUND_TOOLS）——"首轮工具一定是
+//       DEFAULT_FIRST_ROUND_TOOLS"，无交集演算；
+//       全量阶段 = effectiveToolWhitelist（settings.toolWhitelist ∪ 已启用群组
+//       − 已停用群组）。不再有 minimalTools 概念：首阶段极简完全由
+//       round-minimal 定义，全量阶段由白名单定义。
 //   - effectiveToolWhitelist = (settings.toolWhitelist ∪ 已启用群组的工具)
 //       − 已停用群组的工具：已启用群组的工具总是加入（即使不在白名单里）；
 //       已停用群组的工具总是排除（即使写进了白名单）。kaz-memory / kaz-diag
 //       的工具是否出现在工具面完全由各自的 enabled 决定。
 //   - 非 Kaz 模式：本模块不干预（工具面由标准模式决定；kaz-memory 等插件
 //     关闭时已自行注销工具，开启时自行注册）。
-//   - 用户 settings.yaml 的 toolWhitelist / minimalTools / firstRoundTools /
-//     disabledTools 始终优先：本模块只提供默认值与计算，不读写设置。
+//   - 用户 settings.yaml 的 toolWhitelist / firstRoundTools / disabledTools
+//     始终优先：本模块只提供默认值与计算，不读写设置。
 //
 // 本模块零依赖、无副作用导入（注册表是显式 API 驱动的模块级状态，
 // ESM 模块缓存保证所有导入方共享同一份注册表）。
 // ===========================================================================
-
-/** 极简基底（首阶段与全量阶段工具面的默认交集）。 */
-export const DEFAULT_MINIMAL_TOOLS = ["pwsh", "str_replace_editor"];
 
 /** round-minimal 首阶段工具白名单默认值（首次工具调用前仅保留这些）。 */
 export const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "str_replace_editor"];
@@ -160,19 +160,17 @@ export function effectiveToolWhitelist(toolWhitelist = []) {
 /**
  * 计算某代理此刻的 Kaz 工具面（Set）。
  *   minimalPhase=true（round-minimal 首阶段）：只保留 firstRoundTools（为空回退
- *   minimalTools）；否则全量阶段 = minimalTools ∪ effectiveToolWhitelist。
+ *   DEFAULT_FIRST_ROUND_TOOLS）；否则全量阶段 = effectiveToolWhitelist。
  * @param {object} inputs
- * @param {string[]} [inputs.minimalTools] settings 的 kaz-mode.minimalTools
  * @param {string[]} [inputs.toolWhitelist] settings 的 kaz-mode.toolWhitelist
  * @param {boolean} [inputs.minimalPhase] round-minimal 首阶段信号
  * @param {string[]} [inputs.firstRoundTools] round-minimal 的 firstRoundTools
  * @returns {Set<string>}
  */
-export function computeSurface({ minimalTools = [], toolWhitelist = [], minimalPhase = false, firstRoundTools = [] } = {}) {
-  const minimal = Array.isArray(minimalTools) ? minimalTools.filter((tool) => typeof tool === "string" && tool.length > 0) : [];
+export function computeSurface({ toolWhitelist = [], minimalPhase = false, firstRoundTools = [] } = {}) {
   const first = Array.isArray(firstRoundTools) ? firstRoundTools.filter((tool) => typeof tool === "string" && tool.length > 0) : [];
   if (minimalPhase) {
-    return new Set(first.length > 0 ? first : minimal);
+    return new Set(first.length > 0 ? first : DEFAULT_FIRST_ROUND_TOOLS);
   }
-  return new Set([...minimal, ...effectiveToolWhitelist(toolWhitelist)]);
+  return new Set(effectiveToolWhitelist(toolWhitelist));
 }

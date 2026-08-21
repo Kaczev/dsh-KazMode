@@ -14,12 +14,12 @@
 //      不再向 Kaz 会话的 system prompt 注入其它内容。
 //   2) 工具面两阶段（工具清单全部由 kaz-shared 的 tool-lists.js 管理）：
 //        - 首次工具调用前（round-minimal 首阶段信号）：仅保留 round-minimal
-//          首轮工具集 firstRoundTools（为空回退 minimalTools）；
-//        - 首次工具调用后：恢复 Kaz 全部工具 = minimalTools + effectiveToolWhitelist
+//          首轮工具集 firstRoundTools（为空回退 DEFAULT_FIRST_ROUND_TOOLS）；
+//        - 首次工具调用后：恢复 Kaz 全部工具 = effectiveToolWhitelist
 //          （= settings.toolWhitelist 用户白名单 ∪ 已启用群组的工具 − 已停用
-//          群组的工具）。白名单默认值与极简基底来自 kaz-shared；
-//          settings.yaml 的 kaz-mode.toolWhitelist / minimalTools 是手动编辑点
-//          （热改生效，用户配置始终优先）。
+//          群组的工具）。白名单默认值来自 kaz-shared；
+//          settings.yaml 的 kaz-mode.toolWhitelist 是手动编辑点
+//          （热改生效，用户配置始终优先）。不再有 minimalTools 概念。
 //        - 动态调整：kaz-memory / kaz-diag 各自以群组"发信"注册工具并随
 //          enabled 加入/排除（关闭时 kaz-memory 还把工具完全注销）；无需本
 //          插件维护任何工具名清单。
@@ -40,7 +40,6 @@ import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
-  DEFAULT_MINIMAL_TOOLS,
   DEFAULT_TOOL_WHITELIST,
   DEFAULT_FIRST_ROUND_TOOLS,
   DEFAULT_DISABLED_TOOLS,
@@ -66,9 +65,9 @@ const PERSONA_SECTION = "deployment:persona";
 
 /**
  * Kaz 工具面全部交给 kaz-shared（lib/tool-lists.js）管理：白名单默认值 /
- * 极简基底 / 群组注册 / 工具面计算都来自 kaz-shared；kaz-memory 与 kaz-diag
+ * 群组注册 / 工具面计算都来自 kaz-shared；kaz-memory 与 kaz-diag
  * 以群组方式"发信"注册自己的工具并随 enabled 加入/排除。本插件只负责读
- * settings（用户 toolWhitelist / minimalTools 优先）并在组装层/执行层应用
+ * settings（用户 toolWhitelist 优先）并在组装层/执行层应用
  * computeSurface 的结果。记忆工具与 kaz_mode_status 不再硬编码在本文件。
  */
 
@@ -122,8 +121,6 @@ const RPC_CHANNEL = "/kaz-mode";
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(false),
   managedPlugins: z.array(z.string()).default(MANAGED_PLUGINS.map((plugin) => plugin.id)),
-  /** Kaz 工具面·极简基底（首阶段与全量阶段始终保留的最小工具集）。 */
-  minimalTools: z.array(z.string()).default([...DEFAULT_MINIMAL_TOOLS]),
   /** Kaz 工具面·白名单（= Kaz 全部工具的手动编辑点），热改生效。 */
   toolWhitelist: z.array(z.string()).default([...DEFAULT_TOOL_WHITELIST]),
   /** 最近一个非 kaz 预设（按钮"关闭 Kaz"时切回的目标，由预设联动自动维护）。 */
@@ -368,12 +365,10 @@ function normalizeConfig(raw) {
     Array.isArray(raw)
       ? raw.filter((item) => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
       : [...fallback];
-  const minimalTools = stringList(value.minimalTools, DEFAULT_MINIMAL_TOOLS);
   const toolWhitelist = stringList(value.toolWhitelist, DEFAULT_TOOL_WHITELIST);
   const saved = value.savedPluginStates && typeof value.savedPluginStates === "object" ? value.savedPluginStates : {};
   return {
     enabled: value.enabled === true,
-    minimalTools,
     toolWhitelist,
     managedPlugins: managed,
     previousPreset:
@@ -665,22 +660,11 @@ export default {
     }
 
     // -----------------------------------------------------------------------
-    // Kaz 工具面：enabled=true 时收敛模型工具面（minimalTools + 白名单）。
-    // 白名单是纯工具名列表（= Kaz 全部工具的手动编辑点）。组装层过滤工具并
-    // 固定提示词；执行层拒绝白名单外调用。host 平面监听器对所有 agent 生效
-    // → 子代理会话同样是 Kaz 工具面。
+    // Kaz 工具面：enabled=true 时收敛模型工具面（全部由 kaz-shared 的
+    // computeSurface 计算：首阶段 firstRoundTools / 全量 effectiveToolWhitelist）。
+    // 组装层过滤工具并固定提示词；执行层拒绝白名单外调用。host 平面监听器
+    // 对所有 agent 生效 → 子代理会话同样是 Kaz 工具面。
     // -----------------------------------------------------------------------
-
-    /** 会话里是否已发生第一次工具调用。 */
-    function hasToolCall(agent) {
-      try {
-        const events = agent?.session?.events;
-        if (!Array.isArray(events)) return false;
-        return events.some((event) => event !== null && typeof event === "object" && event.type === "tool/call");
-      } catch {
-        return false;
-      }
-    }
 
     /** 是否为会话型子代理（含 workflow / ralph 派生的子会话）。 */
     function isSubagent(agent) {
@@ -699,9 +683,8 @@ export default {
       }
     }
 
-    /** 该代理此刻是否处于首阶段极简（首次工具调用前；子代理除外）。
-     *  优先查询 round-minimal 服务（其判定与配置一致），服务缺失时用
-     *  会话内 tool/call 事件自行兜底。 */
+    /** 该代理此刻是否处于首阶段极简：完全由 round-minimal 服务判定
+     *  （它自身按 enabled / 首次工具调用前判断）；服务缺失或禁用 → 无首阶段。 */
     function isMinimalAgent(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
       if (isSubagent(agent)) return false;
@@ -710,17 +693,17 @@ export default {
         try {
           return roundMinimal.isMinimal(agent) === true;
         } catch {
-          // fall through to local check
+          return false;
         }
       }
-      return !hasToolCall(agent);
+      return false;
     }
 
     /**
      * 计算某代理此刻的 Kaz 工具面（Set）——全部交给 kaz-shared 的
-     * computeSurface：白名单/极简基底来自 settings（用户优先），群组
-     * （kaz-memory / kaz-diag 的工具）由 kaz-shared 注册表按各自 enabled
-     * 动态加入/排除；round-minimal 首阶段信号由本插件读取并传入。
+     * computeSurface：白名单来自 settings（用户优先），群组（kaz-memory /
+     * kaz-diag 的工具）由 kaz-shared 注册表按各自 enabled 动态加入/排除；
+     * round-minimal 首阶段信号由本插件读取并传入。
      */
     function allowedToolSet(agent) {
       const current = source();
@@ -734,11 +717,10 @@ export default {
             if (Array.isArray(tools)) firstRoundTools = tools;
           }
         } catch {
-          // 保持空数组（computeSurface 回退 minimalTools）
+          // 保持空数组（computeSurface 回退 DEFAULT_FIRST_ROUND_TOOLS）
         }
       }
       return computeSurface({
-        minimalTools: current.minimalTools,
         toolWhitelist: current.toolWhitelist,
         minimalPhase,
         firstRoundTools,
@@ -748,8 +730,9 @@ export default {
     // 组装层：过滤工具列表 + 固定系统提示词。
     //   系统提示词 = 固定 persona 一句（+ 计划模式段）；其余提示段一律过滤。
     //   工具面（kaz-shared computeSurface）：首阶段（round-minimal 信号）仅保留
-    //   firstRoundTools（为空回退 minimalTools）；首次工具调用后 = minimalTools +
-    //   有效白名单（含已启用群组的工具）。
+    //   firstRoundTools（为空回退 DEFAULT_FIRST_ROUND_TOOLS）；首次工具调用后 =
+    //   有效白名单（settings.toolWhitelist ∪ 已启用群组，含 kaz-memory / kaz-diag
+    //   的动态增减）。
     ctx.on("system-prompt/assemble", function (assembly, context, next) {
       const current = source();
       if (current.enabled !== true) return next();
@@ -797,8 +780,8 @@ export default {
         return {
           kind: "deny",
           reason:
-            `工具 "${name}" 不在 Kaz 模式工具面内（minimalTools + toolWhitelist）。` +
-            `如需使用，请在 settings.yaml 的 kaz-mode.toolWhitelist 中放行（首次工具调用前仅 minimalTools ∪ round-minimal 首轮工具集）。`,
+            `工具 "${name}" 不在 Kaz 模式工具面内（toolWhitelist + 已启用群组）。` +
+            `如需使用，请在 settings.yaml 的 kaz-mode.toolWhitelist 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
         };
       }
       return next();
