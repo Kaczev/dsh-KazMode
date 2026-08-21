@@ -1143,12 +1143,24 @@ window.__ModuleLoader__.load({
 				}
 				const hasOverrides = PLUGINS.some((plugin) => overriddenMap[plugin.id] === true);
 
+				// 广播「生效状态已变化」：kaz-memory / round-display 面板据此立即刷新显隐，
+				// 替代轮询（2026-08-21）。
+				const notifyEffectiveChanged = () => {
+					if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+					try {
+						window.dispatchEvent(new Event("kaz-mode:effective-changed"));
+					} catch {
+						// 忽略
+					}
+				};
+
 				const patchSession = useCallback(
 					async (pluginId, patch) => {
 						if (!sessionId) return null;
 						const res = await rpcCall("setSessionPlugin", { sessionId, pluginId, patch });
 						if (res !== null) {
 							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+							notifyEffectiveChanged();
 						}
 						return res;
 					},
@@ -1160,6 +1172,7 @@ window.__ModuleLoader__.load({
 						const res = await rpcCall("setDefaultPlugin", { mode: targetMode, pluginId, patch, cwd: cwd || "" });
 						if (res !== null) {
 							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
+							notifyEffectiveChanged();
 						}
 						return res;
 					},
@@ -1174,6 +1187,7 @@ window.__ModuleLoader__.load({
 						const res = await rpcCall("setAsDefault", { sessionId, mode: targetMode });
 						if (res !== null) {
 							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
+							notifyEffectiveChanged();
 						}
 						return res;
 					},
@@ -1185,6 +1199,7 @@ window.__ModuleLoader__.load({
 						const res = await rpcCall("resetDefault", { sessionId: sessionId || "", mode: targetMode, cwd: cwd || "" });
 						if (res !== null) {
 							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
+							notifyEffectiveChanged();
 						}
 						return res;
 					},
@@ -1200,6 +1215,7 @@ window.__ModuleLoader__.load({
 						const res = await rpcCall("clearSession", { sessionId });
 						if (res !== null) {
 							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+							notifyEffectiveChanged();
 						}
 						return res;
 					},
@@ -1213,6 +1229,7 @@ window.__ModuleLoader__.load({
 						const res = await rpcCall("clearSessionPlugin", { sessionId, pluginId });
 						if (res !== null) {
 							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+							notifyEffectiveChanged();
 						}
 						return res;
 					},

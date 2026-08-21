@@ -388,11 +388,13 @@ window.__ModuleLoader__.load({
 						setEnabled(state !== null ? effectiveEnabledOf(state, pluginId) : null);
 					};
 					void refresh();
-					// 2s 轮询：同一会话里 Kaz 面板改动（默认/专属）也能在 ~2s 内同步按钮显隐。
-					const timer = setInterval(() => void refresh(), 2000);
+					// 事件驱动：Kaz 面板改动生效状态后广播 kaz-mode:effective-changed，
+					// 收到即刷新（替代轮询）。会话切换由 sessionId 依赖触发。
+					const onChanged = () => void refresh();
+					window.addEventListener("kaz-mode:effective-changed", onChanged);
 					return () => {
 						alive = false;
-						clearInterval(timer);
+						window.removeEventListener("kaz-mode:effective-changed", onChanged);
 					};
 				}, [pluginId, sessionId]);
 				return enabled;
@@ -412,13 +414,14 @@ window.__ModuleLoader__.load({
 				ctx.slots.register({ name: "conversation.input.right", id: "round-display", order: 90 }, RoundDisplaySlot),
 			);
 			// 会话列表订阅：props 拿不到会话时兜底用当前会话（切换会话时重新拉取）。
-			ctx.inject(["sessions"], (sessionsScope) => {
+			// 注：与 kaz-mode / kaz-agent-preset-display 一致，注入 conversation+sessions 两个服务。
+			ctx.inject(["conversation", "sessions"], (sessionsScope) => {
 				const update = () => {
-					const snap = sessionsScope.list.getSnapshot();
+					const snap = sessionsScope.sessions.list.getSnapshot();
 					sessionIdStore.set(snap !== null && snap !== undefined ? snap.current : "");
 				};
 				update();
-				sessionsScope.list.subscribe(update);
+				sessionsScope.sessions.list.subscribe(update);
 			});
 		}
 
