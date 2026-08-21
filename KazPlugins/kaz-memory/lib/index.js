@@ -1060,9 +1060,11 @@ export async function apply(ctx, config = {}) {
   });
 
   // ---- 六工具（与 @max-null/dsh-memory 同名同 schema 同行为；memory_update /
-  // memory_detail 为扩展）。描述与参数说明为英文（模型推理用英文）。----
-  ctx.tools.register(
-    defineTool({
+  // memory_detail 为扩展）。描述与参数说明为英文（模型推理用英文）。
+  // 注册跟随 kaz-memory.enabled（2026-08-21）：关闭 = 六工具完全注销（不只是
+  // 移出 Kaz 工具面），热重载；任何模式下都不再出现在工具列表里。----
+  const toolDefs = [
+  defineTool({
       name: "memory_save",
       description:
         'Save one cross-session memory as "pending" (待确认). It does NOT take effect automatically — a human must confirm it in the web panel before it becomes "applied"; never treat a pending memory as effective. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json).',
@@ -1098,10 +1100,8 @@ export async function apply(ctx, config = {}) {
       },
       presentCall: (args) => present("保存记忆", "other", args.content),
     }),
-  );
 
-  ctx.tools.register(
-    defineTool({
+  defineTool({
       name: "memory_update",
       description:
         'Update an existing memory by id: content, keywords, name and/or summary. Changing the content of an "applied" memory demotes it back to "pending" for human re-confirmation; metadata-only edits (name / keywords / summary) keep the status. id comes from memory_list or memory_search.',
@@ -1128,10 +1128,8 @@ export async function apply(ctx, config = {}) {
       },
       presentCall: (args) => present("更新记忆", "other", args.id),
     }),
-  );
 
-  ctx.tools.register(
-    defineTool({
+  defineTool({
       name: "memory_list",
       description:
         "List all memories; each entry contains only id/namespace/status/autoLoad/name (title line or first line, truncated to 140 chars) — no content and no keywords. Use memory_search for relevance hits, memory_detail for the full content of a single memory.",
@@ -1154,10 +1152,8 @@ export async function apply(ctx, config = {}) {
       },
       presentCall: () => present("列出记忆", "read"),
     }),
-  );
 
-  ctx.tools.register(
-    defineTool({
+  defineTool({
       name: "memory_search",
       description:
         "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score — content is NOT included; use memory_detail to read the full content of a hit. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the kaz-memory.bm25 settings section. Returns an empty array when nothing matches; errors when the query is empty.",
@@ -1194,10 +1190,8 @@ export async function apply(ctx, config = {}) {
       },
       presentCall: (args) => present("搜索记忆", "read", args.query),
     }),
-  );
 
-  ctx.tools.register(
-    defineTool({
+  defineTool({
       name: "memory_detail",
       description:
         "Read the full content of a single memory by id, with chunked reading. Returns id, name, summary, content_preview (limit chars starting at offset), total_length and has_more. Errors if the id does not exist; if offset is beyond the content length, content_preview is an empty string (total_length tells you the real size) and has_more is false. Use memory_search or memory_list first to obtain ids.",
@@ -1220,10 +1214,8 @@ export async function apply(ctx, config = {}) {
       },
       presentCall: (args) => present("查看记忆详情", "read", args.id),
     }),
-  );
 
-  ctx.tools.register(
-    defineTool({
+  defineTool({
       name: "memory_forget",
       description:
         "Delete one memory by id. The owner can delete any memory (pending, ignored or applied). id comes from memory_list or memory_search.",
@@ -1239,7 +1231,37 @@ export async function apply(ctx, config = {}) {
       },
       presentCall: (args) => present("删除记忆", "other", args.id),
     }),
-  );
+];
+
+  // ---- 注册 / 注销跟随 enabled 开关（kaz-diag 同款模式）：关闭 = 六工具完全
+  // 注销（任何模式都不再出现，不占工具列表/上下文）；开启 = 全部注册。热重载。----
+  let toolDisposers = [];
+  function installTools() {
+    if (toolDisposers.length > 0) return;
+    for (const def of toolDefs) {
+      try {
+        toolDisposers.push(ctx.tools.register(def));
+      } catch (error) {
+        ctx.logger.warn(`[kaz-memory] 注册工具 ${def.name} 失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  function uninstallTools() {
+    for (const dispose of toolDisposers) {
+      try {
+        dispose();
+      } catch (error) {
+        ctx.logger.warn(`[kaz-memory] 注销工具失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    toolDisposers = [];
+  }
+  function handleChange() {
+    const current = source();
+    const enabled = current === null || typeof current !== "object" || current.enabled !== false;
+    if (enabled) installTools();
+    else uninstallTools();
+  }
 
   /** 在文件管理器中打开一个文件夹（先确保目录存在；探针可用 config.openFolder 覆盖）。 */
   function openFolder(folder) {
@@ -1281,7 +1303,14 @@ export async function apply(ctx, config = {}) {
       setSource: (getValue) => {
         source = () => getValue();
       },
-      onChange: () => {},
+      onChange: () => handleChange(),
     },
   );
+
+  // 初始注册：settings 服务未挂载时按 entry 默认（enabled: true）注册；
+  // settings 挂载 / 热重载后由 onChange → handleChange 同步开关。
+  handleChange();
+  ctx.effect(() => () => {
+    uninstallTools();
+  });
 }

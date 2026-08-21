@@ -42,7 +42,7 @@
 - **打开记忆文件夹按钮（2026-08-17）**：面板顶部「打开全局记忆文件夹」「打开项目记忆文件夹」两个按钮。
 - **面板不被侧边栏裁剪（2026-08-17）**：记忆面板经 `createPortal` 挂到 `document.body`，按按钮矩形 fixed 定位、自动在视口内收拢。
 - **消息格式（2026-08-17 起精简；2026-08-21 改为主动行动式措辞；2026-08-22 改为首轮工具调用后注入，后续每轮开头重复）**：记忆指引是**首轮工具调用之后以上下文消息注入、并从下一轮起在每轮开头重复**的**固定短提示**——`[kaz-memory guidance] / > / 内容 / <` 信封格式，只发一行 We need 风格英文总述（主动行动式：任务开始时先用 memory_search 查记忆、学到重要事实后用 memory_save 存下来——存时给 name + 一句话 summary + 精炼正文）；记忆工具的具体用法由各工具描述自带。**仅当 memory_search 在当前环境确实可调用时发送**；不可用即返回空串。**每一轮第一次 `memory_search` 之后**还会以同一信封格式再注入一条**遗忘指引**（`We need to forget memories (memory_forget) ...`），按 turn 注入、每个 turn 内只注入一次，且仅在 `memory_search` 与 `memory_forget` 都可用时发送。Kaz 模式会滤掉 systemPrompt 段，因此固定指引不再注册 `tool:memory:kaz-memory` 系统提示段，改为 `agent/pre-step` 合成用户消息注入；部署基础英文记忆指引段（`tool:memory`）仍在组装层**无条件移除**。
-- **总开关（2026-08-21）**：settings.yaml `kaz-memory` 段的 `enabled`（默认 `true`）。关闭时：不注入记忆指引、不自动载入记忆，客户端完全不渲染记忆面板；开启时按原有逻辑自动判断。
+- **总开关（2026-08-21）**：settings.yaml `kaz-memory` 段的 `enabled`（默认 `true`）。关闭时：**六个记忆工具完全注销**（不只是移出 Kaz 工具面——任何模式下都不再出现在工具列表里，不占工具面/上下文；热重载），不注入记忆指引、不自动载入记忆，客户端完全不渲染记忆面板；开启时按原有逻辑自动判断并重新注册六工具。
 - **指引配置（2026-08-17）**：settings.yaml `kaz-memory` 段生效字段——`guidance`（旧字段，整段覆盖）与 `guidanceHead`（固定提示总述行覆盖）与 `guidanceForget`（遗忘指引覆盖）；`guidanceSearch` / `guidanceSave` / `guidanceList` 仍保留兼容但**不再生效**。
 - **闸门（含 memory_update）**：模型 memory_save 仍然只能写 `pending`，只有人在面板点「确认生效」才会置为 `applied`；「忽略」置为 `ignored`；「删除」即 forget。`memory_update` 可修改已有记忆的正文/标签/标题/摘要；**修改 applied 记忆的正文会把它降级回 `pending`**，需人工再次确认，只改标签/标题/摘要不降级。「自动载入」开关只由面板操作（模型没有对应工具）；未确认的记忆即使勾选也不注入。
 - **状态命名（2026-08 起）**：对外统一 `pending`（待确认）/ `ignored`（已忽略）/ `applied`（已生效）；旧 JSON 里的 `suggested` / `suggest` / `auto` 读取时自动映射到新值，写回时逐步落新值，无需手工迁移。
@@ -57,7 +57,7 @@ kaz-memory:
   guidance: ""           # 旧字段：整段指引覆盖（留空 = 内置默认）
   guidanceHead: ""       # 固定提示总述行覆盖（留空 = 内置默认）
   guidanceForget: ""     # 遗忘指引覆盖（留空 = 内置默认）
-  bm25:                  # BM25 检索参数（memory_search 评分用；改配置热重载，无需 UI）
+  bm25:                  # BM25 检索参数（memory_search 评分用；改配置热重载；Kaz 模式面板的 kaz-memory 行也提供 k1/b 输入）
     k1: 1.2              # 词频饱和参数（默认 1.2，一般取值 1.2 ~ 2.0）
     b: 0.75              # 长度归一化参数（默认 0.75，0 = 不做长度归一化）
 ```

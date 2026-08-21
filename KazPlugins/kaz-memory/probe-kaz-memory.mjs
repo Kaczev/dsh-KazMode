@@ -758,6 +758,18 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   rmSync(storeOff, { force: true });
 }
 
+// ⑮ enabled 总开关 = 六工具完全注销（不只是移出 Kaz 工具面；任何模式都不再出现）
+{
+  const SIX = ["memory_save", "memory_update", "memory_list", "memory_search", "memory_detail", "memory_forget"];
+  check("⑮ 初始（enabled=true）六工具已注册", SIX.every((n) => registeredTools.has(n)));
+  await settings.update("kaz-memory", { enabled: false });
+  await settle();
+  check("⑮ 关闭后六工具完全注销", SIX.every((n) => !registeredTools.has(n)));
+  await settings.update("kaz-memory", { enabled: true });
+  await settle();
+  check("⑮ 重新开启后六工具恢复注册", SIX.every((n) => registeredTools.has(n)));
+}
+
 // ⑭ BM25 评分单元检查（vendored okapibm25 + lib/bm25.js）
 {
   const { bm25Scores, bm25ScoresAsync, tokenize } = await import("./lib/bm25.js");

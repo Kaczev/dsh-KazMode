@@ -103,10 +103,12 @@ window.__ModuleLoader__.load({
 				namespace: "kaz-memory",
 				name: "kaz-memory",
 				tag: "独立记忆组件（有独立开关）",
-				note: "记忆自动载入在对话开始时注入；记忆工具（memory_save/list/search/forget）仅在 kaz-memory 开启时加入 Kaz 模式的全部工具列表。",
+				note: "记忆自动载入在对话开始时注入；六个记忆工具（memory_save/update/list/search/detail/forget）仅在 kaz-memory 开启时注册并加入工具面（关闭 = 六工具完全注销，任何模式都不再出现，热重载）。",
 				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不注入记忆、记忆工具移出 Kaz 工具面）" },
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不注入记忆、六工具完全注销）" },
 					{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（固定提示总述行；留空 = 内置默认）" },
+					{ key: "bm25", path: ["k1"], kind: "number", step: 0.1, label: "bm25.k1（BM25 词频饱和参数；默认 1.2，一般 1.2~2.0）" },
+					{ key: "bm25", path: ["b"], kind: "number", step: 0.05, label: "bm25.b（BM25 长度归一化参数；默认 0.75，0 = 不做长度归一化）" },
 				],
 			},
 			{

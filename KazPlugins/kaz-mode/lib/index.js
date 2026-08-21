@@ -17,10 +17,10 @@
 //          pwsh、str_replace_editor）∪ round-minimal 首轮工具集；
 //        - 首次工具调用后：恢复 Kaz 全部工具 = minimalTools + toolWhitelist
 //          白名单（= 标准模式全部工具除 bash + pwsh + str_replace_editor +
-//          kaz-memory 四工具）。toolWhitelist 是 Kaz 全部工具的手动编辑点
+//          kaz-memory 六工具）。toolWhitelist 是 Kaz 全部工具的手动编辑点
 //          （settings.yaml 的 kaz-mode.toolWhitelist，热改生效）。
-//        - 动态调整：kaz-memory 关闭 → 其四个记忆工具自动移出白名单；
-//          kaz-diag 开启 → kaz_mode_status 自动加入白名单。
+//        - 动态调整：kaz-memory 关闭 → 其六个记忆工具自动移出白名单（kaz-memory
+//          插件自身也会把工具完全注销）；kaz-diag 开启 → kaz_mode_status 自动加入白名单。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
 //      再按会话/默认状态应用。变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用。
@@ -59,14 +59,15 @@ const PERSONA_SECTION = "deployment:persona";
 /** Kaz 工具面·极简基底（首阶段与全量阶段始终保留的最小工具集）。 */
 const DEFAULT_MINIMAL_TOOLS = ["pwsh", "str_replace_editor"];
 
-/** kaz-memory 的四工具（kaz-memory 关闭时从 Kaz 工具面自动移除）。 */
-const KAZ_MEMORY_TOOLS = ["memory_save", "memory_list", "memory_search", "memory_forget"];
+/** kaz-memory 的六工具（kaz-memory 关闭时从 Kaz 工具面自动移除；kaz-memory
+ *  插件本身也会在关闭时把工具完全注销，这里是纵深防御的兜底）。 */
+const KAZ_MEMORY_TOOLS = ["memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"];
 
 /**
  * Kaz 工具面·白名单默认值 = Kaz 模式的「全部工具列表」：
  *   标准模式（shipped standard 预设）全部工具（除 bash 与 skill：Windows 上
  *   bash 本就不存在；skill 已按 Kaczev 要求从 Kaz 模式整体移除）
- *   + pwsh + str_replace_editor + kaz-memory 四工具。
+ *   + pwsh + str_replace_editor + kaz-memory 六工具。
  * 这是手动编辑点：以后要加新工具，在 settings.yaml 的 kaz-mode.toolWhitelist
  * 里加工具名即可（热改生效）。kaz_mode_status 不在白名单内——由 kaz-diag 插件
  * 开启时动态加入。
@@ -80,7 +81,7 @@ const DEFAULT_TOOL_WHITELIST = [
   "workflow", "ralph",
   "ask_user_question", "todo_write", "web_search",
   "str_replace_editor",
-  "memory_save", "memory_list", "memory_search", "memory_forget", "memory_update"
+  "memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"
 ];
 
 /** 被管理的插件（id 与 settings.yaml 命名空间一致）。 */
