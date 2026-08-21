@@ -208,6 +208,8 @@ window.__ModuleLoader__.load({
 .kzm-default-actions .kzm-set-default-btn{flex:1;text-align:center}
 .kzm-reset-btn,.kzm-set-default-btn{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px;flex:none}
 .kzm-reset-btn:hover,.kzm-set-default-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.kzm-reset-btn[data-drifted="true"]{border-color:rgba(217,119,6,.65);color:#d97706;background:rgba(217,119,6,.12)}
+.kzm-reset-btn[data-drifted="true"]:hover{background:rgba(217,119,6,.22)}
 .kzm-override-badge{font-size:10px;color:#b45309;border:1px solid rgba(180,83,9,.4);background:rgba(180,83,9,.08);border-radius:8px;padding:1px 6px;flex:none}
 .kzm-state-item{display:flex;flex-direction:column;padding:3px 0;border-top:1px solid var(--dsw-alias-border-l2)}
 .kzm-state-item:first-of-type{border-top:none}
@@ -1035,7 +1037,7 @@ window.__ModuleLoader__.load({
 			}
 
 			/** 三个层级的设置区块：a=非 Kaz 默认，b=Kaz 默认，c=当前对话专属。 */
-			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onSetNonKazDefault, onSetKazDefault, disabled, plugins = PLUGINS }) {
+			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onSetNonKazDefault, onSetKazDefault, disabled, plugins = PLUGINS, restoreDrifted }) {
 				return createElement(
 					"div",
 					{ className: "kzm-state-section" },
@@ -1046,7 +1048,16 @@ window.__ModuleLoader__.load({
 						onRestore !== undefined &&
 							createElement(
 								"button",
-								{ type: "button", className: "kzm-reset-btn", onClick: onRestore, disabled: disabled === true },
+								{
+									type: "button",
+									className: "kzm-reset-btn",
+									"data-drifted": restoreDrifted === true ? "true" : "false",
+									title: restoreDrifted === true
+										? "当前默认设置与代码内出厂默认不一致；点击将恢复为出厂设置"
+										: "恢复为代码内出厂设置",
+									onClick: onRestore,
+									disabled: disabled === true,
+								},
 								"恢复原设置",
 							),
 					),
@@ -1136,6 +1147,12 @@ window.__ModuleLoader__.load({
 					: (newConversationPreset !== undefined ? newConversationPreset : (blankDefaultPreset !== null ? blankDefaultPreset : preset));
 				const mode = effectiveKazEnabled ? "kaz" : "nonKaz";
 				const baseMap = defaults[mode] || {};
+				// 「恢复原设置」橙色提示：当前模式默认设置与代码内出厂默认（初始下载时设置）
+				// 不一致时高亮，提示点击会恢复为出厂设置（getState 已返回 factory 出厂默认）。
+				const factoryDefaults = stateData !== null && stateData.factory !== null && typeof stateData.factory === "object" ? stateData.factory : {};
+				const factoryForMode = factoryDefaults[mode] !== null && typeof factoryDefaults[mode] === "object" ? factoryDefaults[mode] : {};
+				const defaultsForMode = defaults[mode] !== null && typeof defaults[mode] === "object" ? defaults[mode] : {};
+				const restoreDrifted = JSON.stringify(defaultsForMode) !== JSON.stringify(factoryForMode);
 				const effectiveMap = {};
 				const overriddenMap = {};
 				for (const plugin of PLUGINS) {
@@ -1266,6 +1283,7 @@ window.__ModuleLoader__.load({
 								overriddenMap,
 								onPatch: patchSession,
 								onRestore: () => resetDefault(mode, stateData !== null ? stateData.cwd : undefined),
+								restoreDrifted,
 								disabled: !writable,
 							}))
 						: createElement(StateSection, {
@@ -1278,6 +1296,7 @@ window.__ModuleLoader__.load({
 							overriddenMap,
 							onPatch: (pluginId, patch) => patchDefault(mode, pluginId, patch, stateData !== null ? stateData.cwd : undefined),
 							onRestore: () => resetDefault(mode, stateData !== null ? stateData.cwd : undefined),
+							restoreDrifted,
 							disabled: !writable,
 						}),
 					createElement(StateSection, {
