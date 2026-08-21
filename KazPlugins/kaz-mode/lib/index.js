@@ -724,15 +724,50 @@ export default {
       return "";
     }
 
-    /** 该 agent 的会话是否为 Kaz 模式：以会话头记录的 agentPreset 为准
-     *  （子代理继承父会话）；无显式预设时回退全局开关。 */
-    function agentKazEnabled(agent) {
+    /** 从 agent 会话解析当前生效的 agent preset id（与官方 resolveSessionPreset
+     *  同语义）：优先会话事件日志里最后一次 agent-preset/selected——新对话切换
+     *  预设只追加事件、不改 header；回退 header（创建时值）；再回退 undefined。 */
+    function agentPresetOf(agent) {
       try {
-        const preset = agent?.session?.header?.agentPreset;
-        if (typeof preset === "string" && preset.trim().length > 0) return preset === KAZ_PRESET_ID;
+        const session = agent?.session;
+        const events = session?.events;
+        if (Array.isArray(events)) {
+          for (let index = events.length - 1; index >= 0; index -= 1) {
+            const event = events[index];
+            if (
+              event !== null &&
+              typeof event === "object" &&
+              event.type === "agent-preset/selected" &&
+              event.data !== null &&
+              typeof event.data === "object" &&
+              typeof event.data.agentPreset === "string" &&
+              event.data.agentPreset.trim().length > 0
+            ) {
+              return event.data.agentPreset;
+            }
+          }
+        }
+        const header = session?.header;
+        if (
+          header !== null &&
+          header !== undefined &&
+          typeof header === "object" &&
+          typeof header.agentPreset === "string" &&
+          header.agentPreset.trim().length > 0
+        ) {
+          return header.agentPreset;
+        }
       } catch {
         // fall through
       }
+      return undefined;
+    }
+
+    /** 该 agent 的会话是否为 Kaz 模式：以会话生效 preset（事件优先，官方同语义）
+     *  为准（子代理继承父会话）；无显式预设时回退全局开关。 */
+    function agentKazEnabled(agent) {
+      const preset = agentPresetOf(agent);
+      if (typeof preset === "string" && preset.trim().length > 0) return preset === KAZ_PRESET_ID;
       return source().enabled === true;
     }
 
