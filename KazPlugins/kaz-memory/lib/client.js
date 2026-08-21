@@ -144,9 +144,60 @@ window.__ModuleLoader__.load({
 				}
 			}
 
-			// ---- settings 绑定：kaz-memory.enabled（Kaz 模式面板的开关，热重载） ----
-			// 关闭（enabled=false）时整个记忆面板（侧边栏按钮 + 面板）完全隐藏；
-			// 未加载 / 不可读时按默认开启处理（与 schema 默认值一致），保持向后兼容。
+			// ---- 会话显隐（纯方案 A）：优先用 kaz-mode getState 的 effective（与
+			// Kaz 面板同源：模式默认 + 会话覆盖），取不到时回退 settings.yaml 开关。----
+			/** 经 kaz-mode RPC 读取某会话的完整状态（与 Kaz 面板同源）；失败返回 null。 */
+			async function kazModeGetState(sessionId) {
+				if (rpc === null) return null;
+				try {
+					const result = await rpc.call("/kaz-mode", "getState", { sessionId: sessionId || "" });
+					if (result !== null && typeof result === "object" && result.ok === true && result.value !== null && typeof result.value === "object") {
+						return result.value;
+					}
+					return null;
+				} catch {
+					return null;
+				}
+			}
+
+			/** 读 getState 里 host 已算好的生效 enabled（state.effective[pluginId].enabled）。 */
+			function effectiveEnabledOf(state, pluginId) {
+				if (state === null || state === undefined || typeof state !== "object") return null;
+				const eff = state.effective !== null && typeof state.effective === "object" ? state.effective : {};
+				const entry = eff[pluginId];
+				if (entry === null || entry === undefined || typeof entry !== "object") return null;
+				return entry.enabled !== false;
+			}
+
+			/** 当前会话 id：引用不变的 store（组件挂载后再注入也不丢订阅），
+			 *  由下方 ctx.inject(["sessions"]) 填充。 */
+			const sessionIdStore = {
+				listeners: new Set(),
+				value: "",
+				subscribe(listener) {
+					this.listeners.add(listener);
+					return () => this.listeners.delete(listener);
+				},
+				getSnapshot() {
+					return this.value;
+				},
+				set(next) {
+					const v = typeof next === "string" ? next : "";
+					if (v !== this.value) {
+						this.value = v;
+						for (const l of [...this.listeners]) l();
+					}
+				},
+			};
+			function useCurrentSessionId() {
+				return useSyncExternalStore(
+					(listener) => sessionIdStore.subscribe(listener),
+					() => sessionIdStore.getSnapshot(),
+					() => sessionIdStore.getSnapshot(),
+				);
+			}
+
+			// ---- settings 绑定：kaz-memory.enabled（standalone 兜底开关，热重载） ----
 			let kmScope = null;
 			try {
 				if (ctx.settingsScope !== undefined && ctx.settingsScope !== null && typeof ctx.settingsScope.bind === "function") {
@@ -578,11 +629,37 @@ window.__ModuleLoader__.load({
 			// ---- 注册 ----
 			// 记忆按钮：注册进侧边栏底部工具栏（sidebar.footer.action，root 作用域。
 			// 常驻可见——未开始对话时也能查看 / 确认记忆），排在 Kaz 按钮左侧（order -2）。
-			// 外面包一层开关门：kaz-memory.enabled=false（Kaz 面板关掉）时完全隐藏，
-			// 连侧边栏按钮都不渲染。
+			// 外面包一层开关门：优先按「与 Kaz 面板同源的当前会话生效值」显示，
+			// 取不到（kaz-mode 未加载/无会话）时回退 settings.yaml 开关。
+			function useSessionPluginEnabled(pluginId, sessionId) {
+				const [enabled, setEnabled] = useState(null);
+				useEffect(() => {
+					let alive = true;
+					setEnabled(null);
+					const refresh = async () => {
+						const state = await kazModeGetState(sessionId);
+						if (!alive) return;
+						setEnabled(state !== null ? effectiveEnabledOf(state, pluginId) : null);
+					};
+					void refresh();
+					// 2s 轮询：同一会话里 Kaz 面板改动（默认/专属）也能在 ~2s 内同步按钮显隐。
+					const timer = setInterval(() => void refresh(), 2000);
+					return () => {
+						alive = false;
+						clearInterval(timer);
+					};
+				}, [pluginId, sessionId]);
+				return enabled;
+			}
+
 			function MemorySlot(props) {
 				const snap = useScope(kmScope);
-				if (enabledOf(snap) !== true) return null;
+				const settingsEnabled = enabledOf(snap);
+				const sessionId = useCurrentSessionId();
+				const sessionEnabled = useSessionPluginEnabled("kaz-memory", sessionId);
+				// 优先用与 Kaz 面板同源的会话状态；取不到（kaz-mode 未加载/无会话）时回退 settings.yaml 开关。
+				const enabled = sessionEnabled !== null ? sessionEnabled : settingsEnabled;
+				if (enabled !== true) return null;
 				return createElement(MemoryHeaderButton, props);
 			}
 			ctx.slots.inject("sidebar.footer.action", () =>
@@ -591,6 +668,15 @@ window.__ModuleLoader__.load({
 					MemorySlot,
 				),
 			);
+			// 会话列表订阅：把当前会话 id 喂给稳定的 sessionIdStore。
+			ctx.inject(["sessions"], (sessionsScope) => {
+				const update = () => {
+					const snap = sessionsScope.list.getSnapshot();
+					sessionIdStore.set(snap !== null && snap !== undefined ? snap.current : "");
+				};
+				update();
+				sessionsScope.list.subscribe(update);
+			});
 		}
 
 		exports.apply = apply;

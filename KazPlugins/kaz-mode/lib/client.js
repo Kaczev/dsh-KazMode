@@ -274,7 +274,6 @@ window.__ModuleLoader__.load({
 			}
 			const kazScope = bindScope("kaz-mode");
 			const presetScope = bindScope(PRESET_NAMESPACE);
-			const memoryScope = bindScope("kaz-memory");
 			const patchScope = bindScope("kaz-agent-preset-display");
 
 			/** 会话列表 binding（由下方 conversation/sessions inject 填充）。 */
@@ -671,83 +670,6 @@ window.__ModuleLoader__.load({
 					editor,
 					field.kind !== "json" && error !== null && createElement("span", { className: "kzm-error" }, error),
 					saving && createElement("span", { className: "kzm-saving" }, "正在同步到 settings.yaml…"),
-				);
-			}
-
-			function PluginRow({ plugin, scope }) {
-				const snap = useScope(scope);
-				const value = valueOf(snap);
-				const [cfgOpen, setCfgOpen] = useState(false);
-				const enabled = value !== null && typeof value === "object" ? value.enabled !== false : false;
-				const writable = writableOf(snap);
-				const missing = value === null;
-
-				return createElement(
-					"div",
-					{ className: "kzm-row" },
-					createElement(
-						"div",
-						{ className: "kzm-row-head" },
-						createElement(
-							"span",
-							{ className: "kzm-name", title: plugin.tag || plugin.id },
-							plugin.name,
-							createElement("span", { className: "kzm-tag" }, "  " + plugin.tag),
-						),
-						missing === true && createElement(StateBadge, { state: "missing" }),
-						createElement(Toggle, {
-							checked: enabled,
-							onChange: (next) => {
-								if (writable) scope.set("enabled", next).catch(() => {});
-							},
-							disabled: !writable,
-							title: writable ? "单独启用 / 禁用该插件" : "当前页面不可写（远程内存模式）",
-						}),
-						createElement(
-							"button",
-							{
-								type: "button",
-								className: "kzm-cfg-btn",
-								onClick: () => setCfgOpen((open) => !open),
-							},
-							cfgOpen ? "收起" : "配置",
-						),
-					),
-					cfgOpen &&
-						createElement(
-							"div",
-							{ className: "kzm-fields" },
-							plugin.fields.map((field) => createElement(FieldEditor, { key: fieldKey(field), field, scope })),
-							plugin.id === "deepseek-default-model" &&
-								createElement(
-									"div",
-									{ className: "kzm-preset-actions" },
-									createElement(
-										"button",
-										{
-											type: "button",
-											className: "kzm-cfg-btn",
-											disabled: !writable,
-											onClick: () => {
-												if (writable) scope.set("generation_kwargs", { ...DEEPSEEK_OFFICIAL_KWARGS }).catch(() => {});
-											},
-										},
-										"使用官方值（1 / 1 / 1）",
-									),
-									createElement(
-										"button",
-										{
-											type: "button",
-											className: "kzm-cfg-btn",
-											disabled: !writable,
-											onClick: () => {
-												if (writable) scope.set("generation_kwargs", { ...DEEPSEEK_KAZ_KWARGS }).catch(() => {});
-											},
-										},
-										"使用 Kaz 模式的默认值（0.2 / 0.9 / 1.2）",
-									),
-								),
-						),
 				);
 			}
 

@@ -437,34 +437,16 @@ export default {
       }
     }
 
-    /** 快照全部已加载被管理插件的原始状态（供关闭 Kaz 模式时恢复）。 */
+    /** 快照全部已加载被管理插件的原始状态（仅供面板/诊断报告展示；纯方案 A 下
+     *  不再驱动任何恢复——kaz-mode 不写各插件 settings.yaml）。 */
     async function snapshotPluginStates() {
       const snapshot = {};
       for (const plugin of managedList()) {
         const state = readPluginState(plugin.id);
-        if (state === null) continue; // 未加载的插件不参与快照，也不参与恢复
+        if (state === null) continue; // 未加载的插件不参与快照
         snapshot[plugin.id] = { hadOverride: state.hadOverride, enabled: state.enabled };
       }
       return snapshot;
-    }
-
-    /** 联动启用：把尚未启用的被管理插件置为 enabled=true。返回实际写入个数。 */
-    async function forceEnableManaged() {
-      const settings = getSettings();
-      if (settings === undefined) return 0;
-      let count = 0;
-      for (const plugin of managedList()) {
-        const state = readPluginState(plugin.id);
-        if (state === null || state.enabled === true) continue;
-        try {
-          await settings.update(settingsNamespace(plugin.id), { enabled: true });
-          count += 1;
-          ctx.logger.info(`[kaz-mode] 联动启用 ${plugin.id}`);
-        } catch (error) {
-          ctx.logger.warn(`[kaz-mode] 联动启用 ${plugin.id} 失败：${safeMessage(error)}`);
-        }
-      }
-      return count;
     }
 
     /** 由会话 id 解析项目工作区根目录（优先从 agents 服务取会话头，失败回退 cwd）。 */
@@ -490,7 +472,29 @@ export default {
       return { cwd, data };
     }
 
-    /** 计算某会话当前应生效的插件状态 map：专属覆盖 > 当前模式默认。 */
+    /** 按会话 id 判断该会话是否 Kaz 模式：经 agents 服务取 agent，用事件优先的
+     *  agentPresetOf 判定（与 agentKazEnabled 同源）；读不到时回退全局开关。 */
+    function sessionKazEnabledById(sessionId) {
+      if (typeof sessionId === "string" && sessionId.length > 0) {
+        try {
+          const agents = ctx.get("agents");
+          if (agents !== undefined && agents !== null && typeof agents.get === "function") {
+            const agent = agents.get(sessionId);
+            if (agent !== undefined && agent !== null) {
+              const preset = agentPresetOf(agent);
+              if (typeof preset === "string" && preset.trim().length > 0) return preset === KAZ_PRESET_ID;
+            }
+          }
+        } catch {
+          // fall through
+        }
+      }
+      return source().enabled === true;
+    }
+
+    /** 计算某会话当前应生效的插件状态 map：专属覆盖 > 当前模式默认。
+     *  纯方案 A：此 map 只经 kazMode.pluginConfig / getState.effective 提供给
+     *  被管理插件与客户端面板，kaz-mode 不再把它写入任何插件的 settings.yaml。 */
     function effectivePluginStates(data, sessionId, kazEnabled) {
       const mode = kazEnabled ? "kaz" : "nonKaz";
       const defaults = data.defaults?.[mode] ?? {};
@@ -504,36 +508,10 @@ export default {
       return result;
     }
 
-    /** 把某会话的生效插件状态写入各插件 settings.yaml 段（热重载生效）。 */
-    async function applyEffectiveState(cwd, sessionId) {
-      const settings = getSettings();
-      if (settings === undefined) return false;
-      const data = loadStateFile(cwd, ctx.logger);
-      const states = effectivePluginStates(data, sessionId, source().enabled === true);
-      let wrote = 0;
-      for (const plugin of managedList()) {
-        const state = states[plugin.id];
-        if (state === undefined || state === null) continue;
-        const current = readPluginState(plugin.id);
-        if (current === null) continue; // 未加载的插件不写入
-        try {
-          await settings.update(settingsNamespace(plugin.id), state);
-          wrote += 1;
-        } catch (error) {
-          ctx.logger.warn(`[kaz-mode] 按会话应用 ${plugin.id} 状态失败：${safeMessage(error)}`);
-        }
-      }
-      if (wrote > 0) {
-        ctx.logger.info(`[kaz-mode] 已按会话 ${sessionId} 应用 ${wrote} 个插件状态（Kaz=${source().enabled === true}）`);
-      }
-      return wrote > 0;
-    }
-
     /**
-     * 联动主流程：enabled=true（进入 Kaz）→ 快照 + 按会话/默认状态应用插件；
-     * enabled=false（关闭 / 切走）→ 按会话/非 Kaz 默认状态应用插件。
-     * 若尚无客户端告知的活跃会话，则回退到旧的强制启用行为，保证
-     * 纯 settings.yaml 使用方式仍然可用。
+     * 联动主流程（纯方案 A）：enabled=true（进入 Kaz）→ 仅补录原始状态快照
+     * （信息用途）；enabled=false（关闭 / 切走）→ 无操作。被管理插件启停已由
+     * 各插件经 kazMode.pluginConfig 按 agent 会话实时读取，无需写 settings.yaml。
      */
     let linkRunPending = false;
     let lastEnabledState = false;
@@ -550,47 +528,29 @@ export default {
           const enabledNow = current.enabled === true;
           const entering = enabledNow && !lastEnabledState;
           lastEnabledState = enabledNow;
-          if (enabledNow) {
-            if (entering) {
-              // 快照 = 开启 Kaz 前被管理插件的原始状态。只补录「尚无快照」的插件，
-              // 不覆盖已保存的快照——否则第二次进入 Kaz 时快照到的是上次退出被
-              // 应用成 nonKaz 默认后的状态，并非真正的原始状态（2026-08-21 修复）。
-              const saved = await snapshotPluginStates();
-              const settings = getSettings();
-              const currentSettings = source();
-              const existing =
-                currentSettings.savedPluginStates !== null &&
-                typeof currentSettings.savedPluginStates === "object"
-                  ? currentSettings.savedPluginStates
-                  : {};
-              const merged = { ...existing };
-              for (const [id, state] of Object.entries(saved)) {
-                if (merged[id] === undefined || merged[id] === null) merged[id] = state;
-              }
-              if (Object.keys(merged).length > 0 && settings !== undefined) {
-                await settings.update(NAMESPACE, { savedPluginStates: merged });
-              }
+          if (entering) {
+            // 快照 = 开启 Kaz 前被管理插件的原始状态（仅信息展示）。只补录
+            // 「尚无快照」的插件，不覆盖已保存的快照。
+            const saved = await snapshotPluginStates();
+            const settings = getSettings();
+            const currentSettings = source();
+            const existing =
+              currentSettings.savedPluginStates !== null &&
+              typeof currentSettings.savedPluginStates === "object"
+                ? currentSettings.savedPluginStates
+                : {};
+            const merged = { ...existing };
+            for (const [id, state] of Object.entries(saved)) {
+              if (merged[id] === undefined || merged[id] === null) merged[id] = state;
             }
-            if (activeSession !== null) {
-              await applyEffectiveState(activeSession.cwd, activeSession.sessionId);
-              ctx.logger.info(
-                `[kaz-mode] Kaz 模式已开启：已按会话 ${activeSession.sessionId} 应用插件状态；原始状态快照已保存。`,
-              );
-            } else {
-              const enabledCount = await forceEnableManaged();
-              ctx.logger.info(
-                `[kaz-mode] Kaz 模式已开启：联动启用 ${enabledCount} 个插件；原始状态快照已保存。`,
-              );
+            if (Object.keys(merged).length > 0 && settings !== undefined) {
+              await settings.update(NAMESPACE, { savedPluginStates: merged });
             }
+            ctx.logger.info(`[kaz-mode] Kaz 模式已开启：插件状态按 agent 会话实时生效（纯方案 A，不再写插件 settings.yaml）。`);
+          } else if (enabledNow) {
+            ctx.logger.debug(`[kaz-mode] Kaz 模式保持开启。`);
           } else {
-            if (activeSession !== null) {
-              await applyEffectiveState(activeSession.cwd, activeSession.sessionId);
-              ctx.logger.info(
-                `[kaz-mode] Kaz 模式已关闭：已按会话 ${activeSession.sessionId} 应用非 Kaz 默认插件状态。`,
-              );
-            } else {
-              ctx.logger.info(`[kaz-mode] Kaz 模式已关闭：插件 enabled 保持当前状态。`);
-            }
+            ctx.logger.info(`[kaz-mode] Kaz 模式已关闭：插件回落到各自独立生效配置（纯方案 A）。`);
           }
         } while (linkRunPending);
       } catch (error) {
@@ -1103,14 +1063,24 @@ export default {
           const cwd = sessionId.length > 0 ? resolveSessionCwd(sessionId) : activeSession !== null ? activeSession.cwd : process.cwd();
           const data = loadStateFile(cwd, ctx.logger);
           if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          // 会话自己的 Kaz 状态（事件优先判定，与面板/组装层同源），不是全局开关。
+          const kazEnabled = sessionKazEnabledById(sessionId);
+          // 直接算好每个被管理插件的生效 enabled（工厂+模式默认+会话覆盖），
+          // 供 kaz-memory / round-display 客户端面板判断显隐，无需各自重复计算。
+          const effective = effectivePluginStates(data, sessionId, kazEnabled);
+          const effectiveEnabled = {};
+          for (const [pid, st] of Object.entries(effective)) {
+            effectiveEnabled[pid] = { enabled: st !== null && typeof st === "object" ? st.enabled !== false : false };
+          }
           return {
             ok: true,
             value: {
               sessionId,
               cwd,
-              kazEnabled: source().enabled === true,
+              kazEnabled,
               defaults: data.defaults,
               session: data.sessions[sessionId] || null,
+              effective: effectiveEnabled,
               factory: {
                 nonKaz: deepClone(FACTORY_NON_KAZ_DEFAULTS),
                 kaz: deepClone(FACTORY_KAZ_DEFAULTS),
@@ -1120,9 +1090,10 @@ export default {
         }
 
         if (endpoint === "applySession") {
+          // 纯方案 A：只需记录活跃会话；插件在使用时刻经 kazMode.pluginConfig
+          // 按 agent 会话实时读取生效状态，无需写任何插件 settings.yaml。
           const { cwd, data } = loadSessionData(sessionId);
           activeSession = { sessionId, cwd };
-          await applyEffectiveState(cwd, sessionId);
           return { ok: true, value: { applied: true, sessionId } };
         }
 
@@ -1152,7 +1123,6 @@ export default {
           }
           saveSessions(cwd, data.sessions, ctx.logger);
           activeSession = { sessionId, cwd };
-          await applyEffectiveState(cwd, sessionId);
           return { ok: true, value: { session: data.sessions[sessionId] } };
         }
 
@@ -1187,12 +1157,12 @@ export default {
           const mode = input.mode === "nonKaz" || input.mode === "kaz" ? input.mode : null;
           if (mode === null) return rpcFail("mode 必须是 nonKaz 或 kaz");
           const { cwd, data } = loadSessionData(sessionId);
-          // "当前对话的插件状态" = 有效状态（专属覆盖 > 当前模式默认）。
-          const effective = effectivePluginStates(data, sessionId, source().enabled === true);
+          // "当前对话的插件状态" = 有效状态（专属覆盖 > 该会话当前模式默认）。
+          // 用会话自身预设（事件优先）计算，避免把上一个会话的模式带进来。
+          const effective = effectivePluginStates(data, sessionId, sessionKazEnabledById(sessionId));
           data.defaults[mode] = deepClone(effective);
           saveDefaults(data.defaults, ctx.logger);
           activeSession = { sessionId, cwd };
-          await applyEffectiveState(cwd, sessionId);
           return { ok: true, value: { defaults: data.defaults } };
         }
 
@@ -1209,7 +1179,6 @@ export default {
           saveDefaults(data.defaults, ctx.logger);
           if (sessionId.length > 0) {
             activeSession = { sessionId, cwd };
-            await applyEffectiveState(cwd, sessionId);
           }
           return { ok: true, value: { defaults: data.defaults } };
         }
@@ -1221,7 +1190,6 @@ export default {
           delete data.sessions[sessionId];
           saveSessions(cwd, data.sessions, ctx.logger);
           activeSession = { sessionId, cwd };
-          await applyEffectiveState(cwd, sessionId);
           return { ok: true, value: { session: data.sessions[sessionId] ?? null } };
         }
 
@@ -1238,7 +1206,6 @@ export default {
             saveSessions(cwd, data.sessions, ctx.logger);
           }
           activeSession = { sessionId, cwd };
-          await applyEffectiveState(cwd, sessionId);
           return { ok: true, value: { session: data.sessions[sessionId] ?? null } };
         }
 
