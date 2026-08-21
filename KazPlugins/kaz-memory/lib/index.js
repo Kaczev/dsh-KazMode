@@ -220,12 +220,13 @@ function present(title, kind, rawInput) {
  *  2026-08-21：改为主动行动式措辞——模型应当主动查记忆、主动存记忆，
  *  而不是等到"遇到难题"才想起记忆。 */
 const GUIDANCE_HEAD = [
-  "We need to search the memory (memory_search) at the start of a task for relevant information",
+  "We need to search the memory (memory_search) at the start of a task for relevant information.",
   "We need to save memories (memory_save) with a name, a one-line summary and concise, sharp content — shared with the user, persists across conversations."
 ].join("\n");
 
 /** 每轮首次 memory_search 之后注入的遗忘指引。 */
 const GUIDANCE_FORGET = [
+ "We need to get details of memories (memory_detail) when we need more information about a specific memory.",
  "We need to forget memories (memory_forget) related to tasks that have been completed and no longer need to be retained.",
  "We need to update memories (memory_update) when the stored content is incorrect, when the content needs to be changed, or when the memory's name or keywords are no longer accurate."
 ].join("\n");
