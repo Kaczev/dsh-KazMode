@@ -1,7 +1,6 @@
 // kaz-memory —— 独立记忆插件（BM25 检索 + 摘要 + 自动载入 + RPC 面板通道）
 // ===========================================================================
-// 与 @max-null/dsh-memory 同功能的跨会话明文记忆（引擎 vendored 自
-// @max-null/dsh-memory，MIT，存储位置与格式兼容），2026-08 升级：
+//   2026-08 升级：
 //   * ctx.memory 引擎 + memory_save / memory_update / memory_list /
 //     memory_search / memory_detail / memory_forget 六工具
 //   * 每条记忆 JSON 持久化：id / name / keywords / summary / content /

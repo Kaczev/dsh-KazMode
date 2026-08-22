@@ -104,7 +104,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
-  if (id === "thinking-anchor" || id === "kaz-diag") {
+  if (id === "thinking-anchor" || id === "kaz-diag" || id === "round-display") {
     FACTORY_KAZ_DEFAULTS[id].enabled = false;
   }
 }
