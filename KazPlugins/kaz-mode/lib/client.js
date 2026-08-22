@@ -26,6 +26,65 @@ window.__ModuleLoader__.load({
 		const DEEPSEEK_OFFICIAL_KWARGS = { temperature: 1, top_p: 1, repetition_penalty: 1 };
 		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 };
 
+		/** Kaz 模式当前版本（与仓库 Git tag 对应；发新版时记得同步改这里）。 */
+		const KAZ_CURRENT_VERSION = "2.11.4";
+		/** Kaz 模式 GitHub 仓库地址。 */
+		const KAZ_GITHUB_REPO_URL = "https://github.com/Kaczev/dsh-KazMode";
+		/** GitHub tags API（只用来做“有没有新版本”提醒）。 */
+		const KAZ_GITHUB_TAGS_API = "https://api.github.com/repos/Kaczev/dsh-KazMode/tags?per_page=100";
+
+		/** 简单比较 tag 版本号：支持 v 前缀、点分数字（2.11.4 < 2.11.10）。 */
+		function kazCompareVersions(a, b) {
+			const parse = (value) =>
+				String(value || "")
+					.replace(/^v/i, "")
+					.split(/[.\-_+]/)
+					.map((part) => {
+						const number = Number.parseInt(part, 10);
+						return Number.isNaN(number) ? part : number;
+					});
+			const left = parse(a);
+			const right = parse(b);
+			const length = Math.max(left.length, right.length);
+			for (let index = 0; index < length; index += 1) {
+				const x = index < left.length ? left[index] : 0;
+				const y = index < right.length ? right[index] : 0;
+				if (typeof x === "number" && typeof y === "number") {
+					if (x !== y) return x < y ? -1 : 1;
+				} else {
+					const xs = String(x ?? "");
+					const ys = String(y ?? "");
+					if (xs !== ys) return xs < ys ? -1 : 1;
+				}
+			}
+			return 0;
+		}
+
+		/** 从 GitHub tags API 获取最高版本 tag；失败返回 null。 */
+		async function kazFetchLatestTag() {
+			try {
+				const controller = new AbortController();
+				const timer = setTimeout(() => controller.abort(), 10000);
+				const response = await fetch(KAZ_GITHUB_TAGS_API, {
+					headers: { Accept: "application/vnd.github+json" },
+					signal: controller.signal,
+				});
+				clearTimeout(timer);
+				if (!response.ok) return null;
+				const data = await response.json();
+				if (!Array.isArray(data) || data.length === 0) return null;
+				let latest = null;
+				for (const entry of data) {
+					if (entry !== null && typeof entry === "object" && typeof entry.name === "string" && entry.name.length > 0) {
+						if (latest === null || kazCompareVersions(entry.name, latest) > 0) latest = entry.name;
+					}
+				}
+				return latest;
+			} catch {
+				return null;
+			}
+		}
+
 		/**
 		 * 被管理的插件与其配置字段（字段与各插件 settings.yaml 段一一对应）。
 		 * tag 作为悬停简介（Tooltip），解决名称过长被省略号截断的问题。
@@ -1121,6 +1180,21 @@ window.__ModuleLoader__.load({
 					void refresh();
 				}, [refresh]);
 
+				// 简单的 GitHub 新版本提醒：打开面板时查一次最新 tag。
+				const [latestTag, setLatestTag] = useState(null);
+				const [checkFailed, setCheckFailed] = useState(false);
+				useEffect(() => {
+					let cancelled = false;
+					kazFetchLatestTag().then((tag) => {
+						if (cancelled) return;
+						if (tag === null) setCheckFailed(true);
+						else setLatestTag(tag);
+					});
+					return () => {
+						cancelled = true;
+					};
+				}, []);
+
 				const defaults = stateData !== null && stateData.defaults !== undefined ? stateData.defaults : { nonKaz: {}, kaz: {} };
 				const sessionOverrides = stateData !== null && stateData.session !== null && typeof stateData.session === "object" ? stateData.session : {};
 				// 新建对话页面优先使用空白会话上已暂存/已应用的 agentPreset；
@@ -1247,6 +1321,30 @@ window.__ModuleLoader__.load({
 						"Kaz 模式 · 详细设置",
 						createElement("span", { className: "kzm-badge", "data-state": effectiveKazEnabled ? "on" : "off" }, effectiveKazEnabled ? "已开启" : "已关闭"),
 					),
+					createElement(
+						"p",
+						{ className: "kzm-preset" },
+						createElement("strong", null, "版本"),
+						"：当前 " + KAZ_CURRENT_VERSION,
+						latestTag !== null
+							? (kazCompareVersions(KAZ_CURRENT_VERSION, latestTag) < 0
+								? " · GitHub 有新版本：" + latestTag
+								: " · 已是最新")
+							: (checkFailed ? " · GitHub 检查失败" : " · 正在检查 GitHub…"),
+						createElement("br", null),
+						"仓库：",
+						createElement("a", { href: KAZ_GITHUB_REPO_URL, target: "_blank", rel: "noreferrer" }, KAZ_GITHUB_REPO_URL),
+					),
+					latestTag !== null && kazCompareVersions(KAZ_CURRENT_VERSION, latestTag) < 0 &&
+						createElement(
+							"div",
+							{ className: "kzm-drift" },
+							createElement(
+								"span",
+								{ className: "kzm-drift-text" },
+								"⚠ GitHub 有新版本：" + latestTag + "，去仓库看看更新内容吧。",
+							),
+						),
 					createElement(
 						"p",
 						{ className: "kzm-preset" },
