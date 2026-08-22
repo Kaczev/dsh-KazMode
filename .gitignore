@@ -3,3 +3,4 @@
 /.dsh
 /.dsh/storages
 .dsh/storages/memory_project.json
+*.7z
