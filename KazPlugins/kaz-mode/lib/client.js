@@ -26,7 +26,7 @@ window.__ModuleLoader__.load({
 		const DEEPSEEK_OFFICIAL_KWARGS = { temperature: 1, top_p: 1, repetition_penalty: 1 };
 		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 };
 
-		/** Kaz 模式当前版本（与仓库 Git tag 对应；发新版时记得同步改这里）。 */
+		/** Kaz 模式当前版本兜底值：正常会通过 RPC 读取 version.json，这里只在 RPC 失败时使用。 */
 		const KAZ_CURRENT_VERSION = "2.11.4";
 		/** Kaz 模式 GitHub 仓库地址。 */
 		const KAZ_GITHUB_REPO_URL = "https://github.com/Kaczev/dsh-KazMode";
@@ -1195,6 +1195,22 @@ window.__ModuleLoader__.load({
 					};
 				}, []);
 
+				// 本地版本通过宿主 RPC 读取 version.json；RPC 失败时用 KAZ_CURRENT_VERSION 兜底。
+				const [localVersion, setLocalVersion] = useState(null);
+				useEffect(() => {
+					let cancelled = false;
+					rpcCall("getVersion", {}).then((res) => {
+						if (cancelled) return;
+						if (res !== null && typeof res.version === "string" && res.version.length > 0) {
+							setLocalVersion(res.version);
+						}
+					});
+					return () => {
+						cancelled = true;
+					};
+				}, []);
+				const effectiveLocalVersion = localVersion !== null && localVersion.length > 0 ? localVersion : KAZ_CURRENT_VERSION;
+
 				const defaults = stateData !== null && stateData.defaults !== undefined ? stateData.defaults : { nonKaz: {}, kaz: {} };
 				const sessionOverrides = stateData !== null && stateData.session !== null && typeof stateData.session === "object" ? stateData.session : {};
 				// 新建对话页面优先使用空白会话上已暂存/已应用的 agentPreset；
@@ -1325,9 +1341,9 @@ window.__ModuleLoader__.load({
 						"p",
 						{ className: "kzm-preset" },
 						createElement("strong", null, "版本"),
-						"：当前 " + KAZ_CURRENT_VERSION,
+						"：当前 " + effectiveLocalVersion,
 						latestTag !== null
-							? (kazCompareVersions(KAZ_CURRENT_VERSION, latestTag) < 0
+							? (kazCompareVersions(effectiveLocalVersion, latestTag) < 0
 								? " · GitHub 有新版本：" + latestTag
 								: " · 已是最新")
 							: (checkFailed ? " · GitHub 检查失败" : " · 正在检查 GitHub…"),
@@ -1335,7 +1351,7 @@ window.__ModuleLoader__.load({
 						"仓库：",
 						createElement("a", { href: KAZ_GITHUB_REPO_URL, target: "_blank", rel: "noreferrer" }, KAZ_GITHUB_REPO_URL),
 					),
-					latestTag !== null && kazCompareVersions(KAZ_CURRENT_VERSION, latestTag) < 0 &&
+					latestTag !== null && kazCompareVersions(effectiveLocalVersion, latestTag) < 0 &&
 						createElement(
 							"div",
 							{ className: "kzm-drift" },

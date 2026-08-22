@@ -39,6 +39,7 @@ import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
   TOOL_WHITELIST,
@@ -119,6 +120,10 @@ let STORAGE_DIR = join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storage
 let DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/kaz-mode";
+
+/** kaz-mode 插件根目录与版本文件（本机已安装版本的单一事实源）。 */
+const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const VERSION_FILE = join(PLUGIN_ROOT, "version.json");
 
 /** 设置 schema（同时驱动设置页 UI 与客户端面板的字段读写）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -1081,7 +1086,13 @@ export default {
       try {
         const input = payload !== null && typeof payload === "object" ? payload : {};
         const sessionId = typeof input.sessionId === "string" ? input.sessionId : "";
-        if (sessionId.length === 0 && endpoint !== "resetDefault" && endpoint !== "getState" && endpoint !== "setDefaultPlugin") {
+        if (
+          sessionId.length === 0 &&
+          endpoint !== "resetDefault" &&
+          endpoint !== "getState" &&
+          endpoint !== "setDefaultPlugin" &&
+          endpoint !== "getVersion"
+        ) {
           return rpcFail("缺少 sessionId");
         }
 
@@ -1113,6 +1124,28 @@ export default {
               },
             },
           };
+        }
+
+        if (endpoint === "getVersion") {
+          // 本机已安装的 Kaz 模式版本：读插件目录下的 version.json。
+          try {
+            if (!existsSync(VERSION_FILE)) {
+              return rpcFail("版本文件不存在：" + VERSION_FILE);
+            }
+            let raw = readFileSync(VERSION_FILE, "utf8");
+            if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+            const parsed = JSON.parse(raw);
+            const version =
+              parsed !== null && typeof parsed === "object" && typeof parsed.version === "string"
+                ? parsed.version.trim()
+                : "";
+            if (version.length === 0) {
+              return rpcFail("版本文件缺少 version 字段");
+            }
+            return { ok: true, value: { version } };
+          } catch (error) {
+            return rpcFail("读取版本文件失败：" + safeMessage(error));
+          }
         }
 
         if (endpoint === "applySession") {
