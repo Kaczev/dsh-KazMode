@@ -18,6 +18,9 @@
     "lib/client.js",
     "version.json"
   ],
+  "scripts": {
+    "check:version": "node check-version.mjs"
+  },
   "dsh": {
     "client": {
       "inject": [

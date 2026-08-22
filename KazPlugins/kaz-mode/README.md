@@ -104,6 +104,20 @@ kaz-mode:
   savedPluginStates: {}               # 信息快照（自动维护，勿手改）
 ```
 
+## 发新版必做（给未来的我和 agent）
+
+Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/version.json`。**发新版本时如果不改这里，面板会一直拿旧版本号和 GitHub 比较，导致错误提示。**
+
+每次发布新版本前，按这个顺序做：
+
+1. 更新 `KazPlugins/kaz-mode/version.json` 里的 `version` 为新 tag 号；
+2. 运行版本检查：
+   ```powershell
+   node KazPlugins/kaz-mode/check-version.mjs
+   ```
+   如果最新 tag 之后有提交但 `version.json` 没升版本，脚本会报错提醒；
+3. 确认无误后再打 tag、推送到 GitHub。
+
 ## 依赖契约
 
 kaz-mode 存在时，`round-minimal` / `plugin-filter` / `kaz-memory` 三个前置插件必须
