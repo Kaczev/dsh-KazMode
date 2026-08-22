@@ -1,6 +1,6 @@
 {
   "name": "deepseek-default-model",
-  "description": "DeepSeek 模型默认参数插件：Kaz 面板调整默认 provider / model / reasoningEffort / generation_kwargs（temperature / top_p / repetition_penalty），同步官方 agent-default-model 设置段并把 temperature 应用到请求。",
+  "description": "DeepSeek 模型采样参数插件：Kaz 面板调整 generation_kwargs（temperature / top_p / repetition_penalty），并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理。",
   "version": "0.1.0",
   "entry": {
     "name": "deepseek-default-model"

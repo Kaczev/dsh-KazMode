@@ -14,7 +14,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | `plugin-filter`（原 tool-filter） | 工具过滤：按名单移除 / 禁用指定工具 |
 | `output-beep` | 输出完成提示音：模型输出完毕时响提示音（可配频率/时长/子代理） |
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
-| `deepseek-default-model` | DeepSeek 默认参数：面板调整默认 provider / model / reasoningEffort / generation_kwargs，同步官方 agent-default-model 并把 temperature 应用到请求 |
+| `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
 | `kaz-diag` | 诊断：只注册只读状态工具 `kaz_mode_status`（开启本插件才加入 Kaz 工具面） |
 

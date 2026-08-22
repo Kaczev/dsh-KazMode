@@ -3,7 +3,7 @@
 // 「Kaz 模式」超级模式插件 —— 统一管理并联动本工作区插件：
 //   thinking-anchor（思考锚点 · 消息注入）、round-minimal（首阶段极简）、
 //   plugin-filter（工具过滤）、output-beep（提示音）、round-display（注入显示）、
-//   deepseek-default-model（DeepSeek 默认参数）、kaz-memory（独立记忆组件）、
+//   deepseek-default-model（DeepSeek 采样参数）、kaz-memory（独立记忆组件）、
 //   kaz-diag（诊断 · 状态工具），并提供集中管理面板与头部开关按钮（客户端半）。
 //
 // Kaz 模式的语义（2026-08 重构后）：
@@ -92,9 +92,6 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   "round-display": { enabled: false },
   "deepseek-default-model": {
     enabled: false,
-    provider: "deepseek-official",
-    model: "deepseek-v4-flash",
-    reasoningEffort: "high",
     generation_kwargs: { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 },
   },
   "kaz-memory": { enabled: false, guidance: "", guidanceHead: "" },

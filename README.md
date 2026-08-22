@@ -77,7 +77,7 @@ dsh-KazMode/
 | `kaz-agent-preset-display` | `kaz-agent-preset-display` | 修正新对话 hero 上 agent preset 按钮显示；默认常驻开启，不受 Kaz 模式开关影响 |
 | `output-beep` | `output-beep` | 模型输出完毕 / 提问时播放提示音 |
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
-| `deepseek-default-model` | `deepseek-default-model` | DeepSeek 默认模型参数：provider / model / reasoningEffort / generation_kwargs |
+| `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
 | `kaz-diag` | `kaz-diag` | 诊断工具 `kaz_mode_status`（只读状态报告） |
 

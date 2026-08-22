@@ -56,7 +56,7 @@ export const MANAGED_PLUGINS = [
   { id: "plugin-filter", label: "plugin-filter（工具过滤）" },
   { id: "output-beep", label: "output-beep（输出完成提示音）" },
   { id: "round-display", label: "round-display（每轮注入显示）" },
-  { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 默认参数）" },
+  { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 采样参数）" },
   { id: "kaz-memory", label: "kaz-memory（独立记忆组件）" },
   { id: "kaz-diag", label: "kaz-diag（诊断 · 状态工具）" },
   { id: "first-round-hints", label: "first-round-hints（首轮其它消息提示 · 对话开始注入）" },
