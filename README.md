@@ -1,32 +1,38 @@
-# Kaz模式说明
-本模式用于提升ds的推理效率，提高ds输出的质量
+# Kaz 模式（dsh-KazMode 全家桶）
 
-本模式的基本思路是维持极简模式的提示词，同时首轮工具被调用之前与极简模式几乎相同
+> 为 DeepSeek Harness（dsh）设计的一套工作模式与插件合集：**极简提示词 + 两阶段工具面 + 跨会话记忆**，用于提升模型的推理效率与输出质量。
 
-拥有记忆组件，模型在相同话题下越用越好用（因为有些过去得到的经验，模型会存下来）
+## Kaz 模式是什么
 
-大部分插件目录下都有README.md，写明了它们的作用
+- **提示词极简**：Kaz 会话的系统提示词固定为一句 `You are a helpful software engineer assistant.`，把上下文预算留给任务本身；
+- **工具面两阶段**：首次工具调用前只暴露 `pwsh` / `read` / `edit`，第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
+- **跨会话记忆**：模型会把经验存为明文记忆（`memory_save / update / list / search / detail / forget` 六工具），同一话题下越用越好用；
+- **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；
+- **settings.yaml 干净（纯方案 A，v2.11）**：被管理插件的生效配置存于 `~/.dsh/storages/kaz-defaults.json`（模式默认）与 `<项目>/.dsh/storages/kaz-session-states.json`（会话覆盖），**不会写回 settings.yaml**。
 
-默认不开启（不需要开启）
-- kaz-diag：给模型加入一个可以汇报Kaz模式状态的工具，调试的时候用。
-- thinking-anchor：使用提示词提醒模型要遵循We need思维，用英语思考（无需开启，因为我发现不开启也是这样）。
+## 插件说明
 
-kaz-agent-preset-display插件是补丁来的，因为原dsh的按钮显示的模式不一定正确：如果新建对话的时候，一开始你选择了模式A，但是你在设置中，预设模式是模式B，接着你刷新了浏览器，官方的按钮会显示成模式B。如果你不主动再调模式，你发了第一条消息之后，会显示回模式A。
+完整清单见下文「仓库内容」表格；几个值得知道的：
 
-output-beep插件会在模型提问或者输出完之后，让电脑发出“滴”的声音，提醒用户可以回答，或者继续写提示词。因为模型推理时间有时候很长。我为了摸鱼，专门添加这个功能。
+- **默认关闭、按需开启**：
+  - `kaz-diag`：给模型一个 `kaz_mode_status` 状态工具，调试 Kaz 模式时用；
+  - `thinking-anchor`：用提示词提醒模型遵循 "We need…" 思维链、用英语思考（多数情况下不开效果也一样）。
+- **`kaz-agent-preset-display`**：显示补丁。官方新对话预设按钮在「先选模式 A、设置里默认 B、刷新页面」后会错显成 B；本插件让按钮优先显示该对话自己的预设。
+- **`output-beep`**：模型输出完毕 / 提问时“滴”一声，提醒你可以继续打字（作者摸鱼专用 🐳）。
+- **`round-display`**：显示每轮 Kaz 联动/附属插件给模型注入了什么信息。
+- **不喜欢某个插件？** 在 Kaz 面板直接关掉；还能把当前状态“设为 Kaz / 非 Kaz 模式的默认设置”，非常灵活。
 
-如果你不喜欢某些插件，你可以关掉，并设置为默认的Kaz模式和非Kaz模式的配置。配置是按照对话隔离的。非常方便。
+---
 
-> 写安装程序老是出错，我决定使用最先进的ds安装法，根本无需考虑那么多（推荐在梁文谷的时候安装）
+## 仓库说明与安装指引
 
-# dsh-KazMode —— Kaz 模式全家桶
-
-本仓库保存 **Kaz 模式全家桶**：Kaczev 在 dsh（DeepSeek Harness）里使用的全部插件和 `kaz` 预设。  
-本文档既是仓库说明，也是**写给 DeepSeek 的安装指引**。
+本仓库保存 **Kaz 模式全家桶**：Kaczev 在 dsh（DeepSeek Harness）里使用的全部插件和 `kaz` 预设；既是仓库说明，也是写给 DeepSeek 的安装指引。
 
 > 安装时最需要注意两件事：
 > 1. **插件必须装到 `KazPlugins` 文件夹**（不是 `plugins`）；
 > 2. **预设必须装成 `.agent-presets/kaz`**（小写 `kaz`，文件直接放在该目录根部）。
+
+> 写安装程序老是出错，我决定使用最先进的 ds 安装法，根本无需考虑那么多（推荐在梁文谷的时候安装）
 
 ---
 
@@ -262,7 +268,7 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund
 output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag /
 first-round-hints）的生效配置由 kazMode 服务读取：
 - `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认）
-- `<项目>/.dsh/kaz-session-states.json`（会话专属覆盖）
+- `<项目>/.dsh/storages/kaz-session-states.json`（会话专属覆盖）
 
 settings.yaml **不再承载这些插件的段**（插件自愈写入已关闭），只需保留：
 
