@@ -1,10 +1,12 @@
 # round-minimal —— 首阶段极简（首次工具调用后恢复）
 
+> **作用**：首次工具调用前只暴露 `pwsh` / `read` / `edit` 三个工具，模型第一次调用工具后就恢复全部工具——让模型先以极简工具观察/动手，避免首轮就乱调工具、浪费上下文。
+
 宿主侧插件：按「会话里是否已发生第一次工具调用」切换工具集（2026-08 重构，
 替代旧的按对话轮次判定）：
 
 - **首次工具调用前**（极简阶段）：模型可见/可调用的工具只保留 `firstRoundTools`
-  （默认 `pwsh`、`str_replace_editor`），其余工具及 `tool:*` 指导段全部滤除；
+  （默认 `pwsh`、`read`、`edit`），其余工具及 `tool:*` 指导段全部滤除；
   执行层对白名单之外的调用一律拒绝（纵深防御）。
 - **首次工具调用之后**：工具列表恢复为组合/预设配置的全部工具。
 
@@ -16,8 +18,7 @@
 
 ## 特性
 
-- **首阶段极简**：首阶段只暴露 `pwsh` + `str_replace_editor`（RL 形态的 shell +
-  editor 工具面）；
+- **首阶段极简**：首阶段只暴露 `pwsh` + `read` + `edit`（shell + 文件查看/编辑）；
 - **子代理排除**：默认不受影响（`includeSubagents: false`）——subagent / workflow /
   ralph 的子会话始终走全量模式；
 - **对外信号**：发布 `roundMinimal` 服务（`enabled` / `firstRoundTools` /
@@ -27,14 +28,17 @@
 > Windows 说明：极简阶段工具集默认使用 `pwsh`（PowerShell 7+，Windows 自带）
 > 而非 bash，因此本插件开箱即用于 Windows 环境。
 
-## settings（`~/.dsh/settings.yaml`，热重载）
+## settings（纯方案 A：Kaz 会话下经 Kaz 面板/kazMode 服务生效；此处仅 standalone 兜底）
 
 ```yaml
 round-minimal:
   enabled: true
-  firstRoundTools: [ pwsh, str_replace_editor ]  # 极简阶段工具白名单
+  firstRoundTools: [ pwsh, read, edit ]  # 极简阶段工具白名单
   includeSubagents: false   # 子代理也走首阶段极简（默认关）
 ```
+
+> 纯方案 A：Kaz 模式下生效配置由 kazMode 服务按会话读取（kaz-defaults.json +
+> kaz-session-states.json），settings.yaml 段不再被 kaz-mode 改写、也不再自动补写。
 
 ## 阶段如何判定（无进程内状态，重启安全）
 
@@ -59,7 +63,7 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\round-minimal\probe-round-mi
 
 ## 验收要点
 
-1. 新对话首次请求的工具面只有 `pwsh` + `str_replace_editor`；
+1. 新对话首次请求的工具面只有 `pwsh` + `read` + `edit`；
 2. 模型第一次工具调用后的下一次组装，工具面恢复全部工具；
 3. 重启续接旧对话（已有工具调用）直接全量模式；
 4. 子代理（`includeSubagents: false` 时）始终全量模式。

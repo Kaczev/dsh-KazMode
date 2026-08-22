@@ -1,5 +1,7 @@
 # kaz-memory —— 独立记忆插件（BM25 检索 + 摘要 + 自动载入 + RPC 面板通道）
 
+> **作用**：跨会话明文记忆——模型把经验存成记忆（六工具），相同话题下越用越好用；人工确认闸门 + 自动载入 + 面板管理。
+
 与 `@max-null/dsh-memory` 同功能的跨会话明文记忆；默认**不注入记忆正文**，但首轮工具调用后会注入一条记忆指引，并在后续每一轮开头重复注入；每一轮首次使用 `memory_search` 后会再注入一条清理遗忘指引；对每条记忆可标记「自动载入」，在**对话开始时**自动注入一次（2026-08 重构：不再等 memory_search 首次可用）。2026-08 升级：**BM25 相关性检索（vendored okapibm25，离线可用）+ 摘要字段 + 分页 + memory_detail 分片读取**。
 
 | | @max-null/dsh-memory | kaz-memory |
@@ -42,27 +44,32 @@
 - **打开记忆文件夹按钮（2026-08-17）**：面板顶部「打开全局记忆文件夹」「打开项目记忆文件夹」两个按钮。
 - **面板不被侧边栏裁剪（2026-08-17）**：记忆面板经 `createPortal` 挂到 `document.body`，按按钮矩形 fixed 定位、自动在视口内收拢。
 - **消息格式（2026-08-17 起精简；2026-08-21 改为主动行动式措辞；2026-08-22 改为首轮工具调用后注入，后续每轮开头重复）**：记忆指引是**首轮工具调用之后以上下文消息注入、并从下一轮起在每轮开头重复**的**固定短提示**——`[kaz-memory guidance] / > / 内容 / <` 信封格式，只发一行 We need 风格英文总述（主动行动式：任务开始时先用 memory_search 查记忆、学到重要事实后用 memory_save 存下来——存时给 name + 一句话 summary + 精炼正文）；记忆工具的具体用法由各工具描述自带。**仅当 memory_search 在当前环境确实可调用时发送**；不可用即返回空串。**每一轮第一次 `memory_search` 之后**还会以同一信封格式再注入一条**遗忘指引**（`We need to forget memories (memory_forget) ...`），按 turn 注入、每个 turn 内只注入一次，且仅在 `memory_search` 与 `memory_forget` 都可用时发送。Kaz 模式会滤掉 systemPrompt 段，因此固定指引不再注册 `tool:memory:kaz-memory` 系统提示段，改为 `agent/pre-step` 合成用户消息注入；部署基础英文记忆指引段（`tool:memory`）仍在组装层**无条件移除**。
-- **总开关（2026-08-21）**：settings.yaml `kaz-memory` 段的 `enabled`（默认 `true`）。关闭时：**六个记忆工具完全注销**（不只是移出 Kaz 工具面——任何模式下都不再出现在工具列表里，不占工具面/上下文；热重载），不注入记忆指引、不自动载入记忆，客户端完全不渲染记忆面板；开启时按原有逻辑自动判断并重新注册六工具。
+- **总开关（纯方案 A，2026-08-21）**：Kaz 会话下生效 enabled 由 kazMode 服务按会话
+  读取（Kaz 面板开关，kaz-defaults.json + kaz-session-states.json）。关闭时（该会话
+  生效 enabled=false）：六个记忆工具从该会话工具面移出、调用被拒，不注入记忆指引、
+  不自动载入，客户端不渲染记忆面板；settings.yaml 的 `kaz-memory.enabled=false`
+  仍作为 standalone 硬闸门（六工具完全注销、任何模式不出现）。
 - **指引配置（2026-08-17）**：settings.yaml `kaz-memory` 段生效字段——`guidance`（旧字段，整段覆盖）与 `guidanceHead`（固定提示总述行覆盖）与 `guidanceForget`（遗忘指引覆盖）；`guidanceSearch` / `guidanceSave` / `guidanceList` 仍保留兼容但**不再生效**。
 - **闸门（含 memory_update）**：模型 memory_save 仍然只能写 `pending`，只有人在面板点「确认生效」才会置为 `applied`；「忽略」置为 `ignored`；「删除」即 forget。`memory_update` 可修改已有记忆的正文/标签/标题/摘要；**修改 applied 记忆的正文会把它降级回 `pending`**，需人工再次确认，只改标签/标题/摘要不降级。「自动载入」开关只由面板操作（模型没有对应工具）；未确认的记忆即使勾选也不注入。
 - **状态命名（2026-08 起）**：对外统一 `pending`（待确认）/ `ignored`（已忽略）/ `applied`（已生效）；旧 JSON 里的 `suggested` / `suggest` / `auto` 读取时自动映射到新值，写回时逐步落新值，无需手工迁移。
 
-## 配置（settings.yaml，2026-08 升级）
+## 配置（纯方案 A：Kaz 会话下经 Kaz 面板/kazMode 服务生效；此处仅 standalone 兜底）
 
 `kaz-memory` 段现在只有**指引配置 + BM25 参数**（记忆数据全部在 JSON 文件里）：
 
 ```yaml
 kaz-memory:
-  enabled: true          # 总开关（Kaz 模式面板也提供）
+  enabled: true          # 总开关（Kaz 模式面板也提供；standalone 硬闸门）
   guidance: ""           # 旧字段：整段指引覆盖（留空 = 内置默认）
   guidanceHead: ""       # 固定提示总述行覆盖（留空 = 内置默认）
   guidanceForget: ""     # 遗忘指引覆盖（留空 = 内置默认）
-  bm25:                  # BM25 检索参数（memory_search 评分用；改配置热重载；Kaz 模式面板的 kaz-memory 行也提供 k1/b 输入）
+  bm25:                  # BM25 检索参数（memory_search 评分用；Kaz 面板的 kaz-memory 行也提供 k1/b 输入）
     k1: 1.2              # 词频饱和参数（默认 1.2，一般取值 1.2 ~ 2.0）
     b: 0.75              # 长度归一化参数（默认 0.75，0 = 不做长度归一化）
 ```
 
-插件加载时会自动把缺失的默认键（含 `bm25.k1 / b`）补写进 `settings.yaml`，无需手工添加。改完热重载生效（或重启 dsh）。
+> 纯方案 A：Kaz 会话下这些配置的生效值由 kazMode 服务按会话读取（kaz-defaults.json
+> + kaz-session-states.json），settings.yaml 段仅作 standalone 兜底，**不再自动补写**。
 
 ## 存储位置（2026-08-17 起）
 
@@ -124,10 +131,10 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-memory\probe-engine.mjs"
 6. 面板「确认生效」后该记忆 status 变 `applied`，`memory_list` 可查（只回 id/namespace/status/autoLoad/名称）。
 6b. 面板「自动载入」开关触发 RPC `autoLoad` 端点，旧记忆无该字段时按 `false` 读。
 6c. 记忆 `name` / `summary` 存在 JSON 里：保存时必填；面板「改名」经 RPC `rename` 写回 JSON；旧记录无 `name` 时按正文回退现算。
-7. `memory_list` 返回项只有 `id/namespace/status/autoLoad/名称` 五项、**没有 content 与 keywords**；`memory_search` 只回摘要（id/name/summary/keywords/score，无 content），看全文用 `memory_detail`；**settings.yaml 的 `kaz-memory` 段只剩指引 + bm25 配置**。
+7. `memory_list` 返回项只有 `id/namespace/status/autoLoad/名称` 五项、**没有 content 与 keywords**；`memory_search` 只回摘要（id/name/summary/keywords/score，无 content），看全文用 `memory_detail`；**settings.yaml 的 `kaz-memory` 段仅作 standalone 兜底（指引 + bm25），Kaz 会话下生效值来自 kaz-defaults.json / 会话状态**。
 7b. `memory_search` 按 BM25 分数降序、`limit`/`offset` 分页生效；`query` 为空报错；无命中返回空数组；`namespace`/`status` 过滤仍生效。
 7c. `memory_detail` 按 id 返回 content_preview/total_length/has_more；`offset` 超出正文返回空串 + `has_more=false`；不存在的 id 报错。
-7d. settings.yaml `kaz-memory.bm25.k1/b` 修改后 `memory_search` 分数随之变化（热重载）。
+7d. Kaz 面板 / `kaz-defaults.json` 里 `kaz-memory.bm25.k1/b` 修改后 `memory_search` 分数随之变化（下次请求生效）。
 8b. 自动载入时机：对话开始（首个 pre-step）即注入一次已确认且勾选自动载入的记忆全文，每会话只注入一次。
 9. 项目记忆按项目隔离：在 A 工作区 `memory_save(namespace=project)` 后，A 工作区的 `memory_list`/`memory_search`/`memory_detail` 能看到，B 工作区看不到；json 落在 `<A>/.dsh/storages/memory_project.json`，且桌面不再出现 `.dsh`。
 10. 每一轮第一次调用 `memory_search` 后，注入一次遗忘指引，每个 turn 内不重复；`memory_forget` 不可用或插件关闭时不发。固定指引首轮工具调用后注入，并从下一轮起在每轮开头重复注入。

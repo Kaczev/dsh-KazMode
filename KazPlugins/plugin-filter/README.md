@@ -1,5 +1,7 @@
 # plugin-filter（原 tool-filter，中文说明）
 
+> **作用**：从 dsh 的工具列表中过滤指定工具，阻止它们被加载或使用——默认屏蔽 `tool-cordis`、`tool-subagent-report`、`codex`、`claude-code`，可随时追加。
+
 一个 dsh（DeepSeek Harness）插件：从 dsh 的工具列表中**过滤指定工具**，阻止它们
 被加载或使用。默认屏蔽 `tool-cordis`、`tool-subagent-report`、`codex`、
 `claude-code` 四个工具/插件，并允许你随时追加更多。
@@ -78,7 +80,7 @@ plugin-filter/
 
 dsh 的插件 = 一个 npm 包 + 组合（`cordis.yml` 补丁）里的一行。共三步：
 
-**① 把包放进 profile**（目录位置：`~/.dsh/profiles/web/plugins/plugin-filter`）。
+**① 把包放进 profile**（目录位置：`~/.dsh/profiles/web/KazPlugins/plugin-filter`）。
 任选其一：
 
 - 方式 A（npm，推荐）：
@@ -88,16 +90,16 @@ dsh 的插件 = 一个 npm 包 + 组合（`cordis.yml` 补丁）里的一行。�
   # 本机 dsh 环境会设置 npm_config_allow_scripts，npm 11 会因此拒绝项目内安装，
   # 临时移除即可（只影响这一次命令）
   Remove-Item Env:npm_config_allow_scripts
-  npm install --legacy-peer-deps --no-audit --no-fund --save ./plugins/plugin-filter
+  npm install --legacy-peer-deps --no-audit --no-fund --save ./KazPlugins/plugin-filter
   ```
 
   npm 会把 `web/node_modules/plugin-filter` 建成指向
-  `web/plugins/plugin-filter` 的目录联接（junction），改源码即时生效、无需重装。
+  `web/KazPlugins/plugin-filter` 的目录联接（junction），改源码即时生效、无需重装。
 
 - 方式 B（无 npm / 不想用 npm）：
 
   ```powershell
-  $dst = Join-Path $env:USERPROFILE ".dsh\profiles\web\plugins\plugin-filter"
+  $dst = Join-Path $env:USERPROFILE ".dsh\profiles\web\KazPlugins\plugin-filter"
   Copy-Item "C:\Users\Kaczev\.dsh\profiles\web\KazPlugins\plugin-filter" -Destination $dst -Recurse -Force
   New-Item -ItemType Junction -Path "$env:USERPROFILE\.dsh\profiles\web\node_modules\plugin-filter" -Target $dst
   ```
@@ -135,6 +137,10 @@ plugin-filter:
     - codex
     - claude-code
 ```
+
+> 纯方案 A：Kaz 会话下生效 enabled / mode / disabledTools 由 kazMode 服务按会话
+> 读取（Kaz 面板可调），settings.yaml 段仅作 standalone 兜底（注册期全局行为仍由
+> 它驱动；组装/执行层按会话判定）。
 
 **④ 重启 dsh**（或等待热重载）。运行中的 dsh 会热重载用户补丁，改完
 `cordis.patch.yml` 可能当场挂载插件；重启可确保挂载状态干净。

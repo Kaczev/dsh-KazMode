@@ -1,10 +1,12 @@
 # first-round-hints —— 首轮其它消息提示插件
 
+> **作用**：对话开始时注入一条"使用要点"消息（pwsh 输出是对象别拼串、别用 Get-Content 读 UTF-8、JSON 陷阱、EIO 重试、该问就问、别乱搜网等），让模型一开场就避开常见坑。
+
 对话开始时（首个 `agent/pre-step`，step === 1）把一条固定消息**注入一次**
 （kaz-memory 自动载入 / thinking-anchor 同款机制）：以**合成用户消息**追加到
 当前请求，不触碰系统提示词（Kaz 模式的系统提示词由 kaz-mode 固定为一句）。
 
-## 默认消息（pwsh 使用要点）
+## 默认消息（内置四段：pwsh 要点 / EIO 重试 / 提问 / 搜索）
 
 ```text
 [first-round-hints pwsh quick rules]
@@ -12,6 +14,19 @@
 - pwsh result: stdout/stderr are OBJECTS, not strings — read .text (r.stdout?.text ?? ""), never concatenate them directly.
 - Encoding: do not read UTF-8 files with Get-Content (CJK becomes mojibake) — use the read tool.
 - PowerShell JSON: ConvertTo-Json flattens single-element arrays to a bare string (use -AsArray or build the JSON manually); Set-Content -Encoding UTF8 adds a BOM that breaks JSON.parse (strip /^\uFEFF/ or write with node).
+<
+[first-round-hints EIO]
+>
+- If write/edit reports 'Error: ReplaceFileW EIO (Win32 1175)', retry the exact same edit once — it is an intermittent Windows FS error.
+<
+[first-round-hints ask]
+>
+- We need to ask the user for clarification when the task goal or context is ambiguous.
+- we need to ask the user to resolve conflicts when multiple requirements cannot be satisfied simultaneously.
+<
+[first-round-hints web_search]
+>
+- We should avoid web_search when we have sufficient information.
 <
 ```
 
@@ -24,13 +39,16 @@
 - **插件加载时已存活的 agent 预标记**：它们的对话开始于插件之前，不注入；
 - `enabled: false` 关闭整个插件。
 
-## settings（`~/.dsh/settings.yaml`，热重载）
+## settings（纯方案 A：Kaz 会话下经 Kaz 面板/kazMode 服务生效；此处仅 standalone 兜底）
 
 ```yaml
 first-round-hints:
   enabled: true    # 总开关（默认开）
-  message: ""      # 注入的消息内容（留空 = 内置默认 pwsh 使用要点）
+  message: ""      # 注入的消息内容（留空 = 内置默认四段）
 ```
+
+> 纯方案 A：Kaz 模式下生效配置由 kazMode 服务按会话读取，settings.yaml 段不再被
+> kaz-mode 改写、也不再自动补写。
 
 ## 安装（与其它插件一致）
 
