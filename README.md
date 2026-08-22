@@ -378,9 +378,9 @@ kaz-agent-preset-display:
 
 ## 7. 发版提醒（给未来的我和 agent）
 
-Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/version.json`。
+Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段。
 
-**发新版本时，务必同步修改 `KazPlugins/kaz-mode/version.json` 里的 `version`，否则面板会用旧版本号和 GitHub tag 比较，产生错误的新版本提醒。**
+**发新版本时，务必同步修改 `KazPlugins/kaz-mode/package.json` 里的 `version`，否则面板会用旧版本号和 GitHub tag 比较，产生错误的新版本提醒。**
 
 发布前建议运行：
 
@@ -388,7 +388,7 @@ Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/version.json`。
 node KazPlugins/kaz-mode/check-version.mjs
 ```
 
-该脚本会在“最新 tag 之后有新提交、但 version.json 没升版本”时主动报错提醒。
+该脚本会在“最新 tag 之后有新提交、但 package.json 的 version 没升版本”时主动报错提醒。
 
 ---
 

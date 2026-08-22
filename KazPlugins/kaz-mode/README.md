@@ -106,16 +106,16 @@ kaz-mode:
 
 ## 发新版必做（给未来的我和 agent）
 
-Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/version.json`。**发新版本时如果不改这里，面板会一直拿旧版本号和 GitHub 比较，导致错误提示。**
+Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段。**发新版本时如果不改这里，面板会一直拿旧版本号和 GitHub 比较，导致错误提示。**
 
 每次发布新版本前，按这个顺序做：
 
-1. 更新 `KazPlugins/kaz-mode/version.json` 里的 `version` 为新 tag 号；
+1. 更新 `KazPlugins/kaz-mode/package.json` 里的 `version` 为新 tag 号；
 2. 运行版本检查：
    ```powershell
    node KazPlugins/kaz-mode/check-version.mjs
    ```
-   如果最新 tag 之后有提交但 `version.json` 没升版本，脚本会报错提醒；
+   如果最新 tag 之后有提交但 `package.json` 的 `version` 没升版本，脚本会报错提醒；
 3. 确认无误后再打 tag、推送到 GitHub。
 
 ## 依赖契约

@@ -26,8 +26,8 @@ window.__ModuleLoader__.load({
 		const DEEPSEEK_OFFICIAL_KWARGS = { temperature: 1, top_p: 1, repetition_penalty: 1 };
 		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 };
 
-		/** Kaz 模式当前版本兜底值：正常会通过 RPC 读取 version.json，这里只在 RPC 失败时使用。 */
-		const KAZ_CURRENT_VERSION = "2.11.4";
+		/** Kaz 模式当前版本兜底值：正常会通过 RPC 读取 package.json 的 version，这里只在 RPC 失败时使用。 */
+		const KAZ_CURRENT_VERSION = "2.11.8";
 		/** Kaz 模式 GitHub 仓库地址。 */
 		const KAZ_GITHUB_REPO_URL = "https://github.com/Kaczev/dsh-KazMode";
 		/** GitHub tags API（只用来做“有没有新版本”提醒）。 */
@@ -1195,7 +1195,7 @@ window.__ModuleLoader__.load({
 					};
 				}, []);
 
-				// 本地版本通过宿主 RPC 读取 version.json；RPC 失败时用 KAZ_CURRENT_VERSION 兜底。
+				// 本地版本通过宿主 RPC 读取 package.json 的 version；RPC 失败时用 KAZ_CURRENT_VERSION 兜底。
 				const [localVersion, setLocalVersion] = useState(null);
 				useEffect(() => {
 					let cancelled = false;
