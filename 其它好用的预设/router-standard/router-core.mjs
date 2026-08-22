@@ -140,9 +140,22 @@ export function classifyTask(text) {
 }
 
 /** Per-session mode derived from durable events (resume-safe). */
+/**
+ * Per-session mode derived from durable events (resume-safe).
+ *
+ * v0.3.0: only USER-ORIGIN messages may pin the band. Plugin-injected
+ * user-role messages (approval notices, runtime-context snapshots,
+ * agent-instructions, the router's own guides) carry `source.kind` values
+ * other than 'user'; the first message in a session is often one of them,
+ * and classifying from it silently routed every session to weak (#13).
+ * Messages without a source tag are treated as user-origin (legacy
+ * sessions). Falls back to the first user/message of any origin when no
+ * user-origin message exists.
+ */
 export function sessionMode(session) {
   const events = session.events
-  const userMsg = events.find((e) => e.type === 'user/message')
+  const userMsg = events.find((e) => e.type === 'user/message' && (e.data?.source?.kind === 'user' || e.data?.source?.kind === undefined))
+    ?? events.find((e) => e.type === 'user/message')
   return classifyTask(extractText(userMsg?.data))
 }
 

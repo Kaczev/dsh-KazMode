@@ -2,7 +2,7 @@
  * router-bootstrap: task-aware reasoning-mode router with a continuous
  * react↔spec axis.
  *
- * Reads the session's first user message, classifies the task into a
+ * Reads the session's first REAL user message, classifies the task into a
  * continuous mode in [0,1] (0 = spec plan-first, 1 = react doer), and on the
  * first model request injects the matching persona and first-turn core tool
  * set. After the first durable tool/call the full preset catalog is exposed
@@ -17,11 +17,39 @@
  * specifiers from the user home, where `@deepseek-ai/*` is not installed.
  * The router tools therefore inline a minimal schema compiler instead of
  * importing `defineTool` from `@deepseek-ai/dsh-tools`.
+ *
+ * ── v0.3.0: real-assembly-chain fixes ─────────────────────────────────────
+ *
+ * The DeepSeek Harness agent loop (`@deepseek-ai/dsh-agent-loop`) runs, per
+ * step, `inbox.claim()` → `system-prompt/assemble` → `agent/pre-step` →
+ * `session.append('user/message')` → model request. Two consequences shaped
+ * this rewrite:
+ *
+ * 1. FIRST-TURN CLASSIFICATION (#13): the first user message is NOT in
+ *    `session.events` while the first assembly runs (append happens after
+ *    assembly), so `sessionMode(session)` saw an empty transcript and every
+ *    session's first request fell into the weak band. `inbox.claim()` emits
+ *    the agent-scoped `agent/inbox/claimed` event SYNCHRONOUSLY BEFORE
+ *    assembly, so the router captures the first real user message there
+ *    (`firstUserText`) and the assembly handler classifies from it. The old
+ *    `session/event` capture is kept as a fallback for host-plane
+ *    deployments where that event is reachable.
+ *
+ * 2. NEAR-FIELD GUIDANCE (#34/#36/#55): the previous implementation listened
+ *    to `session/event` and re-appended the guide to the inbox as
+ *    `next-step`. In agent-plane presets `session/event` never fires
+ *    (dsh-scope filters it out of entry-local realms), so weak-mode
+ *    guidance never reached the model; and wherever it DID fire, the
+ *    `next-step` append forced a SECOND model request per user message —
+ *    the 2× API-call spike. The router now injects the guide into
+ *    `decision.messages` at `agent/pre-step`, so the guide rides the SAME
+ *    request as the user message: near-field, cache-neutral, zero extra
+ *    round-trips.
  */
 
 import {
-  applyPersona, bandFor, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
-  isComplexTask,
+  applyPersona, bandFor, bandOf, coreFor, parseMode, personaFor, sessionMode, testinessFor, clamp01,
+  classifyTask, extractText, isComplexTask,
 } from './router-core.mjs'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -47,16 +75,55 @@ function toJsonSchema(spec) {
 export function apply(ctx, config) {
   const overrides = new Map() // session id -> explicit mode (number 0..1)
   const agents = new Map() // session id -> Agent (live handle, in-process only)
+  const firstUserText = new Map() // session id -> first REAL user message text (#13)
+  const sessionModels = new Map() // session id -> { provider, model } from assembled.variables (#9)
+
+  /** Resolve the session's routing mode: explicit override > classification of
+   *  the captured first real user message > durable transcript (resume).
+   *  `firstUserText` holds RAW TEXT — it must be classified here, never fed to
+   *  bandOf directly (Number(rawText) → NaN → spec). */
+  function currentMode(session) {
+    const override = overrides.get(session.id)
+    if (override !== undefined) return override
+    const text = firstUserText.get(session.id)
+    if (text !== undefined) return classifyTask(text)
+    return sessionMode(session)
+  }
+
+  // ── first-turn routing: agent/inbox/claimed (#13/#17/#32) ────────────────
+  // The loop claims the inbox BEFORE assembling the system prompt
+  // (dsh-agent-loop preStep: inbox.claim() → assemble()), and claim()
+  // dispatches this agent-scoped event synchronously per claimed message —
+  // so the FIRST request already sees the REAL classification. Filter
+  // source.kind === 'user' so plugin-injected steering (approval notices,
+  // runtime-context snapshots, agent-instructions) can never pin the band.
+  ctx.on('agent/inbox/claimed', ({ agent, message }) => {
+    if (message?.source?.kind !== 'user') return
+    const text = extractText(message)
+    if (!text.trim()) return
+    const session = agent?.session
+    if (session !== undefined && !firstUserText.has(session.id)) {
+      firstUserText.set(session.id, text.trim())
+    }
+  })
 
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
     const agent = context.agent
     if (agent === undefined) return assembled
+    // Spawned subagents are clean child tasks with their own scoped tool sets;
+    // the router governs root (user) sessions only (#5).
+    if (agent.session?.header?.parentSession !== undefined) return assembled
     const session = agent.session
     agents.set(session.id, agent)
 
-    const mode = overrides.get(session.id) ?? sessionMode(session)
-    const modelId = agent.options?.model
+    const mode = currentMode(session)
+    // #9 fix: the session-selected model rides assembled.variables, NOT agent.options.
+    const selectedModel = assembled.variables?.model
+      ? { provider: assembled.variables?.provider, model: assembled.variables.model }
+      : undefined
+    if (selectedModel?.model) sessionModels.set(session.id, selectedModel)
+    const modelId = selectedModel?.model ?? agent.options?.model
     const persona = personaFor(mode, modelId)
 
     // The persona stays constant for the whole session (mode is fixed); only
@@ -85,7 +152,8 @@ export function apply(ctx, config) {
 
   // ── near-field routing guidance for weak mode (P14/P16/P17/P19/P20) ─────
   // Every REAL user message in a weak-mode session gets ONE fixed guidance
-  // message appended to the inbox right after it (near field, cache-neutral).
+  // message placed immediately after it in the SAME request (near field,
+  // cache-neutral, zero extra API calls — see header note #2).
   // v19: depth-adaptive — SIMPLE tasks get the fast-convergence guide;
   // COMPLEX tasks get the deep-exploration guide (depth-first, information-
   // driven stop signal). The persona carries no hard converge anchor
@@ -96,26 +164,62 @@ export function apply(ctx, config) {
   const GUIDE_DEEP =
     '\nRouter: classify this task (build or fix) now, then adopt the matching style — build: direct production; fix: inspect-first. Think deeply about the architecture, edge cases, and integration points. Do not spend reasoning on the environment or tooling. Produce when your information is complete. End each reasoning block with a decision or an information need.'
 
+  // Legacy capture fallback (host-plane deployments where session/event is
+  // reachable). Guidance itself is NOT injected here — that would append a
+  // pending next-step message and force an extra model round-trip (#55).
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'user/message') return
     const data = event.data ?? {}
     if (data.source?.kind !== 'user') return // only real user messages
-    const agent = ctx.get('agent')
-    const target = agent !== undefined && agent.session === session ? agent : [...agents.values()].find((a) => a.session === session)
-    if (target === undefined || target.inbox === undefined) return
-    const mode = overrides.get(session.id) ?? sessionMode(session)
-    if (bandOf(mode) !== 'weak') return // strong modes need no guidance
     const text = extractText(data)
-    if (!text.trim()) return
-    const guide = isComplexTask(text) ? GUIDE_DEEP : GUIDE_WEAK
-    try {
-      target.inbox.append('next-step', {
-        id: `router-guide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    if (!firstUserText.has(session.id) && text.trim()) {
+      firstUserText.set(session.id, text.trim())
+    }
+  })
+
+  // Real-chain guidance injection: agent/pre-step is an agent-scoped
+  // waterfall fired after assembly and BEFORE the claimed messages are
+  // appended as user/message — inserting the guide into decision.messages
+  // puts it directly behind the user message in the outgoing request.
+  ctx.on('agent/pre-step', async (payload, next) => {
+    const decision = await next()
+    if (decision.kind !== 'enter') return decision
+    const agent = payload.agent
+    const session = agent?.session
+    if (session === undefined) return decision
+    const mode = currentMode(session)
+    if (bandOf(mode) !== 'weak') return decision // strong modes need no guidance
+    const messages = decision.messages ?? []
+    if (messages.length === 0) return decision
+    // The claimed batch sits at the head of decision.messages (runtime
+    // context, when present, follows). Insert one guide after each REAL
+    // user message, walking backwards so positions stay valid.
+    const claimed = payload.messages ?? []
+    const guides = []
+    for (let i = claimed.length - 1; i >= 0; i--) {
+      const message = claimed[i]
+      if (message?.source?.kind !== 'user') continue
+      const text = extractText(message)
+      if (!text.trim()) continue
+      const id = `router-guide-${message.id}`
+      // Resume safety: a previously appended guide for the same message id
+      // is already durable in the transcript — never inject twice.
+      if (session.events.some((event) => event.type === 'user/message' && event.data?.id === id)) continue
+      guides.push({
+        id,
         role: 'user',
         source: { kind: 'plugin', plugin: 'router-bootstrap' },
-        content: [{ type: 'text', text: guide }],
+        content: [{ type: 'text', text: isComplexTask(text) ? GUIDE_DEEP : GUIDE_WEAK }],
       })
-    } catch { /* duplicate/ordering races: skip */ }
+    }
+    if (guides.length === 0) return decision
+    const out = [...messages]
+    for (const guide of guides) {
+      const anchor = out.findIndex((message) => message.id === guide.id.slice('router-guide-'.length))
+      if (anchor === -1) continue
+      out.splice(anchor + 1, 0, guide)
+    }
+    return { ...decision, messages: out }
   })
 
   // ── router visibility & tuning (agent self-optimization) ────────────────
@@ -147,8 +251,8 @@ export function apply(ctx, config) {
     execute() {
       const session = currentSession()
       if (session === undefined) return 'no agent session'
-      const mode = overrides.get(session.id) ?? sessionMode(session)
-      const modelId = currentAgent()?.options?.model
+      const mode = currentMode(session)
+      const modelId = sessionModels.get(session.id)?.model ?? currentAgent()?.options?.model
       return [
         `mode=${fmtMode(mode)} (band=${bandFor(mode)})`,
         `persona=${personaFor(mode, modelId).replace(/\n/g, ' / ')}`,
@@ -171,7 +275,7 @@ export function apply(ctx, config) {
       if (session === undefined) return 'no agent session'
       if (parsed === 'auto') overrides.delete(session.id)
       else overrides.set(session.id, parsed === 'weak' ? 'weak' : clamp01(parsed))
-      const current = overrides.get(session.id) ?? sessionMode(session)
+      const current = currentMode(session)
       return `mode=${fmtMode(current)} (band=${bandFor(current)}) — next request applies`
     },
   })
