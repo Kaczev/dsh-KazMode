@@ -617,9 +617,9 @@ export async function apply(ctx, config = {}) {
     if (!Array.isArray(records) || records.length === 0) return undefined;
     const lines = ["[kaz-memory Auto-Load]", ">", "We need to recall the memories:"];
     for (const record of records) {
-      const title = nameOf(record.content, 80) || "（未命名记忆）";
+      // 自动载入只注入 content 正文，不再额外带标题/namespace，减小上下文占用。
       const body = String(record.content ?? "").replace(/\r?\n/g, "\n  ");
-      lines.push(`- [${record.namespace}] ${title}`, `  ${body}`);
+      lines.push(`- ${body}`);
     }
     lines.push("<");
     return createUserMessage({
