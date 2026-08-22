@@ -4,11 +4,11 @@
 
 ## Kaz 模式是什么
 
-- **提示词极简**：Kaz 会话的系统提示词固定为一句 `You are a helpful software engineer assistant.`，把上下文预算留给任务本身；
-- **工具面两阶段**：首次工具调用前只暴露 `pwsh` / `read` / `edit`，第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
-- **跨会话记忆**：模型会把经验存为明文记忆（`memory_save / update / list / search / detail / forget` 六工具），同一话题下越用越好用；
+- **跨会话记忆**：模型会把经验存为明文记忆，同一话题下越用越好用。以往每次重开新对话，要么重新向模型说明项目，要么模型每次都需要自己重新探索项目，有了kaz-memory插件，模型可以从记忆中搜索，快速找到方向；
+- **提示词极简**：Kaz 会话的系统提示词为极简模式的 `You are a helpful software engineer assistant.`，保障deepseek-v4的性能；
+- **工具面两阶段**：首次工具调用前只暴露 `pwsh` / `read` / `edit`，第一次工具调用后恢复白名单里的全部工具；
 - **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；
-- **settings.yaml 干净（纯方案 A，v2.11）**：被管理插件的生效配置存于 `~/.dsh/storages/kaz-defaults.json`（模式默认）与 `<项目>/.dsh/storages/kaz-session-states.json`（会话覆盖），**不会写回 settings.yaml**。
+- **功能按插件分离**：Kaz模式的功能是按插件分离的。如果仅想要Kaz模式的部分功能，也可以在 **Kaz面板** 里面单独开启；
 
 ## 插件说明
 
@@ -88,8 +88,8 @@ dsh-KazMode/
 - 已安装 dsh，并存在 `~/.dsh/profiles/web`（`$env:USERPROFILE\.dsh\profiles\web`）。
 - 本说明以 Windows + PowerShell 为例；DeepSeek 在安装时请按实际环境调整。
 - 若目标机就是当前机器，源路径是：
-  - 插件源：`C:\Users\Kaczev\Documents\GitHub\dsh-KazMode\KazPlugins`
-  - 预设源：`C:\Users\Kaczev\Documents\GitHub\dsh-KazMode\kaz`
+  - 插件源：`存仓库的文件夹\dsh-KazMode\KazPlugins`
+  - 预设源：`存仓库的文件夹\dsh-KazMode\kaz`
 
 ---
 
@@ -113,7 +113,7 @@ dsh-KazMode/
 在 PowerShell 中执行：
 
 ```powershell
-$repo = "C:\Users\Kaczev\Documents\GitHub\dsh-KazMode"
+$repo = "存仓库的文件夹\dsh-KazMode"
 
 # 1) 插件 -> profiles/web/KazPlugins（目录名严格保持 KazPlugins）
 $pluginDst = Join-Path $env:USERPROFILE ".dsh\profiles\web\KazPlugins"
@@ -267,54 +267,12 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund
 纯方案 A（2026-08-21）：被管理插件（thinking-anchor / round-minimal / plugin-filter /
 output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag /
 first-round-hints）的生效配置由 kazMode 服务读取：
-- `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认）
-- `<项目>/.dsh/storages/kaz-session-states.json`（会话专属覆盖）
+- `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认）（会自动创建）
+- `<项目>/.dsh/storages/kaz-session-states.json`（会话专属覆盖）（在会话的时候自动创建）
 
-settings.yaml **不再承载这些插件的段**（插件自愈写入已关闭），只需保留：
-
-```yaml
-agent-presets:
-  default: kaz
-
-agent-default-model:
-  provider: deepseek-official
-  model: deepseek-v4-flash
-  reasoningEffort: high
-
-kaz-mode:
-  enabled: true
-  toolWhitelist:
-    [
-      pwsh,
-      read,
-      write,
-      edit,
-      glob,
-      grep,
-      job_list,
-      job_output,
-      job_kill,
-      ask_user_question,
-      todo_write,
-      web_search,
-      memory_save,
-      memory_update,
-      memory_list,
-      memory_search,
-      memory_detail,
-      memory_forget,
-      kaz_mode_status
-    ]
-  previousPreset: router-standard
-  # savedPluginStates 由 kaz-mode 自动维护，新装可省略
-
-kaz-agent-preset-display:
-  enabled: true
-```
+settings.yaml **不再承载这些插件的段**，仅有kaz-mode和补丁插件的设置（这两个都有自愈写入）
 
 > 被管理插件在 **Kaz 面板**（专属设置 / 默认设置）里改，改动落到上面两个 json，
-> **不会写进 settings.yaml**。`agent-presets.default` 是否设为 `kaz` 取决于你是否
-> 希望新会话默认进入 Kaz 模式。
 
 ### 3.7 重启 dsh 并验证
 
@@ -323,20 +281,14 @@ kaz-agent-preset-display:
 3. 在预设选择器中选择 **Kaz 模式**（`kaz`）。
 4. 验证：
    - `dsh --profile web --dump-config` 能看到 `kaz-mode`、`round-minimal`、`plugin-filter`、`kaz-memory`、`kaz-agent-preset-display`、`deepseek-default-model` 等组合行；
-   - 新对话系统提示词固定为 `You are a helpful software engineer assistant.`；
+   - 新对话系统的思考内不再出现"Let me"，而有很多的"We need"、"Let's"之类的；
    - 首次工具调用前工具面只有 `pwsh` + `read` + `edit`；
    - 第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
    - 若开启 `kaz-diag`，工具列表里出现 `kaz_mode_status`；
    - Kaz 面板出现各被管理插件的开关行。
-
-> **纯方案 A 的核验点**：开一个 Kaz 对话、再开一个非 Kaz 对话来回切换，并在 Kaz
-> 面板改「专属设置/默认设置」——`settings.yaml` 里除 `kaz-mode:` / `agent-default-model:` /
-> `agent-presets:` / `kaz-agent-preset-display:` 外**不应新增或改写任何被管理插件的段**；
-> 改动只落在 `kaz-defaults.json` 与 `kaz-session-states.json`。
-
 ---
 
-## 4. 其它好用的工具/预设（可选）
+## 4. 其它好用的工具/预设（可选）（通常无需理会）
 
 以下内容不是 Kaz 模式的必需部分，按需使用：
 
