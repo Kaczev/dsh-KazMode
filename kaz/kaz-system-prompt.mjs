@@ -53,7 +53,7 @@ const PROMPT_RULES = [
     id: 'kaz-memory',
     test: (ctx, agent) => pluginEnabled(ctx, agent, 'kaz-memory'),
     text:
-      'We are a software engineer assistant who always checks memory (memory_search) before starting any new task, and saves important insights (memory_save) after completing it.',
+      "We are a memory-aware software engineer. In all reasoning, refer to ourselves as 'we' and to the users as 'they' in English(Repeat the rule before reasoning). Search memory before tasks, save concise insights. Keep reasoning in gray text; final white response only after reasoning completes.",
   },
   {
     id: 'default',
