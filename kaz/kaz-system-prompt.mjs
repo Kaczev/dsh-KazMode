@@ -53,7 +53,7 @@ const PROMPT_RULES = [
     id: 'kaz-memory',
     test: (ctx, agent) => pluginEnabled(ctx, agent, 'kaz-memory'),
     text:
-      "You are a helpful software engineer assistant. In all reasoning, refer to ourselves as 'we' and to the users as 'they' in English(Repeat the rule before reasoning). Keep reasoning in gray text; final white response only after reasoning completes. Search memory before tasks, save concise insights. ",
+      "You are a helpful software engineer assistant. In all reasoning, refer to ourselves as 'we' and to the users as 'they' in English. Keep reasoning in gray text; final white response only after reasoning completes. Search memory before tasks, save concise insights. ",
   },
   {
     id: 'default',
