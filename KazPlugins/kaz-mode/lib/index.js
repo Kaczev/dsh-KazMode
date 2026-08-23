@@ -92,18 +92,22 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     enabled: false,
     generation_kwargs: { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 },
   },
-  "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: false, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
+  "kaz-memory": { enabled: true, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "kaz-diag": { enabled: false },
   "first-round-hints": { enabled: false },
 };
 
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
 /** 默认不开启thinking-anchor、kaz-diag */
+/** 默认不开启kaz-memory的guidanceHeadEnabled，因为有系统提示词 */
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
   if (id === "thinking-anchor" || id === "kaz-diag" || id === "round-display") {
     FACTORY_KAZ_DEFAULTS[id].enabled = false;
+  }
+  if (id === "kaz-memory") {
+    FACTORY_KAZ_DEFAULTS[id].guidanceHeadEnabled = false;
   }
 }
 
