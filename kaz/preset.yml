@@ -1,2 +1,2 @@
 name: Kaz 模式
-description: 工具面两阶段——首次工具调用前仅 memory_search，首次调用后恢复 Kaz 全部工具。
+description: 专门避免犯过往错误和经验的，高效思考的模式。工具面两阶段——首次工具调用前仅 memory_search，首次调用后恢复白名单上的全部工具。具有高自由度的配置面板。
