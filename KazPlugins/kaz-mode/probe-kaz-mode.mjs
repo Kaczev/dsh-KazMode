@@ -1,13 +1,12 @@
 // kaz-mode 探针（方案 A 重构后）：按 agent 会话计算工具面，不做全局注销。
 // 覆盖：
 //   ① kazMode 服务：kazEnabled / pluginEnabled / toolVisible 按 agent 会话判定；
-//   ② 组装层：Kaz 会话按白名单过滤（记忆/诊断工具按该会话开关增减）+ persona 固定；
+//   ② 组装层：Kaz 会话按白名单过滤（记忆/诊断工具按该会话开关增减）；
 //   ③ 组装层：非 Kaz 会话只移除该会话禁用的记忆/诊断工具（标准工具保留）；
 //   ④ 执行层：Kaz 会话拒绝白名单外调用；非 Kaz 会话拒绝已禁用插件的工具；
 //   ⑤ 记忆/诊断工具常驻注册——工具面完全由会话状态计算，不随全局 enabled 注销。
 // 运行：node kaz-mode/probe-kaz-mode.mjs
 import plugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/kaz-mode/lib/index.js";
-import { FIXED_PERSONA } from "kaz-shared";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -200,7 +199,7 @@ check("④ 无 agent 的内部调用放行", internalCall.kind === "allow");
 // ⑤ 工具面完全由会话状态计算（常驻注册语义：不看全局 enabled 注销）
 check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）", kazMode.toolVisible(sKaz, "memory_search") === true && kazMode.toolVisible(sPlain, "memory_search") === false);
 
-// ⑥ 组装层 persona 固定（Kaz 会话）
+// ⑥ 组装层不再改写系统提示词（已交给 kaz 预设的 kaz-system-prompt.mjs）
 {
   const listener = listeners.get("system-prompt/assemble")[0];
   const assembly = {
@@ -214,8 +213,8 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   };
   await listener(assembly, { agent: sKaz }, () => assembly);
   const persona = assembly.sections.find((s) => s.name === "deployment:persona");
-  check("⑥ Kaz 会话 persona 固定为 FIXED_PERSONA", persona !== undefined && persona.text === FIXED_PERSONA);
-  check("⑥ Kaz 会话过滤其它提示段", assembly.sections.length === 1);
+  check("⑥ Kaz 会话不再由 kaz-mode 改写 persona", persona !== undefined && persona.text === "other");
+  check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "thinking-anchor:policy"));
 }
 
 rmSync(TMP, { recursive: true, force: true });

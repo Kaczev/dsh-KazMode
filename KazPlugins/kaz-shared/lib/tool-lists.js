@@ -46,7 +46,7 @@ export const MEMORY_TOOLS = [
 /** kaz-diag 的状态工具名（会话级可见性由 kaz-mode 按 agent 会话计算）。 */
 export const DIAG_TOOL = "kaz_mode_status";
 
-/** Kaz 模式固定系统提示词（persona 唯一文本）。 */
+/** Kaz 模式默认系统提示词（persona 默认文本；实际由 kaz 预设脚本按条件覆盖）。 */
 export const FIXED_PERSONA = "You are a helpful software engineer assistant.";
 
 /** 被管理插件目录（kaz-mode 面板 / kaz-diag 报告共用）。 */

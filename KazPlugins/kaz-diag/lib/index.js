@@ -9,7 +9,7 @@
 //      全部工具的手动编辑点），并给出动态调整后的实际工具面：
 //        - kaz-memory 关闭 → 其四个记忆工具自动移出；
 //        - 本插件（kaz-diag）开启 → kaz_mode_status 自动加入；
-//   4) round-minimal 信号：首次工具调用前 = 首阶段极简（pwsh + str_replace_editor），
+//   4) round-minimal 信号：首次工具调用前 = 首阶段极简（pwsh + read + edit），
 //      首次工具调用后 = 恢复 Kaz 全部工具。
 //
 // 工具注册跟随本插件 enabled 开关（settings.yaml 的 kaz-diag: 段，热重载）：
@@ -33,7 +33,7 @@ const NAMESPACE = settingsNamespace("kaz-diag");
 /** Kaz 模式对应的 agent preset id。 */
 const KAZ_PRESET_ID = "kaz";
 
-/** 固定系统提示词（kaz-mode 强制，Kaz 模式下系统提示词只有这一句 + 计划模式段）。 */
+/** 默认系统提示词（kaz 预设的 kaz-system-prompt.mjs 会按条件覆盖；这里仅作展示参考）。 */
 // （FIXED_PERSONA 来自 kaz-shared 单一事实源，不再本地维护副本）
 
 const SETTINGS_SCHEMA = z.object({
@@ -262,8 +262,8 @@ export default {
       lines.push(`  说明：Kaz 模式已注册为 agent preset（id: kaz），按钮与预设选择器双向同步。`);
       lines.push("");
 
-      lines.push("[固定系统提示词]");
-      lines.push(`  persona（Kaz 模式全部提示段被 kaz-mode 收敛为这一句 + 计划模式段）: ${FIXED_PERSONA}`);
+      lines.push("[系统提示词]");
+      lines.push(`  默认 persona（由 kaz 预设的 kaz-system-prompt.mjs 按条件覆盖，kaz-memory 启用时切换为记忆优先提示词）: ${FIXED_PERSONA}`);
       lines.push("");
 
       lines.push("[插件联动]");
@@ -400,7 +400,7 @@ export default {
           defineTool({
             name: "kaz_mode_status",
             description:
-              "只读报告 Kaz 模式当前状态：Kaz 模式开关、固定系统提示词、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（toolWhitelist 白名单是唯一闸门）、round-minimal 首阶段信号。无需任何参数。",
+              "只读报告 Kaz 模式当前状态：Kaz 模式开关、系统提示词（由 kaz-system-prompt.mjs 按条件控制）、被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag）的启停、Kaz 工具面（toolWhitelist 白名单是唯一闸门）、round-minimal 首阶段信号。无需任何参数。",
             parameters: {},
             output: {
               schema: { type: "string" },

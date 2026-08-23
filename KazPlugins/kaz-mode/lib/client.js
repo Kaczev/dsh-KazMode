@@ -1373,7 +1373,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"Kaz 模式 = 固定系统提示词（You are a helpful software engineer assistant.）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（toolWhitelist 白名单 + 已启用群组，子代理会话同样适用）；" +
+						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 You are a helpful software engineer assistant.，kaz-memory 启用时切换为记忆优先提示词）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（toolWhitelist 白名单 + 已启用群组，子代理会话同样适用）；" +
 							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory + kaz-diag；" +
 							"kaz-memory 关闭时其工具自动移出白名单，kaz-diag 开启时 kaz_mode_status 自动加入。",
 					),

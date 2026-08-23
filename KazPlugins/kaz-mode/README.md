@@ -18,12 +18,13 @@ Kaz 模式同时具备两个入口，双向同步：
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
 | `kaz-diag` | 诊断：只注册只读状态工具 `kaz_mode_status`（开启本插件才加入 Kaz 工具面） |
 
-**Kaz 模式的核心语义（2026-08-21，纯方案 A）**：
+**Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
 
-1. **系统提示词固定**为 `You are a helpful software engineer assistant.`。组装层把
-   提示段收敛为 persona 一句（+ 计划模式段，保证 plan mode 仍工作），其余任何提示段
-   （thinking-anchor / round-minimal 轮次提示 / kaz-memory 指引 / tool:* 指导段 /
-   运行时上下文…）一律过滤。
+1. **系统提示词由 `kaz` 预设的 `kaz-system-prompt.mjs` 控制**。默认是
+   `You are a helpful software engineer assistant.`；当 `kaz-memory` 启用时自动切换为
+   记忆优先提示词。组装层把提示段收敛为 persona 一句（+ 计划模式段，保证 plan mode
+   仍工作），其余任何提示段（thinking-anchor / round-minimal 轮次提示 / kaz-memory
+   指引 / tool:* 指导段 / 运行时上下文…）一律过滤。**kaz-mode 插件不再控制系统提示词。**
 2. **工具面两阶段**：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
      （默认 `pwsh` / `read` / `edit`）；
@@ -137,8 +138,9 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
 
 ## 验收要点
 
-1. 选择 `kaz` 预设后：新建对话的系统提示词只含
-   `You are a helpful software engineer assistant.`（+ 计划模式段）；
+1. 选择 `kaz` 预设后：新建对话的系统提示词由 `kaz/kaz-system-prompt.mjs` 收敛；
+   默认是 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时是
+   记忆优先提示词（+ 计划模式段）；
 2. 首次工具调用前工具面只有 `pwsh` + `read` + `edit`；第一次工具调用后恢复
    `toolWhitelist` 全部工具（kaz-memory 关闭时无记忆工具；kaz-diag 开启时有
    `kaz_mode_status`）；

@@ -1,6 +1,6 @@
 # kaz-shared —— Kaz 模式工具清单的单一事实源（依赖包，非 cordis 插件）
 
-> **作用**：Kaz 全家桶的公共依赖包——Kaz 工具清单（白名单/首轮工具/默认禁用/被管理插件目录/固定 persona）和工具面计算的唯一来源，其它插件不再各自维护副本。
+> **作用**：Kaz 全家桶的公共依赖包——Kaz 工具清单（白名单/首轮工具/默认禁用/被管理插件目录/默认 persona）和工具面计算的唯一来源，其它插件不再各自维护副本。
 
 `kaz-mode` / `kaz-memory` / `kaz-diag` / `round-minimal` / `plugin-filter` 的公共依赖。
 **纯 ESM 模块**（`lib/tool-lists.js`），不注册任何服务、不注入任何提示段，只是常量 + 纯函数。
@@ -16,7 +16,7 @@ Kaz 模式的工具清单**全部集中在这里**，其它组件不再各自维
 | `computeSurface(inputs)` | kaz-mode 组装层 / kaz-diag 报告 | 计算某代理此刻的 Kaz 工具面 |
 | `DEFAULT_FIRST_ROUND_TOOLS` | round-minimal / kaz-mode | 首阶段工具白名单默认值 |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
-| `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode / kaz-diag | 被管理插件目录 / 固定 persona |
+| `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-diag（展示默认 persona） | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
 
 ## 工具面语义（2026-08-21 统一）
 

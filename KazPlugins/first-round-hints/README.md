@@ -4,7 +4,8 @@
 
 对话开始时（首个 `agent/pre-step`，step === 1）把一条固定消息**注入一次**
 （kaz-memory 自动载入 / thinking-anchor 同款机制）：以**合成用户消息**追加到
-当前请求，不触碰系统提示词（Kaz 模式的系统提示词由 kaz-mode 固定为一句）。
+当前请求，不触碰系统提示词（Kaz 模式的系统提示词由 kaz 预设的
+`kaz-system-prompt.mjs` 控制）。
 
 ## 默认消息（内置四段：pwsh 要点 / EIO 重试 / 提问 / 搜索）
 
@@ -60,4 +61,4 @@ KazPlugins 目录随 profile 以 `file:` 依赖 + junction 装配；`cordis.patc
 1. 新对话开头出现一条 `[first-round-hints pwsh quick rules]` 合成用户消息；
 2. 同一会话后续轮次不再重复注入；重启恢复的旧对话不注入；
 3. `first-round-hints.message` 改文案后新对话按新文案注入；
-4. 系统提示词不受影响（Kaz 模式下仍只有固定 persona 一句）。
+4. 系统提示词不受影响（Kaz 模式下由 `kaz-system-prompt.mjs` 按条件收敛）。

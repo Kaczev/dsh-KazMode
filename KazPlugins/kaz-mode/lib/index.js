@@ -7,11 +7,11 @@
 //   kaz-diag（诊断 · 状态工具），并提供集中管理面板与头部开关按钮（客户端半）。
 //
 // Kaz 模式的语义（2026-08 重构后）：
-//   1) 系统提示词固定：Kaz 模式下组装层把提示段收敛为 persona 一句
-//      "You are a helpful software engineer assistant."（+ 计划模式段，计划模式
-//      仍需生效），其余任何提示段（thinking-anchor / round-minimal 轮次提示 /
-//      kaz-memory 指引 / tool:* 指导段 / 运行时上下文…）一律过滤。任何插件都
-//      不再向 Kaz 会话的 system prompt 注入其它内容。
+//   1) 系统提示词由 kaz 预设的 kaz-system-prompt.mjs 控制：组装层按条件收敛为
+//      persona（默认 "You are a helpful software engineer assistant."；kaz-memory
+//      启用时切换为记忆优先提示词）+ 计划模式段（计划模式仍需生效），其余任何
+//      提示段（thinking-anchor / round-minimal 轮次提示 / kaz-memory 指引 /
+//      tool:* 指导段 / 运行时上下文…）一律过滤。本插件不再负责系统提示词。
 //   2) 工具面两阶段（工具清单全部由 kaz-shared 的 tool-lists.js 管理）：
 //        - 首次工具调用前（round-minimal 首阶段信号）：仅保留 round-minimal
 //          首轮工具集 firstRoundTools（为空回退 DEFAULT_FIRST_ROUND_TOOLS）；
@@ -30,7 +30,8 @@
 //      或会话切换到 kaz 时把 kaz-mode.enabled 置 true（触发上面的插件联动）；
 //      切到其它预设 / 其它会话时置 false。同时把最近一个非 kaz 预设记录到
 //      kaz-mode.previousPreset，供按钮"关闭"时切回。
-//   5) 本插件不注册任何 systemPrompt 段，除联动与固定提示词外不触碰用户已有配置。
+//   5) 本插件不注册任何 systemPrompt 段，也不触碰系统提示词；系统提示词由
+//      kaz 预设的 kaz-system-prompt.mjs 负责。
 //   6) 状态工具 kaz_mode_status 已移出本插件，由独立的 kaz-diag 插件注册
 //      （本插件开启/关闭不影响其注册；kaz-diag 关闭时工具也不进入 Kaz 工具面）。
 // ===========================================================================
@@ -45,7 +46,6 @@ import {
   TOOL_WHITELIST,
   DEFAULT_FIRST_ROUND_TOOLS,
   DEFAULT_DISABLED_TOOLS,
-  FIXED_PERSONA,
   MANAGED_PLUGINS,
   MEMORY_TOOLS,
   DIAG_TOOL,
@@ -64,9 +64,6 @@ const KAZ_PRESET_ID = "kaz";
 
 /** 按钮"关闭 Kaz"时的兜底预设。 */
 const FALLBACK_PRESET_ID = "cordis";
-
-/** 固定 persona 段名（与 preset 的 persona 行一致）。 */
-const PERSONA_SECTION = "deployment:persona";
 
 /**
  * Kaz 工具面全部交给 kaz-shared（lib/tool-lists.js）管理：白名单默认值 /
@@ -868,9 +865,10 @@ export default {
       };
     }, "kaz-mode: 发布 kazMode 会话工具面服务");
 
-    // 组装层：按 agent 会话过滤工具列表 + Kaz 会话固定系统提示词。
+    // 组装层：按 agent 会话过滤工具列表。
     //   Kaz 会话：工具面 = kazSurfaceFor（白名单 - 该会话禁用的记忆/诊断工具，
-    //   首阶段仅 firstRoundTools）；系统提示词收敛为固定 persona + 计划模式段。
+    //   首阶段仅 firstRoundTools）；系统提示词已交给 kaz 预设的
+    //   kaz-system-prompt.mjs 控制，本插件不再收敛/改写 sections。
     //   非 Kaz 会话：只移除该会话禁用的记忆/诊断工具（kaz-memory/kaz-diag 的
     //   工具常驻注册，标准模式不能露出），其余工具交还宿主标准工具面。
     //   每个请求组装时实时计算 → 后台运行的会话不受切换对话影响。
@@ -887,27 +885,6 @@ export default {
           if (tool === null || typeof tool !== "object") return false;
           return allowed.has(tool.name);
         });
-        // 固定系统提示词：只保留 persona（文本固定为 FIXED_PERSONA）+ 计划模式段。
-        const planSection = assembly.sections.find(
-          (section) =>
-            section !== null &&
-            typeof section === "object" &&
-            typeof section.name === "string" &&
-            /plan/i.test(section.name),
-        );
-        const kept = [];
-        if (planSection !== undefined) kept.push(planSection);
-        let personaKept = false;
-        for (const section of assembly.sections) {
-          if (section === null || typeof section !== "object" || section.name !== PERSONA_SECTION) continue;
-          if (typeof section.text === "string") section.text = FIXED_PERSONA;
-          kept.push(section);
-          personaKept = true;
-        }
-        if (!personaKept) {
-          kept.push({ name: PERSONA_SECTION, order: 0, text: FIXED_PERSONA });
-        }
-        assembly.sections = kept;
         return next();
       }
 

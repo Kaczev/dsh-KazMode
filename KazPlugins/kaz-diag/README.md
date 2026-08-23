@@ -10,7 +10,7 @@
 ## 状态报告内容
 
 - **Kaz 模式开关**（kaz-mode.enabled）与**预设联动**（agent-presets.default）；
-- **固定系统提示词**（`You are a helpful software engineer assistant.`）；
+- **系统提示词**：由 `kaz` 预设的 `kaz-system-prompt.mjs` 按条件控制（默认 `You are a helpful software engineer assistant.`，kaz-memory 启用时切换为记忆优先提示词）；
 - **被管理插件启停**：thinking-anchor / round-minimal / plugin-filter / output-beep /
   round-display / deepseek-default-model / kaz-memory / kaz-diag，含开启 Kaz 前的
   原始状态快照与**本会话生效**状态（纯方案 A：模式默认 + 会话覆盖）；

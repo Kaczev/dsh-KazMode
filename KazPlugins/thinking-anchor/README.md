@@ -34,7 +34,7 @@ thinking-anchor:
 
 Kaz 模式把 thinking-anchor 作为被管理插件：生效 enabled / 文案按会话经 kazMode
 服务读取（Kaz 面板可调），settings.yaml 仅作 standalone 兜底。注入是消息、不是
-系统提示词，因此与 Kaz 模式"系统提示词固定"不冲突。
+系统提示词，因此与 Kaz 模式的"系统提示词由 kaz-system-prompt.mjs 控制"不冲突。
 
 ## 安装（与其它插件一致）
 
@@ -45,4 +45,4 @@ KazPlugins 目录随 profile 以 `file:` 依赖 + junction 装配；`cordis.patc
 
 1. 新对话开头出现一条 `[thinking-anchor …]` 合成用户消息（完整协议）；
 2. 此后每个 turn 开头出现短提醒；续接对话只有提醒、没有完整指令；
-3. 系统提示词不受影响（Kaz 模式下仍只有固定 persona 一句）。
+3. 系统提示词不受影响（Kaz 模式下由 `kaz-system-prompt.mjs` 按条件收敛）。

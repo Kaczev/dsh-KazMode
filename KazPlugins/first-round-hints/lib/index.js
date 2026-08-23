@@ -2,7 +2,8 @@
 // ===========================================================================
 // 对话开始时（首个 agent/pre-step，step === 1）把一条固定消息注入一次
 // （kaz-memory 自动载入 / thinking-anchor 同款机制）：以合成用户消息追加到
-// decision.messages，不触碰系统提示词（Kaz 模式的系统提示词由 kaz-mode 固定）。
+// decision.messages，不触碰系统提示词（Kaz 模式的系统提示词由 kaz 预设的
+// kaz-system-prompt.mjs 控制）。
 //
 // 默认消息 = pwsh 使用要点（stdout/stderr 是对象、编码陷阱、JSON 序列化陷阱；
 // run_code 要点已按 Kaczev 要求移除）。消息内容可在 settings.yaml 的

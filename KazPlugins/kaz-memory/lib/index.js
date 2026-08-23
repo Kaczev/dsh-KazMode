@@ -1010,8 +1010,9 @@ export async function apply(ctx, config = {}) {
   // 记第一次发送固定指引的轮次为 n，则第 n+1、n+2、……轮都在对话开始
   // （agent/pre-step，step === 1）再次注入同一固定指引。首次发送仍保持旧语义：
   // 在会话已有第一次 tool/call 后的某个 pre-step 以合成用户消息注入一次。
-  // Kaz 模式固定系统提示词会滤掉所有非 persona 段，因此固定指引不再注册
-  // systemPrompt.section；改为 agent/pre-step 合成用户消息注入（round-display 同步上报）。
+  // Kaz 模式系统提示词由 kaz 预设的 kaz-system-prompt.mjs 收敛（只保留 persona +
+  // 计划模式段），因此固定指引不再注册 systemPrompt.section；改为 agent/pre-step
+  // 合成用户消息注入（round-display 同步上报）。
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;

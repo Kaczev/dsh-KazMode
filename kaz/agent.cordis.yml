@@ -1,15 +1,15 @@
 # The `kaz` agent preset: Kaz 模式 —— Kaczev 的专属模式。
 #
-# 组合基底 = shipped `cordis` 预设的完整副本（完整工具面），但 persona 行固定为
-# "You are a helpful software engineer assistant."（complete: false、
-# includeRuntimeContext: false——运行时上下文快照由 persona 行的
-# includeRuntimeContext 抑制，不再需要 kaz-no-context 插件）。Kaz 模式
-# 的系统提示词由 kaz-mode 在组装层收敛为这一句（+ 计划模式段），任何插件都
-# 不再向 Kaz 会话注入其它提示段；首阶段极简（首次工具调用前仅 pwsh +
-# str_replace_editor，之后恢复全部工具）由 round-minimal 提供，工具面白名单
-# 由 kaz-mode 的 kaz-mode.toolWhitelist 决定（= Kaz 全部工具的手动编辑点）。
-# 工具过滤由 plugin-filter、思考锚点由 thinking-anchor（消息注入）、记忆由
-# kaz-memory 提供，全部由 kaz-mode 插件按本预设的选中状态联动启用/恢复。
+# 组合基底 = shipped `cordis` 预设的完整副本（完整工具面），persona 行保留为
+# 默认兜底（complete: false、includeRuntimeContext: false——运行时上下文快照
+# 由 persona 行的 includeRuntimeContext 抑制，不再需要 kaz-no-context 插件）。
+# Kaz 模式的系统提示词由本目录的 kaz-system-prompt.mjs 在组装层按条件收敛
+# （默认仍是 "You are a helpful software engineer assistant."；kaz-memory 启用时
+# 自动换成记忆优先提示词），任何插件都不再向 Kaz 会话注入其它提示段；首阶段
+# 极简（首次工具调用前仅 pwsh + read + edit，之后恢复全部工具）由 round-minimal
+# 提供，工具面白名单由 kaz-mode 的 kaz-mode.toolWhitelist 决定（= Kaz 全部工具
+# 的手动编辑点）。工具过滤由 plugin-filter、思考锚点由 thinking-anchor（消息注入）、
+# 记忆由 kaz-memory 提供，全部由 kaz-mode 插件按本预设的选中状态联动启用/恢复。
 # skill 工具与技能目录已从本预设整体移除（Kaczev 2026-08：Kaz 模式不需要
 # skill-catalog 合成消息，直接删掉 skill 能力）。
 #
@@ -36,9 +36,9 @@
 
 
 # The preset's own persona, shadowing the deployment default for this agent.
-# 与 shipped `minimal` 预设的 persona 逐字一致（Kaz 模式的固定系统提示词）。
-# 不用 complete: true——kaz-mode 在组装层把提示段收敛为 persona + 计划模式段，
-# 并把本段文本固定为 "You are a helpful software engineer assistant."。
+# 与 shipped `minimal` 预设的 persona 逐字一致（Kaz 模式的默认兜底系统提示词）。
+# 不用 complete: true——kaz-system-prompt.mjs 在组装层把提示段收敛为 persona +
+# 计划模式段，并按条件覆盖本段文本。
 - id: persona
   name: '@deepseek-ai/dsh-persona'
   config:
@@ -50,6 +50,15 @@
   name: '@deepseek-ai/dsh-agent-instructions'
   config:
     maxBytes: 65536
+
+# ── system prompt controller ────────────────────────────────────────────────
+#
+# 系统提示词控制脚本：集中管理“各种情况下的系统提示词”。
+# 目前支持 kaz-memory 启用时切换为记忆优先提示词，默认保持原 persona。
+# 要加新情况时直接改 ./kaz-system-prompt.mjs 的 PROMPT_RULES。
+- id: kaz-system-prompt
+  name: ./kaz-system-prompt.mjs
+  config: {}
 
 # ── shell ───────────────────────────────────────────────────────────────────
 
