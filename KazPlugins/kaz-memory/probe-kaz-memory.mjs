@@ -429,11 +429,13 @@ async function runPreStep(agent, step = 2, messages = [], turn = 1) {
 const beforeToolAgent = { id: "guidance-before-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }] } };
 const afterToolAgent = { id: "guidance-after-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 
-// ③ 新开关默认关：即使已过首次工具调用，也不注入固定指引
+// ③ 开关默认：固定指引默认关、遗忘指引默认开
 const defaultOffAfterTool = { id: "guidance-default-off", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③ guidanceHeadEnabled 默认关：不注入固定指引", hasGuidance(await runPreStep(defaultOffAfterTool, 2)) === false);
-// 以下 guidance 测试显式打开开关（guidanceHead 留空 = 内置默认）。
-await settings.update("kaz-memory", { guidanceHeadEnabled: true });
+const defaultOnSearchAgent = { id: "guidance-forget-default-on", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
+check("③ guidanceForgetEnabled 默认开：注入遗忘指引", hasForgetGuidance(await runPreStep(defaultOnSearchAgent, 2)) === true);
+// 以下 guidance 测试显式打开固定指引开关（guidanceHead / guidanceForget 留空 = 内置默认）。
+await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceForgetEnabled: true });
 await settle();
 
 const preBefore = await runPreStep(beforeToolAgent, 2);

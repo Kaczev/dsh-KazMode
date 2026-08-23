@@ -32,6 +32,18 @@ function pluginEnabled(ctx, agent, pluginId) {
   return false
 }
 
+/** 把系统提示词上报给 round-display（best-effort，服务不存在时静默跳过）。 */
+function reportRoundDisplay(ctx, agent, content) {
+  try {
+    const rd = ctx.get('roundDisplay')
+    if (rd && typeof rd.report === 'function' && agent && typeof content === 'string' && content.trim().length > 0) {
+      rd.report({ agent, plugin: 'kaz-system-prompt', title: 'system prompt', content })
+    }
+  } catch {
+    // 上报失败不影响系统提示词
+  }
+}
+
 /**
  * 各种情况下的系统提示词。
  * `test` 返回 true 时使用 `text`；多条规则时取第一条命中的。
@@ -41,9 +53,7 @@ const PROMPT_RULES = [
     id: 'kaz-memory',
     test: (ctx, agent) => pluginEnabled(ctx, agent, 'kaz-memory'),
     text:
-      'We are a software engineer assistant who always checks memory (memory_search) ' +
-      'before starting any new task, and saves important insights (memory_save) ' +
-      'after completing it.',
+      'We are a software engineer assistant who always checks memory (memory_search) before starting any new task, and saves important insights (memory_save) after completing it.',
   },
   {
     id: 'default',
@@ -108,6 +118,7 @@ export function apply(ctx, _config) {
     }
 
     assembly.sections = kept
+    reportRoundDisplay(ctx, agent, prompt)
     return next()
   })
 }

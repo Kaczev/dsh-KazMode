@@ -165,6 +165,8 @@ window.__ModuleLoader__.load({
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不注入记忆、六工具完全注销）" },
 					{ key: "guidanceHeadEnabled", kind: "boolean", label: "guidanceHeadEnabled（固定提示总述行开关；默认关）" },
 					{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（固定提示总述行文本；仅在 guidanceHeadEnabled=true 时生效；留空 = 内置默认）" },
+					{ key: "guidanceForgetEnabled", kind: "boolean", label: "guidanceForgetEnabled（遗忘指引开关；默认开）" },
+					{ key: "guidanceForget", kind: "textarea", label: "guidanceForget（遗忘指引文本；仅在 guidanceForgetEnabled=true 时生效；留空 = 内置默认）" },
 					{ key: "bm25", path: ["k1"], kind: "number", step: 0.1, label: "bm25.k1（BM25 词频饱和参数；默认 1.2，一般 1.2~2.0）" },
 					{ key: "bm25", path: ["b"], kind: "number", step: 0.05, label: "bm25.b（BM25 长度归一化参数；默认 0.75，0 = 不做长度归一化）" },
 				],

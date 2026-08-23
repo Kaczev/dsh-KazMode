@@ -366,6 +366,8 @@ const SETTINGS_SCHEMA = z.object({
   guidanceHeadEnabled: z.boolean().default(false),
   /** 固定提示总述行文本：仅在 guidanceHeadEnabled=true 时生效；留空 = 内置默认。 */
   guidanceHead: z.string().default(""),
+  /** 遗忘指引开关：默认开；关闭后不注入；按 guidanceForget（留空 = 内置默认）注入。 */
+  guidanceForgetEnabled: z.boolean().default(true),
   /** 以下三个字段保留兼容（2026-08-17 起不再生效）：工具细节已并入各工具描述。
    *  guidanceForget 自每轮首次 memory_search 遗忘指引起恢复生效（覆盖默认遗忘指引）。 */
   guidanceSearch: z.string().default(""),
@@ -387,6 +389,8 @@ export const DEFAULT_SECTION = {
   enabled: true,
   guidanceHeadEnabled: false,
   guidanceHead: "",
+  guidanceForgetEnabled: true,
+  guidanceForget: "",
   bm25: { k1: 1.2, b: 0.75 },
 };
 // ---------------------------------------------------------------------------
@@ -473,10 +477,11 @@ export async function apply(ctx, config = {}) {
     guidance: "",
     guidanceHeadEnabled: false,
     guidanceHead: "",
+    guidanceForgetEnabled: true,
+    guidanceForget: "",
     guidanceSearch: "",
     guidanceSave: "",
     guidanceList: "",
-    guidanceForget: "",
   });
 
   // ---- 项目根解析 ----
@@ -773,7 +778,8 @@ export async function apply(ctx, config = {}) {
     return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), ctx.get("roundMinimal"), kazModeSvc);
   };
   /** 每轮首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
-   *  整段覆盖时不再追加（兼容旧配置）；guidanceForget 可覆盖默认遗忘指引。 */
+   *  整段覆盖时不再追加（兼容旧配置）；guidanceForgetEnabled 开关默认开，
+   *  关闭后不注入；guidanceForget 可覆盖默认遗忘指引。 */
   const forgetGuidanceText = (agent) => {
     const current = liveFor(agent);
     const kazModeSvc = getKazModeSvc();
@@ -784,6 +790,8 @@ export async function apply(ctx, config = {}) {
         ? current.guidance.trim()
         : "";
     if (legacy.length > 0) return ""; // 旧字段 guidance：整段覆盖（兼容旧配置）
+    // 遗忘指引开关（2026-08-23）：默认开；关闭后不注入。
+    if (current.guidanceForgetEnabled !== true) return "";
     const settings = getSettings();
     let kazSettings;
     try {
@@ -1373,10 +1381,11 @@ export async function apply(ctx, config = {}) {
       guidance: "",
       guidanceHeadEnabled: false,
       guidanceHead: "",
+      guidanceForgetEnabled: true,
+      guidanceForget: "",
       guidanceSearch: "",
       guidanceSave: "",
       guidanceList: "",
-      guidanceForget: "",
       bm25: { k1: 1.2, b: 0.75 },
     },
     DEFAULT_SECTION,

@@ -92,7 +92,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     enabled: false,
     generation_kwargs: { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 },
   },
-  "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: false, guidanceHead: "" },
+  "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: false, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "kaz-diag": { enabled: false },
   "first-round-hints": { enabled: false },
 };

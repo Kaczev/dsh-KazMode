@@ -1,10 +1,10 @@
 # round-display —— 每轮注入显示插件（Kaz 模式附属）
 
 > **作用**：记录并展示每一轮 Kaz 联动/附属插件（thinking-anchor / kaz-memory /
-> first-round-hints 等）给模型注入了什么信息，方便你看到模型"额外看到了什么"。
+> first-round-hints / kaz-system-prompt 等）给模型注入了什么信息，方便你看到模型"额外看到了什么"。
 
 只负责「显示」，不向模型注入任何内容：记录每一轮开始时 Kaz 模式联动/附属插件
-（thinking-anchor / round-minimal / kaz-memory 等）给模型发送的
+（thinking-anchor / round-minimal / kaz-memory / kaz-system-prompt 等）给模型发送的
 信息，并在对话输入区右侧提供「本轮注入」按钮与面板，按下后在对话框右侧显示
 本轮注入信息（格式：[插件名]>（信息内容）<）。
 
