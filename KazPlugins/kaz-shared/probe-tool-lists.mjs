@@ -3,10 +3,13 @@
 import {
   TOOL_WHITELIST,
   DEFAULT_FIRST_ROUND_TOOLS,
+  DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON,
+  DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF,
   DEFAULT_DISABLED_TOOLS,
   MANAGED_PLUGINS,
   FIXED_PERSONA,
   effectiveToolWhitelist,
+  resolveFirstRoundTools,
   computeSurface,
 } from "./lib/tool-lists.js";
 
@@ -17,11 +20,16 @@ function check(label, ok) {
 }
 
 // ① 常量齐全（单一事实源：各处副本都已删除）
-check("① DEFAULT_FIRST_ROUND_TOOLS = [memory_search]（首轮先查记忆）", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 1 && DEFAULT_FIRST_ROUND_TOOLS[0] === "memory_search");
+check("① DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = [memory_search]", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON) && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON.length === 1 && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON[0] === "memory_search");
+check("① DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = [pwsh, read, edit]", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF) && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF.length === 3 && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF[0] === "pwsh" && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF.includes("read") && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF.includes("edit"));
+check("① DEFAULT_FIRST_ROUND_TOOLS 兜底 = MEMORY_OFF", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 3 && DEFAULT_FIRST_ROUND_TOOLS[0] === "pwsh");
 check("① DEFAULT_DISABLED_TOOLS 存在", Array.isArray(DEFAULT_DISABLED_TOOLS) && DEFAULT_DISABLED_TOOLS.includes("tool-cordis"));
 check("① MANAGED_PLUGINS / FIXED_PERSONA 存在", Array.isArray(MANAGED_PLUGINS) && typeof FIXED_PERSONA === "string");
 const exports0 = await import("./lib/tool-lists.js");
 check("① 已移除群组 API / DEFAULT_ 前缀常量", !("registerGroup" in exports0) && !("DEFAULT_TOOL_WHITELIST" in exports0) && !("DEFAULT_MINIMAL_TOOLS" in exports0));
+check("① resolveFirstRoundTools：kaz-memory 开 → memory_search", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: true })) === JSON.stringify(["memory_search"]));
+check("① resolveFirstRoundTools：kaz-memory 关 → pwsh/read/edit", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: false })) === JSON.stringify(["pwsh", "read", "edit"]));
+check("① resolveFirstRoundTools：状态未知 → 兜底 pwsh/read/edit", JSON.stringify(resolveFirstRoundTools({})) === JSON.stringify(["pwsh", "read", "edit"]));
 
 // ② TOOL_WHITELIST：Kaz 模式下允许出现的全部工具（含记忆六工具与诊断工具）
 const SIX_MEMORY = ["memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"];
@@ -59,8 +67,12 @@ const first = computeSurface({
   firstRoundTools: ["memory_search"],
 });
 check("④ 首阶段仅保留 firstRoundTools（白名单再全也不进首阶段）", first.size === 1 && first.has("memory_search") && !first.has("pwsh") && !first.has("read") && !first.has("edit"));
-const firstFallback = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [] });
-check("④ 首阶段 firstRoundTools 为空时回退 DEFAULT_FIRST_ROUND_TOOLS", firstFallback.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstFallback.has("memory_search") && !firstFallback.has("pwsh"));
+const firstMemOn = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [], kazMemoryEnabled: true });
+check("④ 首阶段 firstRoundTools 为空 + kaz-memory 开 → memory_search", firstMemOn.size === 1 && firstMemOn.has("memory_search") && !firstMemOn.has("pwsh") && !firstMemOn.has("read") && !firstMemOn.has("edit"));
+const firstMemOff = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [], kazMemoryEnabled: false });
+check("④ 首阶段 firstRoundTools 为空 + kaz-memory 关 → pwsh/read/edit", firstMemOff.size === 3 && firstMemOff.has("pwsh") && firstMemOff.has("read") && firstMemOff.has("edit") && !firstMemOff.has("memory_search"));
+const firstUnknown = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [] });
+check("④ 首阶段 firstRoundTools 为空 + 状态未知 → 兜底 DEFAULT_FIRST_ROUND_TOOLS", firstUnknown.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstUnknown.has("pwsh") && firstUnknown.has("read") && firstUnknown.has("edit") && !firstUnknown.has("memory_search"));
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

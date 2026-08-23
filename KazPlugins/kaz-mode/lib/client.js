@@ -108,7 +108,7 @@ window.__ModuleLoader__.load({
 				tag: "首阶段极简 · 首次工具调用后恢复",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
-					{ key: "firstRoundTools", kind: "list", nonEmpty: true, label: "firstRoundTools（首次工具调用前的工具白名单，逗号分隔；不能为空——为空会导致首轮没有任何工具，永远无法触发「首次调用后恢复全部工具」）" },
+					{ key: "firstRoundTools", kind: "list", nonEmpty: true, label: "firstRoundTools（首次工具调用前的工具白名单，逗号分隔。为空则是默认工具）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走首阶段极简）" },
 				],
 			},

@@ -328,9 +328,11 @@ export default {
           if (tools.length > 0) firstRoundTools = tools;
         }
       } catch {
-        // 保持空数组（computeSurface 回退 DEFAULT_FIRST_ROUND_TOOLS）
+        // 保持空数组（computeSurface 按 kaz-memory 自动解析）
       }
-      const fallbackSurface = computeSurface({ toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools });
+      const kazMemoryState = readPluginState("kaz-memory");
+      const kazMemoryEnabled = kazMemoryState !== null && typeof kazMemoryState === "object" && kazMemoryState.enabled === true;
+      const fallbackSurface = computeSurface({ toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools, kazMemoryEnabled });
       let sessionSurface = null;
       if (kazModeSvc !== null && kazEnabled && typeof kazModeSvc.surfaceOf === "function") {
         try {

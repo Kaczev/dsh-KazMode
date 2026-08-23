@@ -3,7 +3,8 @@
 // 按「首次工具调用」切换工具集（2026-08 重构，替代旧的按轮次判定）：
 //
 //   1) 首次工具调用前——极简阶段：
-//        - 模型可见的工具只保留 firstRoundTools（默认 memory_search）：
+//        - 模型可见的工具只保留 firstRoundTools（为空时自动：kaz-memory 开 =
+//          memory_search；关 = pwsh + read + edit，由 kaz-shared 统一解析）：
 //          组装层（system-prompt/assemble）把其它工具及 tool:* 指导段全部滤除，
 //          执行层（tools/pre-execute）对白名单之外的调用一律拒绝（纵深防御）；
 //        - 不再注入任何提示段（2026-08：原 round-minimal:policy 的两条消息已删除，
@@ -28,13 +29,13 @@
 // 配置（热重载，写入 ~/.dsh/settings.yaml 的 round-minimal: 命名空间即可，
 // 无需重启；组合行 cordis.patch.yml 的 config 作为 base 层，用户设置优先）：
 //   enabled                是否启用，默认 true
-//   firstRoundTools        极简阶段可用工具白名单，默认 ["memory_search"]
+//   firstRoundTools        极简阶段可用工具白名单（空 = 按 kaz-memory 自动解析）
 //   includeSubagents       是否对子代理也施加极简阶段，默认 false
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
-import { DEFAULT_FIRST_ROUND_TOOLS } from "kaz-shared";
+import { resolveFirstRoundTools } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 round-minimal: 段。 */
 const NAMESPACE = settingsNamespace("round-minimal");
@@ -42,7 +43,7 @@ const NAMESPACE = settingsNamespace("round-minimal");
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
-  firstRoundTools: z.array(z.string()).default([...DEFAULT_FIRST_ROUND_TOOLS]),
+  firstRoundTools: z.array(z.string()).default([]),
   includeSubagents: z.boolean().default(false),
 });
 
@@ -120,14 +121,15 @@ export function ensureSettingsDefaults(settings, ns, defaults, logger) {
 }
 
 
-/** 归一化任意来源（组合行 config / settings 解析值）的配置。 */
+/** 归一化任意来源（组合行 config / settings 解析值）的配置。
+ *  firstRoundTools 为空 = 自动：由 kaz-shared 按 kaz-memory 启用状态解析。 */
 function normalizeConfig(raw) {
   const value = raw && typeof raw === "object" ? raw : {};
   const tools = Array.isArray(value.firstRoundTools)
     ? value.firstRoundTools
         .filter((tool) => typeof tool === "string" && tool.trim().length > 0)
         .map((tool) => tool.trim())
-    : [...DEFAULT_FIRST_ROUND_TOOLS];
+    : [];
   return {
     enabled: value.enabled !== false,
     firstRoundTools: tools,
@@ -217,6 +219,23 @@ export default {
       return source();
     }
 
+    /** 该代理此刻的首轮工具白名单：显式配置优先；为空时按 kaz-memory 启用状态解析。 */
+    function effectiveFirstRoundTools(agent) {
+      const current = liveFor(agent);
+      const explicit = Array.isArray(current.firstRoundTools) ? current.firstRoundTools.filter((t) => typeof t === "string" && t.trim().length > 0) : [];
+      if (explicit.length > 0) return explicit;
+      let kazMemoryEnabled;
+      try {
+        const svc = ctx.get("kazMode");
+        if (svc !== undefined && svc !== null && typeof svc.pluginEnabled === "function" && agent) {
+          kazMemoryEnabled = svc.pluginEnabled(agent, "kaz-memory") === true;
+        }
+      } catch {
+        // 服务缺失时交给 resolveFirstRoundTools 兜底
+      }
+      return resolveFirstRoundTools({ kazMemoryEnabled });
+    }
+
     /** 该代理此刻是否处于极简阶段（enabled、非子代理（按配置）、尚无 tool/call）。 */
     function isFirstRound(agent) {
       const current = liveFor(agent);
@@ -277,7 +296,7 @@ export default {
       signalState(context?.agent);
       const live = liveFor(context?.agent);
       if (live.enabled === true && isFirstRound(context?.agent)) {
-        const allow = new Set(Array.isArray(live.firstRoundTools) ? live.firstRoundTools : []);
+        const allow = new Set(effectiveFirstRoundTools(context?.agent));
         assembly.tools = assembly.tools.filter(
           (tool) => tool !== null && typeof tool === "object" && allow.has(tool.name),
         );
@@ -298,7 +317,7 @@ export default {
       const live = liveFor(exec?.agent);
       if (live.enabled === true && isFirstRound(exec?.agent)) {
         const name = exec?.name;
-        const tools = Array.isArray(live.firstRoundTools) ? live.firstRoundTools : [];
+        const tools = effectiveFirstRoundTools(exec?.agent);
         if (typeof name === "string" && !tools.includes(name)) {
           ctx.logger.info(
             `[round-minimal] 极简阶段拒绝调用工具 "${name}"（仅允许：${tools.join(", ")}）`,

@@ -14,7 +14,8 @@
 //      tool:* 指导段 / 运行时上下文…）一律过滤。本插件不再负责系统提示词。
 //   2) 工具面两阶段（工具清单全部由 kaz-shared 的 tool-lists.js 管理）：
 //        - 首次工具调用前（round-minimal 首阶段信号）：仅保留 round-minimal
-//          首轮工具集 firstRoundTools（为空回退 DEFAULT_FIRST_ROUND_TOOLS）；
+//          首轮工具集 firstRoundTools（为空时由 kaz-shared 按 kaz-memory 自动解析：
+//          kaz-memory 开 → memory_search；关 → pwsh + read + edit）；
 //        - 首次工具调用后：恢复 Kaz 全部工具 = effectiveToolWhitelist
 //          （= settings.toolWhitelist 用户白名单，白名单是唯一闸门——含记忆/
 //          诊断工具；已注册但不在清单里的工具不进入工具列表）。白名单默认值
@@ -44,7 +45,6 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
   TOOL_WHITELIST,
-  DEFAULT_FIRST_ROUND_TOOLS,
   DEFAULT_DISABLED_TOOLS,
   MANAGED_PLUGINS,
   MEMORY_TOOLS,
@@ -78,7 +78,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   "thinking-anchor": { enabled: false, instruction: "", turnReminder: "" },
   "round-minimal": {
     enabled: false,
-    firstRoundTools: [...DEFAULT_FIRST_ROUND_TOOLS],
+    firstRoundTools: [],
     includeSubagents: false,
   },
   "plugin-filter": {
@@ -92,7 +92,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     enabled: false,
     generation_kwargs: { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 },
   },
-  "kaz-memory": { enabled: true, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
+  "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "kaz-diag": { enabled: false },
   "first-round-hints": { enabled: false },
 };
@@ -803,13 +803,15 @@ export default {
             if (Array.isArray(tools)) firstRoundTools = tools;
           }
         } catch {
-          // 保持空数组（computeSurface 回退 DEFAULT_FIRST_ROUND_TOOLS）
+          // 保持空数组（computeSurface 按 kaz-memory 自动解析）
         }
       }
       return computeSurface({
         toolWhitelist: [...whitelist],
         minimalPhase,
         firstRoundTools,
+        // firstRoundTools 为空时：kaz-memory 开 → memory_search；关 → pwsh/read/edit
+        kazMemoryEnabled: states["kaz-memory"]?.enabled === true,
       });
     }
 

@@ -1,2 +1,2 @@
 name: Kaz 模式
-description: 工具面两阶段——首次工具调用前仅 memory_search，首次调用后恢复 Kaz 全部工具（toolWhitelist 白名单为唯一闸门，含记忆六工具与 kaz_mode_status）。系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 "You are a helpful software engineer assistant."，kaz-memory 启用时切换为记忆优先提示词），拥有跨会话记忆功能。
+description: 工具面两阶段——首次工具调用前仅 memory_search，首次调用后恢复 Kaz 全部工具。

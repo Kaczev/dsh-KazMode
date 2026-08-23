@@ -12,9 +12,10 @@
 //       effectiveToolWhitelist = 用户 settings.toolWhitelist（缺失时
 //       TOOL_WHITELIST）原样去重——白名单是唯一闸门，不做任何群组加减；
 //       全量阶段 = effectiveToolWhitelist；
-//       首阶段（round-minimal 信号 minimalPhase=true）只保留 firstRoundTools
-//       （为空回退 DEFAULT_FIRST_ROUND_TOOLS）——"首轮工具一定是
-//       DEFAULT_FIRST_ROUND_TOOLS"，无交集演算、无 minimalTools 概念。
+//       首阶段（round-minimal 信号 minimalPhase=true）只保留 firstRoundTools；
+//       firstRoundTools 为空时按 kaz-memory 启用状态自动解析（resolveFirstRoundTools）：
+//       kaz-memory 开 → 仅 memory_search；关 → pwsh + read + edit。
+//       无交集演算、无 minimalTools 概念。
 //   - kaz-memory / kaz-diag 的工具是否出现在工具面 ⇔ 插件 enabled 时注册到
 //     harness（关闭时完全注销，由各插件自身负责）且名字在白名单里。
 //   - 非 Kaz 模式：本模块不干预（工具面由标准模式决定；kaz-memory 等插件
@@ -25,10 +26,45 @@
 // 本模块零依赖、无副作用导入。
 // ===========================================================================
 
-/** round-minimal 首阶段工具白名单默认值（首次工具调用前仅保留这些）。
- *  2026-08-23（Kaczev 决定）：仅 memory_search——第一轮先查记忆，触发首次工具
- *  调用后再恢复全部工具。 */
-export const DEFAULT_FIRST_ROUND_TOOLS = ["memory_search"];
+/** kaz-memory 开启时的首轮工具白名单：第一轮先查记忆，触发首次工具调用后再恢复。 */
+export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = ["memory_search"];
+
+/** kaz-memory 关闭时的首轮工具白名单：回到原来的 pwsh + read + edit（shell + 看/改文件）。 */
+export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = ["pwsh", "read", "edit"];
+
+/** 兜底默认（kaz-memory 状态未知时）：pwsh + read + edit（旧行为）。 */
+export const DEFAULT_FIRST_ROUND_TOOLS = DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF;
+
+/**
+ * 首轮工具规则（与 kaz/kaz-system-prompt.mjs 的 PROMPT_RULES 同思路）：
+ * 第一个 test 返回 true 的规则胜出。
+ *   - kaz-memory 启用 → 仅 memory_search
+ *   - 默认（关闭 / 未知）→ pwsh + read + edit
+ */
+const FIRST_ROUND_TOOL_RULES = [
+  {
+    id: "kaz-memory",
+    test: (kazMemoryEnabled) => kazMemoryEnabled === true,
+    tools: DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON,
+  },
+  {
+    id: "default",
+    test: () => true,
+    tools: DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF,
+  },
+];
+
+/** 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点，类似系统提示词规则）。 */
+export function resolveFirstRoundTools({ kazMemoryEnabled } = {}) {
+  for (const rule of FIRST_ROUND_TOOL_RULES) {
+    try {
+      if (rule.test(kazMemoryEnabled)) return [...rule.tools];
+    } catch {
+      // 某条规则异常时跳过，继续往下找
+    }
+  }
+  return [...DEFAULT_FIRST_ROUND_TOOLS];
+}
 
 /** plugin-filter 默认禁用清单（插件/工具名，大小写不敏感匹配）。 */
 export const DEFAULT_DISABLED_TOOLS = ["tool-cordis", "tool-subagent-report", "codex", "claude-code"];
@@ -107,18 +143,20 @@ export function effectiveToolWhitelist(toolWhitelist = []) {
 
 /**
  * 计算某代理此刻的 Kaz 工具面（Set）。
- *   minimalPhase=true（round-minimal 首阶段）：只保留 firstRoundTools（为空回退
- *   DEFAULT_FIRST_ROUND_TOOLS）；否则全量阶段 = effectiveToolWhitelist。
+ *   minimalPhase=true（round-minimal 首阶段）：只保留 firstRoundTools；
+ *   firstRoundTools 为空时按 kazMemoryEnabled 自动解析（resolveFirstRoundTools）；
+ *   否则全量阶段 = effectiveToolWhitelist。
  * @param {object} inputs
  * @param {string[]} [inputs.toolWhitelist] settings 的 kaz-mode.toolWhitelist
  * @param {boolean} [inputs.minimalPhase] round-minimal 首阶段信号
- * @param {string[]} [inputs.firstRoundTools] round-minimal 的 firstRoundTools
+ * @param {string[]} [inputs.firstRoundTools] round-minimal 的 firstRoundTools（空 = 自动）
+ * @param {boolean} [inputs.kazMemoryEnabled] 该会话 kaz-memory 是否启用（firstRoundTools 为空时用）
  * @returns {Set<string>}
  */
-export function computeSurface({ toolWhitelist = [], minimalPhase = false, firstRoundTools = [] } = {}) {
+export function computeSurface({ toolWhitelist = [], minimalPhase = false, firstRoundTools = [], kazMemoryEnabled } = {}) {
   const first = cleanTools(firstRoundTools);
   if (minimalPhase) {
-    return new Set(first.length > 0 ? first : DEFAULT_FIRST_ROUND_TOOLS);
+    return new Set(first.length > 0 ? first : resolveFirstRoundTools({ kazMemoryEnabled }));
   }
   return new Set(effectiveToolWhitelist(toolWhitelist));
 }
