@@ -10,7 +10,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | 插件 | 角色 |
 | --- | --- |
 | `thinking-anchor` | 思考锚点（**消息注入**）：新对话开始时把完整思考协议作为一条合成用户消息注入，此后每轮开头注入短提醒；不触碰系统提示词 |
-| `round-minimal` | 首阶段极简：**首次工具调用前**只暴露 `pwsh` / `read` / `edit`，首次工具调用后恢复全部工具 |
+| `round-minimal` | 首阶段极简：**首次工具调用前**只暴露 `memory_search`，首次工具调用后恢复全部工具 |
 | `plugin-filter`（原 tool-filter） | 工具过滤：按名单移除 / 禁用指定工具 |
 | `output-beep` | 输出完成提示音：模型输出完毕时响提示音（可配频率/时长/子代理） |
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
@@ -27,7 +27,7 @@ Kaz 模式同时具备两个入口，双向同步：
    指引 / tool:* 指导段 / 运行时上下文…）一律过滤。**kaz-mode 插件不再控制系统提示词。**
 2. **工具面两阶段**：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
-     （默认 `pwsh` / `read` / `edit`）；
+     （默认 `memory_search`）；
    - 首次工具调用后：恢复 **Kaz 全部工具** = `toolWhitelist` 白名单（唯一闸门）。
 3. **记忆/诊断工具按会话生效**：`kaz-memory` / `kaz-diag` 关闭时，其六工具 /
    `kaz_mode_status` 从该会话的工具面移出、调用被拒。
@@ -93,7 +93,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 
 round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件。kaz-mode
 据此在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集（默认
-`pwsh` / `read` / `edit`）；首次工具调用后恢复 `toolWhitelist`。
+`memory_search`）；首次工具调用后恢复 `toolWhitelist`。
 
 ### 6. 设置（`~/.dsh/settings.yaml`，热重载）
 
@@ -141,7 +141,7 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
 1. 选择 `kaz` 预设后：新建对话的系统提示词由 `kaz/kaz-system-prompt.mjs` 收敛；
    默认是 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时是
    记忆优先提示词（+ 计划模式段）；
-2. 首次工具调用前工具面只有 `pwsh` + `read` + `edit`；第一次工具调用后恢复
+2. 首次工具调用前工具面只有 `memory_search`；第一次工具调用后恢复
    `toolWhitelist` 全部工具（kaz-memory 关闭时无记忆工具；kaz-diag 开启时有
    `kaz_mode_status`）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；

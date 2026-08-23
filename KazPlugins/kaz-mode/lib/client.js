@@ -163,7 +163,8 @@ window.__ModuleLoader__.load({
 				note: "记忆自动载入在对话开始时注入；六个记忆工具（memory_save/update/list/search/detail/forget）仅在 kaz-memory 开启时注册并加入工具面（关闭 = 六工具完全注销，任何模式都不再出现，热重载）。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不注入记忆、六工具完全注销）" },
-					{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（固定提示总述行；留空 = 内置默认）" },
+					{ key: "guidanceHeadEnabled", kind: "boolean", label: "guidanceHeadEnabled（固定提示总述行开关；默认关）" },
+					{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（固定提示总述行文本；仅在 guidanceHeadEnabled=true 时生效；留空 = 内置默认）" },
 					{ key: "bm25", path: ["k1"], kind: "number", step: 0.1, label: "bm25.k1（BM25 词频饱和参数；默认 1.2，一般 1.2~2.0）" },
 					{ key: "bm25", path: ["b"], kind: "number", step: 0.05, label: "bm25.b（BM25 长度归一化参数；默认 0.75，0 = 不做长度归一化）" },
 				],

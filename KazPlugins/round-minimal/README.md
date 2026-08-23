@@ -1,12 +1,12 @@
 # round-minimal —— 首阶段极简（首次工具调用后恢复）
 
-> **作用**：首次工具调用前只暴露 `pwsh` / `read` / `edit` 三个工具，模型第一次调用工具后就恢复全部工具——让模型先以极简工具观察/动手，避免首轮就乱调工具、浪费上下文。
+> **作用**：首次工具调用前只暴露 `memory_search` 一个工具，模型第一次调用工具后就恢复全部工具——让模型第一轮先查记忆，再开始实际任务，避免首轮就乱调工具、浪费上下文。
 
 宿主侧插件：按「会话里是否已发生第一次工具调用」切换工具集（2026-08 重构，
 替代旧的按对话轮次判定）：
 
 - **首次工具调用前**（极简阶段）：模型可见/可调用的工具只保留 `firstRoundTools`
-  （默认 `pwsh`、`read`、`edit`），其余工具及 `tool:*` 指导段全部滤除；
+  （默认 `memory_search`），其余工具及 `tool:*` 指导段全部滤除；
   执行层对白名单之外的调用一律拒绝（纵深防御）。
 - **首次工具调用之后**：工具列表恢复为组合/预设配置的全部工具。
 
@@ -18,22 +18,22 @@
 
 ## 特性
 
-- **首阶段极简**：首阶段只暴露 `pwsh` + `read` + `edit`（shell + 文件查看/编辑）；
+- **首阶段极简**：首阶段只暴露 `memory_search`（先查记忆，再恢复全量工具）；
 - **子代理排除**：默认不受影响（`includeSubagents: false`）——subagent / workflow /
   ralph 的子会话始终走全量模式；
 - **对外信号**：发布 `roundMinimal` 服务（`enabled` / `firstRoundTools` /
   `isMinimal` / `turnOf`），状态变化时推送 `round-minimal/state` 事件——供 kaz-mode
   等消费方在极简阶段抑制"请先搜索记忆"之类的指引。
 
-> Windows 说明：极简阶段工具集默认使用 `pwsh`（PowerShell 7+，Windows 自带）
-> 而非 bash，因此本插件开箱即用于 Windows 环境。
+> 极简阶段默认只保留 `memory_search`，因此不依赖 shell；首次调用 `memory_search`
+> 后立即恢复全量工具面。
 
 ## settings（纯方案 A：Kaz 会话下经 Kaz 面板/kazMode 服务生效；此处仅 standalone 兜底）
 
 ```yaml
 round-minimal:
   enabled: true
-  firstRoundTools: [ pwsh, read, edit ]  # 极简阶段工具白名单
+  firstRoundTools: [ memory_search ]  # 极简阶段工具白名单
   includeSubagents: false   # 子代理也走首阶段极简（默认关）
 ```
 
@@ -63,7 +63,7 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\round-minimal\probe-round-mi
 
 ## 验收要点
 
-1. 新对话首次请求的工具面只有 `pwsh` + `read` + `edit`；
+1. 新对话首次请求的工具面只有 `memory_search`；
 2. 模型第一次工具调用后的下一次组装，工具面恢复全部工具；
 3. 重启续接旧对话（已有工具调用）直接全量模式；
 4. 子代理（`includeSubagents: false` 时）始终全量模式。

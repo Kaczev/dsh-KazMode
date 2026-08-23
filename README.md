@@ -5,8 +5,8 @@
 ## Kaz 模式是什么
 
 - **跨会话记忆**：模型会把经验存为明文记忆，同一话题下越用越好用。以往每次重开新对话，要么重新向模型说明项目，要么模型每次都需要自己重新探索项目，有了kaz-memory插件，模型可以从记忆中搜索，快速找到方向；
-- **提示词极简**：Kaz 会话的系统提示词为极简模式的 `You are a helpful software engineer assistant.`，保障deepseek-v4的性能；
-- **工具面两阶段**：首次工具调用前只暴露 `pwsh` / `read` / `edit`，第一次工具调用后恢复白名单里的全部工具；
+- **提示词极简**：Kaz 会话的系统提示词由 `kaz/kaz-system-prompt.mjs` 按条件控制，默认是极简模式的 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时切换为记忆优先提示词，保障deepseek-v4的性能；
+- **工具面两阶段**：首次工具调用前只暴露 `memory_search`，第一次工具调用后恢复白名单里的全部工具；
 - **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；
 - **功能按插件分离**：Kaz模式的功能是按插件分离的。如果仅想要Kaz模式的部分功能，也可以在 **Kaz面板** 里面单独开启；
 
@@ -70,7 +70,7 @@ dsh-KazMode/
 | 插件目录 | 插件 id / name | 作用 |
 | --- | --- | --- |
 | `kaz-mode` | `kaz-mode` | Kaz 模式超级模式：预设联动 + 会话头部按钮 + 集中管理面板 |
-| `round-minimal` | `round-minimal` | 首阶段极简：首次工具调用前只暴露 `pwsh` / `read` / `edit` |
+| `round-minimal` | `round-minimal` | 首阶段极简：首次工具调用前只暴露 `memory_search` |
 | `plugin-filter` | `plugin-filter` | 工具过滤：移除或禁用指定工具 |
 | `thinking-anchor` | `thinking-anchor` | 思考锚点：新对话注入完整思考协议，之后每轮短提醒 |
 | `first-round-hints` | `first-round-hints` | 首轮注入 pwsh 使用要点等提示 |

@@ -429,6 +429,13 @@ async function runPreStep(agent, step = 2, messages = [], turn = 1) {
 const beforeToolAgent = { id: "guidance-before-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }] } };
 const afterToolAgent = { id: "guidance-after-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 
+// ③ 新开关默认关：即使已过首次工具调用，也不注入固定指引
+const defaultOffAfterTool = { id: "guidance-default-off", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
+check("③ guidanceHeadEnabled 默认关：不注入固定指引", hasGuidance(await runPreStep(defaultOffAfterTool, 2)) === false);
+// 以下 guidance 测试显式打开开关（guidanceHead 留空 = 内置默认）。
+await settings.update("kaz-memory", { guidanceHeadEnabled: true });
+await settle();
+
 const preBefore = await runPreStep(beforeToolAgent, 2);
 check("③ 首次工具调用前不注入指引", hasGuidance(preBefore) === false);
 const preAfter = await runPreStep(afterToolAgent, 2);
@@ -473,17 +480,17 @@ const preSearchTurn2Again = await runPreStep(searchAgainTurnAgent, 3, [], 2);
 check("③d 第 2 轮内不重复注入遗忘指引", hasForgetGuidance(preSearchTurn2Again) === false);
 
 // ③b guidanceHead 覆盖总述行；guidanceSearch 等字段保留兼容但不再生效
-await settings.update("kaz-memory", { guidanceHead: "Custom head line", guidanceSearch: "Custom search line" });
+await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "Custom head line", guidanceSearch: "Custom search line" });
 await settle();
 const headAgent = { id: "guidance-head", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 const gHead = guidanceTextOf(await runPreStep(headAgent, 2));
 check("③b guidanceHead 覆盖总述行", gHead.includes("Custom head line") && !gHead.includes("search the memory (memory_search)"));
 check("③b guidanceSearch 不再生效（工具细节并入工具描述）", !gHead.includes("Custom search line") && !gHead.includes("memory_search："));
 check("③b 其余工具说明行不再发送", !gHead.includes("memory_save：") && !gHead.includes("memory_forget："));
-await settings.update("kaz-memory", { guidanceHead: "", guidanceSearch: "" });
+await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "", guidanceSearch: "" });
 await settle();
 const defaultAgent = { id: "guidance-default", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-check("③b 清空后恢复内置默认", guidanceTextOf(await runPreStep(defaultAgent, 2)).includes("search the memory (memory_search)"));
+check("③b 清空 guidanceHead 后恢复内置默认", guidanceTextOf(await runPreStep(defaultAgent, 2)).includes("search the memory (memory_search)"));
 
 // ③c 旧字段 guidance（整段覆盖）仍优先
 await settings.update("kaz-memory", { guidance: "整段覆盖的指引文本" });
@@ -491,9 +498,11 @@ await settle();
 const legacyAgent = { id: "guidance-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③c 旧字段 guidance 整段覆盖", guidanceTextOf(await runPreStep(legacyAgent, 2)) === "整段覆盖的指引文本");
 await settings.update("kaz-memory", { guidance: "" });
+await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "Dynamic head after legacy" });
 await settle();
 const dynamicAgent = { id: "guidance-dynamic", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-check("③c 清空旧字段后恢复动态拼装", guidanceTextOf(await runPreStep(dynamicAgent, 2)).startsWith("[kaz-memory guidance]"));
+const dynamicGuidance = guidanceTextOf(await runPreStep(dynamicAgent, 2));
+check("③c 清空旧字段后按 guidanceHead 动态拼装", dynamicGuidance.startsWith("[kaz-memory guidance]") && dynamicGuidance.includes("Dynamic head after legacy"));
 
 // ③d2 guidanceForget 覆盖遗忘指引；旧字段 guidance 整段覆盖时不再追加
 await settings.update("kaz-memory", { guidanceForget: "Custom forget line" });
@@ -508,6 +517,7 @@ await settle();
 const legacyForgetAgent = { id: "guidance-forget-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 check("③d2 旧字段 guidance 整段覆盖时不追加遗忘指引", hasForgetGuidance(await runPreStep(legacyForgetAgent, 2)) === false);
 await settings.update("kaz-memory", { guidance: "" });
+await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "" });
 await settle();
 
 // ④ RPC list：只回元数据（含 name/summary/autoLoad，无正文），按 updated_at 倒序
@@ -780,17 +790,17 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   rmSync(storeOff, { force: true });
 }
 
-// ⑮ 方案 A：六工具常驻注册——enabled 开关不再全局注销工具；会话级可见性由
-// kaz-mode 组装/执行层按 agent 会话过滤（kazMode.toolVisible 判定）
+// ⑮ 方案 A：enabled=false 时六工具完全注销（热重载）；enabled=true 时重新注册。
+// 会话级可见性仍由 kaz-mode 组装/执行层按 agent 会话过滤（kazMode.toolVisible 判定）。
 {
   const SIX = ["memory_save", "memory_update", "memory_list", "memory_search", "memory_detail", "memory_forget"];
   check("⑮ 初始六工具已注册", SIX.every((n) => registeredTools.has(n)));
   await settings.update("kaz-memory", { enabled: false });
   await settle();
-  check("⑮ 关闭后六工具仍保持注册（会话级过滤，不做全局注销）", SIX.every((n) => registeredTools.has(n)));
+  check("⑮ 关闭后六工具完全注销（全局注销，热重载生效）", SIX.every((n) => !registeredTools.has(n)));
   await settings.update("kaz-memory", { enabled: true });
   await settle();
-  check("⑮ 重新开启后六工具仍注册", SIX.every((n) => registeredTools.has(n)));
+  check("⑮ 重新开启后六工具恢复注册", SIX.every((n) => registeredTools.has(n)));
 }
 
 // ⑭ BM25 评分单元检查（vendored okapibm25 + lib/bm25.js）

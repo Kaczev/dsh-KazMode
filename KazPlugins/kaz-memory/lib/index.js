@@ -230,7 +230,9 @@ function present(title, kind, rawInput) {
 
 /** 指引总述行（S 信息）：memory_search 可调用时作为指引第一行。
  *  2026-08-21：改为主动行动式措辞——模型应当主动查记忆、主动存记忆，
- *  而不是等到"遇到难题"才想起记忆。 */
+ *  而不是等到"遇到难题"才想起记忆。
+ *  2026-08-23：固定指引默认由 guidanceHeadEnabled=false 关闭；开启后
+ *  guidanceHead 留空时仍使用这条内置默认。 */
 const GUIDANCE_HEAD = [
   "We need to search the memory (memory_search) at the start of a task for relevant information.",
   "We need to save memories (memory_save) with concise and sharp content that captures the reasoned solutions and key insights we've derived — so we can reference them when facing similar problems in the future."
@@ -313,7 +315,7 @@ function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinim
  *  memory_search 不可用时返回空串（不向模型发指引——没有检索能力的指引
  *  只会干扰模型思考）。
  *
- *  overrides.head：总述行覆盖（空 = 内置默认）。
+ *  overrides.head：总述行覆盖（空 = 内置默认 GUIDANCE_HEAD）。
  */
 function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc, kazModeSvc) {
   const head =
@@ -360,7 +362,9 @@ const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
   /** 整段指引覆盖（旧字段，保留兼容）：非空时完全取代动态拼装。 */
   guidance: z.string().default(""),
-  /** 固定提示总述行覆盖：留空 = 内置默认。 */
+  /** 固定提示总述行开关：默认关；开启后按 guidanceHead（留空 = 内置默认）注入。 */
+  guidanceHeadEnabled: z.boolean().default(false),
+  /** 固定提示总述行文本：仅在 guidanceHeadEnabled=true 时生效；留空 = 内置默认。 */
   guidanceHead: z.string().default(""),
   /** 以下三个字段保留兼容（2026-08-17 起不再生效）：工具细节已并入各工具描述。
    *  guidanceForget 自每轮首次 memory_search 遗忘指引起恢复生效（覆盖默认遗忘指引）。 */
@@ -381,6 +385,8 @@ const SETTINGS_SCHEMA = z.object({
 export const DEFAULT_SECTION = {
   guidance: "",
   enabled: true,
+  guidanceHeadEnabled: false,
+  guidanceHead: "",
   bm25: { k1: 1.2, b: 0.75 },
 };
 // ---------------------------------------------------------------------------
@@ -465,6 +471,7 @@ export async function apply(ctx, config = {}) {
   let source = () => ({
     enabled: true,
     guidance: "",
+    guidanceHeadEnabled: false,
     guidanceHead: "",
     guidanceSearch: "",
     guidanceSave: "",
@@ -750,6 +757,8 @@ export async function apply(ctx, config = {}) {
         ? current.guidance.trim()
         : "";
     if (legacy.length > 0) return legacy; // 旧字段 guidance：整段覆盖（兼容旧配置）
+    // 固定提示总述行开关（2026-08-23）：默认关；开启后才按 guidanceHead 注入。
+    if (current.guidanceHeadEnabled !== true) return "";
     const settings = getSettings();
     let kazSettings;
     try {
@@ -1362,6 +1371,7 @@ export async function apply(ctx, config = {}) {
     {
       enabled: true,
       guidance: "",
+      guidanceHeadEnabled: false,
       guidanceHead: "",
       guidanceSearch: "",
       guidanceSave: "",

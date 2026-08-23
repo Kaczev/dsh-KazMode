@@ -6,7 +6,7 @@
 # Kaz 模式的系统提示词由本目录的 kaz-system-prompt.mjs 在组装层按条件收敛
 # （默认仍是 "You are a helpful software engineer assistant."；kaz-memory 启用时
 # 自动换成记忆优先提示词），任何插件都不再向 Kaz 会话注入其它提示段；首阶段
-# 极简（首次工具调用前仅 pwsh + read + edit，之后恢复全部工具）由 round-minimal
+# 极简（首次工具调用前仅 memory_search，之后恢复全部工具）由 round-minimal
 # 提供，工具面白名单由 kaz-mode 的 kaz-mode.toolWhitelist 决定（= Kaz 全部工具
 # 的手动编辑点）。工具过滤由 plugin-filter、思考锚点由 thinking-anchor（消息注入）、
 # 记忆由 kaz-memory 提供，全部由 kaz-mode 插件按本预设的选中状态联动启用/恢复。

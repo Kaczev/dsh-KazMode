@@ -14,7 +14,7 @@ Kaz 模式的工具清单**全部集中在这里**，其它组件不再各自维
 | `TOOL_WHITELIST` | kaz-mode（schema/自愈默认）、kaz-diag（报告兜底）、kaz-memory（可用性兜底） | Kaz 模式下允许出现的**全部**工具默认清单（含记忆六工具与 `kaz_mode_status`） |
 | `effectiveToolWhitelist(whitelist)` | kaz-mode / kaz-diag / kaz-memory | 有效白名单 = 用户 settings.toolWhitelist 原样去重（白名单是**唯一闸门**） |
 | `computeSurface(inputs)` | kaz-mode 组装层 / kaz-diag 报告 | 计算某代理此刻的 Kaz 工具面 |
-| `DEFAULT_FIRST_ROUND_TOOLS` | round-minimal / kaz-mode | 首阶段工具白名单默认值 |
+| `DEFAULT_FIRST_ROUND_TOOLS` | round-minimal / kaz-mode | 首阶段工具白名单默认值（`memory_search`） |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-diag（展示默认 persona） | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
 

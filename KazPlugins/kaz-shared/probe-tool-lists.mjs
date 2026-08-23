@@ -17,7 +17,7 @@ function check(label, ok) {
 }
 
 // ① 常量齐全（单一事实源：各处副本都已删除）
-check("① DEFAULT_FIRST_ROUND_TOOLS = [pwsh, read, edit]（首轮自洽组合）", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 3 && DEFAULT_FIRST_ROUND_TOOLS[0] === "pwsh" && DEFAULT_FIRST_ROUND_TOOLS.includes("read") && DEFAULT_FIRST_ROUND_TOOLS.includes("edit"));
+check("① DEFAULT_FIRST_ROUND_TOOLS = [memory_search]（首轮先查记忆）", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 1 && DEFAULT_FIRST_ROUND_TOOLS[0] === "memory_search");
 check("① DEFAULT_DISABLED_TOOLS 存在", Array.isArray(DEFAULT_DISABLED_TOOLS) && DEFAULT_DISABLED_TOOLS.includes("tool-cordis"));
 check("① MANAGED_PLUGINS / FIXED_PERSONA 存在", Array.isArray(MANAGED_PLUGINS) && typeof FIXED_PERSONA === "string");
 const exports0 = await import("./lib/tool-lists.js");
@@ -48,7 +48,7 @@ check("③ 白名单缺失/为空时回退 TOOL_WHITELIST", fallback.length === 
 const full = computeSurface({
   toolWhitelist: [...TOOL_WHITELIST],
   minimalPhase: false,
-  firstRoundTools: ["pwsh", "read", "edit"],
+  firstRoundTools: ["memory_search"],
 });
 check("④ 全量阶段 = 有效白名单（含记忆/诊断工具）", full.has("pwsh") && full.has("read") && full.has("memory_search") && full.has("kaz_mode_status"));
 const restricted = computeSurface({ toolWhitelist: ["pwsh", "edit"], minimalPhase: false });
@@ -56,11 +56,11 @@ check("④ 用户收窄白名单后全量阶段只含清单内工具", restricte
 const first = computeSurface({
   toolWhitelist: TOOL_WHITELIST,
   minimalPhase: true,
-  firstRoundTools: ["pwsh", "read", "edit"],
+  firstRoundTools: ["memory_search"],
 });
-check("④ 首阶段仅保留 firstRoundTools（白名单再全也不进首阶段）", first.size === 3 && first.has("pwsh") && first.has("read") && first.has("edit") && !first.has("memory_search"));
+check("④ 首阶段仅保留 firstRoundTools（白名单再全也不进首阶段）", first.size === 1 && first.has("memory_search") && !first.has("pwsh") && !first.has("read") && !first.has("edit"));
 const firstFallback = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [] });
-check("④ 首阶段 firstRoundTools 为空时回退 DEFAULT_FIRST_ROUND_TOOLS", firstFallback.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstFallback.has("pwsh") && firstFallback.has("read") && firstFallback.has("edit"));
+check("④ 首阶段 firstRoundTools 为空时回退 DEFAULT_FIRST_ROUND_TOOLS", firstFallback.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstFallback.has("memory_search") && !firstFallback.has("pwsh"));
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -3,7 +3,7 @@
 // 按「首次工具调用」切换工具集（2026-08 重构，替代旧的按轮次判定）：
 //
 //   1) 首次工具调用前——极简阶段：
-//        - 模型可见的工具只保留 firstRoundTools（默认 pwsh、str_replace_editor）：
+//        - 模型可见的工具只保留 firstRoundTools（默认 memory_search）：
 //          组装层（system-prompt/assemble）把其它工具及 tool:* 指导段全部滤除，
 //          执行层（tools/pre-execute）对白名单之外的调用一律拒绝（纵深防御）；
 //        - 不再注入任何提示段（2026-08：原 round-minimal:policy 的两条消息已删除，
@@ -28,7 +28,7 @@
 // 配置（热重载，写入 ~/.dsh/settings.yaml 的 round-minimal: 命名空间即可，
 // 无需重启；组合行 cordis.patch.yml 的 config 作为 base 层，用户设置优先）：
 //   enabled                是否启用，默认 true
-//   firstRoundTools        极简阶段可用工具白名单，默认 ["pwsh", "str_replace_editor"]
+//   firstRoundTools        极简阶段可用工具白名单，默认 ["memory_search"]
 //   includeSubagents       是否对子代理也施加极简阶段，默认 false
 // ===========================================================================
 

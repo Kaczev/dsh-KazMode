@@ -9,7 +9,7 @@
 //      全部工具的手动编辑点），并给出动态调整后的实际工具面：
 //        - kaz-memory 关闭 → 其四个记忆工具自动移出；
 //        - 本插件（kaz-diag）开启 → kaz_mode_status 自动加入；
-//   4) round-minimal 信号：首次工具调用前 = 首阶段极简（pwsh + read + edit），
+//   4) round-minimal 信号：首次工具调用前 = 首阶段极简（memory_search），
 //      首次工具调用后 = 恢复 Kaz 全部工具。
 //
 // 工具注册跟随本插件 enabled 开关（settings.yaml 的 kaz-diag: 段，热重载）：

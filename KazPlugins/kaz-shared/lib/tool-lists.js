@@ -26,9 +26,9 @@
 // ===========================================================================
 
 /** round-minimal 首阶段工具白名单默认值（首次工具调用前仅保留这些）。
- *  2026-08-21（Kaczev 决定）：pwsh + read + edit——edit 受"先 read 后 edit"
- *  的文件观察策略约束，必须与 read 成对出现，首轮才能自洽地看/改文件。 */
-export const DEFAULT_FIRST_ROUND_TOOLS = ["pwsh", "read", "edit"];
+ *  2026-08-23（Kaczev 决定）：仅 memory_search——第一轮先查记忆，触发首次工具
+ *  调用后再恢复全部工具。 */
+export const DEFAULT_FIRST_ROUND_TOOLS = ["memory_search"];
 
 /** plugin-filter 默认禁用清单（插件/工具名，大小写不敏感匹配）。 */
 export const DEFAULT_DISABLED_TOOLS = ["tool-cordis", "tool-subagent-report", "codex", "claude-code"];
