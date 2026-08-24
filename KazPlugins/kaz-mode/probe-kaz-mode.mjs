@@ -102,6 +102,17 @@ const mockTools = {
   },
   ctx: null,
 };
+const rpcHandlers = new Map();
+const mockConnection = {
+  rpc: {
+    handle(channel, handler, _options) {
+      rpcHandlers.set(channel, handler);
+      return () => {
+        rpcHandlers.delete(channel);
+      };
+    },
+  },
+};
 const ctx = {
   fiber: { state: 0 },
   tools: mockTools,
@@ -127,6 +138,7 @@ const ctx = {
     if (name in provided) return provided[name];
     if (name === "settings") return settings;
     if (name === "agents") return { get: (sid) => agentsBySession.get(sid) ?? undefined };
+    if (name === "connection") return mockConnection;
     return undefined;
   },
   inject(deps, cb) {
@@ -152,6 +164,27 @@ check("① kazMode 服务提供 detectedToolPlugins（只读检测）", kazMode 
   const detected = kazMode.detectedToolPlugins();
   const pixel = detected.find((item) => item.pluginName === "dsh-pixel-art");
   check("①.5 动态检测：dsh-pixel-art 被记录且工具归因正确", pixel !== undefined && pixel.tools.includes("render_pixel_art") && pixel.tools.includes("convert_image_to_pixel_art"));
+}
+
+// ①.6 三层存储 RPC（用户默认 / 项目设置）
+{
+  const rpc = rpcHandlers.get("/kaz-mode");
+  check("①.6 RPC 通道已注册", typeof rpc === "function");
+  const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
+  check("①.6 getExternalToolPlugins 返回三层结构", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.factory === "object" && typeof getRes.value.user === "object" && typeof getRes.value.project === "object" && typeof getRes.value.effective === "object");
+  check("①.6 初始 projectDiffers=false / userDiffersFactory=false", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
+  const setRes = await rpc("setExternalToolPlugin", {
+    cwd: TMP,
+    layer: "project",
+    pluginName: "dsh-pixel-art",
+    toolName: "render_pixel_art",
+    enabled: false,
+  });
+  check("①.6 setExternalToolPlugin 写入项目层", setRes !== null && setRes.ok === true && setRes.value.project.plugins["dsh-pixel-art"]?.tools["render_pixel_art"] === false && setRes.value.projectDiffers === true);
+  const getRes2 = await rpc("getExternalToolPlugins", { cwd: TMP });
+  check("①.6 项目层持久化后可读回", getRes2.value.project.plugins["dsh-pixel-art"]?.tools["render_pixel_art"] === false);
+  const resetRes = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
+  check("①.6 resetExternalToolPlugins 清空项目层", resetRes !== null && resetRes.ok === true && resetRes.value.projectDiffers === false && Object.keys(resetRes.value.project.plugins).length === 0);
 }
 const sKaz = agentOf("s-kaz");
 const sKazNomem = agentOf("s-kaz-nomem");

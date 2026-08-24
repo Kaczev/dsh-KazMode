@@ -53,6 +53,14 @@ import {
   computeSurface,
   effectiveToolWhitelist,
   normalizeExternalKey,
+  emptyExternalToolPluginState,
+  normalizeExternalToolPluginState,
+  effectiveExternalToolPluginState,
+  mergeExternalToolPluginStates,
+  setExternalPluginTool,
+  removeExternalPluginTool,
+  setExternalPluginIgnored,
+  restoreExternalPlugin,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -127,6 +135,12 @@ const SESSION_STATES_FILE = "kaz-session-states.json";
 const DEFAULTS_FILE_NAME = "kaz-defaults.json";
 let STORAGE_DIR = join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages");
 let DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
+/** 外置工具插件：用户目录默认设置文件名（~/.dsh/storages 下）。 */
+const EXTERNAL_USER_DEFAULTS_FILE_NAME = "kaz-tool-plugin-defaults.json";
+/** 外置工具插件：项目设置文件名（<项目>/.dsh/storages 下）。 */
+const EXTERNAL_PROJECT_STATE_FILE_NAME = "kaz-tool-plugins.json";
+/** 外置工具插件：安装时默认（factory）。当前为空 = 新检测默认开启。 */
+const EXTERNAL_TOOL_PLUGIN_FACTORY = emptyExternalToolPluginState();
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/kaz-mode";
 
@@ -359,6 +373,83 @@ function loadStateFile(cwd, logger) {
     defaults: loadDefaults(logger),
     sessions: loadSessions(cwd, logger),
   };
+}
+
+// ---------------------------------------------------------------------------
+// 外置工具插件三层存储（2026-08 分步实施 · 第三步）
+//   factory（代码内）→ 用户默认（~/.dsh/storages/kaz-tool-plugin-defaults.json）
+//   → 项目设置（<项目>/.dsh/storages/kaz-tool-plugins.json）
+// 只负责读写 + 合并，不参与工具面过滤（那是第四步）。
+// ---------------------------------------------------------------------------
+
+/** 用户默认设置文件路径（随 STORAGE_DIR 配置变化，调用时计算）。 */
+function externalUserDefaultsPath() {
+  return join(STORAGE_DIR, EXTERNAL_USER_DEFAULTS_FILE_NAME);
+}
+
+/** 项目设置文件路径。 */
+function externalProjectStatePath(cwd) {
+  return join(cwd, ".dsh", "storages", EXTERNAL_PROJECT_STATE_FILE_NAME);
+}
+
+/** 安全读取一个 JSON 状态文件；不存在/损坏时回退 fallback（不抛错）。 */
+function readExternalStateFile(file, fallback, logger) {
+  try {
+    if (!existsSync(file)) return fallback;
+    let raw = readFileSync(file, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    const parsed = JSON.parse(raw);
+    return normalizeExternalToolPluginState(parsed);
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 读取外置工具插件状态失败（" + file + "）：" + safeMessage(error));
+    return fallback;
+  }
+}
+
+/** 读取用户默认层（~/.dsh/storages）。 */
+function loadExternalUserDefaults(logger) {
+  return readExternalStateFile(externalUserDefaultsPath(), emptyExternalToolPluginState(), logger);
+}
+
+/** 读取项目层（<项目>/.dsh/storages）。 */
+function loadExternalProjectState(cwd, logger) {
+  return readExternalStateFile(externalProjectStatePath(cwd), emptyExternalToolPluginState(), logger);
+}
+
+/** 写用户默认层（先建目录，写规范化状态；失败只记日志）。 */
+function saveExternalUserDefaults(state, logger) {
+  try {
+    mkdirSync(STORAGE_DIR, { recursive: true });
+    writeFileSync(externalUserDefaultsPath(), JSON.stringify(normalizeExternalToolPluginState(state), null, 2) + "\n", "utf8");
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 写入外置工具插件用户默认失败：" + safeMessage(error));
+  }
+}
+
+/** 写项目层（先建目录，写规范化状态；失败只记日志）。 */
+function saveExternalProjectState(cwd, state, logger) {
+  try {
+    const dir = join(cwd, ".dsh", "storages");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(externalProjectStatePath(cwd), JSON.stringify(normalizeExternalToolPluginState(state), null, 2) + "\n", "utf8");
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 写入外置工具插件项目设置失败：" + safeMessage(error));
+  }
+}
+
+/** 读取三层并算出生效状态。cwd 缺失时回退 process.cwd()。 */
+function loadExternalToolPluginLayers(cwd, logger) {
+  const safeCwd = typeof cwd === "string" && cwd.trim().length > 0 ? cwd.trim() : process.cwd();
+  const factory = deepClone(EXTERNAL_TOOL_PLUGIN_FACTORY);
+  const user = loadExternalUserDefaults(logger);
+  const project = loadExternalProjectState(safeCwd, logger);
+  const effective = effectiveExternalToolPluginState({ factory, user, project });
+  return { cwd: safeCwd, factory, user, project, effective };
+}
+
+/** 判断两个规范化状态是否内容一致（用于还原按钮状态）。 */
+function externalStateEquals(left, right) {
+  return JSON.stringify(normalizeExternalToolPluginState(left)) === JSON.stringify(normalizeExternalToolPluginState(right));
 }
 
 /** 从 agent 会话头解析项目工作区根目录。 */
@@ -1146,10 +1237,21 @@ export default {
           endpoint !== "getState" &&
           endpoint !== "setDefaultPlugin" &&
           endpoint !== "getVersion" &&
-          endpoint !== "listToolPlugins"
+          endpoint !== "listToolPlugins" &&
+          endpoint !== "getExternalToolPlugins" &&
+          endpoint !== "setExternalToolPlugin" &&
+          endpoint !== "resetExternalToolPlugins"
         ) {
           return rpcFail("缺少 sessionId");
         }
+
+        /** 外置工具插件端点统一解析项目 cwd：显式 cwd > 会话 cwd > 活跃会话 > 进程 cwd。 */
+        const resolveExternalCwd = () => {
+          if (typeof input.cwd === "string" && input.cwd.trim().length > 0) return input.cwd.trim();
+          if (sessionId.length > 0) return resolveSessionCwd(sessionId);
+          if (activeSession !== null && activeSession !== undefined) return activeSession.cwd;
+          return process.cwd();
+        };
 
         if (endpoint === "getState") {
           const cwd = sessionId.length > 0 ? resolveSessionCwd(sessionId) : activeSession !== null ? activeSession.cwd : process.cwd();
@@ -1206,6 +1308,83 @@ export default {
         if (endpoint === "listToolPlugins") {
           // 动态检测到的工具注册快照（只读，供 Kaz 面板后续展示/管理）。
           return { ok: true, value: { plugins: detectedToolPluginsList() } };
+        }
+
+        if (endpoint === "getExternalToolPlugins") {
+          const cwd = resolveExternalCwd();
+          const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
+          return {
+            ok: true,
+            value: {
+              cwd,
+              factory: layers.factory,
+              user: layers.user,
+              project: layers.project,
+              effective: layers.effective,
+              projectDiffers: !externalStateEquals(layers.project, layers.user),
+              userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
+            },
+          };
+        }
+
+        if (endpoint === "setExternalToolPlugin") {
+          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
+          const pluginName = typeof input.pluginName === "string" ? input.pluginName : "";
+          if (layer === null || pluginName.length === 0) return rpcFail("缺少 layer 或 pluginName");
+          const cwd = resolveExternalCwd();
+          const current = layer === "user"
+            ? loadExternalUserDefaults(ctx.logger)
+            : loadExternalProjectState(cwd, ctx.logger);
+          let next = current;
+          if (input.restore === true) {
+            next = restoreExternalPlugin(current, pluginName);
+          } else if (typeof input.ignored === "boolean") {
+            next = setExternalPluginIgnored(current, pluginName, input.ignored);
+          } else if (typeof input.toolName === "string" && input.toolName.length > 0) {
+            if (input.remove === true) {
+              next = removeExternalPluginTool(current, pluginName, input.toolName);
+            } else if (typeof input.enabled === "boolean") {
+              next = setExternalPluginTool(current, pluginName, input.toolName, input.enabled);
+            } else {
+              return rpcFail("缺少 enabled/remove");
+            }
+          } else {
+            return rpcFail("缺少 toolName 或 restore/ignored 操作");
+          }
+          if (layer === "user") saveExternalUserDefaults(next, ctx.logger);
+          else saveExternalProjectState(cwd, next, ctx.logger);
+          const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
+          return {
+            ok: true,
+            value: {
+              cwd,
+              user: layers.user,
+              project: layers.project,
+              effective: layers.effective,
+              projectDiffers: !externalStateEquals(layers.project, layers.user),
+              userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
+            },
+          };
+        }
+
+        if (endpoint === "resetExternalToolPlugins") {
+          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
+          if (layer === null) return rpcFail("缺少 layer");
+          const cwd = resolveExternalCwd();
+          if (layer === "user") saveExternalUserDefaults(emptyExternalToolPluginState(), ctx.logger);
+          else saveExternalProjectState(cwd, emptyExternalToolPluginState(), ctx.logger);
+          const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
+          return {
+            ok: true,
+            value: {
+              cwd,
+              user: layers.user,
+              project: layers.project,
+              effective: layers.effective,
+              projectDiffers: !externalStateEquals(layers.project, layers.user),
+              userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
+            },
+          };
         }
 
         if (endpoint === "applySession") {
