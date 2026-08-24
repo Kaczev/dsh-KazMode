@@ -476,9 +476,12 @@ export default {
         const turn = currentTurnOf(agent);
         let state = lastToolSurfaces.get(agent);
         if (state === undefined || state.turn !== turn) {
-          // 新一轮：以本轮第一次 assemble 的“过滤前”工具面作为基线，
-          // 这样只报 round-minimal 在本轮实际造成的收窄/恢复净变化。
-          state = { turn, names: before };
+          // 新一轮的第一条基线：
+          //  - 全新会话且还在极简阶段：用过滤前的原始面，让面板能展示“极简阶段”的收窄；
+          //  - 轮次切换或历史缺失：用当前真实最终工具面，避免把 kaz-mode 白名单过滤前
+          //    的原始全量误当作上一轮状态。
+          const useRawBaseline = state === undefined && minimal === true;
+          state = { turn, names: useRawBaseline ? before : after };
           lastToolSurfaces.set(agent, state);
         }
         const prev = state.names;
@@ -523,7 +526,7 @@ export default {
     //    host 平面的监听器无 scope 标签，对 agent 作用域的组装同样生效。
     //    同时把 assemble 前后的工具面差异上报 round-display。
     // -----------------------------------------------------------------------
-    ctx.on("system-prompt/assemble", function (assembly, context, next) {
+    ctx.on("system-prompt/assemble", async function (assembly, context, next) {
       signalState(context?.agent);
       const agent = context?.agent;
       const before = toolNamesOf(assembly?.tools);
@@ -539,9 +542,13 @@ export default {
           return allow.has(section.name.slice("tool:".length));
         });
       }
-      const after = toolNamesOf(assembly?.tools);
+      // 等后面所有监听器（含 kaz-mode 的白名单过滤）都跑完，再取最终工具面。
+      // 这样上报的才是模型真正可见的工具面，而不是 round-minimal 自己过滤前的原始全量。
+      const nextResult = await next();
+      const finalAssembly = nextResult ?? assembly;
+      const after = toolNamesOf(finalAssembly?.tools);
       reportToolSurfaceChange(agent, before, after, minimal);
-      return next();
+      return nextResult;
     });
 
     // -----------------------------------------------------------------------

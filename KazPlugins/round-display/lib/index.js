@@ -136,11 +136,8 @@ export default {
   inject: ["connection"],
   apply(ctx, config = {}) {
     const entry = { enabled: config.enabled !== false };
-    let source = () => entry;
     installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {
-      setSource: (current) => {
-        source = current;
-      },
+      setSource: () => {},
       onChange: () => {},
     });
 
@@ -238,23 +235,10 @@ export default {
       }, 1000);
     }
 
-    /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
-    function liveFor(agent) {
-      try {
-        const svc = ctx.get("kazMode");
-        if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
-          const cfg = svc.pluginConfig(agent, "round-display");
-          if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
-        }
-      } catch {
-        // fall through
-      }
-      return source();
-    }
-
-    /** 记录一条注入：agent + 当前轮次 + (plugin, content) 去重（title 仅展示用）。 */
+    /** 记录一条注入：agent + 当前轮次 + (plugin, content) 去重（title 仅展示用）。
+     *  注意：round-display.enabled 只控制面板是否显示，不影响接收/记录/持久化——
+     *  关闭状态下也必须继续收消息，否则发现问题后再打开面板就看不到之前的信息了。 */
     function record(agent, plugin, title, content) {
-      if (liveFor(agent).enabled !== true) return;
       if (agent === null || typeof agent !== "object") return;
       const id = agent.id;
       if (id === undefined) return;
