@@ -11,6 +11,16 @@ import {
   effectiveToolWhitelist,
   resolveFirstRoundTools,
   computeSurface,
+  normalizeExternalKey,
+  emptyExternalToolPluginState,
+  normalizeExternalToolPluginState,
+  mergeExternalToolPluginStates,
+  setExternalPluginTool,
+  setExternalPluginIgnored,
+  restoreExternalPlugin,
+  effectiveExternalToolPluginState,
+  flattenEnabledExternalTools,
+  computeExternalToolSurface,
 } from "./lib/tool-lists.js";
 
 let failures = 0;
@@ -73,6 +83,37 @@ const firstMemOff = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase
 check("④ 首阶段 firstRoundTools 为空 + kaz-memory 关 → pwsh/read/edit", firstMemOff.size === 3 && firstMemOff.has("pwsh") && firstMemOff.has("read") && firstMemOff.has("edit") && !firstMemOff.has("memory_search"));
 const firstUnknown = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [] });
 check("④ 首阶段 firstRoundTools 为空 + 状态未知 → 兜底 DEFAULT_FIRST_ROUND_TOOLS", firstUnknown.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstUnknown.has("pwsh") && firstUnknown.has("read") && firstUnknown.has("edit") && !firstUnknown.has("memory_search"));
+
+// ⑤ 外置工具插件数据模型（分步实施第一步：纯函数）
+check("⑤ normalizeExternalKey 归一化大小写/分隔符", normalizeExternalKey("dsh-pixel-art") === normalizeExternalKey("Dsh_Pixel Art") && normalizeExternalKey("dsh-pixel-art") === "dsh-pixel-art");
+check("⑤ 空状态结构正确", JSON.stringify(emptyExternalToolPluginState()) === JSON.stringify({ version: 1, plugins: {} }));
+const base = setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true);
+const base2 = setExternalPluginTool(base, "dsh-pixel-art", "convert_image_to_pixel_art", false);
+check("⑤ setExternalPluginTool 登记工具开关", base2.plugins["dsh-pixel-art"].tools["render_pixel_art"] === true && base2.plugins["dsh-pixel-art"].tools["convert_image_to_pixel_art"] === false);
+const ignored = setExternalPluginIgnored(base2, "dsh-pixel-art", true);
+check("⑤ setExternalPluginIgnored 生效", ignored.plugins["dsh-pixel-art"].ignored === true);
+const restored = restoreExternalPlugin(ignored, "dsh-pixel-art");
+check("⑤ restoreExternalPlugin 取消忽略且全部工具开启", restored.plugins["dsh-pixel-art"].ignored === false && restored.plugins["dsh-pixel-art"].tools["render_pixel_art"] === true && restored.plugins["dsh-pixel-art"].tools["convert_image_to_pixel_art"] === true);
+const user = setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", false);
+const project = setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true);
+const merged = mergeExternalToolPluginStates({}, user, project);
+check("⑤ 三层合并：项目覆盖用户、用户覆盖出厂", merged.plugins["dsh-pixel-art"].tools["render_pixel_art"] === true);
+const effExternal = effectiveExternalToolPluginState({ factory: {}, user, project: {} });
+check("⑤ effectiveExternalToolPluginState 只合并两层也正确", effExternal.plugins["dsh-pixel-art"].tools["render_pixel_art"] === false);
+const surface = computeExternalToolSurface({
+  factory: {},
+  user: setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true),
+  project: {},
+  detected: { "dsh-pixel-art": ["render_pixel_art", "convert_image_to_pixel_art"] },
+});
+check("⑤ 检测到未登记的新工具默认开启", surface.has("render_pixel_art") && surface.has("convert_image_to_pixel_art"));
+const surfaceIgnored = computeExternalToolSurface({
+  factory: {},
+  user: setExternalPluginIgnored(setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true), "dsh-pixel-art", true),
+  project: {},
+  detected: { "dsh-pixel-art": ["render_pixel_art"] },
+});
+check("⑤ 插件 ignored 时即便检测到也不进入工具面", surfaceIgnored.size === 0);
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

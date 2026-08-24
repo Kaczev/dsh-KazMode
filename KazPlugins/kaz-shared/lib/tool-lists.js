@@ -160,3 +160,198 @@ export function computeSurface({ toolWhitelist = [], minimalPhase = false, first
   }
   return new Set(effectiveToolWhitelist(toolWhitelist));
 }
+
+// ---------------------------------------------------------------------------
+// 外置工具插件管理（2026-08 分步实施 · 第一步：纯数据模型）
+// ---------------------------------------------------------------------------
+// 目标：Kaz 面板要能管理“外置插件注册进来的工具”（如 dsh-pixel-art 的
+// render_pixel_art / convert_image_to_pixel_art）。官方工具不进入这套模型，
+// 继续由 toolWhitelist 管。本段只提供纯函数与数据结构，不读写任何文件、
+// 不注册任何服务，也不改变现有工具面计算——后续步骤再接动态检测 / 存储 /
+// kazSurfaceFor / 面板 UI。
+//
+// 存储形态（三层：factory → 用户默认 → 项目设置）：
+//   {
+//     version: 1,
+//     plugins: {
+//       "dsh-pixel-art": {
+//         ignored: false,              // true = 被忽略（永久关闭，可还原）
+//         tools: {
+//           "render_pixel_art": true,  // false = 该工具在 Kaz 工具面关闭
+//           "convert_image_to_pixel_art": true
+//         }
+//       }
+//     }
+//   }
+// 新检测到但未在任何层登记的插件/工具，按“默认开启”处理（flatten 时补入）。
+// ---------------------------------------------------------------------------
+
+/** 外置工具插件状态文件版本。 */
+export const EXTERNAL_TOOL_PLUGIN_STATE_VERSION = 1;
+
+/** 归一化插件/工具名（匹配用）：小写，非字母数字连续串折叠为单个 “-”。 */
+export function normalizeExternalKey(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** 返回一份空的外置工具插件状态（三层共用同一形态）。 */
+export function emptyExternalToolPluginState() {
+  return { version: EXTERNAL_TOOL_PLUGIN_STATE_VERSION, plugins: {} };
+}
+
+/** 清洗任意来源的外置工具插件状态：只保留合法结构，未知字段丢弃。 */
+export function normalizeExternalToolPluginState(raw) {
+  const value = raw !== null && typeof raw === "object" ? raw : {};
+  const plugins = {};
+  if (value.plugins !== null && typeof value.plugins === "object") {
+    for (const [rawKey, plugin] of Object.entries(value.plugins)) {
+      const key = normalizeExternalKey(rawKey);
+      if (key.length === 0) continue;
+      const item = plugin !== null && typeof plugin === "object" ? plugin : {};
+      const tools = {};
+      if (item.tools !== null && typeof item.tools === "object") {
+        for (const [toolName, enabled] of Object.entries(item.tools)) {
+          if (typeof toolName !== "string" || toolName.length === 0) continue;
+          tools[toolName] = enabled === true;
+        }
+      }
+      plugins[key] = {
+        ignored: item.ignored === true,
+        tools,
+      };
+    }
+  }
+  return { version: EXTERNAL_TOOL_PLUGIN_STATE_VERSION, plugins };
+}
+
+/**
+ * 合并多层外置工具插件状态（顺序 = 优先级，后层覆盖前层）：
+ *   factory → user → project
+ * 插件级和工具级都做浅合并：高层显式写 false 会覆盖低层的 true，
+ * 高层没写的键继承低层。
+ */
+export function mergeExternalToolPluginStates(...states) {
+  const out = emptyExternalToolPluginState();
+  for (const state of states) {
+    const normalized = normalizeExternalToolPluginState(state);
+    for (const [key, plugin] of Object.entries(normalized.plugins)) {
+      const target = out.plugins[key] ?? { ignored: false, tools: {} };
+      target.ignored = plugin.ignored;
+      for (const [tool, enabled] of Object.entries(plugin.tools)) {
+        target.tools[tool] = enabled;
+      }
+      out.plugins[key] = target;
+    }
+  }
+  return out;
+}
+
+/** 设置某个外置插件的某个工具开关；enabled=true/false，传 null/undefined 表示删除该键。 */
+export function setExternalPluginTool(state, pluginName, toolName, enabled) {
+  const next = normalizeExternalToolPluginState(state);
+  const key = normalizeExternalKey(pluginName);
+  if (key.length === 0 || typeof toolName !== "string" || toolName.length === 0) return next;
+  const plugin = next.plugins[key] ?? { ignored: false, tools: {} };
+  if (enabled === true) {
+    plugin.tools[toolName] = true;
+  } else if (enabled === false) {
+    plugin.tools[toolName] = false;
+  } else {
+    delete plugin.tools[toolName];
+  }
+  next.plugins[key] = plugin;
+  return next;
+}
+
+/** 删除某个外置插件的某个工具键（等价于“不再显式管理该工具”）。 */
+export function removeExternalPluginTool(state, pluginName, toolName) {
+  return setExternalPluginTool(state, pluginName, toolName, null);
+}
+
+/** 设置某个外置插件的“忽略”状态（true = 永久关闭，可还原）。 */
+export function setExternalPluginIgnored(state, pluginName, ignored) {
+  const next = normalizeExternalToolPluginState(state);
+  const key = normalizeExternalKey(pluginName);
+  if (key.length === 0) return next;
+  const plugin = next.plugins[key] ?? { ignored: false, tools: {} };
+  plugin.ignored = ignored === true;
+  next.plugins[key] = plugin;
+  return next;
+}
+
+/**
+ * 还原某个外置插件：取消忽略，并把该插件已登记的所有工具设为开启
+ * （用户确认的语义：还原 = 默认全部开启）。
+ */
+export function restoreExternalPlugin(state, pluginName) {
+  const next = normalizeExternalToolPluginState(state);
+  const key = normalizeExternalKey(pluginName);
+  if (key.length === 0) return next;
+  const plugin = next.plugins[key] ?? { ignored: false, tools: {} };
+  plugin.ignored = false;
+  for (const tool of Object.keys(plugin.tools)) {
+    plugin.tools[tool] = true;
+  }
+  next.plugins[key] = plugin;
+  return next;
+}
+
+/**
+ * 计算外置工具插件最终状态：merge(factory, user, project)。
+ * 返回规范化后的状态对象。
+ */
+export function effectiveExternalToolPluginState({ factory = {}, user = {}, project = {} } = {}) {
+  return mergeExternalToolPluginStates(factory, user, project);
+}
+
+/**
+ * 把最终状态 + 动态检测结果展开成“应在 Kaz 工具面出现的外置工具名集合”。
+ * 规则：
+ *   - 插件 ignored=true → 该插件工具全部不出现；
+ *   - 已显式登记的工具：true 出现、false 不出现；
+ *   - 检测到但未显式登记的工具（新工具/新插件）→ 默认开启（补入集合）。
+ */
+export function flattenEnabledExternalTools(effectiveState, detected = {}) {
+  const state = normalizeExternalToolPluginState(effectiveState);
+  const out = new Set();
+
+  // ① 显式登记的工具
+  for (const [key, plugin] of Object.entries(state.plugins)) {
+    if (plugin.ignored === true) continue;
+    for (const [tool, enabled] of Object.entries(plugin.tools)) {
+      if (enabled === true) out.add(tool);
+    }
+  }
+
+  // ② 检测到的工具：没被显式登记的一律默认开启
+  for (const [rawKey, tools] of Object.entries(detected)) {
+    const key = normalizeExternalKey(rawKey);
+    if (key.length === 0) continue;
+    const plugin = state.plugins[key];
+    if (plugin !== undefined && plugin.ignored === true) continue;
+    const list = Array.isArray(tools)
+      ? tools
+      : tools !== null && typeof tools === "object" && Array.isArray(tools.tools)
+        ? tools.tools
+        : [];
+    for (const rawTool of list) {
+      const tool = typeof rawTool === "string" ? rawTool : rawTool !== null && typeof rawTool === "object" ? rawTool.name : undefined;
+      if (typeof tool !== "string" || tool.length === 0) continue;
+      if (plugin !== undefined && Object.prototype.hasOwnProperty.call(plugin.tools, tool)) {
+        if (plugin.tools[tool] === true) out.add(tool);
+      } else {
+        out.add(tool);
+      }
+    }
+  }
+
+  return out;
+}
+
+/** 一步到位：factory → user → project 合并后，再按动态检测结果展开外置工具面。 */
+export function computeExternalToolSurface({ factory = {}, user = {}, project = {}, detected = {} } = {}) {
+  return flattenEnabledExternalTools(effectiveExternalToolPluginState({ factory, user, project }), detected);
+}
