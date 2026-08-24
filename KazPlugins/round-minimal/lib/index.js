@@ -348,7 +348,7 @@ export default {
       } else {
         list = tools.slice(0, -1).join(", ") + ", or " + tools[tools.length - 1];
       }
-      return "Only after using " + list + " can other tools be used.";
+      return "Only " + list + " are available at beginning." + " Any call you make will unlock all tools";
     }
 
     /** 首轮工具提示的进程内去重（会话事件里已有 source 标记时同样跳过）。 */
