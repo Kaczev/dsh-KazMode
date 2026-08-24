@@ -21,6 +21,8 @@ import {
   effectiveExternalToolPluginState,
   flattenEnabledExternalTools,
   computeExternalToolSurface,
+  TOOL_PLUGIN_FACTORY,
+  computeToolPluginSurface,
 } from "./lib/tool-lists.js";
 
 let failures = 0;
@@ -114,6 +116,14 @@ const surfaceIgnored = computeExternalToolSurface({
   detected: { "dsh-pixel-art": ["render_pixel_art"] },
 });
 check("⑤ 插件 ignored 时即便检测到也不进入工具面", surfaceIgnored.size === 0);
+
+// ⑥ 统一工具插件出厂默认：官方工具也走同一套插件分组格式
+{
+  const factorySurface = computeToolPluginSurface({ factory: TOOL_PLUGIN_FACTORY, user: {}, project: {}, detected: {} });
+  const required = ["pwsh", "read", "write", "edit", "glob", "grep", "job_list", "job_output", "job_kill", "ask_user_question", "todo_write", "web_search", "memory_save", "memory_search", "kaz_mode_status"];
+  check("⑥ TOOL_PLUGIN_FACTORY 覆盖当前官方默认工具面", required.every((tool) => factorySurface.has(tool)));
+  check("⑥ TOOL_PLUGIN_FACTORY 不含已移除的 read_image/str_replace_editor", !factorySurface.has("read_image") && !factorySurface.has("str_replace_editor"));
+}
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -172,7 +172,7 @@ check("① kazMode 服务提供 detectedToolPlugins（只读检测）", kazMode 
   check("①.6 RPC 通道已注册", typeof rpc === "function");
   const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
   check("①.6 getExternalToolPlugins 返回三层结构", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.factory === "object" && typeof getRes.value.user === "object" && typeof getRes.value.project === "object" && typeof getRes.value.effective === "object");
-  check("①.6 初始 projectDiffers=false / userDiffersFactory=false", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
+  check("①.6 初始 projectDiffers=false / userDiffersFactory=true（用户默认空 ≠ 官方出厂）", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === true);
   const setRes = await rpc("setExternalToolPlugin", {
     cwd: TMP,
     layer: "project",
@@ -190,6 +190,33 @@ const sKaz = agentOf("s-kaz");
 const sKazNomem = agentOf("s-kaz-nomem");
 const sPlain = agentOf("s-plain");
 const sPlainMem = agentOf("s-plain-mem");
+
+// ①.7 kazSurfaceFor 接入：外置工具默认开启，项目层可关闭
+{
+  const rpc = rpcHandlers.get("/kaz-mode");
+  check("①.7 外置检测默认开启：render_pixel_art 进入 Kaz 工具面", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+  check("①.7 surfaceOf 包含 render_pixel_art", kazMode.surfaceOf(sKaz).has("render_pixel_art") === true);
+  await rpc("setExternalToolPlugin", {
+    cwd: TMP,
+    layer: "project",
+    pluginName: "dsh-pixel-art",
+    toolName: "render_pixel_art",
+    enabled: false,
+  });
+  check("①.7 项目层关闭后 render_pixel_art 不可见", kazMode.toolVisible(sKaz, "render_pixel_art") === false);
+  check("①.7 convert_image_to_pixel_art 仍默认开启", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
+  await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
+  check("①.7 重置项目层后 render_pixel_art 恢复可见", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+}
+
+// ①.8 官方工具统一走 factory/JSON，不再依赖 settings.yaml 的 toolWhitelist
+{
+  await settings.update("kaz-mode", { toolWhitelist: ["only_unknown"] });
+  await settle();
+  check("①.8 官方工具不再依赖 settings.toolWhitelist：pwsh/read/todo_write 仍可见", kazMode.toolVisible(sKaz, "pwsh") === true && kazMode.toolVisible(sKaz, "read") === true && kazMode.toolVisible(sKaz, "todo_write") === true);
+  check("①.8 only_unknown 不进入工具面", kazMode.toolVisible(sKaz, "only_unknown") === false);
+}
+
 check("① kazEnabled(kaz 会话)=true", kazMode.kazEnabled(sKaz) === true);
 check("① kazEnabled(非 kaz 会话)=false", kazMode.kazEnabled(sPlain) === false);
 check("① pluginEnabled(s-kaz, kaz-memory)=true", kazMode.pluginEnabled(sKaz, "kaz-memory") === true);

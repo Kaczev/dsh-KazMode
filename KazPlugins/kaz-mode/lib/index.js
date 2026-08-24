@@ -51,16 +51,16 @@ import {
   MEMORY_TOOLS,
   DIAG_TOOL,
   computeSurface,
-  effectiveToolWhitelist,
   normalizeExternalKey,
   emptyExternalToolPluginState,
   normalizeExternalToolPluginState,
   effectiveExternalToolPluginState,
-  mergeExternalToolPluginStates,
   setExternalPluginTool,
   removeExternalPluginTool,
   setExternalPluginIgnored,
   restoreExternalPlugin,
+  TOOL_PLUGIN_FACTORY,
+  computeToolPluginSurface,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -139,8 +139,8 @@ let DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
 const EXTERNAL_USER_DEFAULTS_FILE_NAME = "kaz-tool-plugin-defaults.json";
 /** 外置工具插件：项目设置文件名（<项目>/.dsh/storages 下）。 */
 const EXTERNAL_PROJECT_STATE_FILE_NAME = "kaz-tool-plugins.json";
-/** 外置工具插件：安装时默认（factory）。当前为空 = 新检测默认开启。 */
-const EXTERNAL_TOOL_PLUGIN_FACTORY = emptyExternalToolPluginState();
+/** 外置工具插件：安装时默认（factory）。统一工具插件出厂默认来自 kaz-shared。 */
+const TOOL_PLUGIN_FACTORY_STATE = TOOL_PLUGIN_FACTORY;
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/kaz-mode";
 
@@ -171,7 +171,6 @@ const SETTINGS_SCHEMA = z.object({
  *  不预置，避免把本机的联动状态带到新机器。 */
 export const DEFAULT_SECTION = {
   enabled: true,
-  toolWhitelist: [...TOOL_WHITELIST],
 };
 // ---------------------------------------------------------------------------
 // settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
@@ -440,7 +439,7 @@ function saveExternalProjectState(cwd, state, logger) {
 /** 读取三层并算出生效状态。cwd 缺失时回退 process.cwd()。 */
 function loadExternalToolPluginLayers(cwd, logger) {
   const safeCwd = typeof cwd === "string" && cwd.trim().length > 0 ? cwd.trim() : process.cwd();
-  const factory = deepClone(EXTERNAL_TOOL_PLUGIN_FACTORY);
+  const factory = deepClone(TOOL_PLUGIN_FACTORY_STATE);
   const user = loadExternalUserDefaults(logger);
   const project = loadExternalProjectState(safeCwd, logger);
   const effective = effectiveExternalToolPluginState({ factory, user, project });
@@ -553,6 +552,15 @@ export default {
       return Array.from(detectedToolPlugins.entries())
         .map(([key, entry]) => ({ key, pluginName: entry.pluginName, tools: [...entry.tools].sort() }))
         .sort((left, right) => left.pluginName.localeCompare(right.pluginName));
+    }
+
+    /** 返回 computeExternalToolSurface 可直接使用的 detected 映射（key → 工具名数组）。 */
+    function detectedToolPluginsForCompute() {
+      const out = {};
+      for (const [key, entry] of detectedToolPlugins.entries()) {
+        out[key] = [...entry.tools];
+      }
+      return out;
     }
 
     /** 包装 tools.register：记录调用方插件名 + 工具名（best-effort，失败不影响注册）。 */
@@ -938,11 +946,28 @@ export default {
     /**
      * 计算某 agent 此刻的 Kaz 工具面（Set）——全部交给 kaz-shared 的
      * computeSurface：白名单来自 settings（用户优先），再按该 agent 会话的
-     * kaz-memory / kaz-diag 生效状态动态剔除对应工具；round-minimal 首阶段
-     * 信号由本插件读取并传入。
+     * kaz-memory / kaz-diag 生效状态动态剔除对应工具；外置工具插件按
+     * factory → 用户默认 → 项目设置 合并后加入（新检测默认开启）；
+     * round-minimal 首阶段信号由本插件读取并传入。
      */
     function kazSurfaceFor(agent, current, states) {
-      const whitelist = new Set(effectiveToolWhitelist(current.toolWhitelist));
+      // 统一工具插件数据源：官方 + 外置都走 factory → 用户默认 → 项目设置，
+      // 不再读 settings.yaml 的 kaz-mode.toolWhitelist。
+      let whitelist;
+      try {
+        const layers = loadExternalToolPluginLayers(workspaceOfAgent(agent), ctx.logger);
+        whitelist = new Set(
+          computeToolPluginSurface({
+            factory: layers.factory,
+            user: layers.user,
+            project: layers.project,
+            detected: detectedToolPluginsForCompute(),
+          }),
+        );
+      } catch (error) {
+        ctx.logger?.debug?.("[kaz-mode] 计算统一工具插件面失败：" + safeMessage(error));
+        whitelist = new Set();
+      }
       // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
       // 才保留记忆/诊断工具，避免新对话/未落盘状态被误判为启用。
       if (states["kaz-memory"]?.enabled !== true) {

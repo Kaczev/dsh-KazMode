@@ -189,6 +189,71 @@ export function computeSurface({ toolWhitelist = [], minimalPhase = false, first
 /** 外置工具插件状态文件版本。 */
 export const EXTERNAL_TOOL_PLUGIN_STATE_VERSION = 1;
 
+/**
+ * 统一工具插件出厂默认（factory）：官方工具也改用“插件分组”格式管理，
+ * 不再写入 settings.yaml 的 kaz-mode.toolWhitelist。
+ * 分组名 = 插件 fiber.name（tool-fs / tool-pwsh / ... / kaz-memory / kaz-diag）。
+ * 只包含当前 Kaz 默认白名单里的工具；未列入的官方工具（read_image、
+ * str_replace_editor、subagent 等）默认不出现，之后可由用户在面板/JSON 添加。
+ */
+export const TOOL_PLUGIN_FACTORY = {
+  version: EXTERNAL_TOOL_PLUGIN_STATE_VERSION,
+  plugins: {
+    "tool-pwsh": { ignored: false, tools: { pwsh: true } },
+    "tool-fs": {
+      ignored: false,
+      tools: { read: true, write: true, edit: true },
+    },
+    "tool-fs-search": {
+      ignored: false,
+      tools: { glob: true, grep: true },
+    },
+    "tool-jobs": {
+      ignored: false,
+      tools: { job_list: true, job_output: true, job_kill: true },
+    },
+    "tool-ask-user": {
+      ignored: false,
+      tools: { ask_user_question: true },
+    },
+    "tool-todo": {
+      ignored: false,
+      tools: { todo_write: true },
+    },
+    "tool-web": {
+      ignored: false,
+      tools: { web_search: true },
+    },
+    "kaz-memory": {
+      ignored: false,
+      tools: {
+        memory_save: true,
+        memory_update: true,
+        memory_list: true,
+        memory_search: true,
+        memory_detail: true,
+        memory_forget: true,
+      },
+    },
+    "kaz-diag": {
+      ignored: false,
+      tools: { kaz_mode_status: true },
+    },
+  },
+};
+
+/** 通用别名：外置/官方统一叫“工具插件”，后续新代码优先用这些名字。 */
+export const emptyToolPluginState = emptyExternalToolPluginState;
+export const normalizeToolPluginState = normalizeExternalToolPluginState;
+export const mergeToolPluginStates = mergeExternalToolPluginStates;
+export const setToolPluginTool = setExternalPluginTool;
+export const removeToolPluginTool = removeExternalPluginTool;
+export const setToolPluginIgnored = setExternalPluginIgnored;
+export const restoreToolPlugin = restoreExternalPlugin;
+export const effectiveToolPluginState = effectiveExternalToolPluginState;
+export const flattenEnabledToolPlugins = flattenEnabledExternalTools;
+export const computeToolPluginSurface = computeExternalToolSurface;
+
 /** 归一化插件/工具名（匹配用）：小写，非字母数字连续串折叠为单个 “-”。 */
 export function normalizeExternalKey(value) {
   return String(value ?? "")
