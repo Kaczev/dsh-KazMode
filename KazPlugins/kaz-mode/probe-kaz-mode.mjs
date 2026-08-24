@@ -188,6 +188,8 @@ check("① kazMode 服务提供 detectedToolPlugins（只读检测）", kazMode 
   check("①.6 项目层持久化后可读回", getRes2.value.project.plugins["dsh-pixel-art"]?.tools["render_pixel_art"] === false);
   const resetRes = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
   check("①.6 resetExternalToolPlugins 清空项目层", resetRes !== null && resetRes.ok === true && resetRes.value.projectDiffers === false && Object.keys(resetRes.value.project.plugins).length === 0);
+  const resetUser = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "user" });
+  check("①.6 reset user 写回出厂后 userDiffersFactory=false", resetUser !== null && resetUser.ok === true && resetUser.value.userDiffersFactory === false);
 }
 const sKaz = agentOf("s-kaz");
 const sKazNomem = agentOf("s-kaz-nomem");

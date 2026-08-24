@@ -1181,7 +1181,7 @@ window.__ModuleLoader__.load({
 				const layer = "project";
 				const [data, setData] = useState(null);
 				const [detected, setDetected] = useState([]);
-				const [catalog, setCatalog] = useState({ official: [...OFFICIAL_TOOL_PLUGIN_KEYS], kaz: [...KAZ_TOOL_PLUGIN_KEYS], removedPlugins: {} });
+				const [catalog, setCatalog] = useState({ official: [...OFFICIAL_TOOL_PLUGIN_KEYS], kaz: [...KAZ_TOOL_PLUGIN_KEYS], removedPlugins: {}, unassignedTools: [] });
 				const [registeredTools, setRegisteredTools] = useState([]);
 				const [showRegistered, setShowRegistered] = useState(false);
 				const [expanded, setExpanded] = useState(() => new Set());
@@ -1200,6 +1200,7 @@ window.__ModuleLoader__.load({
 								official: Array.isArray(det.catalog.official) ? det.catalog.official : [...OFFICIAL_TOOL_PLUGIN_KEYS],
 								kaz: Array.isArray(det.catalog.kaz) ? det.catalog.kaz : [...KAZ_TOOL_PLUGIN_KEYS],
 								removedPlugins: det.catalog.removedPlugins !== null && typeof det.catalog.removedPlugins === "object" ? det.catalog.removedPlugins : {},
+								unassignedTools: Array.isArray(det.catalog.unassignedTools) ? det.catalog.unassignedTools : [],
 							});
 						}
 					}
@@ -1222,6 +1223,8 @@ window.__ModuleLoader__.load({
 					if (!writable) return;
 					const res = await rpcCall("resetExternalToolPlugins", { sessionId: sessionId || "", cwd: targetCwd(), layer: target || layer });
 					if (res !== null) setData(res);
+					const fresh = await rpcCall("getExternalToolPlugins", { sessionId: sessionId || "", cwd: targetCwd() });
+					if (fresh !== null) setData(fresh);
 				};
 
 				const refreshCatalog = async () => {
@@ -1231,7 +1234,10 @@ window.__ModuleLoader__.load({
 							official: Array.isArray(det.catalog.official) ? det.catalog.official : catalog.official,
 							kaz: Array.isArray(det.catalog.kaz) ? det.catalog.kaz : catalog.kaz,
 							removedPlugins: det.catalog.removedPlugins !== null && typeof det.catalog.removedPlugins === "object" ? det.catalog.removedPlugins : {},
+							unassignedTools: Array.isArray(det.catalog.unassignedTools) ? det.catalog.unassignedTools : [],
 						});
+						if (Array.isArray(det.plugins)) setDetected(det.plugins);
+						if (Array.isArray(det.registeredTools)) setRegisteredTools(det.registeredTools);
 					}
 				};
 
@@ -1278,6 +1284,10 @@ window.__ModuleLoader__.load({
 					if (pluginsMap[key] === undefined) {
 						pluginsMap[key] = { key, plugin: { ignored: false, tools: {}, hiddenTools: {} } };
 					}
+				}
+				// 未归属工具兜底：即使服务端 detected 未带 unknown，也显示为「未归属」外置插件。
+				if (catalog.unassignedTools.length > 0 && pluginsMap["unknown"] === undefined) {
+					pluginsMap["unknown"] = { key: "unknown", plugin: { ignored: false, tools: {}, hiddenTools: {} } };
 				}
 				const pluginKeys = Object.keys(pluginsMap).sort();
 
@@ -1360,10 +1370,11 @@ window.__ModuleLoader__.load({
 				let restoreAction = null;
 				if (projectDiffers) {
 					restoreLabel = "恢复默认设置";
-					restoreOrange = true;
+					restoreOrange = false;
 					restoreAction = () => resetLayer("project");
 				} else if (userDiffersFactory) {
 					restoreLabel = "恢复原设置";
+					restoreOrange = true;
 					restoreAction = () => resetLayer("user");
 				}
 
@@ -1383,11 +1394,10 @@ window.__ModuleLoader__.load({
 					const plugin = item.plugin;
 					const open = expanded.has(key);
 					const tools = toolsOf(key).filter((tool) => plugin.hiddenTools === undefined || plugin.hiddenTools[tool] !== true);
-					const allOn = tools.length > 0 && tools.every((tool) => plugin.tools !== undefined && plugin.tools[tool] === true);
 					const anyOn = tools.some((tool) => plugin.tools === undefined || plugin.tools[tool] !== false);
-					const projectPlugin = data.project !== null && data.project !== undefined && data.project.plugins !== undefined ? data.project.plugins[key] : undefined;
-					const userPlugin = data.user !== null && data.user !== undefined && data.user.plugins !== undefined ? data.user.plugins[key] : undefined;
-					const projectUnique = JSON.stringify(projectPlugin ?? null) !== JSON.stringify(userPlugin ?? null);
+					const effectivePlugin = data.effective !== null && data.effective !== undefined && data.effective.plugins !== undefined ? data.effective.plugins[key] : undefined;
+					const userEffectivePlugin = data.userEffective !== null && data.userEffective !== undefined && data.userEffective.plugins !== undefined ? data.userEffective.plugins[key] : undefined;
+					const projectUnique = JSON.stringify(effectivePlugin ?? null) !== JSON.stringify(userEffectivePlugin ?? null);
 					return createElement(
 						"div",
 						{ key, className: "kzm-state-item" },
@@ -1397,7 +1407,7 @@ window.__ModuleLoader__.load({
 							createElement(
 								"span",
 								{ className: "kzm-state-name", title: key },
-								key,
+								key === "unknown" ? "未归属" : key,
 								projectUnique && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							),
 							createElement(
@@ -1417,7 +1427,7 @@ window.__ModuleLoader__.load({
 								"忽略",
 							),
 							createElement(Toggle, {
-								checked: allOn || (tools.length === 0 ? anyOn : allOn),
+								checked: tools.length === 0 || anyOn,
 								disabled: !writable || busy,
 								title: "Kaz 工具面开关：插件关 = 所有工具关",
 								onChange: (next) => void togglePluginAll(key, next),

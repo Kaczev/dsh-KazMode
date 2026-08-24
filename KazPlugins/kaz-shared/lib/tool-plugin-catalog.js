@@ -52,3 +52,22 @@ export const KAZ_TOOL_PLUGIN_KEYS = [
   "kaz-memory",
   "kaz-diag",
 ];
+
+/** 官方工具名（含不在 TOOL_PLUGIN_FACTORY 默认清单里的官方工具），用于 registeredTools 扫描时排除。 */
+export const OFFICIAL_TOOL_NAMES = [
+  "read_image",
+  "str_replace_editor",
+  "subagent",
+  "subagent_fork",
+  "send_message",
+  "interrupt_agent",
+  "list_agents",
+  "report",
+  "workflow",
+  "ralph",
+  "exit_plan_mode",
+  "create_goal",
+  "get_goal",
+  "update_goal",
+  "run_code",
+];

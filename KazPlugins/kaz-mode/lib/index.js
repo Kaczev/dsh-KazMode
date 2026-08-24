@@ -60,6 +60,7 @@ import {
   computeToolPluginSurface,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
+  OFFICIAL_TOOL_NAMES,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -403,10 +404,10 @@ function toolPluginCatalogPath() {
 
 /** 空目录。 */
 function emptyToolPluginCatalog() {
-  return { version: 1, knownPlugins: {}, removedPlugins: {} };
+  return { version: 1, knownPlugins: {}, removedPlugins: {}, unassignedTools: [] };
 }
 
-/** 清洗目录数据：只保留 knownPlugins（插件名 → { tools[] }）与 removedPlugins（插件名 → true）。 */
+/** 清洗目录数据：knownPlugins / removedPlugins / unassignedTools。 */
 function normalizeToolPluginCatalog(raw) {
   const value = raw !== null && typeof raw === "object" ? raw : {};
   const knownPlugins = {};
@@ -428,7 +429,10 @@ function normalizeToolPluginCatalog(raw) {
       if (removed === true) removedPlugins[normalizedKey] = true;
     }
   }
-  return { version: 1, knownPlugins, removedPlugins };
+  const unassignedTools = Array.isArray(value.unassignedTools)
+    ? value.unassignedTools.filter((tool) => typeof tool === "string" && tool.length > 0)
+    : [];
+  return { version: 1, knownPlugins, removedPlugins, unassignedTools };
 }
 
 /** 读取用户目录外置插件目录；不存在/损坏回退空目录。 */
@@ -630,6 +634,57 @@ export default {
         for (const tool of meta.tools) {
           recordDetectedToolPlugin(key, tool);
         }
+      }
+    }
+
+    /**
+     * 用 registeredTools（当前注册表）补检测：解决包装装得太晚导致漏抓的问题。
+     *  - 官方工具名/官方出厂工具/记忆诊断工具直接跳过；
+     *  - 已知外置插件目录里的工具归入对应插件；
+     *  - 其余未归属工具进入 unassignedTools，并在面板显示为「未归属」外置插件。
+     */
+    function syncDetectedFromRegisteredTools() {
+      try {
+        const schemas = ctx.tools?.schemas?.();
+        if (!Array.isArray(schemas)) return;
+        const officialTools = new Set([
+          ...OFFICIAL_TOOL_NAMES,
+          ...Object.values(TOOL_PLUGIN_FACTORY.plugins).flatMap((plugin) => Object.keys(plugin.tools ?? {})),
+          ...MEMORY_TOOLS,
+          DIAG_TOOL,
+        ]);
+        const knownToolToPlugin = new Map();
+        for (const [key, meta] of Object.entries(toolPluginCatalog.knownPlugins)) {
+          for (const tool of meta.tools) knownToolToPlugin.set(tool, key);
+        }
+        const detectedTools = new Set();
+        for (const entry of detectedToolPlugins.values()) {
+          for (const tool of entry.tools) detectedTools.add(tool);
+        }
+        let changed = false;
+        for (const schema of schemas) {
+          const tool = schema?.name;
+          if (typeof tool !== "string" || tool.length === 0) continue;
+          if (officialTools.has(tool)) continue;
+          const knownKey = knownToolToPlugin.get(tool);
+          if (knownKey !== undefined) {
+            if (!detectedTools.has(tool)) {
+              recordDetectedToolPlugin(knownKey, tool);
+              detectedTools.add(tool);
+            }
+            continue;
+          }
+          if (detectedTools.has(tool)) continue;
+          if (!toolPluginCatalog.unassignedTools.includes(tool)) {
+            toolPluginCatalog.unassignedTools.push(tool);
+            changed = true;
+          }
+          recordDetectedToolPlugin("unknown", tool);
+          detectedTools.add(tool);
+        }
+        if (changed) saveToolPluginCatalog(toolPluginCatalog, ctx.logger);
+      } catch (error) {
+        ctx.logger?.debug?.("[kaz-mode] 用 registeredTools 补检测失败：" + safeMessage(error));
       }
     }
 
@@ -1420,7 +1475,8 @@ export default {
 
         if (endpoint === "listToolPlugins") {
           // 动态检测到的工具注册快照 + 官方/Kaz 分类 + 用户目录外置目录。
-          const catalog = loadToolPluginCatalog(ctx.logger);
+          toolPluginCatalog = loadToolPluginCatalog(ctx.logger);
+          syncDetectedFromRegisteredTools();
           let registeredTools = [];
           try {
             const schemas = ctx.tools?.schemas?.();
@@ -1438,8 +1494,9 @@ export default {
               catalog: {
                 official: [...OFFICIAL_TOOL_PLUGIN_KEYS],
                 kaz: [...KAZ_TOOL_PLUGIN_KEYS],
-                knownPlugins: catalog.knownPlugins,
-                removedPlugins: catalog.removedPlugins,
+                knownPlugins: toolPluginCatalog.knownPlugins,
+                removedPlugins: toolPluginCatalog.removedPlugins,
+                unassignedTools: toolPluginCatalog.unassignedTools,
               },
             },
           };
@@ -1554,7 +1611,8 @@ export default {
           const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
           if (layer === null) return rpcFail("缺少 layer");
           const cwd = resolveExternalCwd();
-          if (layer === "user") saveExternalUserDefaults(emptyExternalToolPluginState(), ctx.logger);
+          // 用户默认“恢复原设置”= 把用户默认写回出厂（factory），而不是清空成空对象。
+          if (layer === "user") saveExternalUserDefaults(deepClone(TOOL_PLUGIN_FACTORY_STATE), ctx.logger);
           else saveExternalProjectState(cwd, emptyExternalToolPluginState(), ctx.logger);
           const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
           return {

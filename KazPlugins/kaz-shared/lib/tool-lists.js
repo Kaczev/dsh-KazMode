@@ -243,7 +243,7 @@ export const TOOL_PLUGIN_FACTORY = {
 };
 
 /** 官方 / Kaz 插件分类目录（源码修改点，见 tool-plugin-catalog.js）。 */
-export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS } from "./tool-plugin-catalog.js";
+export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS, OFFICIAL_TOOL_NAMES } from "./tool-plugin-catalog.js";
 
 /** 通用别名：外置/官方统一叫“工具插件”，后续新代码优先用这些名字。 */
 export const emptyToolPluginState = emptyExternalToolPluginState;
