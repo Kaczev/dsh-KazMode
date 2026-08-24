@@ -58,7 +58,8 @@ import {
   restoreExternalPlugin,
   TOOL_PLUGIN_FACTORY,
   computeToolPluginSurface,
-  KNOWN_EXTERNAL_TOOL_PLUGINS,
+  OFFICIAL_TOOL_PLUGIN_KEYS,
+  KAZ_TOOL_PLUGIN_KEYS,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -137,6 +138,8 @@ let DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
 const EXTERNAL_USER_DEFAULTS_FILE_NAME = "kaz-tool-plugin-defaults.json";
 /** 外置工具插件：项目设置文件名（<项目>/.dsh/storages 下）。 */
 const EXTERNAL_PROJECT_STATE_FILE_NAME = "kaz-tool-plugins.json";
+/** 外置工具插件：用户目录的检测/移除目录文件名（~/.dsh/storages 下，用户数据）。 */
+const TOOL_PLUGIN_CATALOG_FILE_NAME = "kaz-tool-plugin-catalog.json";
 /** 外置工具插件：安装时默认（factory）。统一工具插件出厂默认来自 kaz-shared。 */
 const TOOL_PLUGIN_FACTORY_STATE = TOOL_PLUGIN_FACTORY;
 /** 面板专用 RPC 通道。 */
@@ -387,6 +390,76 @@ function externalProjectStatePath(cwd) {
   return join(cwd, ".dsh", "storages", EXTERNAL_PROJECT_STATE_FILE_NAME);
 }
 
+// ---------------------------------------------------------------------------
+// 外置插件用户目录（检测/移除目录）：~/.dsh/storages/kaz-tool-plugin-catalog.json
+// 这是用户数据，不是源码。动态检测到的外置插件会写进 knownPlugins；
+// 用户“从列表移除”写进 removedPlugins；源码只负责官方/Kaz 分类。
+// ---------------------------------------------------------------------------
+
+/** 外置插件目录文件路径。 */
+function toolPluginCatalogPath() {
+  return join(STORAGE_DIR, TOOL_PLUGIN_CATALOG_FILE_NAME);
+}
+
+/** 空目录。 */
+function emptyToolPluginCatalog() {
+  return { version: 1, knownPlugins: {}, removedPlugins: {} };
+}
+
+/** 清洗目录数据：只保留 knownPlugins（插件名 → { tools[] }）与 removedPlugins（插件名 → true）。 */
+function normalizeToolPluginCatalog(raw) {
+  const value = raw !== null && typeof raw === "object" ? raw : {};
+  const knownPlugins = {};
+  if (value.knownPlugins !== null && typeof value.knownPlugins === "object") {
+    for (const [key, meta] of Object.entries(value.knownPlugins)) {
+      const normalizedKey = normalizeExternalKey(key);
+      if (normalizedKey.length === 0) continue;
+      const tools = Array.isArray(meta?.tools)
+        ? meta.tools.filter((tool) => typeof tool === "string" && tool.length > 0)
+        : [];
+      knownPlugins[normalizedKey] = { tools };
+    }
+  }
+  const removedPlugins = {};
+  if (value.removedPlugins !== null && typeof value.removedPlugins === "object") {
+    for (const [key, removed] of Object.entries(value.removedPlugins)) {
+      const normalizedKey = normalizeExternalKey(key);
+      if (normalizedKey.length === 0) continue;
+      if (removed === true) removedPlugins[normalizedKey] = true;
+    }
+  }
+  return { version: 1, knownPlugins, removedPlugins };
+}
+
+/** 读取用户目录外置插件目录；不存在/损坏回退空目录。 */
+function loadToolPluginCatalog(logger) {
+  try {
+    const file = toolPluginCatalogPath();
+    if (!existsSync(file)) return emptyToolPluginCatalog();
+    let raw = readFileSync(file, "utf8");
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+    return normalizeToolPluginCatalog(JSON.parse(raw));
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 读取外置插件目录失败：" + safeMessage(error));
+    return emptyToolPluginCatalog();
+  }
+}
+
+/** 保存用户目录外置插件目录；失败只记日志。 */
+function saveToolPluginCatalog(catalog, logger) {
+  try {
+    mkdirSync(STORAGE_DIR, { recursive: true });
+    writeFileSync(toolPluginCatalogPath(), JSON.stringify(normalizeToolPluginCatalog(catalog), null, 2) + "\n", "utf8");
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 写入外置插件目录失败：" + safeMessage(error));
+  }
+}
+
+/** 判断一个 key 是否属于官方/Kaz（非外置）。 */
+function isOfficialOrKazPluginKey(key) {
+  return OFFICIAL_TOOL_PLUGIN_KEYS.includes(key) || KAZ_TOOL_PLUGIN_KEYS.includes(key);
+}
+
 /** 安全读取一个 JSON 状态文件；不存在/损坏时回退 fallback（不抛错）。 */
 function readExternalStateFile(file, fallback, logger) {
   try {
@@ -520,6 +593,8 @@ export default {
     // 记录（后续步骤由面板按“非官方”过滤）；这里暂不参与任何过滤/落盘。
     // -----------------------------------------------------------------------
     const detectedToolPlugins = new Map();
+    /** 用户目录外置插件目录（knownPlugins / removedPlugins），内存态 + 落盘。 */
+    let toolPluginCatalog = emptyToolPluginCatalog();
 
     /** 记录一次工具注册；pluginName 可能缺失（核心/保留工具），归入 unknown。 */
     function recordDetectedToolPlugin(pluginName, toolName) {
@@ -535,7 +610,27 @@ export default {
         // 用第一次拿到的可读名补全 unknown 占位
         entry.pluginName = pluginName;
       }
+      const isNewTool = !entry.tools.has(toolName);
       entry.tools.add(toolName);
+      // 外置插件写入用户目录目录（源码不改）；已移除的不再自动加回主列表。
+      if (safeKey !== "unknown" && !isOfficialOrKazPluginKey(safeKey) && toolPluginCatalog.removedPlugins[safeKey] !== true && isNewTool) {
+        const known = toolPluginCatalog.knownPlugins[safeKey] ?? { tools: [] };
+        if (!known.tools.includes(toolName)) {
+          known.tools.push(toolName);
+          toolPluginCatalog.knownPlugins[safeKey] = known;
+          saveToolPluginCatalog(toolPluginCatalog, ctx.logger);
+        }
+      }
+    }
+
+    /** 从用户目录目录把已知外置插件种回内存检测表（未移除的）。 */
+    function seedDetectedFromCatalog() {
+      for (const [key, meta] of Object.entries(toolPluginCatalog.knownPlugins)) {
+        if (toolPluginCatalog.removedPlugins[key] === true) continue;
+        for (const tool of meta.tools) {
+          recordDetectedToolPlugin(key, tool);
+        }
+      }
     }
 
     /** 返回检测结果的只读快照（数组，工具名排序）。 */
@@ -554,28 +649,11 @@ export default {
       return out;
     }
 
-    /** 回填已知外置插件：包装安装前已注册的工具也能被识别（如 dsh-pixel-art）。 */
-    function backfillKnownExternalToolPlugins() {
-      try {
-        const toolsSvc = ctx.tools;
-        if (toolsSvc === undefined || toolsSvc === null || typeof toolsSvc.schemas !== "function") return;
-        const schemas = toolsSvc.schemas();
-        if (!Array.isArray(schemas)) return;
-        const registered = new Set(schemas.map((schema) => schema?.name).filter((name) => typeof name === "string" && name.length > 0));
-        for (const [pluginName, meta] of Object.entries(KNOWN_EXTERNAL_TOOL_PLUGINS)) {
-          const tools = Array.isArray(meta?.tools) ? meta.tools : [];
-          for (const tool of tools) {
-            if (registered.has(tool)) recordDetectedToolPlugin(pluginName, tool);
-          }
-        }
-      } catch (error) {
-        ctx.logger?.debug?.("[kaz-mode] 回填已知外置插件失败：" + safeMessage(error));
-      }
-    }
-
     /** 包装 tools.register：记录调用方插件名 + 工具名（best-effort，失败不影响注册）。 */
     function installToolRegistrationDetector() {
       try {
+        toolPluginCatalog = loadToolPluginCatalog(ctx.logger);
+        seedDetectedFromCatalog();
         const raw = ctx.tools[symbols.original] ?? ctx.tools;
         const originalRegister = raw.register;
         const registerWrapper = function register(definition) {
@@ -591,7 +669,6 @@ export default {
           return originalRegister.call(this, definition);
         };
         raw.register = registerWrapper;
-        backfillKnownExternalToolPlugins();
         ctx.effect(() => () => {
           if (raw.register === registerWrapper) raw.register = originalRegister;
         });
@@ -1342,8 +1419,20 @@ export default {
         }
 
         if (endpoint === "listToolPlugins") {
-          // 动态检测到的工具注册快照（只读，供 Kaz 面板后续展示/管理）。
-          return { ok: true, value: { plugins: detectedToolPluginsList() } };
+          // 动态检测到的工具注册快照 + 官方/Kaz 分类 + 用户目录外置目录。
+          const catalog = loadToolPluginCatalog(ctx.logger);
+          return {
+            ok: true,
+            value: {
+              plugins: detectedToolPluginsList(),
+              catalog: {
+                official: [...OFFICIAL_TOOL_PLUGIN_KEYS],
+                kaz: [...KAZ_TOOL_PLUGIN_KEYS],
+                knownPlugins: catalog.knownPlugins,
+                removedPlugins: catalog.removedPlugins,
+              },
+            },
+          };
         }
 
         if (endpoint === "getExternalToolPlugins") {
@@ -1365,10 +1454,54 @@ export default {
         }
 
         if (endpoint === "setExternalToolPlugin") {
-          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
           const pluginName = typeof input.pluginName === "string" ? input.pluginName : "";
-          if (layer === null || pluginName.length === 0) return rpcFail("缺少 layer 或 pluginName");
+          if (pluginName.length === 0) return rpcFail("缺少 pluginName");
           const cwd = resolveExternalCwd();
+          const normalizedPluginKey = normalizeExternalKey(pluginName);
+
+          // 用户目录操作：从列表移除 / 恢复已移除（不依赖 layer）。
+          if (input.removePlugin === true) {
+            toolPluginCatalog = loadToolPluginCatalog(ctx.logger);
+            toolPluginCatalog.removedPlugins[normalizedPluginKey] = true;
+            saveToolPluginCatalog(toolPluginCatalog, ctx.logger);
+            const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
+            return {
+              ok: true,
+              value: {
+                cwd,
+                user: layers.user,
+                project: layers.project,
+                effective: layers.effective,
+                userEffective: layers.userEffective,
+                projectDiffers: !externalStateEquals(layers.project, layers.user),
+                userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
+                removedPlugins: toolPluginCatalog.removedPlugins,
+              },
+            };
+          }
+          if (input.restoreRemoved === true) {
+            toolPluginCatalog = loadToolPluginCatalog(ctx.logger);
+            delete toolPluginCatalog.removedPlugins[normalizedPluginKey];
+            saveToolPluginCatalog(toolPluginCatalog, ctx.logger);
+            seedDetectedFromCatalog();
+            const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
+            return {
+              ok: true,
+              value: {
+                cwd,
+                user: layers.user,
+                project: layers.project,
+                effective: layers.effective,
+                userEffective: layers.userEffective,
+                projectDiffers: !externalStateEquals(layers.project, layers.user),
+                userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
+                removedPlugins: toolPluginCatalog.removedPlugins,
+              },
+            };
+          }
+
+          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
+          if (layer === null) return rpcFail("缺少 layer");
           const current = layer === "user"
             ? loadExternalUserDefaults(ctx.logger)
             : loadExternalProjectState(cwd, ctx.logger);

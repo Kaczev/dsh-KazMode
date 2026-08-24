@@ -96,6 +96,8 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   - 出厂：`TOOL_PLUGIN_FACTORY`；
   - 用户默认：`~/.dsh/storages/kaz-tool-plugin-defaults.json`；
   - 项目设置：`<项目>/.dsh/storages/kaz-tool-plugins.json`；
+  - 外置插件检测/移除目录（用户数据）：`~/.dsh/storages/kaz-tool-plugin-catalog.json`；
+  - 官方/Kaz 分类修改点：`kaz-shared/lib/tool-plugin-catalog.js`；
   - 动态检测到的新插件/新工具默认开启。
 - `kaz-memory` 关闭 → 六工具自动移出；`kaz-diag` 关闭 → `kaz_mode_status` 移出。
 

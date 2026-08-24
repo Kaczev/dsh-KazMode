@@ -149,7 +149,7 @@ const ctx = {
   },
 };
 
-plugin.apply(ctx, { enabled: true, toolWhitelist: [...WHITELIST] });
+plugin.apply(ctx, { enabled: true, toolWhitelist: [...WHITELIST], storageDir: join(TMP, "dsh-storages") });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 await settle();
 
@@ -237,6 +237,19 @@ const sPlainMem = agentOf("s-plain-mem");
   await settle();
   check("①.8 官方工具不再依赖 settings.toolWhitelist：pwsh/read/todo_write 仍可见", kazMode.toolVisible(sKaz, "pwsh") === true && kazMode.toolVisible(sKaz, "read") === true && kazMode.toolVisible(sKaz, "todo_write") === true);
   check("①.8 only_unknown 不进入工具面", kazMode.toolVisible(sKaz, "only_unknown") === false);
+}
+
+// ①.9 用户目录外置插件目录：分类来自 catalog，remove/restoreRemoved 落盘
+{
+  const rpc = rpcHandlers.get("/kaz-mode");
+  const list1 = await rpc("listToolPlugins", {});
+  check("①.9 listToolPlugins 返回 catalog 且官方含 planmodecontroller", list1 !== null && list1.ok === true && list1.value.catalog !== null && Array.isArray(list1.value.catalog.official) && list1.value.catalog.official.includes("planmodecontroller"));
+  const rem = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", removePlugin: true });
+  check("①.9 removePlugin 落盘 removedPlugins", rem !== null && rem.ok === true && rem.value.removedPlugins["dsh-pixel-art"] === true);
+  const list2 = await rpc("listToolPlugins", {});
+  check("①.9 listToolPlugins 能看到 removedPlugins", list2.value.catalog.removedPlugins["dsh-pixel-art"] === true);
+  const rst = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", restoreRemoved: true });
+  check("①.9 restoreRemoved 清空 removedPlugins", rst !== null && rst.ok === true && rst.value.removedPlugins["dsh-pixel-art"] === undefined);
 }
 
 check("① kazEnabled(kaz 会话)=true", kazMode.kazEnabled(sKaz) === true);

@@ -1181,6 +1181,7 @@ window.__ModuleLoader__.load({
 				const layer = "project";
 				const [data, setData] = useState(null);
 				const [detected, setDetected] = useState([]);
+				const [catalog, setCatalog] = useState({ official: [...OFFICIAL_TOOL_PLUGIN_KEYS], kaz: [...KAZ_TOOL_PLUGIN_KEYS], removedPlugins: {} });
 				const [expanded, setExpanded] = useState(() => new Set());
 				const [busy, setBusy] = useState(false);
 
@@ -1189,7 +1190,16 @@ window.__ModuleLoader__.load({
 					const res = await rpcCall("getExternalToolPlugins", { sessionId: sessionId || "", cwd: cwd || "" });
 					if (res !== null) setData(res);
 					const det = await rpcCall("listToolPlugins", {});
-					if (det !== null && Array.isArray(det.plugins)) setDetected(det.plugins);
+					if (det !== null) {
+						if (Array.isArray(det.plugins)) setDetected(det.plugins);
+						if (det.catalog !== null && det.catalog !== undefined && typeof det.catalog === "object") {
+							setCatalog({
+								official: Array.isArray(det.catalog.official) ? det.catalog.official : [...OFFICIAL_TOOL_PLUGIN_KEYS],
+								kaz: Array.isArray(det.catalog.kaz) ? det.catalog.kaz : [...KAZ_TOOL_PLUGIN_KEYS],
+								removedPlugins: det.catalog.removedPlugins !== null && typeof det.catalog.removedPlugins === "object" ? det.catalog.removedPlugins : {},
+							});
+						}
+					}
 					setBusy(false);
 				}, [sessionId, cwd]);
 
@@ -1209,6 +1219,31 @@ window.__ModuleLoader__.load({
 					if (!writable) return;
 					const res = await rpcCall("resetExternalToolPlugins", { sessionId: sessionId || "", cwd: targetCwd(), layer: target || layer });
 					if (res !== null) setData(res);
+				};
+
+				const refreshCatalog = async () => {
+					const det = await rpcCall("listToolPlugins", {});
+					if (det !== null && det.catalog !== null && det.catalog !== undefined && typeof det.catalog === "object") {
+						setCatalog({
+							official: Array.isArray(det.catalog.official) ? det.catalog.official : catalog.official,
+							kaz: Array.isArray(det.catalog.kaz) ? det.catalog.kaz : catalog.kaz,
+							removedPlugins: det.catalog.removedPlugins !== null && typeof det.catalog.removedPlugins === "object" ? det.catalog.removedPlugins : {},
+						});
+					}
+				};
+
+				const applyRemovePlugin = async (key) => {
+					if (!writable) return;
+					const res = await rpcCall("setExternalToolPlugin", { sessionId: sessionId || "", cwd: targetCwd(), pluginName: key, removePlugin: true });
+					if (res !== null) setData(res);
+					await refreshCatalog();
+				};
+
+				const applyRestoreRemoved = async (key) => {
+					if (!writable) return;
+					const res = await rpcCall("setExternalToolPlugin", { sessionId: sessionId || "", cwd: targetCwd(), pluginName: key, restoreRemoved: true });
+					if (res !== null) setData(res);
+					await refreshCatalog();
 				};
 
 				if (data === null) {
@@ -1271,6 +1306,10 @@ window.__ModuleLoader__.load({
 					const name = window.prompt("输入要添加的插件名（fiber.name，不是包名）");
 					if (name === null || name.trim().length === 0) return;
 					const key = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+					if (removedPlugins[key] === true) {
+						await applyRestoreRemoved(key);
+						return;
+					}
 					const hiddenPlugin = displayPlugins[key] !== undefined && displayPlugins[key].ignored === true;
 					if (hiddenPlugin) {
 						await applyPatch({ pluginName: key, restore: true });
@@ -1325,9 +1364,11 @@ window.__ModuleLoader__.load({
 					restoreAction = () => resetLayer("user");
 				}
 
-				const mainPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true);
-				const ignoredPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true);
-				const categoryOf = (key) => (key.startsWith("tool-") || OFFICIAL_TOOL_PLUGIN_KEYS.has(key) ? "official" : KAZ_TOOL_PLUGIN_KEYS.has(key) ? "kaz" : "external");
+				const removedPlugins = catalog.removedPlugins !== null && typeof catalog.removedPlugins === "object" ? catalog.removedPlugins : {};
+				const mainPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true && removedPlugins[key] !== true);
+				const ignoredOnlyPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true && removedPlugins[key] !== true);
+				const removedPluginKeys = pluginKeys.filter((key) => removedPlugins[key] === true);
+				const categoryOf = (key) => (catalog.official.includes(key) ? "official" : catalog.kaz.includes(key) ? "kaz" : "external");
 				const groups = [
 					{ id: "external", title: "外置插件", keys: mainPlugins.filter((key) => categoryOf(key) === "external") },
 					{ id: "kaz", title: "Kaz 插件", keys: mainPlugins.filter((key) => categoryOf(key) === "kaz") },
@@ -1341,6 +1382,9 @@ window.__ModuleLoader__.load({
 					const tools = toolsOf(key).filter((tool) => plugin.hiddenTools === undefined || plugin.hiddenTools[tool] !== true);
 					const allOn = tools.length > 0 && tools.every((tool) => plugin.tools !== undefined && plugin.tools[tool] === true);
 					const anyOn = tools.some((tool) => plugin.tools === undefined || plugin.tools[tool] !== false);
+					const projectPlugin = data.project !== null && data.project !== undefined && data.project.plugins !== undefined ? data.project.plugins[key] : undefined;
+					const userPlugin = data.user !== null && data.user !== undefined && data.user.plugins !== undefined ? data.user.plugins[key] : undefined;
+					const projectUnique = JSON.stringify(projectPlugin ?? null) !== JSON.stringify(userPlugin ?? null);
 					return createElement(
 						"div",
 						{ key, className: "kzm-state-item" },
@@ -1351,12 +1395,19 @@ window.__ModuleLoader__.load({
 								"span",
 								{ className: "kzm-state-name", title: key },
 								key,
+								projectUnique && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							),
 							createElement(
 								"button",
 								{ type: "button", className: "kzm-cfg-btn", onClick: () => setExpanded((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }) },
 								open ? "收起" : "展开",
 							),
+							categoryOf(key) === "external" &&
+								createElement(
+									"button",
+									{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyRemovePlugin(key) },
+									"移除",
+								),
 							createElement(
 								"button",
 								{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, ignored: true }) },
@@ -1438,12 +1489,12 @@ window.__ModuleLoader__.load({
 							group.keys.map((key) => renderPluginRow(key)),
 						),
 					),
-					(ignoredPlugins.length > 0 || pluginKeys.some((key) => { const p = pluginsMap[key].plugin; return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0; })) &&
+					(ignoredOnlyPlugins.length > 0 || removedPluginKeys.length > 0 || pluginKeys.some((key) => { const p = pluginsMap[key].plugin; return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0; })) &&
 						createElement(
 							"div",
 							{ className: "kzm-tp-hidden" },
-							createElement("p", { className: "kzm-tp-hidden-title" }, "已忽略 / 已隐藏（仍可能被检测到，可还原）"),
-							ignoredPlugins.map((key) =>
+							createElement("p", { className: "kzm-tp-hidden-title" }, "已忽略 / 已移除 / 已隐藏（仍可能被检测到，可还原）"),
+							ignoredOnlyPlugins.map((key) =>
 								createElement(
 									"div",
 									{ key, className: "kzm-state-row" },
@@ -1452,6 +1503,18 @@ window.__ModuleLoader__.load({
 										"button",
 										{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, restore: true }) },
 										"还原插件",
+									),
+								),
+							),
+							removedPluginKeys.map((key) =>
+								createElement(
+									"div",
+									{ key, className: "kzm-state-row" },
+									createElement("span", { className: "kzm-state-name" }, key),
+									createElement(
+										"button",
+										{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyRestoreRemoved(key) },
+										"恢复列表",
 									),
 								),
 							),

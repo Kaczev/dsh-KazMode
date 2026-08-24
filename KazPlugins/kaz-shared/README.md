@@ -21,6 +21,8 @@ Kaz 模式的工具清单 / 工具插件模型**全部集中在这里**，其它
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-diag（展示默认 persona） | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
 
+> **官方/Kaz 分类修改点**：`lib/tool-plugin-catalog.js`。外置插件数据（检测结果 / 用户移除 / 手动添加）保存在用户目录 storages，**不写在源码里**。
+
 ## 工具面语义（2026-08 统一）
 
 - **官方/外置统一为“工具插件”**：Kaz 工具面 = `factory → 用户默认 → 项目设置`

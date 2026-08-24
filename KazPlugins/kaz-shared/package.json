@@ -11,7 +11,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/tool-lists.js"
+    "lib/tool-lists.js",
+    "lib/tool-plugin-catalog.js"
   ],
   "license": "MIT"
 }
