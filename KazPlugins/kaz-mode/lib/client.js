@@ -1182,6 +1182,8 @@ window.__ModuleLoader__.load({
 				const [data, setData] = useState(null);
 				const [detected, setDetected] = useState([]);
 				const [catalog, setCatalog] = useState({ official: [...OFFICIAL_TOOL_PLUGIN_KEYS], kaz: [...KAZ_TOOL_PLUGIN_KEYS], removedPlugins: {} });
+				const [registeredTools, setRegisteredTools] = useState([]);
+				const [showRegistered, setShowRegistered] = useState(false);
 				const [expanded, setExpanded] = useState(() => new Set());
 				const [busy, setBusy] = useState(false);
 
@@ -1192,6 +1194,7 @@ window.__ModuleLoader__.load({
 					const det = await rpcCall("listToolPlugins", {});
 					if (det !== null) {
 						if (Array.isArray(det.plugins)) setDetected(det.plugins);
+						if (Array.isArray(det.registeredTools)) setRegisteredTools(det.registeredTools);
 						if (det.catalog !== null && det.catalog !== undefined && typeof det.catalog === "object") {
 							setCatalog({
 								official: Array.isArray(det.catalog.official) ? det.catalog.official : [...OFFICIAL_TOOL_PLUGIN_KEYS],
@@ -1537,6 +1540,17 @@ window.__ModuleLoader__.load({
 								);
 							}),
 						),
+					createElement(
+						"div",
+						{ className: "kzm-tp-hidden" },
+						createElement(
+							"button",
+							{ type: "button", className: "kzm-cfg-btn", onClick: () => setShowRegistered((open) => !open) },
+							showRegistered ? "收起已注册工具诊断" : "已注册工具诊断（" + registeredTools.length + "）",
+						),
+						showRegistered &&
+							createElement("p", { className: "kzm-note" }, registeredTools.length > 0 ? registeredTools.join(", ") : "（当前注册表为空）"),
+					),
 					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
 				);
 			}

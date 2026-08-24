@@ -1421,10 +1421,20 @@ export default {
         if (endpoint === "listToolPlugins") {
           // 动态检测到的工具注册快照 + 官方/Kaz 分类 + 用户目录外置目录。
           const catalog = loadToolPluginCatalog(ctx.logger);
+          let registeredTools = [];
+          try {
+            const schemas = ctx.tools?.schemas?.();
+            if (Array.isArray(schemas)) {
+              registeredTools = schemas.map((schema) => schema?.name).filter((name) => typeof name === "string" && name.length > 0).sort();
+            }
+          } catch {
+            registeredTools = [];
+          }
           return {
             ok: true,
             value: {
               plugins: detectedToolPluginsList(),
+              registeredTools,
               catalog: {
                 official: [...OFFICIAL_TOOL_PLUGIN_KEYS],
                 kaz: [...KAZ_TOOL_PLUGIN_KEYS],
