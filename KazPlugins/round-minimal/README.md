@@ -1,6 +1,6 @@
 # round-minimal —— 首阶段极简（首次工具调用后恢复）
 
-> **作用**：首次工具调用前只暴露极简工具集，模型第一次调用工具后就恢复全部工具——首轮工具按 `kaz-memory` 是否启用自动切换（启用 → 只 `memory_search`；关闭 → `pwsh` / `read` / `edit`），避免首轮就乱调工具、浪费上下文。
+> **作用**：首次工具调用前只暴露极简工具集，模型第一次调用工具后就恢复全部工具——首轮工具按 `kaz-memory` 是否启用自动切换（启用 → 只 `memory_search`；关闭 → `pwsh` / `read` / `edit`），避免首轮就乱调工具、浪费上下文；并把当前轮 assemble 可见的工具面增删明细上报给 round-display 显示。
 
 宿主侧插件：按「会话里是否已发生第一次工具调用」切换工具集（2026-08 重构，
 替代旧的按对话轮次判定）：
@@ -20,6 +20,9 @@
 ## 特性
 
 - **首阶段极简**：首阶段按 kaz-memory 自动切换——启用只暴露 `memory_search`（先查记忆）；关闭暴露 `pwsh` + `read` + `edit`（shell + 看/改文件）；
+- **工具变化显示**：每次 `system-prompt/assemble` 后，把当前轮可见工具面的增删明细
+  （如极简阶段移除的工具、首次工具调用后恢复新增的工具）主动上报给 `roundDisplay`，
+  在 round-display「本轮注入」面板直接可见；
 - **子代理排除**：默认不受影响（`includeSubagents: false`）——subagent / workflow /
   ralph 的子会话始终走全量模式；
 - **对外信号**：发布 `roundMinimal` 服务（`enabled` / `firstRoundTools` /
@@ -67,4 +70,6 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\round-minimal\probe-round-mi
 1. 新对话首次请求的工具面：kaz-memory 开 = `memory_search`；关 = `pwsh` + `read` + `edit`；
 2. 模型第一次工具调用后的下一次组装，工具面恢复全部工具；
 3. 重启续接旧对话（已有工具调用）直接全量模式；
-4. 子代理（`includeSubagents: false` 时）始终全量模式。
+4. 子代理（`includeSubagents: false` 时）始终全量模式；
+5. round-display「本轮注入」面板能看到 round-minimal 上报的本轮工具增删明细
+   （极简阶段移除哪些、首次工具调用后新增哪些）。

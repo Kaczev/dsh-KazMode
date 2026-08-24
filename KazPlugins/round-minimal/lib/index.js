@@ -26,6 +26,10 @@
 // round-minimal/state 事件（{ agent, minimal, turn, firstRoundTools }）——
 // 供 kaz-mode 等消费方在极简阶段抑制"请先搜索记忆"之类的指引。
 //
+// 工具变化显示：每次 system-prompt/assemble 时记录过滤前后的可见工具面，
+// 把当前轮的增删明细（移除/新增工具名）主动上报给 roundDisplay 服务，
+// 由 round-display 的「本轮注入」面板展示。
+//
 // 配置（热重载，写入 ~/.dsh/settings.yaml 的 round-minimal: 命名空间即可，
 // 无需重启；组合行 cordis.patch.yml 的 config 作为 base 层，用户设置优先）：
 //   enabled                是否启用，默认 true
@@ -146,6 +150,20 @@ function hasToolCall(agent) {
   } catch {
     return false;
   }
+}
+
+/** 提取 assembly.tools 里的工具名（去重、保留顺序）。 */
+function toolNamesOf(tools) {
+  const names = [];
+  const seen = new Set();
+  for (const tool of Array.isArray(tools) ? tools : []) {
+    if (tool === null || typeof tool !== "object") continue;
+    const name = tool.name;
+    if (typeof name !== "string" || name.length === 0 || seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+  return names;
 }
 
 /** 读取代理当前轮次（仅供信号展示）：会话日志中最近一个 turn/start 的 data.turn；无则 0。 */
@@ -289,14 +307,73 @@ export default {
     }
 
     // -----------------------------------------------------------------------
+    // 工具面变化展示：按 agent × 轮次记录上一次 assemble 后的可见工具面，
+    // 每次组装时把增删明细主动上报给 round-display（best-effort）。
+    // -----------------------------------------------------------------------
+    const lastToolSurfaces = new WeakMap();
+    /** 向 round-display 上报一次工具面增删明细（数据来自 system-prompt/assemble）。 */
+    function reportToolSurfaceChange(agent, before, after, minimal) {
+      try {
+        if (agent === null || typeof agent !== "object") return;
+        if (agent.id === undefined) return;
+        const turn = currentTurnOf(agent);
+        let state = lastToolSurfaces.get(agent);
+        if (state === undefined || state.turn !== turn) {
+          // 新一轮：以本轮第一次 assemble 的“过滤前”工具面作为基线，
+          // 这样只报 round-minimal 在本轮实际造成的收窄/恢复净变化。
+          state = { turn, names: before };
+          lastToolSurfaces.set(agent, state);
+        }
+        const prev = state.names;
+        const added = after.filter((name) => !prev.includes(name));
+        const removed = prev.filter((name) => !after.includes(name));
+        if (added.length === 0 && removed.length === 0) return;
+        state.names = after;
+
+        let phase;
+        if (minimal) {
+          phase = "极简阶段（首次工具调用前）";
+        } else if (added.length > 0 && removed.length === 0) {
+          phase = "恢复全量（首次工具调用后）";
+        } else {
+          phase = "工具面变化";
+        }
+        const content =
+          "工具面变化（来自 system-prompt/assemble）\n" +
+          phase + "\n" +
+          "- 移除（" + removed.length + "）：" + (removed.length > 0 ? removed.join(", ") : "（无）") + "\n" +
+          "+ 新增（" + added.length + "）：" + (added.length > 0 ? added.join(", ") : "（无）");
+        const roundDisplay = ctx.get("roundDisplay");
+        if (
+          roundDisplay !== null &&
+          roundDisplay !== undefined &&
+          typeof roundDisplay.report === "function"
+        ) {
+          roundDisplay.report({
+            agent,
+            plugin: "round-minimal",
+            title: "本轮工具变化",
+            content,
+          });
+        }
+      } catch (error) {
+        ctx.logger?.debug?.("[round-minimal] 工具变化上报失败：" + (error instanceof Error ? error.message : String(error)));
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // 组装层过滤：极简阶段只保留白名单工具及其 tool:* 指导段。
     //    host 平面的监听器无 scope 标签，对 agent 作用域的组装同样生效。
+    //    同时把 assemble 前后的工具面差异上报 round-display。
     // -----------------------------------------------------------------------
     ctx.on("system-prompt/assemble", function (assembly, context, next) {
       signalState(context?.agent);
-      const live = liveFor(context?.agent);
-      if (live.enabled === true && isFirstRound(context?.agent)) {
-        const allow = new Set(effectiveFirstRoundTools(context?.agent));
+      const agent = context?.agent;
+      const before = toolNamesOf(assembly?.tools);
+      const live = liveFor(agent);
+      const minimal = live.enabled === true && isFirstRound(agent);
+      if (minimal) {
+        const allow = new Set(effectiveFirstRoundTools(agent));
         assembly.tools = assembly.tools.filter(
           (tool) => tool !== null && typeof tool === "object" && allow.has(tool.name),
         );
@@ -305,6 +382,8 @@ export default {
           return allow.has(section.name.slice("tool:".length));
         });
       }
+      const after = toolNamesOf(assembly?.tools);
+      reportToolSurfaceChange(agent, before, after, minimal);
       return next();
     });
 

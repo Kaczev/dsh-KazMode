@@ -1,7 +1,7 @@
 {
   "name": "round-minimal",
-  "version": "0.1.0",
-  "description": "首阶段极简：首次工具调用前按 kaz-memory 自动暴露极简工具集（开=memory_search；关=pwsh/read/edit），首次工具调用后恢复全量工具。",
+  "version": "0.2.0",
+  "description": "首阶段极简：首次工具调用前按 kaz-memory 自动暴露极简工具集（开=memory_search；关=pwsh/read/edit），首次工具调用后恢复全量工具；并把当前轮工具面增删明细上报 round-display 显示。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
