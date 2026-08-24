@@ -221,9 +221,9 @@ window.__ModuleLoader__.load({
 			"tool-ask-user",
 			"tool-todo",
 			"tool-web",
-			"kaz-memory",
-			"kaz-diag",
 		]);
+		/** Kaz 模式自家插件（记忆/诊断），排序时位于官方之上、外置之下。 */
+		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory", "kaz-diag"]);
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
 		const RPC_CHANNEL = "/kaz-mode";
@@ -326,6 +326,9 @@ window.__ModuleLoader__.load({
 .kzm-tp-new{font-size:10px;color:#16a34a;border:1px solid rgba(22,163,74,.4);background:rgba(22,163,74,.08);border-radius:8px;padding:0 5px;flex:none}
 .kzm-tp-hidden{border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;padding:6px 8px;margin-top:6px}
 .kzm-tp-hidden-title{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-bottom:4px}
+.kzm-tp-group-title{font-size:11px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em}
+.kzm-tp-tools{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-radius:8px;padding:6px 8px;margin:4px 0 2px;display:flex;flex-direction:column;gap:4px}
+.kzm-tp-tools-title{font-size:10px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:0}
 `;
 			const tagId = "kaz-mode/styles";
 			if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -766,7 +769,7 @@ window.__ModuleLoader__.load({
 			}
 
 			/** kaz-mode 自身行：状态由预设驱动，不提供独立 enabled 开关。 */
-			function KazRow() {
+			function KazRow({ sessionId, cwd, writable }) {
 				const [cfgOpen, setCfgOpen] = useState(false);
 				const kazSnap = useScope(kazScope);
 				const kazValue = valueOf(kazSnap);
@@ -798,6 +801,12 @@ window.__ModuleLoader__.load({
 							"div",
 							{ className: "kzm-fields" },
 							KAZ_FIELDS.map((field) => createElement(FieldEditor, { key: field.key, field, scope: kazScope })),
+							createElement(ToolPluginsSection, {
+								key: "tool-plugins",
+								sessionId: sessionId || "",
+								cwd,
+								writable,
+							}),
 						),
 				);
 			}
@@ -1166,7 +1175,7 @@ window.__ModuleLoader__.load({
 
 			/** 工具插件（官方 + 外置统一）管理区块：按项目分开，支持用户默认/项目设置两层。 */
 			function ToolPluginsSection({ sessionId, cwd, writable }) {
-				const [layer, setLayer] = useState("project");
+				const layer = "project";
 				const [data, setData] = useState(null);
 				const [detected, setDetected] = useState([]);
 				const [expanded, setExpanded] = useState(() => new Set());
@@ -1285,27 +1294,112 @@ window.__ModuleLoader__.load({
 					await applyPatch({ pluginName: key, toolName: toolName.trim(), enabled: true });
 				};
 
+				const addToolFor = async (key) => {
+					const toolName = window.prompt("输入工具名");
+					if (toolName === null || toolName.trim().length === 0) return;
+					const tool = toolName.trim();
+					const plugin = displayPlugins[key];
+					if (plugin !== undefined && plugin.hiddenTools !== undefined && plugin.hiddenTools[tool] === true) {
+						await applyPatch({ pluginName: key, toolName: tool, toolHidden: false });
+						return;
+					}
+					const detectedNow = detectedMap[key] !== undefined && detectedMap[key].includes(tool);
+					if (!detectedNow && !window.confirm(`未检测到工具 "${tool}"，仍要添加吗？`)) return;
+					await applyPatch({ pluginName: key, toolName: tool, enabled: true });
+				};
+
 				const projectDiffers = data.projectDiffers === true;
 				const userDiffersFactory = data.userDiffersFactory === true;
 				let restoreLabel = null;
 				let restoreOrange = false;
 				let restoreAction = null;
-				if (layer === "project") {
-					if (projectDiffers) {
-						restoreLabel = "还原默认设置";
-						restoreOrange = true;
-						restoreAction = () => resetLayer("project");
-					} else if (userDiffersFactory) {
-						restoreLabel = "还原安装时的默认设置";
-						restoreAction = () => resetLayer("user");
-					}
+				if (projectDiffers) {
+					restoreLabel = "恢复默认设置";
+					restoreOrange = true;
+					restoreAction = () => resetLayer("project");
 				} else if (userDiffersFactory) {
-					restoreLabel = "还原安装时的默认设置";
+					restoreLabel = "恢复原设置";
 					restoreAction = () => resetLayer("user");
 				}
 
 				const mainPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true);
 				const ignoredPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true);
+				const categoryOf = (key) => (OFFICIAL_TOOL_PLUGIN_KEYS.has(key) ? "official" : KAZ_TOOL_PLUGIN_KEYS.has(key) ? "kaz" : "external");
+				const groups = [
+					{ id: "external", title: "外置插件", keys: mainPlugins.filter((key) => categoryOf(key) === "external") },
+					{ id: "kaz", title: "Kaz 插件", keys: mainPlugins.filter((key) => categoryOf(key) === "kaz") },
+					{ id: "official", title: "官方插件", keys: mainPlugins.filter((key) => categoryOf(key) === "official") },
+				].filter((group) => group.keys.length > 0);
+
+				const renderPluginRow = (key) => {
+					const item = pluginsMap[key];
+					const plugin = item.plugin;
+					const open = expanded.has(key);
+					const tools = toolsOf(key).filter((tool) => plugin.hiddenTools === undefined || plugin.hiddenTools[tool] !== true);
+					const allOn = tools.length > 0 && tools.every((tool) => plugin.tools !== undefined && plugin.tools[tool] === true);
+					const anyOn = tools.some((tool) => plugin.tools === undefined || plugin.tools[tool] !== false);
+					return createElement(
+						"div",
+						{ key, className: "kzm-state-item" },
+						createElement(
+							"div",
+							{ className: "kzm-state-row" },
+							createElement(
+								"span",
+								{ className: "kzm-state-name", title: key },
+								key,
+							),
+							createElement(
+								"button",
+								{ type: "button", className: "kzm-cfg-btn", onClick: () => setExpanded((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }) },
+								open ? "收起" : "展开",
+							),
+							createElement(
+								"button",
+								{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, ignored: true }) },
+								"忽略",
+							),
+							createElement(Toggle, {
+								checked: allOn || (tools.length === 0 ? anyOn : allOn),
+								disabled: !writable || busy,
+								title: "Kaz 工具面开关：插件关 = 所有工具关",
+								onChange: (next) => void togglePluginAll(key, next),
+							}),
+						),
+						open &&
+							createElement(
+								"div",
+								{ className: "kzm-tp-tools" },
+								createElement("p", { className: "kzm-tp-tools-title" }, "工具"),
+								tools.length === 0 && createElement("p", { className: "kzm-note" }, "暂无已登记工具；检测到后会自动出现并默认开启。"),
+								tools.map((tool) => {
+									const enabled = plugin.tools !== undefined && plugin.tools[tool] === true;
+									const fresh = isNewTool(key, tool);
+									return createElement(
+										"div",
+										{ key: tool, className: "kzm-field-line" },
+										createElement("span", { className: "kzm-state-name", title: tool }, tool, fresh && createElement("span", { className: "kzm-tp-new" }, "新")),
+										createElement(
+											"button",
+											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: true }) },
+											"隐藏",
+										),
+										createElement(Toggle, {
+											checked: enabled,
+											disabled: !writable || busy,
+											title: "Kaz 工具面开关",
+											onChange: (next) => void applyPatch({ pluginName: key, toolName: tool, enabled: next }),
+										}),
+									);
+								}),
+								createElement(
+									"button",
+									{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addToolFor(key) },
+									"＋ 添加工具",
+								),
+							),
+					);
+				};
 
 				return createElement(
 					"div",
@@ -1330,89 +1424,17 @@ window.__ModuleLoader__.load({
 					createElement("p", { className: "kzm-state-desc" }, "官方工具与外置插件统一管理，只影响 Kaz 工具面，不卸载/不停用插件本体。当前项目：" + (targetCwd() || "（未知）")),
 					createElement(
 						"div",
-						{ className: "kzm-tp-tabs" },
-						createElement(
-							"button",
-							{ type: "button", className: "kzm-tp-tab", "data-on": layer === "project" ? "true" : "false", onClick: () => setLayer("project") },
-							"项目设置",
-						),
-						createElement(
-							"button",
-							{ type: "button", className: "kzm-tp-tab", "data-on": layer === "user" ? "true" : "false", onClick: () => setLayer("user") },
-							"用户默认",
-						),
-					),
-					createElement(
-						"div",
 						{ className: "kzm-tp-add" },
 						createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addPlugin() }, "＋ 添加插件"),
-						createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addTool() }, "＋ 添加工具"),
 					),
-					mainPlugins.map((key) => {
-						const item = pluginsMap[key];
-						const plugin = item.plugin;
-						const isOfficial = OFFICIAL_TOOL_PLUGIN_KEYS.has(key);
-						const open = expanded.has(key);
-						const tools = toolsOf(key).filter((tool) => plugin.hiddenTools === undefined || plugin.hiddenTools[tool] !== true);
-						const allOn = tools.length > 0 && tools.every((tool) => plugin.tools !== undefined && plugin.tools[tool] === true);
-						const anyOn = tools.some((tool) => plugin.tools === undefined || plugin.tools[tool] !== false);
-						return createElement(
-							"div",
-							{ key, className: "kzm-state-item" },
-							createElement(
-								"div",
-								{ className: "kzm-state-row" },
-								createElement(
-									"span",
-									{ className: "kzm-state-name", title: key },
-									key,
-									createElement("span", { className: "kzm-tag" }, isOfficial ? "  官方" : "  外置"),
-								),
-								createElement(
-									"button",
-									{ type: "button", className: "kzm-cfg-btn", onClick: () => setExpanded((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }) },
-									open ? "收起" : "展开",
-								),
-								createElement(
-									"button",
-									{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, ignored: true }) },
-									"忽略",
-								),
-								createElement(Toggle, {
-									checked: allOn || (tools.length === 0 ? anyOn : allOn),
-									disabled: !writable || busy,
-									title: "Kaz 工具面开关：插件关 = 所有工具关",
-									onChange: (next) => void togglePluginAll(key, next),
-								}),
-							),
-							open &&
-								createElement(
-									"div",
-									{ className: "kzm-fields" },
-									tools.length === 0 && createElement("p", { className: "kzm-note" }, "暂无已登记工具；检测到后会自动出现并默认开启。"),
-									tools.map((tool) => {
-										const enabled = plugin.tools !== undefined && plugin.tools[tool] === true;
-										const fresh = isNewTool(key, tool);
-										return createElement(
-											"div",
-											{ key: tool, className: "kzm-field-line" },
-											createElement("span", { className: "kzm-state-name", title: tool }, tool, fresh && createElement("span", { className: "kzm-tp-new" }, "新")),
-											createElement(
-												"button",
-												{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: true }) },
-												"隐藏",
-											),
-											createElement(Toggle, {
-												checked: enabled,
-												disabled: !writable || busy,
-												title: "Kaz 工具面开关",
-												onChange: (next) => void applyPatch({ pluginName: key, toolName: tool, enabled: next }),
-											}),
-										);
-									}),
-								),
-						);
-					}),
+					groups.map((group) =>
+						createElement(
+							Fragment,
+							{ key: group.id },
+							createElement("p", { className: "kzm-tp-group-title" }, group.title),
+							group.keys.map((key) => renderPluginRow(key)),
+						),
+					),
 					(ignoredPlugins.length > 0 || pluginKeys.some((key) => { const p = pluginsMap[key].plugin; return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0; })) &&
 						createElement(
 							"div",
@@ -1712,12 +1734,6 @@ window.__ModuleLoader__.load({
 								: "正在调整新建对话的默认设置：开关会直接保存为当前模式默认值。")
 							: "当前页面处于远程内存模式，设置不可写（请在本机 127.0.0.1 页面操作）。",
 					),
-					createElement(ToolPluginsSection, {
-						key: "tool-plugins",
-						sessionId: sessionId || "",
-						cwd: stateData !== null && stateData.cwd !== undefined ? stateData.cwd : undefined,
-						writable,
-					}),
 					hasSession
 						? (hasOverrides
 							? createElement(StateSection, {
@@ -1768,7 +1784,11 @@ window.__ModuleLoader__.load({
 						disabled: !patchWritable,
 						plugins: PATCH_PLUGINS,
 					}),
-					createElement(KazRow, null),
+					createElement(KazRow, {
+						sessionId: sessionId || "",
+						cwd: stateData !== null && stateData.cwd !== undefined ? stateData.cwd : undefined,
+						writable,
+					}),
 					lastRpcError.length > 0 && createElement("p", { className: "kzm-error" }, "RPC 通道未就绪：" + lastRpcError),
 				);
 			}
