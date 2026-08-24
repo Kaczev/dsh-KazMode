@@ -70,7 +70,7 @@ dsh-KazMode/
 | 插件目录 | 插件 id / name | 作用 |
 | --- | --- | --- |
 | `kaz-mode` | `kaz-mode` | Kaz 模式超级模式：预设联动 + 会话头部按钮 + 集中管理面板 |
-| `round-minimal` | `round-minimal` | 首阶段极简：首次工具调用前按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`/`read`/`edit`）；并把当前轮工具面增删明细上报 round-display 显示 |
+| `round-minimal` | `round-minimal` | 首阶段极简：首次工具调用前按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`/`read`/`edit`）；第一轮注入精简工具解锁提示（Kaz 默认开）；当前轮工具面增删明细上报 round-display 显示 |
 | `plugin-filter` | `plugin-filter` | 工具过滤：移除或禁用指定工具 |
 | `thinking-anchor` | `thinking-anchor` | 思考锚点：新对话注入完整思考协议，之后每轮短提醒 |
 | `first-round-hints` | `first-round-hints` | 首轮注入 pwsh 使用要点等提示 |

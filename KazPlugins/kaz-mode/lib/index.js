@@ -80,6 +80,8 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     enabled: false,
     firstRoundTools: [],
     includeSubagents: false,
+    guidanceHeadEnabled: false,
+    guidanceHead: "",
   },
   "plugin-filter": {
     enabled: false,
@@ -108,6 +110,10 @@ for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   }
   if (id === "kaz-memory") {
     FACTORY_KAZ_DEFAULTS[id].guidanceHeadEnabled = false;
+  }
+  if (id === "round-minimal") {
+    // Kaz 模式默认开首轮工具解锁提示；非 Kaz 默认关。
+    FACTORY_KAZ_DEFAULTS[id].guidanceHeadEnabled = true;
   }
 }
 

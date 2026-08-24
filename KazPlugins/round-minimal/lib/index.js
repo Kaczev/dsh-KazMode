@@ -7,8 +7,9 @@
 //          memory_search；关 = pwsh + read + edit，由 kaz-shared 统一解析）：
 //          组装层（system-prompt/assemble）把其它工具及 tool:* 指导段全部滤除，
 //          执行层（tools/pre-execute）对白名单之外的调用一律拒绝（纵深防御）；
-//        - 不再注入任何提示段（2026-08：原 round-minimal:policy 的两条消息已删除，
-//          对话开始时的注入消息改由 first-round-hints 插件提供）。
+//        - 第一轮开始时按 guidanceHeadEnabled 注入一条极简工具解锁提示
+//          （类似 kaz-memory 的 guidance_head；Kaz 模式默认开、非 Kaz 默认关）；
+//          原 round-minimal:policy 的两条旧消息已删除，普通轮次不再注入。
 //   2) 首次工具调用之后——全量恢复：
 //        - 工具列表恢复为组合/预设配置的全部工具（round-minimal 不再过滤）。
 //
@@ -35,10 +36,13 @@
 //   enabled                是否启用，默认 true
 //   firstRoundTools        极简阶段可用工具白名单（空 = 按 kaz-memory 自动解析）
 //   includeSubagents       是否对子代理也施加极简阶段，默认 false
+//   guidanceHeadEnabled    第一轮工具解锁提示开关（Kaz 模式默认开；非 Kaz 默认关）
+//   guidanceHead           第一轮工具解锁提示文本（留空 = 内置默认，按首轮工具拼装）
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { resolveFirstRoundTools } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 round-minimal: 段。 */
@@ -49,11 +53,17 @@ const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
   firstRoundTools: z.array(z.string()).default([]),
   includeSubagents: z.boolean().default(false),
+  /** 第一轮工具解锁提示开关：Kaz 模式默认开，非 Kaz 模式默认关。 */
+  guidanceHeadEnabled: z.boolean().default(false),
+  /** 第一轮工具解锁提示文本：留空 = 内置默认（按 firstRoundTools 自动拼装）。 */
+  guidanceHead: z.string().default(""),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
 export const DEFAULT_SECTION = {
   enabled: true,
+  guidanceHeadEnabled: false,
+  guidanceHead: "",
 };
 // ---------------------------------------------------------------------------
 // settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
@@ -138,6 +148,8 @@ function normalizeConfig(raw) {
     enabled: value.enabled !== false,
     firstRoundTools: tools,
     includeSubagents: value.includeSubagents === true,
+    guidanceHeadEnabled: value.guidanceHeadEnabled === true,
+    guidanceHead: typeof value.guidanceHead === "string" ? value.guidanceHead : "",
   };
 }
 
@@ -201,6 +213,61 @@ function isSubagent(agent) {
   }
 }
 
+/** 会话日志里是否已注入过 round-minimal 的指定 form 消息（跨重启/同 turn 防重复）。 */
+function hasInjectedBefore(agent, form) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return false;
+    return events.some((event) => {
+      if (event === null || typeof event !== "object" || event.type !== "user/message") return false;
+      const data = event.data;
+      if (data === null || typeof data !== "object") return false;
+      const source = data.source;
+      if (source === null || typeof source !== "object") return false;
+      if (source.kind !== "plugin" || source.plugin !== "round-minimal") return false;
+      return form === undefined || source.form === form;
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** 指定 turn 内是否已注入过 round-minimal 的指定 form 消息。 */
+function hasInjectedInTurn(agent, form, turn) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return false;
+    let turnStartIndex = -1;
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      if (
+        event !== null &&
+        typeof event === "object" &&
+        event.type === "turn/start" &&
+        event.data !== null &&
+        typeof event.data === "object" &&
+        event.data.turn === turn
+      ) {
+        turnStartIndex = index;
+      }
+    }
+    if (turnStartIndex === -1) return false;
+    for (let index = turnStartIndex + 1; index < events.length; index += 1) {
+      const event = events[index];
+      if (event === null || typeof event !== "object" || event.type !== "user/message") continue;
+      const data = event.data;
+      if (data === null || typeof data !== "object") continue;
+      const source = data.source;
+      if (source === null || typeof source !== "object") continue;
+      if (source.kind !== "plugin" || source.plugin !== "round-minimal") continue;
+      if (form === undefined || source.form === form) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export default {
   name: "round-minimal",
   // systemPrompt：监听组装瀑布；tools：监听执行前闸门。
@@ -218,7 +285,8 @@ export default {
         ctx.logger.info(
           `[round-minimal] 配置已热更新：enabled=${live.enabled}, ` +
             `firstRoundTools=[${live.firstRoundTools.join(", ")}], ` +
-            `includeSubagents=${live.includeSubagents}`,
+            `includeSubagents=${live.includeSubagents}, ` +
+            `guidanceHeadEnabled=${live.guidanceHeadEnabled}`,
         );
       },
     });
@@ -263,11 +331,35 @@ export default {
       return !hasToolCall(agent);
     }
 
+    /** 首轮工具解锁提示文本：guidanceHead 留空时按 firstRoundTools 自动拼装。 */
+    function firstRoundGuidanceText(agent, current) {
+      const override =
+        current !== null && typeof current === "object" && typeof current.guidanceHead === "string"
+          ? current.guidanceHead.trim()
+          : "";
+      if (override.length > 0) return override;
+      const tools = effectiveFirstRoundTools(agent);
+      if (tools.length === 0) return "";
+      let list;
+      if (tools.length === 1) {
+        list = tools[0];
+      } else if (tools.length === 2) {
+        list = tools.join(" or ");
+      } else {
+        list = tools.slice(0, -1).join(", ") + ", or " + tools[tools.length - 1];
+      }
+      return "Only after using " + list + " can other tools be used.";
+    }
+
+    /** 首轮工具提示的进程内去重（会话事件里已有 source 标记时同样跳过）。 */
+    const firstRoundGuidanceInjected = new WeakMap();
+
     const initial = source();
     ctx.logger.info(
       `[round-minimal] 已加载：enabled=${initial.enabled}, ` +
         `firstRoundTools=[${initial.firstRoundTools.join(", ")}], ` +
-        `includeSubagents=${initial.includeSubagents}`,
+        `includeSubagents=${initial.includeSubagents}, ` +
+        `guidanceHeadEnabled=${initial.guidanceHeadEnabled}`,
     );
 
     // -----------------------------------------------------------------------
@@ -305,6 +397,71 @@ export default {
         // 信号发送失败不影响主流程
       }
     }
+
+    // -----------------------------------------------------------------------
+    // 首轮工具解锁提示（类似 kaz-memory guidance_head）：
+    // 第一轮一开始（首个 pre-step，尚无 tool/call）注入一条精简用户消息，
+    // 告诉模型先使用 firstRoundTools 中的工具，之后才能使用其它工具。
+    // 默认：Kaz 模式开，非 Kaz 模式关（guidanceHeadEnabled 可显式覆盖）。
+    // -----------------------------------------------------------------------
+    ctx.on("agent/pre-step", async (payload, next) => {
+      const decision = await next();
+      if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
+      if (payload === null || typeof payload !== "object" || payload.step !== 1) return decision;
+      const agent = payload?.agent;
+      if (agent === null || agent === undefined || typeof agent !== "object") return decision;
+      const live = liveFor(agent);
+      if (live.enabled !== true) return decision;
+      if (live.includeSubagents !== true && isSubagent(agent)) return decision;
+      if (hasToolCall(agent)) return decision;
+      if (firstRoundGuidanceInjected.get(agent) === true) return decision;
+      const turn = currentTurnOf(agent);
+      if (hasInjectedInTurn(agent, "first-round-guidance", turn)) return decision;
+      if (hasInjectedBefore(agent, "first-round-guidance")) return decision;
+
+      // 默认值：Kaz 模式开、非 Kaz 关；显式配置优先。
+      let guidanceEnabled;
+      if (live.guidanceHeadEnabled === true || live.guidanceHeadEnabled === false) {
+        guidanceEnabled = live.guidanceHeadEnabled;
+      } else {
+        let kazEnabled = false;
+        try {
+          const svc = ctx.get("kazMode");
+          if (svc !== undefined && svc !== null && typeof svc.kazEnabled === "function") {
+            kazEnabled = svc.kazEnabled(agent) === true;
+          }
+        } catch {
+          kazEnabled = false;
+        }
+        guidanceEnabled = kazEnabled;
+      }
+      if (!guidanceEnabled) return decision;
+
+      const text = firstRoundGuidanceText(agent, live);
+      if (typeof text !== "string" || text.trim().length === 0) return decision;
+      const messageText = ["[round-minimal guidance]", ">", text.trim(), "<"].join("\n");
+      let message;
+      try {
+        message = createUserMessage({
+          content: [{ type: "text", text: messageText }],
+          source: { kind: "plugin", plugin: "round-minimal", form: "first-round-guidance" },
+        });
+      } catch (error) {
+        ctx.logger.warn("[round-minimal] 构造首轮工具提示消息失败：" + (error instanceof Error ? error.message : String(error)));
+        return decision;
+      }
+      if (!Array.isArray(decision.messages)) return decision;
+      firstRoundGuidanceInjected.set(agent, true);
+      try {
+        const rd = ctx.get("roundDisplay");
+        if (rd !== undefined && rd !== null && typeof rd.report === "function") {
+          rd.report({ agent, plugin: "round-minimal", title: "guidance", content: messageText });
+        }
+      } catch (error) {
+        ctx.logger?.debug?.("[round-minimal] 首轮工具提示上报 round-display 失败：" + (error instanceof Error ? error.message : String(error)));
+      }
+      return { ...decision, messages: [...decision.messages, message] };
+    });
 
     // -----------------------------------------------------------------------
     // 工具面变化展示：按 agent × 轮次记录上一次 assemble 后的可见工具面，

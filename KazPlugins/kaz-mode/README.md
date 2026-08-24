@@ -94,7 +94,8 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件。kaz-mode
 据此在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集（为空时自动：
 kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；首次工具调用后
-恢复 `toolWhitelist`。
+恢复 `toolWhitelist`。Kaz 模式下 round-minimal 的 `guidanceHeadEnabled` 默认开，
+会在第一轮开始时注入一条「先使用首轮工具，之后才能用其它工具」的精简提示。
 
 ### 6. 设置（`~/.dsh/settings.yaml`，热重载）
 
