@@ -316,9 +316,16 @@ export default {
       }
       lines.push("");
 
-      lines.push("[Kaz 工具面]（toolWhitelist 白名单是唯一闸门；记忆/诊断工具按 agent 会话过滤）");
-      const whitelist = kazToolWhitelist();
-      lines.push(`  手动白名单 toolWhitelist（Kaz 全部工具的唯一闸门，settings.yaml 的 kaz-mode.toolWhitelist，Kaz 面板可编辑）: [${whitelist.join(", ")}]`);
+      lines.push("[Kaz 工具面]（官方/外置统一工具插件 JSON：factory → 用户默认 → 项目设置；记忆/诊断工具按 agent 会话过滤）");
+      if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.detectedToolPlugins === "function") {
+        try {
+          const det = kazModeSvc.detectedToolPlugins();
+          lines.push(`  动态检测工具插件: ${det.length > 0 ? det.map((d) => `${d.pluginName}(${d.tools.length})`).join(", ") : "（无）"}`);
+        } catch {
+          // 忽略
+        }
+      }
+      const fallbackWhitelist = kazToolWhitelist();
 
       let firstRoundTools = [];
       try {
@@ -332,7 +339,7 @@ export default {
       }
       const kazMemoryState = readPluginState("kaz-memory");
       const kazMemoryEnabled = kazMemoryState !== null && typeof kazMemoryState === "object" && kazMemoryState.enabled === true;
-      const fallbackSurface = computeSurface({ toolWhitelist: whitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools, kazMemoryEnabled });
+      const fallbackSurface = computeSurface({ toolWhitelist: fallbackWhitelist, minimalPhase: isMinimalAgent(agent), firstRoundTools, kazMemoryEnabled });
       let sessionSurface = null;
       if (kazModeSvc !== null && kazEnabled && typeof kazModeSvc.surfaceOf === "function") {
         try {

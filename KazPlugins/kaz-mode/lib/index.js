@@ -16,14 +16,11 @@
 //        - 首次工具调用前（round-minimal 首阶段信号）：仅保留 round-minimal
 //          首轮工具集 firstRoundTools（为空时由 kaz-shared 按 kaz-memory 自动解析：
 //          kaz-memory 开 → memory_search；关 → pwsh + read + edit）；
-//        - 首次工具调用后：恢复 Kaz 全部工具 = effectiveToolWhitelist
-//          （= settings.toolWhitelist 用户白名单，白名单是唯一闸门——含记忆/
-//          诊断工具；已注册但不在清单里的工具不进入工具列表）。白名单默认值
-//          TOOL_WHITELIST 来自 kaz-shared；
-//          settings.yaml 的 kaz-mode.toolWhitelist 是手动编辑点
-//          （热改生效，用户配置始终优先）。不再有 minimalTools / 群组加减。
+//        - 首次工具调用后：恢复 Kaz 全部工具 = 工具插件 JSON（官方/外置统一：
+//          factory → 用户默认 → 项目设置；动态检测到的新工具默认开启）。
+//          不再有 settings.yaml 的 toolWhitelist / minimalTools / 群组加减。
 //        - 记忆/诊断工具是否真正出现 ⇔ 插件 enabled 时注册到 harness（关闭时
-//          kaz-memory/kaz-diag 把工具完全注销）且名字在白名单里。
+//          kaz-memory/kaz-diag 把工具完全注销）且仍在工具插件 JSON 中。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
 //      再按会话/默认状态应用。变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用。
@@ -45,7 +42,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
-  TOOL_WHITELIST,
   DEFAULT_DISABLED_TOOLS,
   MANAGED_PLUGINS,
   MEMORY_TOOLS,
@@ -77,11 +73,11 @@ const KAZ_PRESET_ID = "kaz";
 const FALLBACK_PRESET_ID = "cordis";
 
 /**
- * Kaz 工具面全部交给 kaz-shared（lib/tool-lists.js）管理：白名单默认值 /
- * 群组注册 / 工具面计算都来自 kaz-shared；kaz-memory 与 kaz-diag
- * 以群组方式"发信"注册自己的工具并随 enabled 加入/排除。本插件只负责读
- * settings（用户 toolWhitelist 优先）并在组装层/执行层应用
- * computeSurface 的结果。记忆工具与 kaz_mode_status 不再硬编码在本文件。
+ * Kaz 工具面全部交给 kaz-shared（lib/tool-lists.js）管理：出厂默认 /
+ * 工具插件状态模型 / 工具面计算都来自 kaz-shared；kaz-memory 与 kaz-diag
+ * 的工具按 agent 会话开关随 enabled 加入/排除。本插件只负责读
+ * 工具插件三层 JSON 并在组装层/执行层应用 computeSurface 的结果。
+ * 记忆工具与 kaz_mode_status 不再硬编码在本文件。
  */
 
 /** 出厂默认（非 Kaz 模式）：Kaz 插件初始默认全关。 */
@@ -153,8 +149,6 @@ const PACKAGE_JSON_FILE = join(PLUGIN_ROOT, "package.json");
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(false),
   managedPlugins: z.array(z.string()).default(MANAGED_PLUGINS.map((plugin) => plugin.id)),
-  /** Kaz 工具面·白名单（= Kaz 全部工具的唯一闸门，含记忆/诊断工具），热改生效。 */
-  toolWhitelist: z.array(z.string()).default([...TOOL_WHITELIST]),
   /** 最近一个非 kaz 预设（按钮"关闭 Kaz"时切回的目标，由预设联动自动维护）。 */
   previousPreset: z.string().default(FALLBACK_PRESET_ID),
   savedPluginStates: z
@@ -472,15 +466,9 @@ function normalizeConfig(raw) {
   const managed = Array.isArray(value.managedPlugins)
     ? value.managedPlugins.filter((id) => typeof id === "string" && id.trim().length > 0).map((id) => id.trim())
     : MANAGED_PLUGINS.map((plugin) => plugin.id);
-  const stringList = (raw, fallback) =>
-    Array.isArray(raw)
-      ? raw.filter((item) => typeof item === "string" && item.trim().length > 0).map((item) => item.trim())
-      : [...fallback];
-  const toolWhitelist = stringList(value.toolWhitelist, TOOL_WHITELIST);
   const saved = value.savedPluginStates && typeof value.savedPluginStates === "object" ? value.savedPluginStates : {};
   return {
     enabled: value.enabled === true,
-    toolWhitelist,
     managedPlugins: managed,
     previousPreset:
       typeof value.previousPreset === "string" && value.previousPreset.trim().length > 0
@@ -1120,8 +1108,8 @@ export default {
           return {
             kind: "deny",
             reason:
-              `工具 "${name}" 不在本会话 Kaz 模式工具面内（toolWhitelist + 已启用记忆/诊断插件）。` +
-              `如需使用，请在 settings.yaml 的 kaz-mode.toolWhitelist 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
+              `工具 "${name}" 不在本会话 Kaz 模式工具面内（工具插件 JSON：官方/外置 + 已启用记忆/诊断插件）。` +
+              `如需使用，请在 Kaz 面板的「工具插件」或项目/用户 JSON 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
           };
         }
         return next();

@@ -28,7 +28,8 @@ Kaz 模式同时具备两个入口，双向同步：
 2. **工具面两阶段**：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
      （为空时自动：kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；
-   - 首次工具调用后：恢复 **Kaz 全部工具** = `toolWhitelist` 白名单（唯一闸门）。
+   - 首次工具调用后：恢复 **Kaz 全部工具** = 工具插件 JSON（官方/外置统一：
+     `factory → 用户默认 → 项目设置`，动态检测到的新工具默认开启）。
 3. **记忆/诊断工具按会话生效**：`kaz-memory` / `kaz-diag` 关闭时，其六工具 /
    `kaz_mode_status` 从该会话的工具面移出、调用被拒。
 4. **skill 已整体移除**（2026-08，Kaczev）：`skill` 工具、技能发现行与技能目录已从
@@ -38,19 +39,25 @@ Kaz 模式同时具备两个入口，双向同步：
    `<项目>/.dsh/storages/kaz-session-states.json`（会话覆盖），经 `kazMode` 服务在
    使用时刻按 agent 会话读取；**kaz-mode 不再把任何插件状态写进 settings.yaml**。
 
-### Kaz 全部工具列表（手动编辑点）
+### 工具插件（官方 / 外置统一管理）
 
-**`~/.dsh/settings.yaml` → `kaz-mode.toolWhitelist`**（热改生效，无需重启）。
-Kaz 面板底部的 `toolWhitelist` 字段也是同一配置。以后要加新工具，就在这里加工具名。
+**不再使用 settings.yaml 的 `kaz-mode.toolWhitelist`。** 官方工具与外置插件统一走同一套三层 JSON：
 
-```yaml
-kaz-mode:
-  toolWhitelist:
-    [ pwsh, read, write, edit, glob, grep,
-      job_list, job_output, job_kill,
-      ask_user_question, todo_write, web_search,
-      memory_save, memory_update, memory_list, memory_search, memory_detail, memory_forget,
-      kaz_mode_status ]
+- **出厂默认（factory）**：`kaz-shared` 的 `TOOL_PLUGIN_FACTORY`（官方默认工具分组）；
+- **用户默认**：`~/.dsh/storages/kaz-tool-plugin-defaults.json`；
+- **项目设置**：`<项目>/.dsh/storages/kaz-tool-plugins.json`。
+
+Kaz 面板的「工具插件」区块可管理全部插件（官方/外置）：插件级开关、工具级开关、
+忽略/隐藏、还原、手动添加；动态检测到的新插件/新工具默认开启。
+
+```json
+{
+  "version": 1,
+  "plugins": {
+    "tool-fs": { "ignored": false, "tools": { "read": true, "write": true, "edit": true } },
+    "dsh-pixel-art": { "ignored": false, "tools": { "render_pixel_art": true, "convert_image_to_pixel_art": true } }
+  }
+}
 ```
 
 两层生效：组装层（`system-prompt/assemble`）过滤工具；执行层（`tools/pre-execute`）
@@ -83,10 +90,13 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   （模式默认 + 会话覆盖），settings.yaml 只作 standalone 兜底；
 - Kaz 面板里可单独开/关每个插件（改会话覆盖或模式默认），改动即时生效。
 
-### 4. Kaz 工具面（toolWhitelist 唯一闸门）
+### 4. Kaz 工具面（工具插件 JSON 唯一闸门）
 
-- **`toolWhitelist`** = Kaz 模式的「全部工具列表」——纯工具名列表，可在
-  settings.yaml 热改 / Kaz 面板编辑；
+- **工具插件 JSON** = Kaz 模式的「全部工具来源」——官方/外置统一，按插件分组；
+  - 出厂：`TOOL_PLUGIN_FACTORY`；
+  - 用户默认：`~/.dsh/storages/kaz-tool-plugin-defaults.json`；
+  - 项目设置：`<项目>/.dsh/storages/kaz-tool-plugins.json`；
+  - 动态检测到的新插件/新工具默认开启。
 - `kaz-memory` 关闭 → 六工具自动移出；`kaz-diag` 关闭 → `kaz_mode_status` 移出。
 
 ### 5. round-minimal 信号（首阶段极简）
@@ -94,7 +104,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件。kaz-mode
 据此在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集（为空时自动：
 kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；首次工具调用后
-恢复 `toolWhitelist`。Kaz 模式下 round-minimal 的 `guidanceHeadEnabled` 默认开，
+恢复工具插件 JSON 定义的全部工具。Kaz 模式下 round-minimal 的 `guidanceHeadEnabled` 默认开，
 会在第一轮开始时注入一条「先使用首轮工具，之后才能用其它工具」的精简提示。
 
 ### 6. 设置（`~/.dsh/settings.yaml`，热重载）
@@ -102,10 +112,10 @@ kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；首�
 ```yaml
 kaz-mode:
   enabled: false                      # 总开关（由预设联动驱动，勿手改）
-  toolWhitelist: [ ... ]              # ★ Kaz 全部工具列表（手动编辑点）
   previousPreset: router-standard     # 最近一个非 kaz 预设（自动维护）
   savedPluginStates: {}               # 信息快照（自动维护，勿手改）
 ```
+> 工具面不再由 `kaz-mode.toolWhitelist` 控制；官方/外置工具请用 Kaz 面板「工具插件」或上面的三层 JSON。
 
 ## 发新版必做（给未来的我和 agent）
 
@@ -144,11 +154,11 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    默认是 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时是
    记忆优先提示词（+ 计划模式段）；
 2. 首次工具调用前工具面：kaz-memory 开 = `memory_search`；关 = `pwsh` + `read` + `edit`；
-   第一次工具调用后恢复 `toolWhitelist` 全部工具（kaz-memory 关闭时无记忆工具；
+   第一次工具调用后恢复工具插件 JSON 定义的全部工具（kaz-memory 关闭时无记忆工具；
    kaz-diag 开启时有 `kaz_mode_status`）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
-5. Kaz 面板的 `toolWhitelist` 字段可改（改完即生效）；
+5. Kaz 面板「工具插件」区块可管理官方/外置插件（开关、忽略/还原、手动添加），改完即生效；
 6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「专属设置/默认设置」——settings.yaml
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
-   `kaz-defaults.json` 与 `kaz-session-states.json`。
+   `kaz-defaults.json`、`kaz-session-states.json` 与工具插件 JSON。

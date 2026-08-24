@@ -14,7 +14,7 @@
 - **被管理插件启停**：thinking-anchor / round-minimal / plugin-filter / output-beep /
   round-display / deepseek-default-model / kaz-memory / kaz-diag，含开启 Kaz 前的
   原始状态快照与**本会话生效**状态（纯方案 A：模式默认 + 会话覆盖）；
-- **Kaz 工具面**：toolWhitelist 白名单（= Kaz 全部工具的唯一闸门），并给出动态
+- **Kaz 工具面**：官方/外置统一工具插件 JSON（factory → 用户默认 → 项目设置），并给出动态
   调整后的实际工具面：
   - kaz-memory 关闭 → 六个记忆工具自动移出；
   - kaz-diag 关闭 → `kaz_mode_status` 自动移出；
@@ -45,4 +45,4 @@ KazPlugins 目录随 profile 以 `file:` 依赖 + junction 装配；`cordis.patc
 
 1. `kaz-diag: enabled: false` 时：`kaz_mode_status` 不在任何会话的工具列表里；
 2. `enabled: true` 时：工具出现；进入 Kaz 模式后它也在 Kaz 全部工具列表里；
-3. 调用返回的报告中"有效白名单"一栏应包含 `kaz_mode_status`。
+3. 调用返回的报告中"当前工具面"一栏应包含 `kaz_mode_status`。
