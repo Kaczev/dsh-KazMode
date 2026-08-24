@@ -57,6 +57,7 @@ import {
   effectiveExternalToolPluginState,
   setExternalPluginTool,
   removeExternalPluginTool,
+  setExternalPluginToolHidden,
   setExternalPluginIgnored,
   restoreExternalPlugin,
   TOOL_PLUGIN_FACTORY,
@@ -1368,10 +1369,12 @@ export default {
           } else if (typeof input.toolName === "string" && input.toolName.length > 0) {
             if (input.remove === true) {
               next = removeExternalPluginTool(current, pluginName, input.toolName);
+            } else if (typeof input.toolHidden === "boolean") {
+              next = setExternalPluginToolHidden(current, pluginName, input.toolName, input.toolHidden);
             } else if (typeof input.enabled === "boolean") {
               next = setExternalPluginTool(current, pluginName, input.toolName, input.enabled);
             } else {
-              return rpcFail("缺少 enabled/remove");
+              return rpcFail("缺少 enabled/remove/toolHidden");
             }
           } else {
             return rpcFail("缺少 toolName 或 restore/ignored 操作");

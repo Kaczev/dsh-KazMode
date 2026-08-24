@@ -207,6 +207,25 @@ const sPlainMem = agentOf("s-plain-mem");
   check("①.7 convert_image_to_pixel_art 仍默认开启", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
   await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
   check("①.7 重置项目层后 render_pixel_art 恢复可见", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+
+  await rpc("setExternalToolPlugin", {
+    cwd: TMP,
+    layer: "project",
+    pluginName: "dsh-pixel-art",
+    toolName: "convert_image_to_pixel_art",
+    toolHidden: true,
+  });
+  check("①.7 工具 hidden 后 convert_image_to_pixel_art 不可见", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === false);
+  check("①.7 render_pixel_art 仍可见", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+  await rpc("setExternalToolPlugin", {
+    cwd: TMP,
+    layer: "project",
+    pluginName: "dsh-pixel-art",
+    toolName: "convert_image_to_pixel_art",
+    toolHidden: false,
+  });
+  check("①.7 取消 toolHidden 后恢复可见", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
+  await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
 }
 
 // ①.8 官方工具统一走 factory/JSON，不再依赖 settings.yaml 的 toolWhitelist

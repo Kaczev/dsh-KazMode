@@ -248,6 +248,7 @@ export const normalizeToolPluginState = normalizeExternalToolPluginState;
 export const mergeToolPluginStates = mergeExternalToolPluginStates;
 export const setToolPluginTool = setExternalPluginTool;
 export const removeToolPluginTool = removeExternalPluginTool;
+export const setToolPluginToolHidden = setExternalPluginToolHidden;
 export const setToolPluginIgnored = setExternalPluginIgnored;
 export const restoreToolPlugin = restoreExternalPlugin;
 export const effectiveToolPluginState = effectiveExternalToolPluginState;
@@ -283,9 +284,17 @@ export function normalizeExternalToolPluginState(raw) {
           tools[toolName] = enabled === true;
         }
       }
+      const hiddenTools = {};
+      if (item.hiddenTools !== null && typeof item.hiddenTools === "object") {
+        for (const [toolName, hidden] of Object.entries(item.hiddenTools)) {
+          if (typeof toolName !== "string" || toolName.length === 0) continue;
+          hiddenTools[toolName] = hidden === true;
+        }
+      }
       plugins[key] = {
         ignored: item.ignored === true,
         tools,
+        hiddenTools,
       };
     }
   }
@@ -303,10 +312,13 @@ export function mergeExternalToolPluginStates(...states) {
   for (const state of states) {
     const normalized = normalizeExternalToolPluginState(state);
     for (const [key, plugin] of Object.entries(normalized.plugins)) {
-      const target = out.plugins[key] ?? { ignored: false, tools: {} };
+      const target = out.plugins[key] ?? { ignored: false, tools: {}, hiddenTools: {} };
       target.ignored = plugin.ignored;
       for (const [tool, enabled] of Object.entries(plugin.tools)) {
         target.tools[tool] = enabled;
+      }
+      for (const [tool, hidden] of Object.entries(plugin.hiddenTools)) {
+        target.hiddenTools[tool] = hidden;
       }
       out.plugins[key] = target;
     }
@@ -319,13 +331,15 @@ export function setExternalPluginTool(state, pluginName, toolName, enabled) {
   const next = normalizeExternalToolPluginState(state);
   const key = normalizeExternalKey(pluginName);
   if (key.length === 0 || typeof toolName !== "string" || toolName.length === 0) return next;
-  const plugin = next.plugins[key] ?? { ignored: false, tools: {} };
+  const plugin = next.plugins[key] ?? { ignored: false, tools: {}, hiddenTools: {} };
   if (enabled === true) {
     plugin.tools[toolName] = true;
+    delete plugin.hiddenTools[toolName];
   } else if (enabled === false) {
     plugin.tools[toolName] = false;
   } else {
     delete plugin.tools[toolName];
+    delete plugin.hiddenTools[toolName];
   }
   next.plugins[key] = plugin;
   return next;
@@ -333,7 +347,30 @@ export function setExternalPluginTool(state, pluginName, toolName, enabled) {
 
 /** 删除某个外置插件的某个工具键（等价于“不再显式管理该工具”）。 */
 export function removeExternalPluginTool(state, pluginName, toolName) {
-  return setExternalPluginTool(state, pluginName, toolName, null);
+  const next = setExternalPluginTool(state, pluginName, toolName, null);
+  const key = normalizeExternalKey(pluginName);
+  const plugin = next.plugins[key];
+  if (plugin !== undefined) delete plugin.hiddenTools[toolName];
+  return next;
+}
+
+/** 设置某个外置插件的某个工具“隐藏/忽略”状态（hidden=true 时该工具从面板主列表隐藏，但仍检测到时进入还原区）。 */
+export function setExternalPluginToolHidden(state, pluginName, toolName, hidden) {
+  const next = normalizeExternalToolPluginState(state);
+  const key = normalizeExternalKey(pluginName);
+  if (key.length === 0 || typeof toolName !== "string" || toolName.length === 0) return next;
+  const plugin = next.plugins[key] ?? { ignored: false, tools: {}, hiddenTools: {} };
+  if (hidden === true) {
+    plugin.hiddenTools[toolName] = true;
+    delete plugin.tools[toolName];
+  } else {
+    delete plugin.hiddenTools[toolName];
+    if (!Object.prototype.hasOwnProperty.call(plugin.tools, toolName)) {
+      plugin.tools[toolName] = true; // 还原 = 默认开启
+    }
+  }
+  next.plugins[key] = plugin;
+  return next;
 }
 
 /** 设置某个外置插件的“忽略”状态（true = 永久关闭，可还原）。 */
@@ -341,22 +378,23 @@ export function setExternalPluginIgnored(state, pluginName, ignored) {
   const next = normalizeExternalToolPluginState(state);
   const key = normalizeExternalKey(pluginName);
   if (key.length === 0) return next;
-  const plugin = next.plugins[key] ?? { ignored: false, tools: {} };
+  const plugin = next.plugins[key] ?? { ignored: false, tools: {}, hiddenTools: {} };
   plugin.ignored = ignored === true;
   next.plugins[key] = plugin;
   return next;
 }
 
 /**
- * 还原某个外置插件：取消忽略，并把该插件已登记的所有工具设为开启
- * （用户确认的语义：还原 = 默认全部开启）。
+ * 还原某个外置插件：取消忽略，清除全部工具隐藏标记，并把该插件已登记的
+ * 所有工具设为开启（用户确认的语义：还原 = 默认全部开启）。
  */
 export function restoreExternalPlugin(state, pluginName) {
   const next = normalizeExternalToolPluginState(state);
   const key = normalizeExternalKey(pluginName);
   if (key.length === 0) return next;
-  const plugin = next.plugins[key] ?? { ignored: false, tools: {} };
+  const plugin = next.plugins[key] ?? { ignored: false, tools: {}, hiddenTools: {} };
   plugin.ignored = false;
+  plugin.hiddenTools = {};
   for (const tool of Object.keys(plugin.tools)) {
     plugin.tools[tool] = true;
   }
@@ -387,6 +425,7 @@ export function flattenEnabledExternalTools(effectiveState, detected = {}) {
   for (const [key, plugin] of Object.entries(state.plugins)) {
     if (plugin.ignored === true) continue;
     for (const [tool, enabled] of Object.entries(plugin.tools)) {
+      if (plugin.hiddenTools[tool] === true) continue;
       if (enabled === true) out.add(tool);
     }
   }
@@ -405,6 +444,7 @@ export function flattenEnabledExternalTools(effectiveState, detected = {}) {
     for (const rawTool of list) {
       const tool = typeof rawTool === "string" ? rawTool : rawTool !== null && typeof rawTool === "object" ? rawTool.name : undefined;
       if (typeof tool !== "string" || tool.length === 0) continue;
+      if (plugin !== undefined && plugin.hiddenTools[tool] === true) continue;
       if (plugin !== undefined && Object.prototype.hasOwnProperty.call(plugin.tools, tool)) {
         if (plugin.tools[tool] === true) out.add(tool);
       } else {
