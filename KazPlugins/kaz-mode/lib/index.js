@@ -444,7 +444,8 @@ function loadExternalToolPluginLayers(cwd, logger) {
   const user = loadExternalUserDefaults(logger);
   const project = loadExternalProjectState(safeCwd, logger);
   const effective = effectiveExternalToolPluginState({ factory, user, project });
-  return { cwd: safeCwd, factory, user, project, effective };
+  const userEffective = effectiveExternalToolPluginState({ factory, user });
+  return { cwd: safeCwd, factory, user, project, effective, userEffective };
 }
 
 /** 判断两个规范化状态是否内容一致（用于还原按钮状态）。 */
@@ -1347,6 +1348,7 @@ export default {
               user: layers.user,
               project: layers.project,
               effective: layers.effective,
+              userEffective: layers.userEffective,
               projectDiffers: !externalStateEquals(layers.project, layers.user),
               userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
             },
@@ -1389,6 +1391,7 @@ export default {
               user: layers.user,
               project: layers.project,
               effective: layers.effective,
+              userEffective: layers.userEffective,
               projectDiffers: !externalStateEquals(layers.project, layers.user),
               userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
             },
@@ -1409,6 +1412,7 @@ export default {
               user: layers.user,
               project: layers.project,
               effective: layers.effective,
+              userEffective: layers.userEffective,
               projectDiffers: !externalStateEquals(layers.project, layers.user),
               userDiffersFactory: !externalStateEquals(layers.user, layers.factory),
             },
