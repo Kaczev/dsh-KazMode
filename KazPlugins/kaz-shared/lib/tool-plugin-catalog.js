@@ -1,13 +1,66 @@
-// kaz-shared —— 工具插件目录（官方 / Kaz 的分类修改点）
+// kaz-shared —— 工具插件目录 / 原设置（官方 / Kaz 分类 + 出厂默认）
 // ===========================================================================
-// 这里只做“分类”，不包含任何逻辑：
-//   - OFFICIAL_TOOL_PLUGIN_KEYS：DSH 官方插件（tool-* 只是多数风格，不以此为准）
-//   - KAZ_TOOL_PLUGIN_KEYS：Kaz 模式自家插件
-// 不在以上两个列表里的检测插件，一律按「外置」处理。
-// 外置插件的数据（检测结果 / 用户移除 / 手动添加）保存在用户目录 storages，
+// 这里就是“原设置”的修改点：
+//   - TOOL_PLUGIN_CATALOG：包名 → [{ 工具名, 开启状态 }, ...]
+//   - DEFAULT_ENABLED_TOOL_PLUGINS：默认开启的包名列表
+//   - OFFICIAL_TOOL_PLUGIN_KEYS / KAZ_TOOL_PLUGIN_KEYS：官方 / Kaz 分类
+// 外置插件数据（检测结果 / 用户移除 / 手动添加）保存在用户目录 storages，
 // 不写在这个源码文件里。
-// 新增/修改官方/Kaz 分类时只需改这个文件；kaz-mode 服务端会把目录通过 RPC 发给面板。
 // ===========================================================================
+
+/** 原设置：每个包的工具与开启状态（出厂默认）。 */
+export const TOOL_PLUGIN_CATALOG = {
+  "tool-pwsh": [
+    { name: "pwsh", enabled: true },
+  ],
+  "tool-fs": [
+    { name: "read", enabled: true },
+    { name: "write", enabled: true },
+    { name: "edit", enabled: true },
+  ],
+  "tool-fs-search": [
+    { name: "glob", enabled: true },
+    { name: "grep", enabled: true },
+  ],
+  "tool-jobs": [
+    { name: "job_list", enabled: true },
+    { name: "job_output", enabled: true },
+    { name: "job_kill", enabled: true },
+  ],
+  "tool-ask-user": [
+    { name: "ask_user_question", enabled: true },
+  ],
+  "tool-todo": [
+    { name: "todo_write", enabled: true },
+  ],
+  "tool-web": [
+    { name: "web_search", enabled: true },
+  ],
+  "kaz-memory": [
+    { name: "memory_save", enabled: true },
+    { name: "memory_update", enabled: true },
+    { name: "memory_list", enabled: true },
+    { name: "memory_search", enabled: true },
+    { name: "memory_detail", enabled: true },
+    { name: "memory_forget", enabled: true },
+  ],
+  "kaz-diag": [
+    { name: "kaz_mode_status", enabled: true },
+  ],
+};
+
+/** 默认开启的包名列表（原设置）。 */
+export const DEFAULT_ENABLED_TOOL_PLUGINS = [
+  "tool-pwsh",
+  "tool-fs",
+  "tool-fs-search",
+  "tool-jobs",
+  "tool-ask-user",
+  "tool-todo",
+  "tool-web",
+  "kaz-memory",
+  "kaz-diag",
+];
 
 /** DSH 官方插件（fiber.name 归一化后的 key）。 */
 export const OFFICIAL_TOOL_PLUGIN_KEYS = [
@@ -53,7 +106,7 @@ export const KAZ_TOOL_PLUGIN_KEYS = [
   "kaz-diag",
 ];
 
-/** 官方工具名（含不在 TOOL_PLUGIN_FACTORY 默认清单里的官方工具），用于 registeredTools 扫描时排除。 */
+/** 官方工具名（含不在 TOOL_PLUGIN_CATALOG 默认清单里的官方工具），用于 registeredTools 扫描时排除。 */
 export const OFFICIAL_TOOL_NAMES = [
   "read_image",
   "str_replace_editor",

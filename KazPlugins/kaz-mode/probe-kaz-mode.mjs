@@ -196,7 +196,7 @@ const sKazNomem = agentOf("s-kaz-nomem");
 const sPlain = agentOf("s-plain");
 const sPlainMem = agentOf("s-plain-mem");
 
-// ①.7 kazSurfaceFor 接入：外置工具默认开启，项目层可关闭
+// ①.7 kazSurfaceFor 接入：外置插件第一次检测到默认开启
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   check("①.7 外置检测默认开启：render_pixel_art 进入 Kaz 工具面", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
@@ -211,7 +211,7 @@ const sPlainMem = agentOf("s-plain-mem");
   check("①.7 项目层关闭后 render_pixel_art 不可见", kazMode.toolVisible(sKaz, "render_pixel_art") === false);
   check("①.7 convert_image_to_pixel_art 仍默认开启", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
   await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
-  check("①.7 重置项目层后 render_pixel_art 恢复可见", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+  check("①.7 重置项目层后 render_pixel_art 恢复默认开启", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
 
   await rpc("setExternalToolPlugin", {
     cwd: TMP,
@@ -221,7 +221,7 @@ const sPlainMem = agentOf("s-plain-mem");
     toolHidden: true,
   });
   check("①.7 工具 hidden 后 convert_image_to_pixel_art 不可见", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === false);
-  check("①.7 render_pixel_art 仍可见", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+  check("①.7 render_pixel_art 仍默认开启", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
   await rpc("setExternalToolPlugin", {
     cwd: TMP,
     layer: "project",
@@ -229,7 +229,7 @@ const sPlainMem = agentOf("s-plain-mem");
     toolName: "convert_image_to_pixel_art",
     toolHidden: false,
   });
-  check("①.7 取消 toolHidden 后恢复可见", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
+  check("①.7 取消 toolHidden 后恢复默认开启", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
   await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
 }
 

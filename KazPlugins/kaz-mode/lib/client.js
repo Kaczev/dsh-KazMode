@@ -1301,13 +1301,6 @@ window.__ModuleLoader__.load({
 					return [...names].sort();
 				};
 
-				const isNewTool = (key, tool) => {
-					const plugin = pluginsMap[key] !== undefined ? pluginsMap[key].plugin : {};
-					return (detectedMap[key] !== undefined && detectedMap[key].includes(tool)) &&
-						(plugin.tools === undefined || plugin.tools === null || !Object.prototype.hasOwnProperty.call(plugin.tools, tool)) &&
-						(plugin.hiddenTools === undefined || plugin.hiddenTools === null || plugin.hiddenTools[tool] !== true);
-				};
-
 				const togglePluginAll = async (key, enabled) => {
 					const tools = toolsOf(key);
 					for (const tool of tools) {
@@ -1441,11 +1434,10 @@ window.__ModuleLoader__.load({
 								tools.length === 0 && createElement("p", { className: "kzm-note" }, "暂无已登记工具；检测到后会自动出现并默认开启。"),
 								tools.map((tool) => {
 									const enabled = plugin.tools !== undefined && plugin.tools[tool] === true;
-									const fresh = isNewTool(key, tool);
 									return createElement(
 										"div",
 										{ key: tool, className: "kzm-field-line" },
-										createElement("span", { className: "kzm-state-name", title: tool }, tool, fresh && createElement("span", { className: "kzm-tp-new" }, "新")),
+										createElement("span", { className: "kzm-state-name", title: tool }, tool),
 										createElement(
 											"button",
 											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: true }) },

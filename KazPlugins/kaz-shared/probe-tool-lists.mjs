@@ -109,7 +109,7 @@ const surface = computeExternalToolSurface({
   project: {},
   detected: { "dsh-pixel-art": ["render_pixel_art", "convert_image_to_pixel_art"] },
 });
-check("⑤ 检测到未登记的新工具默认开启", surface.has("render_pixel_art") && surface.has("convert_image_to_pixel_art"));
+check("⑤ 外置检测到未登记的新工具默认开启", surface.has("render_pixel_art") && surface.has("convert_image_to_pixel_art"));
 const surfaceIgnored = computeExternalToolSurface({
   factory: {},
   user: setExternalPluginIgnored(setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true), "dsh-pixel-art", true),
@@ -122,7 +122,7 @@ check("⑤ 插件 ignored 时即便检测到也不进入工具面", surfaceIgnor
 {
   const hiddenState = setExternalPluginToolHidden(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true);
   const hiddenSurface = computeExternalToolSurface({ factory: {}, user: hiddenState, project: {}, detected: { "dsh-pixel-art": ["render_pixel_art", "convert_image_to_pixel_art"] } });
-  check("⑤.1 工具 hidden 后不出现在工具面，其它工具仍默认开启", !hiddenSurface.has("render_pixel_art") && hiddenSurface.has("convert_image_to_pixel_art"));
+  check("⑤.1 工具 hidden 后不出现在工具面，其它检测到的工具仍默认开启", !hiddenSurface.has("render_pixel_art") && hiddenSurface.has("convert_image_to_pixel_art"));
   const unhiddenState = setExternalPluginToolHidden(hiddenState, "dsh-pixel-art", "render_pixel_art", false);
   const unhiddenSurface = computeExternalToolSurface({ factory: {}, user: unhiddenState, project: {}, detected: { "dsh-pixel-art": ["render_pixel_art"] } });
   check("⑤.1 取消 hidden 后还原默认开启", unhiddenSurface.has("render_pixel_art"));

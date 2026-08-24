@@ -23,8 +23,15 @@
 //   - 用户 settings.yaml 的 toolWhitelist / firstRoundTools / disabledTools
 //     始终优先：本模块只提供默认值与计算，不读写设置。
 //
-// 本模块零依赖、无副作用导入。
+// 本模块零副作用导入；原设置/分类来自 tool-plugin-catalog.js。
 // ===========================================================================
+
+import {
+  TOOL_PLUGIN_CATALOG,
+  DEFAULT_ENABLED_TOOL_PLUGINS,
+  OFFICIAL_TOOL_PLUGIN_KEYS,
+  KAZ_TOOL_PLUGIN_KEYS,
+} from "./tool-plugin-catalog.js";
 
 /** kaz-memory 开启时的首轮工具白名单：第一轮先查记忆，触发首次工具调用后再恢复。 */
 export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = ["memory_search"];
@@ -99,25 +106,21 @@ export const MANAGED_PLUGINS = [
 ];
 
 /**
- * Kaz 模式下允许出现的【全部】工具默认清单：标准模式全部工具（除 bash 与
- * skill）+ pwsh + str_replace_editor + kaz-memory 六工具 + kaz-diag 的
- * kaz_mode_status。白名单是唯一闸门：不在清单里的工具即使被注册也不会进入
- * Kaz 工具列表。
- * 2026-08-21（Kaczev 决定）移除：read_image（模型不支持图片输入）、ralph（仅
- * 显式请求）、workflow（重型编排）、create_goal/get_goal/update_goal（长周期目标）、
- * str_replace_editor（与 edit/write/read 重叠，仅 insert 独有且日常少用）。
- * 子代理几乎不使用，去掉subagent, subagent_fork, list_agents, send_message, interrupt_agent,
- * 用户 settings.yaml 的 kaz-mode.toolWhitelist 是手动编辑点，始终优先；
- * Kaz 面板的「toolWhitelist」输入直接读写该设置（热重载生效）。
+ * 旧白名单已注释（2026-08）：原设置统一由 tool-plugin-catalog.js 提供，
+ * 这里只保留一个由目录派生的兼容导出，供 kaz-memory 等旧路径兜底。
  */
-export const TOOL_WHITELIST = [
-  "pwsh", // windows PowerShell（跨平台）——首轮工具必选
-  "read", "write", "edit", "glob", "grep", // 文件读写/编辑/搜索
-  "job_list", "job_output", "job_kill", // 后台任务管理
-  "ask_user_question", "todo_write", "web_search", // 交互/待办/搜索
-  ...MEMORY_TOOLS, // kaz-memory 六工具
-  DIAG_TOOL, // kaz-diag 的工具：Kaz 模式状态报告
-];
+// export const TOOL_WHITELIST = [
+//   "pwsh", // windows PowerShell（跨平台）——首轮工具必选
+//   "read", "write", "edit", "glob", "grep", // 文件读写/编辑/搜索
+//   "job_list", "job_output", "job_kill", // 后台任务管理
+//   "ask_user_question", "todo_write", "web_search", // 交互/待办/搜索
+//   ...MEMORY_TOOLS, // kaz-memory 六工具
+//   DIAG_TOOL, // kaz-diag 的工具：Kaz 模式状态报告
+// ];
+/** 由 TOOL_PLUGIN_CATALOG + DEFAULT_ENABLED_TOOL_PLUGINS 派生（兼容旧 API）。 */
+export const TOOL_WHITELIST = Object.entries(TOOL_PLUGIN_CATALOG)
+  .filter(([key]) => DEFAULT_ENABLED_TOOL_PLUGINS.includes(key))
+  .flatMap(([, tools]) => tools.filter((tool) => tool.enabled === true).map((tool) => tool.name));
 
 /** 清理 + 去重工具名列表（保留顺序）。 */
 function cleanTools(list) {
@@ -190,56 +193,22 @@ export function computeSurface({ toolWhitelist = [], minimalPhase = false, first
 export const EXTERNAL_TOOL_PLUGIN_STATE_VERSION = 1;
 
 /**
- * 统一工具插件出厂默认（factory）：官方工具也改用“插件分组”格式管理，
- * 不再写入 settings.yaml 的 kaz-mode.toolWhitelist。
- * 分组名 = 插件 fiber.name（tool-fs / tool-pwsh / ... / kaz-memory / kaz-diag）。
- * 只包含当前 Kaz 默认白名单里的工具；未列入的官方工具（read_image、
- * str_replace_editor、subagent 等）默认不出现，之后可由用户在面板/JSON 添加。
+ * 统一工具插件出厂默认（factory）：由 tool-plugin-catalog.js 的
+ * TOOL_PLUGIN_CATALOG + DEFAULT_ENABLED_TOOL_PLUGINS 派生。
+ * 未列入默认开启列表的包，其工具在出厂时全部为 false（不进入工具面）。
  */
 export const TOOL_PLUGIN_FACTORY = {
   version: EXTERNAL_TOOL_PLUGIN_STATE_VERSION,
-  plugins: {
-    "tool-pwsh": { ignored: false, tools: { pwsh: true } },
-    "tool-fs": {
-      ignored: false,
-      tools: { read: true, write: true, edit: true },
-    },
-    "tool-fs-search": {
-      ignored: false,
-      tools: { glob: true, grep: true },
-    },
-    "tool-jobs": {
-      ignored: false,
-      tools: { job_list: true, job_output: true, job_kill: true },
-    },
-    "tool-ask-user": {
-      ignored: false,
-      tools: { ask_user_question: true },
-    },
-    "tool-todo": {
-      ignored: false,
-      tools: { todo_write: true },
-    },
-    "tool-web": {
-      ignored: false,
-      tools: { web_search: true },
-    },
-    "kaz-memory": {
-      ignored: false,
-      tools: {
-        memory_save: true,
-        memory_update: true,
-        memory_list: true,
-        memory_search: true,
-        memory_detail: true,
-        memory_forget: true,
-      },
-    },
-    "kaz-diag": {
-      ignored: false,
-      tools: { kaz_mode_status: true },
-    },
-  },
+  plugins: Object.fromEntries(
+    Object.entries(TOOL_PLUGIN_CATALOG).map(([key, tools]) => {
+      const enabledByDefault = DEFAULT_ENABLED_TOOL_PLUGINS.includes(key);
+      const toolMap = {};
+      for (const item of tools) {
+        toolMap[item.name] = enabledByDefault ? item.enabled === true : false;
+      }
+      return [key, { ignored: false, tools: toolMap }];
+    }),
+  ),
 };
 
 /** 官方 / Kaz 插件分类目录（源码修改点，见 tool-plugin-catalog.js）。 */
@@ -433,12 +402,13 @@ export function flattenEnabledExternalTools(effectiveState, detected = {}) {
     }
   }
 
-  // ② 检测到的工具：没被显式登记的一律默认开启
+  // ② 检测到的工具：官方/Kaz 只在显式登记为 true 时进入；外置插件默认开启。
   for (const [rawKey, tools] of Object.entries(detected)) {
     const key = normalizeExternalKey(rawKey);
     if (key.length === 0) continue;
     const plugin = state.plugins[key];
     if (plugin !== undefined && plugin.ignored === true) continue;
+    const isOfficialOrKaz = OFFICIAL_TOOL_PLUGIN_KEYS.includes(key) || KAZ_TOOL_PLUGIN_KEYS.includes(key);
     const list = Array.isArray(tools)
       ? tools
       : tools !== null && typeof tools === "object" && Array.isArray(tools.tools)
@@ -448,7 +418,11 @@ export function flattenEnabledExternalTools(effectiveState, detected = {}) {
       const tool = typeof rawTool === "string" ? rawTool : rawTool !== null && typeof rawTool === "object" ? rawTool.name : undefined;
       if (typeof tool !== "string" || tool.length === 0) continue;
       if (plugin !== undefined && plugin.hiddenTools[tool] === true) continue;
-      if (plugin !== undefined && Object.prototype.hasOwnProperty.call(plugin.tools, tool)) {
+      if (isOfficialOrKaz) {
+        if (plugin !== undefined && Object.prototype.hasOwnProperty.call(plugin.tools, tool) && plugin.tools[tool] === true) {
+          out.add(tool);
+        }
+      } else if (plugin !== undefined && Object.prototype.hasOwnProperty.call(plugin.tools, tool)) {
         if (plugin.tools[tool] === true) out.add(tool);
       } else {
         out.add(tool);
