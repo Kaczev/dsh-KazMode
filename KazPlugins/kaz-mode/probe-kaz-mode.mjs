@@ -96,8 +96,15 @@ for (const [id, info] of Object.entries(SESSIONS)) {
 const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search", "kaz_mode_status"];
 
 const settings = makeSettings();
+const mockTools = {
+  register() {
+    return () => {};
+  },
+  ctx: null,
+};
 const ctx = {
   fiber: { state: 0 },
+  tools: mockTools,
   logger: { info: () => {}, warn: (...a) => console.log("[mock:warn]", ...a), debug: () => {} },
   on(event, fn) {
     if (!listeners.has(event)) listeners.set(event, []);
@@ -134,6 +141,18 @@ await settle();
 // ① kazMode 服务按 agent 会话判定
 const kazMode = provided["kazMode"];
 check("① kazMode 服务已提供", kazMode !== undefined && typeof kazMode.toolVisible === "function");
+check("① kazMode 服务提供 detectedToolPlugins（只读检测）", kazMode !== undefined && typeof kazMode.detectedToolPlugins === "function");
+
+// ①.5 动态检测：包装 tools.register，用 this.ctx.fiber.name 归因
+{
+  const pluginCtx = { ...ctx, fiber: { name: "dsh-pixel-art", state: 0 } };
+  mockTools.ctx = pluginCtx;
+  mockTools.register({ name: "render_pixel_art" });
+  mockTools.register({ name: "convert_image_to_pixel_art" });
+  const detected = kazMode.detectedToolPlugins();
+  const pixel = detected.find((item) => item.pluginName === "dsh-pixel-art");
+  check("①.5 动态检测：dsh-pixel-art 被记录且工具归因正确", pixel !== undefined && pixel.tools.includes("render_pixel_art") && pixel.tools.includes("convert_image_to_pixel_art"));
+}
 const sKaz = agentOf("s-kaz");
 const sKazNomem = agentOf("s-kaz-nomem");
 const sPlain = agentOf("s-plain");

@@ -39,6 +39,7 @@
 
 import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
+import { symbols } from "@deepseek-ai/cordis";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -51,6 +52,7 @@ import {
   DIAG_TOOL,
   computeSurface,
   effectiveToolWhitelist,
+  normalizeExternalKey,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -410,8 +412,9 @@ function safeMessage(error) {
 export default {
   name: "kaz-mode",
   // systemPrompt：组装层工具面过滤 + 固定提示词挂在瀑布上；connection：面板
-  // RPC 通道；settings / roundMinimal 为可选依赖（惰性解析）。
-  inject: ["systemPrompt", "connection"],
+  // RPC 通道；tools：外置工具注册动态检测（fiber.name 归因）；settings /
+  // roundMinimal 为可选依赖（惰性解析）。
+  inject: ["systemPrompt", "connection", "tools"],
   apply(ctx, config = {}) {
     // 组合行 config 作为 base 层；settings.yaml 用户层优先（热重载）。
     const entry = normalizeConfig(config);
@@ -428,6 +431,64 @@ export default {
 
     /** 当前由客户端告知的活跃会话（用于按会话应用插件状态）。 */
     let activeSession = null;
+
+    // -----------------------------------------------------------------------
+    // 外置工具注册动态检测（2026-08 分步实施 · 第二步：只读收集，不改工具面）
+    // 仿 plugin-filter：包装 ctx.tools.register，从 this.ctx.fiber.name 拿到
+    // “正在注册该工具的插件名”，收集 { pluginName, tools[] }。官方工具也会被
+    // 记录（后续步骤由面板按“非官方”过滤）；这里暂不参与任何过滤/落盘。
+    // -----------------------------------------------------------------------
+    const detectedToolPlugins = new Map();
+
+    /** 记录一次工具注册；pluginName 可能缺失（核心/保留工具），归入 unknown。 */
+    function recordDetectedToolPlugin(pluginName, toolName) {
+      if (typeof toolName !== "string" || toolName.length === 0) return;
+      const key = normalizeExternalKey(pluginName);
+      const safeKey = key.length > 0 ? key : "unknown";
+      const label = typeof pluginName === "string" && pluginName.length > 0 ? pluginName : safeKey;
+      let entry = detectedToolPlugins.get(safeKey);
+      if (entry === undefined) {
+        entry = { pluginName: label, tools: new Set() };
+        detectedToolPlugins.set(safeKey, entry);
+      } else if (typeof pluginName === "string" && pluginName.length > 0 && entry.pluginName === safeKey) {
+        // 用第一次拿到的可读名补全 unknown 占位
+        entry.pluginName = pluginName;
+      }
+      entry.tools.add(toolName);
+    }
+
+    /** 返回检测结果的只读快照（数组，工具名排序）。 */
+    function detectedToolPluginsList() {
+      return Array.from(detectedToolPlugins.entries())
+        .map(([key, entry]) => ({ key, pluginName: entry.pluginName, tools: [...entry.tools].sort() }))
+        .sort((left, right) => left.pluginName.localeCompare(right.pluginName));
+    }
+
+    /** 包装 tools.register：记录调用方插件名 + 工具名（best-effort，失败不影响注册）。 */
+    function installToolRegistrationDetector() {
+      try {
+        const raw = ctx.tools[symbols.original] ?? ctx.tools;
+        const originalRegister = raw.register;
+        const registerWrapper = function register(definition) {
+          try {
+            const callerCtx = this !== null && typeof this === "object" ? this.ctx : undefined;
+            const pluginName = callerCtx !== null && callerCtx !== undefined && typeof callerCtx === "object"
+              ? callerCtx.fiber?.name
+              : undefined;
+            recordDetectedToolPlugin(pluginName, definition?.name);
+          } catch {
+            // 记录失败不影响工具注册本身
+          }
+          return originalRegister.call(this, definition);
+        };
+        raw.register = registerWrapper;
+        ctx.effect(() => () => {
+          if (raw.register === registerWrapper) raw.register = originalRegister;
+        });
+      } catch (error) {
+        ctx.logger.warn("[kaz-mode] 外置工具注册检测包装失败：" + safeMessage(error));
+      }
+    }
 
     /**
      * settings 服务惰性获取：启动时可能尚未挂载（kaz-mode 只 inject systemPrompt），
@@ -839,6 +900,7 @@ export default {
      *     无会话/无覆盖时返回 null，调用方回落到插件自身 settings.yaml。
      *   - toolVisible(agent, name)    该 agent 会话里某工具是否在工具面内；
      *   - surfaceOf(agent)            Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
+     *   - detectedToolPlugins()       动态检测到的工具注册快照（只读，供面板）。
      */
     const kazModeService = {
       kazEnabled: (agent) => agentKazEnabled(agent),
@@ -869,7 +931,10 @@ export default {
         if (!agentKazEnabled(agent)) return null;
         return kazSurfaceFor(agent, source(), agentEffectiveStates(agent));
       },
+      /** 动态检测到的工具注册快照（只读）：[{ key, pluginName, tools[] }]。 */
+      detectedToolPlugins: () => detectedToolPluginsList(),
     };
+    installToolRegistrationDetector();
     ctx.effect(() => {
       const disposeService = ctx.provide("kazMode", kazModeService);
       return () => {
@@ -1080,7 +1145,8 @@ export default {
           endpoint !== "resetDefault" &&
           endpoint !== "getState" &&
           endpoint !== "setDefaultPlugin" &&
-          endpoint !== "getVersion"
+          endpoint !== "getVersion" &&
+          endpoint !== "listToolPlugins"
         ) {
           return rpcFail("缺少 sessionId");
         }
@@ -1135,6 +1201,11 @@ export default {
           } catch (error) {
             return rpcFail("读取 package.json 版本失败：" + safeMessage(error));
           }
+        }
+
+        if (endpoint === "listToolPlugins") {
+          // 动态检测到的工具注册快照（只读，供 Kaz 面板后续展示/管理）。
+          return { ok: true, value: { plugins: detectedToolPluginsList() } };
         }
 
         if (endpoint === "applySession") {
