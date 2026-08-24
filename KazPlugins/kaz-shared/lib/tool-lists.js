@@ -242,6 +242,13 @@ export const TOOL_PLUGIN_FACTORY = {
   },
 };
 
+/** 已知外置工具插件（用于启动回填：即使动态检测包装安装得晚，也能识别已注册工具）。 */
+export const KNOWN_EXTERNAL_TOOL_PLUGINS = {
+  "dsh-pixel-art": {
+    tools: ["render_pixel_art", "convert_image_to_pixel_art"],
+  },
+};
+
 /** 通用别名：外置/官方统一叫“工具插件”，后续新代码优先用这些名字。 */
 export const emptyToolPluginState = emptyExternalToolPluginState;
 export const normalizeToolPluginState = normalizeExternalToolPluginState;

@@ -100,6 +100,9 @@ const mockTools = {
   register() {
     return () => {};
   },
+  schemas() {
+    return [{ name: "render_pixel_art" }, { name: "convert_image_to_pixel_art" }];
+  },
   ctx: null,
 };
 const rpcHandlers = new Map();

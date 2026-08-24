@@ -212,7 +212,8 @@ window.__ModuleLoader__.load({
 		 *  2026-08：官方工具已统一进“工具插件”JSON，不再在 settings.yaml 维护 toolWhitelist。 */
 		const KAZ_FIELDS = [];
 
-		/** 官方工具插件 key（fiber.name 归一化后），用于面板区分“官方/外置”。 */
+		/** 官方工具插件 key（fiber.name 归一化后），用于面板区分“官方/外置”。
+		 *  tool-* 前缀统一按官方处理；这里再补少数不带 tool- 前缀的官方插件。 */
 		const OFFICIAL_TOOL_PLUGIN_KEYS = new Set([
 			"tool-pwsh",
 			"tool-fs",
@@ -221,6 +222,8 @@ window.__ModuleLoader__.load({
 			"tool-ask-user",
 			"tool-todo",
 			"tool-web",
+			"plan-mode",
+			"plan-mode-controller",
 		]);
 		/** Kaz 模式自家插件（记忆/诊断），排序时位于官方之上、外置之下。 */
 		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory", "kaz-diag"]);
@@ -1324,7 +1327,7 @@ window.__ModuleLoader__.load({
 
 				const mainPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true);
 				const ignoredPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true);
-				const categoryOf = (key) => (OFFICIAL_TOOL_PLUGIN_KEYS.has(key) ? "official" : KAZ_TOOL_PLUGIN_KEYS.has(key) ? "kaz" : "external");
+				const categoryOf = (key) => (key.startsWith("tool-") || OFFICIAL_TOOL_PLUGIN_KEYS.has(key) ? "official" : KAZ_TOOL_PLUGIN_KEYS.has(key) ? "kaz" : "external");
 				const groups = [
 					{ id: "external", title: "外置插件", keys: mainPlugins.filter((key) => categoryOf(key) === "external") },
 					{ id: "kaz", title: "Kaz 插件", keys: mainPlugins.filter((key) => categoryOf(key) === "kaz") },

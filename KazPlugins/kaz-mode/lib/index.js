@@ -58,6 +58,7 @@ import {
   restoreExternalPlugin,
   TOOL_PLUGIN_FACTORY,
   computeToolPluginSurface,
+  KNOWN_EXTERNAL_TOOL_PLUGINS,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -553,6 +554,25 @@ export default {
       return out;
     }
 
+    /** 回填已知外置插件：包装安装前已注册的工具也能被识别（如 dsh-pixel-art）。 */
+    function backfillKnownExternalToolPlugins() {
+      try {
+        const toolsSvc = ctx.tools;
+        if (toolsSvc === undefined || toolsSvc === null || typeof toolsSvc.schemas !== "function") return;
+        const schemas = toolsSvc.schemas();
+        if (!Array.isArray(schemas)) return;
+        const registered = new Set(schemas.map((schema) => schema?.name).filter((name) => typeof name === "string" && name.length > 0));
+        for (const [pluginName, meta] of Object.entries(KNOWN_EXTERNAL_TOOL_PLUGINS)) {
+          const tools = Array.isArray(meta?.tools) ? meta.tools : [];
+          for (const tool of tools) {
+            if (registered.has(tool)) recordDetectedToolPlugin(pluginName, tool);
+          }
+        }
+      } catch (error) {
+        ctx.logger?.debug?.("[kaz-mode] 回填已知外置插件失败：" + safeMessage(error));
+      }
+    }
+
     /** 包装 tools.register：记录调用方插件名 + 工具名（best-effort，失败不影响注册）。 */
     function installToolRegistrationDetector() {
       try {
@@ -571,6 +591,7 @@ export default {
           return originalRegister.call(this, definition);
         };
         raw.register = registerWrapper;
+        backfillKnownExternalToolPlugins();
         ctx.effect(() => () => {
           if (raw.register === registerWrapper) raw.register = originalRegister;
         });
