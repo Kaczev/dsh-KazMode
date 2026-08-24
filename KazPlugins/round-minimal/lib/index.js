@@ -501,6 +501,7 @@ export default {
         const content =
           "工具面变化（来自 system-prompt/assemble）\n" +
           phase + "\n" +
+          "- 当前工具（" + after.length + "）：" + (after.length > 0 ? after.join(", ") : "（无）") + "\n" +
           "- 移除（" + removed.length + "）：" + (removed.length > 0 ? removed.join(", ") : "（无）") + "\n" +
           "+ 新增（" + added.length + "）：" + (added.length > 0 ? added.join(", ") : "（无）");
         const roundDisplay = ctx.get("roundDisplay");
