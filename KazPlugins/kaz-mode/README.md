@@ -41,26 +41,26 @@ Kaz 模式同时具备两个入口，双向同步：
 
 ### 工具插件（官方 / 外置统一管理）
 
-**不再使用 settings.yaml 的 `kaz-mode.toolWhitelist`。** 官方工具与外置插件统一走同一套三层结构：
+**不再使用 settings.yaml 的 `kaz-mode.toolWhitelist`。** 官方工具与外置插件统一走同一套四文件模型：
 
 - **原设置（factory）**：`kaz-shared/lib/tool-plugin-catalog.js`
-  （`TOOL_PLUGIN_CATALOG` = 工具白名单，`DEFAULT_ENABLED_TOOL_PLUGINS` = 插件能力）；
-- **用户默认**：`~/.dsh/storages/kaz-tool-plugin-catalog.json`（插件级：ignored/capable）
-  + `~/.dsh/storages/kaz-tool-plugin-defaults.json`（工具级：tools/hiddenTools）；
-- **项目专属**：`<项目>/.dsh/storages/kaz-tool-plugin-catalog.json`
-  + `<项目>/.dsh/storages/kaz-tool-plugin-defaults.json`（与用户目录同名，覆盖用户默认）。
+  （`TOOL_PLUGIN_CATALOG` = 工具目录，`TOOL_PLUGINS` = 插件能力开关）
+  + 用户手动添加的 `~/.dsh/storages/other-tool-plugin.json` / `other-tool-plugin-catalog.json`；
+- **用户默认**：`~/.dsh/storages/tool-plugin.json` + `tool-plugin-catalog.json`
+  + `other-tool-plugin.json` + `other-tool-plugin-catalog.json`；
+- **项目专属**：`<项目>/.dsh/storages/` 下同名四个文件，覆盖用户默认。
 
-Kaz 面板的「工具插件」区块可管理全部插件（官方/外置）：插件能力开关（大开关）、
-工具开关（小开关）、手动添加；检测只做只读展示，不会自动写入设置。
-新插件/新工具需要用户手动添加；已知但默认关闭的插件/工具（`DEFAULT_UNABLED_TOOL_PLUGINS`）
-保持关闭。“未知插件”已移除。
+Kaz 面板的「工具插件」区块是唯一白名单管理器：插件能力开关（大开关）、工具开关
+（小开关）、手动添加插件/工具、删除用户添加的外置插件/工具。**手动添加一律写入用户
+目录的 `other-*` 文件**（不会进项目目录，避免个人数据随项目上传 GitHub）。不做自动
+检测、不写“未知插件”、没有忽略/隐藏。“已知但默认关闭”的插件/工具保持关闭。
 
 ```jsonc
-// 插件级 kaz-tool-plugin-catalog.json
-{ "version": 1, "plugins": { "tool-fs": { "ignored": false, "capable": true } } }
+// 插件启用字典（tool-plugin.json / other-tool-plugin.json）
+{ "tool-fs": true, "dsh-pixel-art": true }
 
-// 工具级 kaz-tool-plugin-defaults.json
-{ "version": 1, "plugins": { "tool-fs": { "tools": { "read": true, "write": true, "edit": true }, "hiddenTools": {} } } }
+// 工具开关字典（tool-plugin-catalog.json / other-tool-plugin-catalog.json）
+{ "tool-fs": { "read": true, "write": true, "edit": true } }
 ```
 
 两层生效：组装层（`system-prompt/assemble`）过滤工具；执行层（`tools/pre-execute`）
@@ -96,12 +96,12 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 ### 4. Kaz 工具面（工具插件 JSON 唯一闸门）
 
 - **工具插件 JSON** = Kaz 模式的「全部工具来源」——官方/外置统一，按插件分组；
-  - 原设置：`kaz-shared/lib/tool-plugin-catalog.js`（`TOOL_PLUGIN_FACTORY`）；
-  - 用户默认：`~/.dsh/storages/kaz-tool-plugin-catalog.json` + `kaz-tool-plugin-defaults.json`；
-  - 项目专属：`<项目>/.dsh/storages/kaz-tool-plugin-catalog.json` + `kaz-tool-plugin-defaults.json`；
-  - 检测/移除目录（用户数据）：`~/.dsh/storages/kaz-tool-plugin-detected.json`；
+  - 原设置：`kaz-shared/lib/tool-plugin-catalog.js`（`TOOL_PLUGIN_CATALOG` + `TOOL_PLUGINS`）；
+  - 用户默认：`~/.dsh/storages/tool-plugin.json` + `tool-plugin-catalog.json`
+    + `other-tool-plugin.json` + `other-tool-plugin-catalog.json`；
+  - 项目专属：`<项目>/.dsh/storages/` 下同名四个文件；
   - 官方/Kaz 分类修改点：`kaz-shared/lib/tool-plugin-catalog.js`；
-  - 检测只做只读展示；新插件/新工具需要手动添加，不会自动写入设置。
+  - 不做自动检测；新插件/新工具只能手动添加，写入用户 `other-*` 文件。
 - `kaz-memory` 关闭 → 六工具自动移出。
 
 ### 5. round-minimal 信号（首阶段极简）
@@ -120,7 +120,7 @@ kaz-mode:
   previousPreset: router-standard     # 最近一个非 kaz 预设（自动维护）
   savedPluginStates: {}               # 信息快照（自动维护，勿手改）
 ```
-> 工具面不再由 `kaz-mode.toolWhitelist` 控制；官方/外置工具请用 Kaz 面板「工具插件」或上面的三层 JSON。
+> 工具面不再由 `kaz-mode.toolWhitelist` 控制；官方/外置工具请用 Kaz 面板「工具插件」或上面的四文件模型。
 
 ## 发新版必做（给未来的我和 agent）
 

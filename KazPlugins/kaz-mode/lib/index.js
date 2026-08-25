@@ -17,7 +17,7 @@
 //          首轮工具集 firstRoundTools（为空时由 kaz-shared 按 kaz-memory 自动解析：
 //          kaz-memory 开 → memory_search；关 → pwsh + read + edit）；
 //        - 首次工具调用后：恢复 Kaz 全部工具 = 工具插件 JSON（官方/外置统一：
-//          factory → 用户默认 → 项目设置；动态检测到的新工具默认开启）。
+//          代码目录 → 用户默认 → 项目设置）。
 //          不再有 settings.yaml 的 toolWhitelist / minimalTools / 群组加减。
 //        - 记忆工具是否真正出现 ⇔ 插件 enabled 时注册到 harness（关闭时
 //          kaz-memory 把工具完全注销）且仍在工具插件 JSON 中。
@@ -44,16 +44,16 @@ import {
   MEMORY_TOOLS,
   computeSurface,
   normalizeExternalKey,
-  normalizeEnableList,
+  normalizePluginEnableDict,
   normalizeToolCatalog,
-  unionEnableLists,
+  mergePluginEnableDicts,
   mergeToolCatalogs,
   buildToolUniverse,
   computeEffectiveToolState,
   computeToolPluginSurfaceFromEffective,
   computeToolPluginSurface,
   TOOL_PLUGIN_CATALOG,
-  DEFAULT_ENABLED_TOOL_PLUGINS,
+  TOOL_PLUGINS,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
 } from "kaz-shared";
@@ -128,13 +128,13 @@ const SESSION_STATES_FILE = "kaz-session-states.json";
 const DEFAULTS_FILE_NAME = "kaz-defaults.json";
 let STORAGE_DIR = join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages");
 let DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
-/** 用户目录：默认“插件启用”文件（纯数组）。 */
-const USER_ENABLE_TOOL_PLUGIN_FILE = "enable-tool-plugin.json";
-/** 用户目录：默认“工具开关”文件（纯对象）。 */
+/** 用户目录：默认“插件启用”字典。 */
+const USER_ENABLE_TOOL_PLUGIN_FILE = "tool-plugin.json";
+/** 用户目录：默认“工具开关”字典。 */
 const USER_TOOL_PLUGIN_CATALOG_FILE = "tool-plugin-catalog.json";
-/** 用户目录：用户添加的“插件启用”文件（纯数组）。 */
-const USER_OTHER_ENABLE_TOOL_PLUGIN_FILE = "other-enable-tool-plugin.json";
-/** 用户目录：用户添加的“工具开关”文件（纯对象）。 */
+/** 用户目录：用户添加的“插件启用”字典（原设置的用户部分）。 */
+const USER_OTHER_ENABLE_TOOL_PLUGIN_FILE = "other-tool-plugin.json";
+/** 用户目录：用户添加的“工具开关”字典（原设置的用户部分）。 */
 const USER_OTHER_TOOL_PLUGIN_CATALOG_FILE = "other-tool-plugin-catalog.json";
 
 /** 项目目录：与用户目录同名的四个文件。 */
@@ -375,9 +375,9 @@ function loadStateFile(cwd, logger) {
 
 // ---------------------------------------------------------------------------
 // 外置工具插件四文件模型（2026-08-25 用户新架构）
-//   原设置   = 代码 TOOL_PLUGIN_CATALOG / DEFAULT_ENABLED_TOOL_PLUGINS
+//   原设置   = 代码 TOOL_PLUGIN_CATALOG / TOOL_PLUGINS
 //              + 用户 other-*.json（用户自己添加的插件和工具）
-//   默认设置 = 用户 tool-plugin-catalog.json / enable-tool-plugin.json
+//   默认设置 = 用户 tool-plugin.json / tool-plugin-catalog.json
 //              + 用户 other-*.json
 //   专属设置 = 项目里同名四个文件
 // ---------------------------------------------------------------------------
@@ -403,25 +403,25 @@ function projectPath(cwd, file) {
 }
 
 function loadUserEnable(logger) {
-  return readJsonFile(userPath(USER_ENABLE_TOOL_PLUGIN_FILE), [], normalizeEnableList, logger);
+  return readJsonFile(userPath(USER_ENABLE_TOOL_PLUGIN_FILE), {}, normalizePluginEnableDict, logger);
 }
 function loadUserCatalog(logger) {
   return readJsonFile(userPath(USER_TOOL_PLUGIN_CATALOG_FILE), {}, normalizeToolCatalog, logger);
 }
 function loadUserOtherEnable(logger) {
-  return readJsonFile(userPath(USER_OTHER_ENABLE_TOOL_PLUGIN_FILE), [], normalizeEnableList, logger);
+  return readJsonFile(userPath(USER_OTHER_ENABLE_TOOL_PLUGIN_FILE), {}, normalizePluginEnableDict, logger);
 }
 function loadUserOtherCatalog(logger) {
   return readJsonFile(userPath(USER_OTHER_TOOL_PLUGIN_CATALOG_FILE), {}, normalizeToolCatalog, logger);
 }
 function loadProjectEnable(cwd, logger) {
-  return readJsonFile(projectPath(cwd, PROJECT_ENABLE_TOOL_PLUGIN_FILE), [], normalizeEnableList, logger);
+  return readJsonFile(projectPath(cwd, PROJECT_ENABLE_TOOL_PLUGIN_FILE), {}, normalizePluginEnableDict, logger);
 }
 function loadProjectCatalog(cwd, logger) {
   return readJsonFile(projectPath(cwd, PROJECT_TOOL_PLUGIN_CATALOG_FILE), {}, normalizeToolCatalog, logger);
 }
 function loadProjectOtherEnable(cwd, logger) {
-  return readJsonFile(projectPath(cwd, PROJECT_OTHER_ENABLE_TOOL_PLUGIN_FILE), [], normalizeEnableList, logger);
+  return readJsonFile(projectPath(cwd, PROJECT_OTHER_ENABLE_TOOL_PLUGIN_FILE), {}, normalizePluginEnableDict, logger);
 }
 function loadProjectOtherCatalog(cwd, logger) {
   return readJsonFile(projectPath(cwd, PROJECT_OTHER_TOOL_PLUGIN_CATALOG_FILE), {}, normalizeToolCatalog, logger);
@@ -430,9 +430,9 @@ function loadProjectOtherCatalog(cwd, logger) {
 function saveUserEnable(value, logger) {
   try {
     mkdirSync(STORAGE_DIR, { recursive: true });
-    writeFileSync(userPath(USER_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizeEnableList(value), null, 2) + "\n", "utf8");
+    writeFileSync(userPath(USER_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizePluginEnableDict(value), null, 2) + "\n", "utf8");
   } catch (error) {
-    logger?.warn?.("[kaz-mode] 写入用户 enable-tool-plugin.json 失败：" + safeMessage(error));
+    logger?.warn?.("[kaz-mode] 写入用户 tool-plugin.json 失败：" + safeMessage(error));
   }
 }
 function saveUserCatalog(value, logger) {
@@ -446,9 +446,9 @@ function saveUserCatalog(value, logger) {
 function saveUserOtherEnable(value, logger) {
   try {
     mkdirSync(STORAGE_DIR, { recursive: true });
-    writeFileSync(userPath(USER_OTHER_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizeEnableList(value), null, 2) + "\n", "utf8");
+    writeFileSync(userPath(USER_OTHER_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizePluginEnableDict(value), null, 2) + "\n", "utf8");
   } catch (error) {
-    logger?.warn?.("[kaz-mode] 写入用户 other-enable-tool-plugin.json 失败：" + safeMessage(error));
+    logger?.warn?.("[kaz-mode] 写入用户 other-tool-plugin.json 失败：" + safeMessage(error));
   }
 }
 function saveUserOtherCatalog(value, logger) {
@@ -463,9 +463,9 @@ function saveProjectEnable(cwd, value, logger) {
   try {
     const dir = join(cwd, ".dsh", "storages");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(projectPath(cwd, PROJECT_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizeEnableList(value), null, 2) + "\n", "utf8");
+    writeFileSync(projectPath(cwd, PROJECT_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizePluginEnableDict(value), null, 2) + "\n", "utf8");
   } catch (error) {
-    logger?.warn?.("[kaz-mode] 写入项目 enable-tool-plugin.json 失败：" + safeMessage(error));
+    logger?.warn?.("[kaz-mode] 写入项目 tool-plugin.json 失败：" + safeMessage(error));
   }
 }
 function saveProjectCatalog(cwd, value, logger) {
@@ -481,9 +481,9 @@ function saveProjectOtherEnable(cwd, value, logger) {
   try {
     const dir = join(cwd, ".dsh", "storages");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(projectPath(cwd, PROJECT_OTHER_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizeEnableList(value), null, 2) + "\n", "utf8");
+    writeFileSync(projectPath(cwd, PROJECT_OTHER_ENABLE_TOOL_PLUGIN_FILE), JSON.stringify(normalizePluginEnableDict(value), null, 2) + "\n", "utf8");
   } catch (error) {
-    logger?.warn?.("[kaz-mode] 写入项目 other-enable-tool-plugin.json 失败：" + safeMessage(error));
+    logger?.warn?.("[kaz-mode] 写入项目 other-tool-plugin.json 失败：" + safeMessage(error));
   }
 }
 function saveProjectOtherCatalog(cwd, value, logger) {
@@ -497,7 +497,7 @@ function saveProjectOtherCatalog(cwd, value, logger) {
 }
 
 function enableEquals(a, b) {
-  return JSON.stringify(normalizeEnableList(a)) === JSON.stringify(normalizeEnableList(b));
+  return JSON.stringify(normalizePluginEnableDict(a)) === JSON.stringify(normalizePluginEnableDict(b));
 }
 function catalogEquals(a, b) {
   return JSON.stringify(normalizeToolCatalog(a)) === JSON.stringify(normalizeToolCatalog(b));
@@ -516,7 +516,7 @@ function loadExternalToolPluginLayers(cwd, logger) {
   const projectOtherCatalog = loadProjectOtherCatalog(safeCwd, logger);
   const effective = computeEffectiveToolState({
     codeCatalog: TOOL_PLUGIN_CATALOG,
-    codeEnabled: DEFAULT_ENABLED_TOOL_PLUGINS,
+    codeEnabled: TOOL_PLUGINS,
     userEnable,
     userOtherEnable,
     userCatalog,
@@ -528,13 +528,13 @@ function loadExternalToolPluginLayers(cwd, logger) {
   });
   const original = computeEffectiveToolState({
     codeCatalog: TOOL_PLUGIN_CATALOG,
-    codeEnabled: DEFAULT_ENABLED_TOOL_PLUGINS,
+    codeEnabled: TOOL_PLUGINS,
     userOtherEnable,
     userOtherCatalog,
   });
   const defaults = computeEffectiveToolState({
     codeCatalog: TOOL_PLUGIN_CATALOG,
-    codeEnabled: DEFAULT_ENABLED_TOOL_PLUGINS,
+    codeEnabled: TOOL_PLUGINS,
     userEnable,
     userOtherEnable,
     userCatalog,
@@ -601,8 +601,8 @@ function deleteExternalPluginPermanently(pluginKey, cwd, logger) {
   if (OFFICIAL_TOOL_PLUGIN_KEYS.includes(pluginKey) || KAZ_TOOL_PLUGIN_KEYS.includes(pluginKey)) return false;
   for (const layer of ["user", "project"]) {
     const data = loadLayerFourFiles(layer, cwd, logger);
-    data.enable = data.enable.filter((key) => key !== pluginKey);
-    data.otherEnable = data.otherEnable.filter((key) => key !== pluginKey);
+    delete data.enable[pluginKey];
+    delete data.otherEnable[pluginKey];
     delete data.catalog[pluginKey];
     delete data.otherCatalog[pluginKey];
     saveLayerFourFiles(layer, cwd, data, logger);
@@ -669,7 +669,7 @@ function safeMessage(error) {
 export default {
   name: "kaz-mode",
   // systemPrompt：组装层工具面过滤 + 固定提示词挂在瀑布上；connection：面板
-  // RPC 通道；tools：外置工具注册动态检测（fiber.name 归因）；settings /
+  // RPC 通道；tools：工具注册信息（面板/工具面用）；settings /
   // roundMinimal 为可选依赖（惰性解析）。
   inject: ["systemPrompt", "connection", "tools"],
   apply(ctx, config = {}) {
@@ -1048,7 +1048,7 @@ export default {
      * 计算某 agent 此刻的 Kaz 工具面（Set）——全部交给 kaz-shared 的
      * computeSurface：白名单来自 settings（用户优先），再按该 agent 会话的
      * kaz-memory 生效状态动态剔除对应工具；外置工具插件按
-     * factory → 用户默认 → 项目设置 合并后加入（新检测默认开启）；
+     * 原设置（代码 + 用户 other-*）→ 用户默认 → 项目设置 合并后加入；
      * round-minimal 首阶段信号由本插件读取并传入。
      */
     function kazSurfaceFor(agent, current, states) {
@@ -1469,7 +1469,7 @@ export default {
           // 手动添加插件：写入用户 other-*（原设置的用户部分）。
           if (input.addPlugin === true) {
             const user = loadLayerFourFiles("user", cwd, ctx.logger);
-            if (!user.otherEnable.includes(key)) user.otherEnable.push(key);
+            user.otherEnable[key] = true;
             if (user.otherCatalog[key] === undefined) user.otherCatalog[key] = {};
             saveLayerFourFiles("user", cwd, user, ctx.logger);
             const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
@@ -1479,7 +1479,7 @@ export default {
           // 手动添加工具：写入用户 other-catalog，并确保插件在 other-enable 里。
           if (input.addTool === true && tool.length > 0) {
             const user = loadLayerFourFiles("user", cwd, ctx.logger);
-            if (!user.otherEnable.includes(key)) user.otherEnable.push(key);
+            user.otherEnable[key] = true;
             user.otherCatalog[key] = { ...(user.otherCatalog[key] ?? {}), [tool]: true };
             saveLayerFourFiles("user", cwd, user, ctx.logger);
             const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
@@ -1492,11 +1492,7 @@ export default {
           const data = loadLayerFourFiles(layer, cwd, ctx.logger);
 
           if (typeof input.capable === "boolean") {
-            if (input.capable === true) {
-              if (!data.enable.includes(key)) data.enable.push(key);
-            } else {
-              data.enable = data.enable.filter((item) => item !== key);
-            }
+            data.enable[key] = input.capable;
           }
           if (tool.length > 0 && typeof input.enabled === "boolean") {
             data.catalog[key] = { ...(data.catalog[key] ?? {}), [tool]: input.enabled };
@@ -1511,13 +1507,13 @@ export default {
           if (layer === null) return rpcFail("缺少 layer");
           const cwd = resolveExternalCwd();
           if (layer === "user") {
-            saveUserEnable([], ctx.logger);
+            saveUserEnable({}, ctx.logger);
             saveUserCatalog({}, ctx.logger);
             // other-* 是“原设置”的用户部分，恢复原设置时保留。
           } else {
-            saveProjectEnable(cwd, [], ctx.logger);
+            saveProjectEnable(cwd, {}, ctx.logger);
             saveProjectCatalog(cwd, {}, ctx.logger);
-            saveProjectOtherEnable(cwd, [], ctx.logger);
+            saveProjectOtherEnable(cwd, {}, ctx.logger);
             saveProjectOtherCatalog(cwd, {}, ctx.logger);
           }
           const layers = loadExternalToolPluginLayers(cwd, ctx.logger);

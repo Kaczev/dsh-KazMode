@@ -11,16 +11,16 @@ import {
   resolveFirstRoundTools,
   computeSurface,
   normalizeExternalKey,
-  normalizeEnableList,
+  normalizePluginEnableDict,
   normalizeToolCatalog,
-  unionEnableLists,
+  mergePluginEnableDicts,
   mergeToolCatalogs,
   buildToolUniverse,
   computeEffectiveToolState,
   computeToolPluginSurfaceFromEffective,
   computeToolPluginSurface,
   TOOL_PLUGIN_CATALOG,
-  DEFAULT_ENABLED_TOOL_PLUGINS,
+  TOOL_PLUGINS,
 } from "./lib/tool-lists.js";
 
 let failures = 0;
@@ -35,9 +35,10 @@ check("① resolveFirstRoundTools kaz-memory 关", JSON.stringify(resolveFirstRo
 check("① TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "glob", "grep", "web_search", "memory_search"].every((t) => TOOL_WHITELIST.includes(t)));
 
 check("② normalizeExternalKey", normalizeExternalKey("Dsh_Pixel Art") === "dsh-pixel-art");
-check("② normalizeEnableList 去重", JSON.stringify(normalizeEnableList(["tool-fs", "Tool_FS", "dsh-pixel-art"])) === JSON.stringify(["tool-fs", "dsh-pixel-art"]));
+check("② normalizePluginEnableDict", JSON.stringify(normalizePluginEnableDict({ "Tool_FS": true, "dsh-pixel-art": false })) === JSON.stringify({ "tool-fs": true, "dsh-pixel-art": false }));
+check("② normalizePluginEnableDict 兼容旧数组", JSON.stringify(normalizePluginEnableDict(["Tool_FS", "dsh-pixel-art"])) === JSON.stringify({ "tool-fs": true, "dsh-pixel-art": true }));
 check("② normalizeToolCatalog", normalizeToolCatalog({ "Tool-FS": { read: true, write: false } })["tool-fs"].read === true && normalizeToolCatalog({ "Tool-FS": { read: true, write: false } })["tool-fs"].write === false);
-check("② unionEnableLists", JSON.stringify(unionEnableLists(["a"], ["b", "a"])) === JSON.stringify(["a", "b"]));
+check("② mergePluginEnableDicts 后层覆盖", JSON.stringify(mergePluginEnableDicts({ a: true }, { a: false, b: true })) === JSON.stringify({ a: false, b: true }));
 check("② mergeToolCatalogs 后层覆盖", mergeToolCatalogs({ a: { x: true } }, { a: { x: false, y: true } }).a.x === false && mergeToolCatalogs({ a: { x: true } }, { a: { x: false, y: true } }).a.y === true);
 
 const universe = buildToolUniverse(TOOL_PLUGIN_CATALOG, { "dsh-pixel-art": { render_pixel_art: true } });
@@ -45,8 +46,8 @@ check("③ T0 含官方工具和用户添加插件", universe["tool-fs"]?.read =
 
 const eff = computeEffectiveToolState({
   codeCatalog: TOOL_PLUGIN_CATALOG,
-  codeEnabled: DEFAULT_ENABLED_TOOL_PLUGINS,
-  userOtherEnable: ["dsh-pixel-art"],
+  codeEnabled: TOOL_PLUGINS,
+  userOtherEnable: { "dsh-pixel-art": true },
   userOtherCatalog: { "dsh-pixel-art": { render_pixel_art: true } },
 });
 const surface = computeToolPluginSurfaceFromEffective(eff);
@@ -54,10 +55,27 @@ check("④ 用户添加插件默认进入工具面", surface.has("render_pixel_a
 check("④ 未启用插件工具不进入", !surface.has("subagent"));
 check("④ computeToolPluginSurface 一步到位", computeToolPluginSurface({
   codeCatalog: TOOL_PLUGIN_CATALOG,
-  codeEnabled: DEFAULT_ENABLED_TOOL_PLUGINS,
-  userOtherEnable: ["dsh-pixel-art"],
+  codeEnabled: TOOL_PLUGINS,
+  userOtherEnable: { "dsh-pixel-art": true },
   userOtherCatalog: { "dsh-pixel-art": { render_pixel_art: true } },
 }).has("render_pixel_art"));
+
+const layered1 = computeEffectiveToolState({
+  codeCatalog: TOOL_PLUGIN_CATALOG,
+  codeEnabled: TOOL_PLUGINS,
+  userEnable: { "tool-ralph": true },
+  userCatalog: { "tool-ralph": { ralph: true } },
+});
+check("⑤ 用户默认开启的插件在无项目覆盖时保持开启", layered1.P["tool-ralph"] === true && layered1.T["tool-ralph"]?.ralph === true && computeToolPluginSurfaceFromEffective(layered1).has("ralph"));
+const layered2 = computeEffectiveToolState({
+  codeCatalog: TOOL_PLUGIN_CATALOG,
+  codeEnabled: TOOL_PLUGINS,
+  userEnable: { "tool-ralph": true },
+  userCatalog: { "tool-ralph": { ralph: true } },
+  projectEnable: { "tool-ralph": false },
+  projectCatalog: { "tool-ralph": { ralph: false } },
+});
+check("⑤ 项目专属关闭覆盖用户默认", layered2.P["tool-ralph"] === false && layered2.T["tool-ralph"]?.ralph === false && !computeToolPluginSurfaceFromEffective(layered2).has("ralph"));
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

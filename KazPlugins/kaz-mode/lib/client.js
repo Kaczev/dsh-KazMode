@@ -318,9 +318,6 @@ window.__ModuleLoader__.load({
 .kzm-tp-tab{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-secondary);border-radius:8px;padding:3px 10px;cursor:pointer;font-size:12px}
 .kzm-tp-tab[data-on="true"]{color:var(--dsw-alias-label-primary);border-color:rgba(22,163,74,.45);background:rgba(22,163,74,.08)}
 .kzm-tp-add{display:flex;gap:6px;margin:2px 0 8px;flex-wrap:wrap}
-.kzm-tp-new{font-size:10px;color:#16a34a;border:1px solid rgba(22,163,74,.4);background:rgba(22,163,74,.08);border-radius:8px;padding:0 5px;flex:none}
-.kzm-tp-hidden{border:1px dashed var(--dsw-alias-border-l2);border-radius:8px;padding:6px 8px;margin-top:6px}
-.kzm-tp-hidden-title{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-bottom:4px}
 .kzm-tp-group-title{font-size:11px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em}
 .kzm-tp-tools{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-radius:8px;padding:6px 8px;margin:4px 0 2px;display:flex;flex-direction:column;gap:4px}
 .kzm-tp-tools-title{font-size:10px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:0}
@@ -1264,18 +1261,18 @@ window.__ModuleLoader__.load({
 				const effective = data.effective !== null && typeof data.effective === "object" ? data.effective : {};
 				const T0 = effective.T0 ?? {};
 				const T = effective.T ?? {};
-				const P = Array.isArray(effective.P) ? effective.P : [];
-				const enabledPlugins = new Set(P);
-				const userOtherEnable = Array.isArray(data.userOtherEnable) ? data.userOtherEnable : [];
-				const projectOtherEnable = Array.isArray(data.projectOtherEnable) ? data.projectOtherEnable : [];
-				const userEnable = Array.isArray(data.userEnable) ? data.userEnable : [];
-				const projectEnable = Array.isArray(data.projectEnable) ? data.projectEnable : [];
+				const P = effective.P !== null && typeof effective.P === "object" ? effective.P : {};
+				const enabledPlugins = new Set(Object.keys(P).filter((key) => P[key] === true));
+				const userOtherEnable = data.userOtherEnable !== null && typeof data.userOtherEnable === "object" ? data.userOtherEnable : {};
+				const projectOtherEnable = data.projectOtherEnable !== null && typeof data.projectOtherEnable === "object" ? data.projectOtherEnable : {};
+				const userEnable = data.userEnable !== null && typeof data.userEnable === "object" ? data.userEnable : {};
+				const projectEnable = data.projectEnable !== null && typeof data.projectEnable === "object" ? data.projectEnable : {};
 
-				const pluginKeys = [...new Set([...Object.keys(T0), ...userOtherEnable, ...projectOtherEnable, ...userEnable, ...projectEnable])].sort();
+				const pluginKeys = [...new Set([...Object.keys(T0), ...Object.keys(userOtherEnable), ...Object.keys(projectOtherEnable), ...Object.keys(userEnable), ...Object.keys(projectEnable)])].sort();
 				const displayPluginKeys = pluginKeys.filter((key) => {
 					const tools = Object.keys(T0[key] ?? {});
 					if (tools.length > 0) return true;
-					return userOtherEnable.includes(key) || projectOtherEnable.includes(key) || userEnable.includes(key) || projectEnable.includes(key);
+					return key in userOtherEnable || key in projectOtherEnable || key in userEnable || key in projectEnable;
 				});
 
 				const categoryOf = (key) => (catalog.official.includes(key) ? "official" : catalog.kaz.includes(key) ? "kaz" : "external");
@@ -1626,7 +1623,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 You are a helpful software engineer assistant.，kaz-memory 启用时切换为记忆优先提示词）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（toolWhitelist 白名单 + 已启用群组，子代理会话同样适用）；" +
+						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 You are a helpful software engineer assistant.，kaz-memory 启用时切换为记忆优先提示词）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（工具插件四文件模型的生效白名单，子代理会话同样适用）；" +
 							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory；" +
 							"kaz-memory 关闭时其工具自动移出白名单。",
 					),
