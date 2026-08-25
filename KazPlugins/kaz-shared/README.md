@@ -2,7 +2,7 @@
 
 > **作用**：Kaz 全家桶的公共依赖包——Kaz 工具清单（出厂默认/首轮工具/默认禁用/被管理插件目录/默认 persona）、工具插件状态模型和工具面计算的唯一来源，其它插件不再各自维护副本。
 
-`kaz-mode` / `kaz-memory` / `kaz-diag` / `round-minimal` / `plugin-filter` 的公共依赖。
+`kaz-mode` / `kaz-memory` / `round-minimal` / `plugin-filter` 的公共依赖。
 **纯 ESM 模块**（`lib/tool-lists.js`），不注册任何服务、不注入任何提示段，只是常量 + 纯函数。
 
 ## 职责
@@ -15,11 +15,11 @@ Kaz 模式的工具清单 / 工具插件模型**全部集中在这里**，其它
 | `TOOL_PLUGIN_FACTORY` | kaz-mode（统一工具面 factory） | 官方工具按插件分组的出厂默认（tool-fs / tool-pwsh / ...） |
 | `computeToolPluginSurface` / `mergeToolPluginStates` / `setToolPluginTool` / `setToolPluginToolHidden` / `setToolPluginIgnored` / `restoreToolPlugin` 等 | kaz-mode 服务端/面板 | 官方+外置统一的三层工具插件状态模型与工具面展开 |
 | `effectiveToolWhitelist(whitelist)` | kaz-memory / 旧版兜底 | 旧数组白名单去重 |
-| `computeSurface(inputs)` | kaz-mode 组装层 / kaz-diag 报告 | 计算某代理此刻的 Kaz 工具面 |
-| `DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON` / `_MEMORY_OFF` / `DEFAULT_FIRST_ROUND_TOOLS` | round-minimal / kaz-mode / kaz-diag | 首阶段工具白名单：kaz-memory 开 = `memory_search`；关 = `pwsh`/`read`/`edit`；兜底 = MEMORY_OFF |
-| `resolveFirstRoundTools({ kazMemoryEnabled })` | round-minimal / kaz-mode / kaz-diag / computeSurface | 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点） |
+| `computeSurface(inputs)` | kaz-mode 组装层 | 计算某代理此刻的 Kaz 工具面 |
+| `DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON` / `_MEMORY_OFF` / `DEFAULT_FIRST_ROUND_TOOLS` | round-minimal / kaz-mode | 首阶段工具白名单：kaz-memory 开 = `memory_search`；关 = `pwsh`/`read`/`edit`；兜底 = MEMORY_OFF |
+| `resolveFirstRoundTools({ kazMemoryEnabled })` | round-minimal / kaz-mode / computeSurface | 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点） |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
-| `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-diag（展示默认 persona） | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
+| `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode 面板 | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
 
 > **官方/Kaz 分类修改点**：`lib/tool-plugin-catalog.js`。外置插件数据（检测结果 / 用户移除 / 手动添加）保存在用户目录 storages，**不写在源码里**。
 
@@ -27,13 +27,13 @@ Kaz 模式的工具清单 / 工具插件模型**全部集中在这里**，其它
 
 - **官方/外置统一为“工具插件”**：Kaz 工具面 = `factory → 用户默认 → 项目设置`
   三层 JSON 合并后的 enabled 工具 + 动态检测到的新工具（默认开启）。
-- **官方出厂**：`TOOL_PLUGIN_FACTORY`（tool-fs / tool-pwsh / ... / kaz-memory / kaz-diag）。
+- **官方出厂**：`TOOL_PLUGIN_FACTORY`（tool-fs / tool-pwsh / ... / kaz-memory）。
 - **旧 `kaz-mode.toolWhitelist` 已弃用**：kaz-mode 不再读取/写入 settings.yaml 的该字段；
   `TOOL_WHITELIST` / `effectiveToolWhitelist` 仅保留给 kaz-memory 可用性兜底等旧路径。
 - **Kaz 模式**（kaz-mode.enabled=true）：
   - 全量阶段 = `computeToolPluginSurface(factory, user, project, detected)`；
   - 首阶段（round-minimal 信号 `minimalPhase=true`）只保留 `firstRoundTools`；为空时按 `resolveFirstRoundTools({ kazMemoryEnabled })` 自动解析——kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`。
-- **记忆/诊断工具**：仍由 kaz-mode 按 agent 会话开关从工具面剔除（不依赖 JSON 开关）。
+- **记忆工具**：仍由 kaz-mode 按 agent 会话开关从工具面剔除（不依赖 JSON 开关）。
 - **非 Kaz 模式**：本模块不干预工具面（由标准模式决定）。
 
 ## 安装

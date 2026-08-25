@@ -17,7 +17,6 @@
 完整清单见下文「仓库内容」表格；几个值得知道的：
 
 - **默认关闭、按需开启**：
-  - `kaz-diag`：给模型一个 `kaz_mode_status` 状态工具，调试 Kaz 模式时用；
   - `thinking-anchor`：用提示词提醒模型遵循 "We need…" 思维链、用英语思考（多数情况下不开效果也一样）。
   - `round-display`：显示每轮 Kaz 联动/附属插件给模型注入了什么信息。
 - **`kaz-agent-preset-display`**：显示补丁。官方新对话预设按钮在「先选模式 A、设置里默认 B、刷新页面」后会错显成 B；本插件让按钮优先显示该对话自己的预设。
@@ -44,11 +43,10 @@
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（11 个插件 + kaz-shared 依赖包）
+├── KazPlugins/                     # 插件全家桶（10 个插件 + kaz-shared 依赖包）
 │   ├── deepseek-default-model/
 │   ├── first-round-hints/
 │   ├── kaz-agent-preset-display/
-│   ├── kaz-diag/
 │   ├── kaz-memory/
 │   ├── kaz-mode/
 │   ├── kaz-shared/                  # 依赖包（非插件）：Kaz 工具清单单一事实源
@@ -81,7 +79,6 @@ dsh-KazMode/
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
-| `kaz-diag` | `kaz-diag` | 诊断工具 `kaz_mode_status`（只读状态报告） |
 
 ---
 
@@ -140,7 +137,6 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "first-round-hints": "file:KazPlugins/first-round-hints",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
-"kaz-diag": "file:KazPlugins/kaz-diag",
 "kaz-memory": "file:KazPlugins/kaz-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
 "kaz-shared": "file:KazPlugins/kaz-shared",
@@ -151,7 +147,7 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 "thinking-anchor": "file:KazPlugins/thinking-anchor"
 ```
 
-> **kaz-shared 是必需依赖**（Kaz 模式工具清单单一事实源，见 `KazPlugins/kaz-shared/`）：kaz-mode / kaz-memory / kaz-diag / round-minimal / plugin-filter 都 import 它，漏装会导致这些插件无法加载。它不是 cordis 插件，只是纯模块包。
+> **kaz-shared 是必需依赖**（Kaz 模式工具清单单一事实源，见 `KazPlugins/kaz-shared/`）：kaz-mode / kaz-memory / round-minimal / plugin-filter 都 import 它，漏装会导致这些插件无法加载。它不是 cordis 插件，只是纯模块包。
 
 完整示例：
 
@@ -163,7 +159,6 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
     "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
     "first-round-hints": "file:KazPlugins/first-round-hints",
     "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
-    "kaz-diag": "file:KazPlugins/kaz-diag",
     "kaz-memory": "file:KazPlugins/kaz-memory",
     "kaz-mode": "file:KazPlugins/kaz-mode",
     "kaz-shared": "file:KazPlugins/kaz-shared",
@@ -252,12 +247,6 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund
         enabled: true
 
 - insert:
-    - id: kaz-diag
-      name: kaz-diag
-      config:
-        enabled: true
-
-- insert:
     - id: first-round-hints
       name: first-round-hints
       config:
@@ -269,7 +258,7 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund
 ### 3.6 编辑 `%USERPROFILE%\.dsh\settings.yaml`
 
 纯方案 A（2026-08-21）：被管理插件（thinking-anchor / round-minimal / plugin-filter /
-output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag /
+output-beep / round-display / deepseek-default-model / kaz-memory /
 first-round-hints）的生效配置由 kazMode 服务读取：
 - `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认）（会自动创建）
 - `<项目>/.dsh/storages/kaz-session-states.json`（会话专属覆盖）（在会话的时候自动创建）
@@ -288,7 +277,6 @@ settings.yaml **不再承载这些插件的段**，仅有kaz-mode和补丁插件
    - 新对话系统的思考内不再出现"Let me"，而有很多的"We need"、"Let's"之类的；
    - 首次工具调用前工具面只有 `pwsh` + `read` + `edit`；
    - 第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
-   - 若开启 `kaz-diag`，工具列表里出现 `kaz_mode_status`；
    - Kaz 面板出现各被管理插件的开关行。
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "kaz-mode",
-  "version": "3.0.0",
-  "description": "kaz-mode 超级模式插件：Kaz 模式 agent preset + 会话头部开关按钮 + 集中管理面板，统一联动管理 thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / kaz-diag。系统提示词由 kaz 预设的 kaz-system-prompt.mjs 控制（默认 \"You are a helpful software engineer assistant.\"，kaz-memory 启用时切换为记忆优先提示词），工具面 = toolWhitelist 白名单（首次工具调用前仅极简工具，之后恢复全部工具）。",
+  "version": "3.1.0",
+  "description": "kaz-mode 超级模式插件：Kaz 模式 agent preset + 会话头部开关按钮 + 集中管理面板，统一联动管理 thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory。系统提示词由 kaz 预设的 kaz-system-prompt.mjs 控制（默认 \"You are a helpful software engineer assistant.\"，kaz-memory 启用时切换为记忆优先提示词），工具面 = 工具插件三层 JSON（原设置 → 用户默认 → 项目专属）。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

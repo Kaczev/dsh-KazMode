@@ -16,7 +16,6 @@ Kaz 模式同时具备两个入口，双向同步：
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
 | `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
-| `kaz-diag` | 诊断：只注册只读状态工具 `kaz_mode_status`（开启本插件才加入 Kaz 工具面） |
 
 **Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
 
@@ -30,8 +29,8 @@ Kaz 模式同时具备两个入口，双向同步：
      （为空时自动：kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；
    - 首次工具调用后：恢复 **Kaz 全部工具** = 工具插件 JSON（官方/外置统一：
      `factory → 用户默认 → 项目设置`，动态检测到的新工具默认开启）。
-3. **记忆/诊断工具按会话生效**：`kaz-memory` / `kaz-diag` 关闭时，其六工具 /
-   `kaz_mode_status` 从该会话的工具面移出、调用被拒。
+3. **记忆工具按会话生效**：`kaz-memory` 关闭时，其六工具从该会话的工具面
+   移出、调用被拒。
 4. **skill 已整体移除**（2026-08，Kaczev）：`skill` 工具、技能发现行与技能目录已从
    kaz 预设删除，白名单里也没有 `skill`。
 5. **配置不写 settings.yaml（纯方案 A）**：被管理插件的生效配置 =
@@ -41,23 +40,25 @@ Kaz 模式同时具备两个入口，双向同步：
 
 ### 工具插件（官方 / 外置统一管理）
 
-**不再使用 settings.yaml 的 `kaz-mode.toolWhitelist`。** 官方工具与外置插件统一走同一套三层 JSON：
+**不再使用 settings.yaml 的 `kaz-mode.toolWhitelist`。** 官方工具与外置插件统一走同一套三层结构：
 
-- **出厂默认（factory）**：`kaz-shared` 的 `TOOL_PLUGIN_FACTORY`（官方默认工具分组）；
-- **用户默认**：`~/.dsh/storages/kaz-tool-plugin-defaults.json`；
-- **项目设置**：`<项目>/.dsh/storages/kaz-tool-plugins.json`。
+- **原设置（factory）**：`kaz-shared/lib/tool-plugin-catalog.js`
+  （`TOOL_PLUGIN_CATALOG` = 工具白名单，`DEFAULT_ENABLED_TOOL_PLUGINS` = 插件能力）；
+- **用户默认**：`~/.dsh/storages/kaz-tool-plugin-catalog.json`（插件级：ignored/capable）
+  + `~/.dsh/storages/kaz-tool-plugin-defaults.json`（工具级：tools/hiddenTools）；
+- **项目专属**：`<项目>/.dsh/storages/kaz-tool-plugin-catalog.json`
+  + `<项目>/.dsh/storages/kaz-tool-plugin-defaults.json`（与用户目录同名，覆盖用户默认）。
 
-Kaz 面板的「工具插件」区块可管理全部插件（官方/外置）：插件级开关、工具级开关、
-忽略/隐藏、还原、手动添加；动态检测到的新插件/新工具默认开启。
+Kaz 面板的「工具插件」区块可管理全部插件（官方/外置）：插件能力开关（大开关）、
+工具开关（小开关）、忽略/隐藏、还原、手动添加；动态检测到的新插件/新工具会写进
+**用户默认设置**并默认启用，包名未知时归入“未知插件”。
 
-```json
-{
-  "version": 1,
-  "plugins": {
-    "tool-fs": { "ignored": false, "tools": { "read": true, "write": true, "edit": true } },
-    "dsh-pixel-art": { "ignored": false, "tools": { "render_pixel_art": true, "convert_image_to_pixel_art": true } }
-  }
-}
+```jsonc
+// 插件级 kaz-tool-plugin-catalog.json
+{ "version": 1, "plugins": { "tool-fs": { "ignored": false, "capable": true } } }
+
+// 工具级 kaz-tool-plugin-defaults.json
+{ "version": 1, "plugins": { "tool-fs": { "tools": { "read": true, "write": true, "edit": true }, "hiddenTools": {} } } }
 ```
 
 两层生效：组装层（`system-prompt/assemble`）过滤工具；执行层（`tools/pre-execute`）
@@ -93,13 +94,13 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 ### 4. Kaz 工具面（工具插件 JSON 唯一闸门）
 
 - **工具插件 JSON** = Kaz 模式的「全部工具来源」——官方/外置统一，按插件分组；
-  - 出厂：`TOOL_PLUGIN_FACTORY`；
-  - 用户默认：`~/.dsh/storages/kaz-tool-plugin-defaults.json`；
-  - 项目设置：`<项目>/.dsh/storages/kaz-tool-plugins.json`；
-  - 外置插件检测/移除目录（用户数据）：`~/.dsh/storages/kaz-tool-plugin-catalog.json`；
+  - 原设置：`kaz-shared/lib/tool-plugin-catalog.js`（`TOOL_PLUGIN_FACTORY`）；
+  - 用户默认：`~/.dsh/storages/kaz-tool-plugin-catalog.json` + `kaz-tool-plugin-defaults.json`；
+  - 项目专属：`<项目>/.dsh/storages/kaz-tool-plugin-catalog.json` + `kaz-tool-plugin-defaults.json`；
+  - 检测/移除目录（用户数据）：`~/.dsh/storages/kaz-tool-plugin-detected.json`；
   - 官方/Kaz 分类修改点：`kaz-shared/lib/tool-plugin-catalog.js`；
-  - 动态检测到的新插件/新工具默认开启。
-- `kaz-memory` 关闭 → 六工具自动移出；`kaz-diag` 关闭 → `kaz_mode_status` 移出。
+  - 动态检测到的新插件/新工具写进用户默认设置并默认开启。
+- `kaz-memory` 关闭 → 六工具自动移出。
 
 ### 5. round-minimal 信号（首阶段极简）
 
@@ -136,7 +137,7 @@ Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里�
 ## 依赖契约
 
 kaz-mode 存在时，`round-minimal` / `plugin-filter` / `kaz-memory` 三个前置插件必须
-存在（`kaz_mode_status` 工具会报告，由 `kaz-diag` 插件注册）。
+存在。
 
 ## 安装（与其它插件一致）
 
@@ -148,7 +149,7 @@ KazPlugins 目录随 profile 以 `file:` 依赖 + junction 装配；`cordis.patc
 ```powershell
 node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
 ```
-（探针为旧版行为编写，重构后仅作参考，可能过时。）
+（探针已随 2026-08-25 重构同步。）
 
 ## 验收要点
 
@@ -156,8 +157,7 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    默认是 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时是
    记忆优先提示词（+ 计划模式段）；
 2. 首次工具调用前工具面：kaz-memory 开 = `memory_search`；关 = `pwsh` + `read` + `edit`；
-   第一次工具调用后恢复工具插件 JSON 定义的全部工具（kaz-memory 关闭时无记忆工具；
-   kaz-diag 开启时有 `kaz_mode_status`）；
+   第一次工具调用后恢复工具插件 JSON 定义的全部工具（kaz-memory 关闭时无记忆工具）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
 5. Kaz 面板「工具插件」区块可管理官方/外置插件（开关、忽略/还原、手动添加），改完即生效；

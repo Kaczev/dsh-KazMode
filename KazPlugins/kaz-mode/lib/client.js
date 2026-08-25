@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
 		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 };
 
 		/** Kaz 模式当前版本兜底值：正常会通过 RPC 读取 package.json 的 version，这里只在 RPC 失败时使用。 */
-		const KAZ_CURRENT_VERSION = "2.11.8";
+		const KAZ_CURRENT_VERSION = "3.1.0";
 		/** Kaz 模式 GitHub 仓库地址。 */
 		const KAZ_GITHUB_REPO_URL = "https://github.com/Kaczev/dsh-KazMode";
 		/** GitHub tags API（只用来做“有没有新版本”提醒）。 */
@@ -174,16 +174,6 @@ window.__ModuleLoader__.load({
 				],
 			},
 			{
-				id: "kaz-diag",
-				namespace: "kaz-diag",
-				name: "kaz-diag",
-				tag: "诊断 · 状态工具",
-				note: "开启后 kaz_mode_status 才注册并加入 Kaz 模式的全部工具列表（与 kaz-memory 工具同款条件）。",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：注册 kaz_mode_status 诊断工具）" },
-				],
-			},
-			{
 				id: "first-round-hints",
 				namespace: "first-round-hints",
 				name: "first-round-hints",
@@ -225,8 +215,8 @@ window.__ModuleLoader__.load({
 			"plan-mode",
 			"plan-mode-controller",
 		]);
-		/** Kaz 模式自家插件（记忆/诊断），排序时位于官方之上、外置之下。 */
-		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory", "kaz-diag"]);
+		/** Kaz 模式自家插件，排序时位于官方之上、外置之下。 */
+		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory"]);
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
 		const RPC_CHANNEL = "/kaz-mode";
@@ -1182,19 +1172,15 @@ window.__ModuleLoader__.load({
 				const [data, setData] = useState(null);
 				const [detected, setDetected] = useState([]);
 				const [catalog, setCatalog] = useState({ official: [...OFFICIAL_TOOL_PLUGIN_KEYS], kaz: [...KAZ_TOOL_PLUGIN_KEYS], removedPlugins: {}, unassignedTools: [] });
-				const [registeredTools, setRegisteredTools] = useState([]);
-				const [showRegistered, setShowRegistered] = useState(false);
 				const [expanded, setExpanded] = useState(() => new Set());
 				const [busy, setBusy] = useState(false);
 
 				const refresh = useCallback(async () => {
 					setBusy(true);
-					const res = await rpcCall("getExternalToolPlugins", { sessionId: sessionId || "", cwd: cwd || "" });
-					if (res !== null) setData(res);
+					// 先 listToolPlugins 触发一次补扫/检测自动写默认，再读三层，保证 UI 拿到最新默认设置。
 					const det = await rpcCall("listToolPlugins", {});
 					if (det !== null) {
 						if (Array.isArray(det.plugins)) setDetected(det.plugins);
-						if (Array.isArray(det.registeredTools)) setRegisteredTools(det.registeredTools);
 						if (det.catalog !== null && det.catalog !== undefined && typeof det.catalog === "object") {
 							setCatalog({
 								official: Array.isArray(det.catalog.official) ? det.catalog.official : [...OFFICIAL_TOOL_PLUGIN_KEYS],
@@ -1204,6 +1190,8 @@ window.__ModuleLoader__.load({
 							});
 						}
 					}
+					const res = await rpcCall("getExternalToolPlugins", { sessionId: sessionId || "", cwd: cwd || "" });
+					if (res !== null) setData(res);
 					setBusy(false);
 				}, [sessionId, cwd]);
 
@@ -1227,6 +1215,13 @@ window.__ModuleLoader__.load({
 					if (fresh !== null) setData(fresh);
 				};
 
+				const applySetAsDefault = async () => {
+					if (!writable) return;
+					if (typeof window !== "undefined" && !window.confirm("确定把当前项目专属设置覆盖到用户默认设置吗？用户目录下两个同名 JSON 会被覆盖。")) return;
+					const res = await rpcCall("setExternalToolPluginsAsDefault", { sessionId: sessionId || "", cwd: targetCwd() });
+					if (res !== null) setData(res);
+				};
+
 				const refreshCatalog = async () => {
 					const det = await rpcCall("listToolPlugins", {});
 					if (det !== null && det.catalog !== null && det.catalog !== undefined && typeof det.catalog === "object") {
@@ -1237,7 +1232,6 @@ window.__ModuleLoader__.load({
 							unassignedTools: Array.isArray(det.catalog.unassignedTools) ? det.catalog.unassignedTools : [],
 						});
 						if (Array.isArray(det.plugins)) setDetected(det.plugins);
-						if (Array.isArray(det.registeredTools)) setRegisteredTools(det.registeredTools);
 					}
 				};
 
@@ -1285,11 +1279,12 @@ window.__ModuleLoader__.load({
 						pluginsMap[key] = { key, plugin: { ignored: false, tools: {}, hiddenTools: {} } };
 					}
 				}
-				// 未归属工具兜底：即使服务端 detected 未带 unknown，也显示为「未归属」外置插件。
+				// 未知工具兜底：即使服务端 detected 未带 unknown，也显示为「未知插件」。
 				if (catalog.unassignedTools.length > 0 && pluginsMap["unknown"] === undefined) {
 					pluginsMap["unknown"] = { key: "unknown", plugin: { ignored: false, tools: {}, hiddenTools: {} } };
 				}
 				const pluginKeys = Object.keys(pluginsMap).sort();
+				const removedPlugins = catalog.removedPlugins !== null && typeof catalog.removedPlugins === "object" ? catalog.removedPlugins : {};
 
 				const toolsOf = (key) => {
 					const plugin = pluginsMap[key] !== undefined ? pluginsMap[key].plugin : { ignored: false, tools: {}, hiddenTools: {} };
@@ -1301,17 +1296,31 @@ window.__ModuleLoader__.load({
 					return [...names].sort();
 				};
 
-				const togglePluginAll = async (key, enabled) => {
-					const tools = toolsOf(key);
-					for (const tool of tools) {
-						await applyPatch({ pluginName: key, toolName: tool, enabled });
-					}
+				/** 该插件是否有项目专属（插件级：ignored / capable 与用户默认不同）。 */
+				const pluginUnique = (key) => {
+					const eff = data.effective !== null && data.effective !== undefined && data.effective.plugins !== undefined ? data.effective.plugins[key] : undefined;
+					const userEff = data.userEffective !== null && data.userEffective !== undefined && data.userEffective.plugins !== undefined ? data.userEffective.plugins[key] : undefined;
+					if (eff === undefined) return userEff !== undefined;
+					if (userEff === undefined) return true;
+					return (eff.ignored !== userEff.ignored) || (eff.capable !== userEff.capable);
+				};
+
+				/** 该工具是否有项目专属（工具级：enabled / hidden 与用户默认不同）。 */
+				const toolUnique = (key, tool) => {
+					const eff = data.effective !== null && data.effective !== undefined && data.effective.plugins !== undefined ? data.effective.plugins[key] : undefined;
+					const userEff = data.userEffective !== null && data.userEffective !== undefined && data.userEffective.plugins !== undefined ? data.userEffective.plugins[key] : undefined;
+					const effTool = eff !== undefined && eff.tools !== undefined ? eff.tools[tool] : undefined;
+					const userTool = userEff !== undefined && userEff.tools !== undefined ? userEff.tools[tool] : undefined;
+					const effHidden = eff !== undefined && eff.hiddenTools !== undefined && eff.hiddenTools[tool] === true;
+					const userHidden = userEff !== undefined && userEff.hiddenTools !== undefined && userEff.hiddenTools[tool] === true;
+					return effTool !== userTool || effHidden !== userHidden;
 				};
 
 				const addPlugin = async () => {
 					const name = window.prompt("输入要添加的插件名（fiber.name，不是包名）");
 					if (name === null || name.trim().length === 0) return;
 					const key = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+					if (key.length === 0) return;
 					if (removedPlugins[key] === true) {
 						await applyRestoreRemoved(key);
 						return;
@@ -1324,6 +1333,7 @@ window.__ModuleLoader__.load({
 					const detectedNow = detected.some((d) => d.key === key || String(d.pluginName || "").toLowerCase() === name.trim().toLowerCase());
 					if (!detectedNow && !window.confirm(`未检测到插件 "${name.trim()}"，仍要添加吗？（请确认是 fiber.name）`)) return;
 					await applyPatch({ pluginName: key, ignored: false });
+					await applyPatch({ pluginName: key, capable: true });
 				};
 
 				const addTool = async () => {
@@ -1332,14 +1342,21 @@ window.__ModuleLoader__.load({
 					const toolName = window.prompt("输入工具名");
 					if (toolName === null || toolName.trim().length === 0) return;
 					const key = pluginName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+					if (key.length === 0) return;
+					if (removedPlugins[key] === true) {
+						await applyRestoreRemoved(key);
+					}
+					const tool = toolName.trim();
 					const plugin = displayPlugins[key];
-					if (plugin !== undefined && plugin.hiddenTools !== undefined && plugin.hiddenTools[toolName.trim()] === true) {
-						await applyPatch({ pluginName: key, toolName: toolName.trim(), toolHidden: false });
+					if (plugin !== undefined && plugin.hiddenTools !== undefined && plugin.hiddenTools[tool] === true) {
+						await applyPatch({ pluginName: key, toolName: tool, toolHidden: false });
 						return;
 					}
-					const detectedNow = detectedMap[key] !== undefined && detectedMap[key].includes(toolName.trim());
-					if (!detectedNow && !window.confirm(`未检测到工具 "${toolName.trim()}"，仍要添加吗？`)) return;
-					await applyPatch({ pluginName: key, toolName: toolName.trim(), enabled: true });
+					const detectedNow = detectedMap[key] !== undefined && detectedMap[key].includes(tool);
+					if (!detectedNow && !window.confirm(`未检测到工具 "${tool}"，仍要添加吗？`)) return;
+					await applyPatch({ pluginName: key, ignored: false });
+					await applyPatch({ pluginName: key, capable: true });
+					await applyPatch({ pluginName: key, toolName: tool, enabled: true });
 				};
 
 				const addToolFor = async (key) => {
@@ -1353,25 +1370,46 @@ window.__ModuleLoader__.load({
 					}
 					const detectedNow = detectedMap[key] !== undefined && detectedMap[key].includes(tool);
 					if (!detectedNow && !window.confirm(`未检测到工具 "${tool}"，仍要添加吗？`)) return;
+					await applyPatch({ pluginName: key, ignored: false });
+					await applyPatch({ pluginName: key, capable: true });
 					await applyPatch({ pluginName: key, toolName: tool, enabled: true });
 				};
 
-				const projectDiffers = data.projectDiffers === true;
 				const userDiffersFactory = data.userDiffersFactory === true;
+				const effectiveEqualsFactory = data.effectiveEqualsFactory === true;
+				const effectiveEqualsUser = data.effectiveEqualsUser === true;
+				const hasProjectOverrides = data.hasProjectOverrides === true;
 				let restoreLabel = null;
 				let restoreOrange = false;
 				let restoreAction = null;
-				if (projectDiffers) {
-					restoreLabel = "恢复默认设置";
+				if (effectiveEqualsFactory) {
+					// 当前生效设置 = 原设置：黑色「恢复原设置」（把用户默认/项目都拉回出厂，通常是幂等）。
+					restoreLabel = "恢复原设置";
 					restoreOrange = false;
-					restoreAction = () => resetLayer("project");
-				} else if (userDiffersFactory) {
+					restoreAction = async () => {
+						if (typeof window !== "undefined" && !window.confirm("确定恢复为代码内出厂设置吗？用户默认与项目专属都会被重置。")) return;
+						await resetLayer("user");
+						await resetLayer("project");
+					};
+				} else if (effectiveEqualsUser) {
+					// 当前生效设置 = 用户默认，且用户默认 ≠ 原设置：橙色「恢复原设置」。
 					restoreLabel = "恢复原设置";
 					restoreOrange = true;
-					restoreAction = () => resetLayer("user");
+					restoreAction = async () => {
+						if (typeof window !== "undefined" && !window.confirm("确定把用户默认设置恢复为原设置，并清除项目专属设置吗？")) return;
+						await resetLayer("project");
+						await resetLayer("user");
+					};
+				} else {
+					// 当前生效设置 ≠ 用户默认（存在项目专属覆盖）：黑色「恢复默认设置」。
+					restoreLabel = "恢复默认设置";
+					restoreOrange = false;
+					restoreAction = async () => {
+						if (typeof window !== "undefined" && !window.confirm("确定清除当前项目专属设置，恢复为用户默认设置吗？")) return;
+						await resetLayer("project");
+					};
 				}
 
-				const removedPlugins = catalog.removedPlugins !== null && typeof catalog.removedPlugins === "object" ? catalog.removedPlugins : {};
 				const mainPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true && removedPlugins[key] !== true);
 				const ignoredOnlyPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true && removedPlugins[key] !== true);
 				const removedPluginKeys = pluginKeys.filter((key) => removedPlugins[key] === true);
@@ -1387,10 +1425,9 @@ window.__ModuleLoader__.load({
 					const plugin = item.plugin;
 					const open = expanded.has(key);
 					const tools = toolsOf(key).filter((tool) => plugin.hiddenTools === undefined || plugin.hiddenTools[tool] !== true);
-					const anyOn = tools.some((tool) => plugin.tools === undefined || plugin.tools[tool] !== false);
-					const effectivePlugin = data.effective !== null && data.effective !== undefined && data.effective.plugins !== undefined ? data.effective.plugins[key] : undefined;
-					const userEffectivePlugin = data.userEffective !== null && data.userEffective !== undefined && data.userEffective.plugins !== undefined ? data.userEffective.plugins[key] : undefined;
-					const projectUnique = JSON.stringify(effectivePlugin ?? null) !== JSON.stringify(userEffectivePlugin ?? null);
+					const pluginCapable = plugin.capable !== false;
+					const projectUnique = pluginUnique(key);
+					const displayName = key === "unknown" ? "未知插件" : key;
 					return createElement(
 						"div",
 						{ key, className: "kzm-state-item" },
@@ -1400,7 +1437,7 @@ window.__ModuleLoader__.load({
 							createElement(
 								"span",
 								{ className: "kzm-state-name", title: key },
-								key === "unknown" ? "未归属" : key,
+								displayName,
 								projectUnique && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							),
 							createElement(
@@ -1420,10 +1457,10 @@ window.__ModuleLoader__.load({
 								"忽略",
 							),
 							createElement(Toggle, {
-								checked: tools.length === 0 || anyOn,
+								checked: pluginCapable,
 								disabled: !writable || busy,
-								title: "Kaz 工具面开关：插件关 = 所有工具关",
-								onChange: (next) => void togglePluginAll(key, next),
+								title: "插件能力开关（大开关）：关 = 该插件下所有工具没有能力启用",
+								onChange: (next) => void applyPatch({ pluginName: key, capable: next }),
 							}),
 						),
 						open &&
@@ -1431,13 +1468,23 @@ window.__ModuleLoader__.load({
 								"div",
 								{ className: "kzm-tp-tools" },
 								createElement("p", { className: "kzm-tp-tools-title" }, "工具"),
-								tools.length === 0 && createElement("p", { className: "kzm-note" }, "暂无已登记工具；检测到后会自动出现并默认开启。"),
+								tools.length === 0 && createElement("p", { className: "kzm-note" }, Object.keys(plugin.hiddenTools || {}).length > 0 ? "该插件当前没有可见工具（已全部隐藏）。" : "暂无已登记工具；检测到后会自动出现并默认开启。"),
 								tools.map((tool) => {
-									const enabled = plugin.tools !== undefined && plugin.tools[tool] === true;
+									const hasExplicit = plugin.tools !== undefined && Object.prototype.hasOwnProperty.call(plugin.tools, tool);
+									const toolOn = hasExplicit
+										? plugin.tools[tool] === true
+										: detectedMap[key] !== undefined && detectedMap[key].includes(tool);
+									const enabled = pluginCapable && toolOn;
+									const unique = toolUnique(key, tool);
 									return createElement(
 										"div",
 										{ key: tool, className: "kzm-field-line" },
-										createElement("span", { className: "kzm-state-name", title: tool }, tool),
+										createElement(
+											"span",
+											{ className: "kzm-state-name", title: tool },
+											tool,
+											unique && createElement("span", { className: "kzm-override-badge" }, "专属"),
+										),
 										createElement(
 											"button",
 											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: true }) },
@@ -1445,8 +1492,8 @@ window.__ModuleLoader__.load({
 										),
 										createElement(Toggle, {
 											checked: enabled,
-											disabled: !writable || busy,
-											title: "Kaz 工具面开关",
+											disabled: !writable || busy || !pluginCapable,
+											title: "工具开关（小开关）：需插件能力开关同时打开才进入工具面",
 											onChange: (next) => void applyPatch({ pluginName: key, toolName: tool, enabled: next }),
 										}),
 									);
@@ -1479,6 +1526,12 @@ window.__ModuleLoader__.load({
 								},
 								restoreLabel,
 							),
+						hasProjectOverrides &&
+							createElement(
+								"button",
+								{ type: "button", className: "kzm-set-default-btn", disabled: !writable || busy, onClick: () => void applySetAsDefault() },
+								"设为默认设置",
+							),
 					),
 					createElement("p", { className: "kzm-state-desc" }, "官方工具与外置插件统一管理，只影响 Kaz 工具面，不卸载/不停用插件本体。当前项目：" + (targetCwd() || "（未知）")),
 					createElement(
@@ -1503,7 +1556,12 @@ window.__ModuleLoader__.load({
 								createElement(
 									"div",
 									{ key, className: "kzm-state-row" },
-									createElement("span", { className: "kzm-state-name" }, key),
+									createElement(
+										"span",
+										{ className: "kzm-state-name" },
+										key === "unknown" ? "未知插件" : key,
+										pluginUnique(key) && createElement("span", { className: "kzm-override-badge" }, "专属"),
+									),
 									createElement(
 										"button",
 										{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, restore: true }) },
@@ -1515,7 +1573,12 @@ window.__ModuleLoader__.load({
 								createElement(
 									"div",
 									{ key, className: "kzm-state-row" },
-									createElement("span", { className: "kzm-state-name" }, key),
+									createElement(
+										"span",
+										{ className: "kzm-state-name" },
+										key === "unknown" ? "未知插件" : key,
+										pluginUnique(key) && createElement("span", { className: "kzm-override-badge" }, "专属"),
+									),
 									createElement(
 										"button",
 										{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyRestoreRemoved(key) },
@@ -1532,7 +1595,12 @@ window.__ModuleLoader__.load({
 									createElement(
 										"div",
 										{ key: key + ":" + tool, className: "kzm-state-row" },
-										createElement("span", { className: "kzm-state-name" }, key + " / " + tool),
+										createElement(
+										"span",
+										{ className: "kzm-state-name" },
+										(key === "unknown" ? "未知插件" : key) + " / " + tool,
+										toolUnique(key, tool) && createElement("span", { className: "kzm-override-badge" }, "专属"),
+									),
 										createElement(
 											"button",
 											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: false }) },
@@ -1542,17 +1610,6 @@ window.__ModuleLoader__.load({
 								);
 							}),
 						),
-					createElement(
-						"div",
-						{ className: "kzm-tp-hidden" },
-						createElement(
-							"button",
-							{ type: "button", className: "kzm-cfg-btn", onClick: () => setShowRegistered((open) => !open) },
-							showRegistered ? "收起已注册工具诊断" : "已注册工具诊断（" + registeredTools.length + "）",
-						),
-						showRegistered &&
-							createElement("p", { className: "kzm-note" }, registeredTools.length > 0 ? registeredTools.join(", ") : "（当前注册表为空）"),
-					),
 					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
 				);
 			}
@@ -1791,8 +1848,8 @@ window.__ModuleLoader__.load({
 						"p",
 						{ className: "kzm-note" },
 						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 You are a helpful software engineer assistant.，kaz-memory 启用时切换为记忆优先提示词）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（toolWhitelist 白名单 + 已启用群组，子代理会话同样适用）；" +
-							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory + kaz-diag；" +
-							"kaz-memory 关闭时其工具自动移出白名单，kaz-diag 开启时 kaz_mode_status 自动加入。",
+							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory；" +
+							"kaz-memory 关闭时其工具自动移出白名单。",
 					),
 					displayPreset === KAZ_PRESET_ID &&
 						effectiveKazEnabled !== true &&

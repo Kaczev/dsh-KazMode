@@ -21,12 +21,12 @@ const TMP = mkdtempSync(join(tmpdir(), "kzm-probe-"));
 mkdirSync(join(TMP, ".dsh"), { recursive: true });
 const SESSION_FILE = join(TMP, ".dsh", "kaz-session-states.json");
 
-// 会话：agentPreset 决定 Kaz/非 Kaz；会话状态文件决定 kaz-memory/kaz-diag 开关。
+// 会话：agentPreset 决定 Kaz/非 Kaz；会话状态文件决定 kaz-memory 开关。
 const SESSIONS = {
-  "s-kaz": { agentPreset: "kaz", states: { "kaz-memory": { enabled: true }, "kaz-diag": { enabled: false } } },
-  "s-kaz-nomem": { agentPreset: "kaz", states: { "kaz-memory": { enabled: false }, "kaz-diag": { enabled: true } } },
-  "s-plain": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: false }, "kaz-diag": { enabled: false } } },
-  "s-plain-mem": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: true }, "kaz-diag": { enabled: false } } },
+  "s-kaz": { agentPreset: "kaz", states: { "kaz-memory": { enabled: true } } },
+  "s-kaz-nomem": { agentPreset: "kaz", states: { "kaz-memory": { enabled: false } } },
+  "s-plain": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: false } } },
+  "s-plain-mem": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: true } } },
 };
 {
   const sessionsJson = { version: 1, sessions: {} };
@@ -93,7 +93,7 @@ const agentsBySession = new Map();
 for (const [id, info] of Object.entries(SESSIONS)) {
   agentsBySession.set(id, { id, session: { header: { id, cwd: TMP, agentPreset: info.agentPreset } } });
 }
-const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search", "kaz_mode_status"];
+const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search"];
 
 const settings = makeSettings();
 const mockTools = {
@@ -175,7 +175,7 @@ check("① kazMode 服务提供 detectedToolPlugins（只读检测）", kazMode 
   check("①.6 RPC 通道已注册", typeof rpc === "function");
   const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
   check("①.6 getExternalToolPlugins 返回三层结构", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.factory === "object" && typeof getRes.value.user === "object" && typeof getRes.value.project === "object" && typeof getRes.value.effective === "object");
-  check("①.6 初始 projectDiffers=false / userDiffersFactory=true（用户默认空 ≠ 官方出厂）", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === true);
+  check("①.6 初始 projectDiffers=false / userDiffersFactory=true（检测到的新插件已写入用户默认）", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === true);
   const setRes = await rpc("setExternalToolPlugin", {
     cwd: TMP,
     layer: "project",
@@ -259,9 +259,7 @@ check("① kazEnabled(非 kaz 会话)=false", kazMode.kazEnabled(sPlain) === fal
 check("① pluginEnabled(s-kaz, kaz-memory)=true", kazMode.pluginEnabled(sKaz, "kaz-memory") === true);
 check("① pluginEnabled(s-kaz-nomem, kaz-memory)=false", kazMode.pluginEnabled(sKazNomem, "kaz-memory") === false);
 check("① toolVisible(s-kaz, memory_search)=true（记忆开）", kazMode.toolVisible(sKaz, "memory_search") === true);
-check("① toolVisible(s-kaz, kaz_mode_status)=false（诊断关）", kazMode.toolVisible(sKaz, "kaz_mode_status") === false);
 check("① toolVisible(s-kaz-nomem, memory_search)=false（记忆关）", kazMode.toolVisible(sKazNomem, "memory_search") === false);
-check("① toolVisible(s-kaz-nomem, kaz_mode_status)=true（诊断开）", kazMode.toolVisible(sKazNomem, "kaz_mode_status") === true);
 check("① toolVisible(s-plain, memory_search)=false（非 Kaz 记忆关）", kazMode.toolVisible(sPlain, "memory_search") === false);
 check("① toolVisible(s-plain-mem, memory_search)=true（非 Kaz 记忆开）", kazMode.toolVisible(sPlainMem, "memory_search") === true);
 check("① toolVisible(s-plain, web_search)=true（非 Kaz 其它工具放行）", kazMode.toolVisible(sPlain, "web_search") === true);
@@ -282,19 +280,15 @@ const ALL_TOOLS = [...WHITELIST, "workflow", "subagent"];
 const kazNames = await runAssemble(sKaz, ALL_TOOLS);
 check("② Kaz 会话：白名单外工具被移除（workflow/subagent）", !kazNames.includes("workflow") && !kazNames.includes("subagent"));
 check("② Kaz 会话：白名单内工具保留（read/memory_search/web_search）", kazNames.includes("read") && kazNames.includes("memory_search") && kazNames.includes("web_search"));
-check("② Kaz 会话：kaz_mode_status 被过滤（该会话 kaz-diag 关）", !kazNames.includes("kaz_mode_status"));
 const kazNomemNames = await runAssemble(sKazNomem, ALL_TOOLS);
 check("② Kaz 会话（记忆关）：记忆工具被过滤", !kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save"));
-check("② Kaz 会话（诊断开）：kaz_mode_status 保留", kazNomemNames.includes("kaz_mode_status"));
 
 // ③ 组装层：非 Kaz 会话
 const plainNames = await runAssemble(sPlain, ALL_TOOLS);
 check("③ 非 Kaz 会话（记忆关）：记忆工具被移除", !plainNames.includes("memory_search") && !plainNames.includes("memory_save"));
-check("③ 非 Kaz 会话：kaz_mode_status 被移除（诊断关）", !plainNames.includes("kaz_mode_status"));
 check("③ 非 Kaz 会话：标准工具保留（workflow/subagent/web_search）", plainNames.includes("workflow") && plainNames.includes("subagent") && plainNames.includes("web_search"));
 const plainMemNames = await runAssemble(sPlainMem, ALL_TOOLS);
 check("③ 非 Kaz 会话（记忆开）：记忆工具保留", plainMemNames.includes("memory_search"));
-check("③ 非 Kaz 会话（记忆开）：kaz_mode_status 仍移除（诊断关）", !plainMemNames.includes("kaz_mode_status"));
 
 // ④ 执行层
 const gate = listeners.get("tools/pre-execute")[0];
@@ -307,8 +301,6 @@ const denyMemPlain = await runGate(sPlain, "memory_search");
 check("④ 非 Kaz 会话（记忆关）：拒绝 memory_search", denyMemPlain.kind === "deny");
 const allowMemPlain = await runGate(sPlainMem, "memory_search");
 check("④ 非 Kaz 会话（记忆开）：放行 memory_search", allowMemPlain.kind === "allow");
-const denyDiag = await runGate(sPlain, "kaz_mode_status");
-check("④ 非 Kaz 会话（诊断关）：拒绝 kaz_mode_status", denyDiag.kind === "deny");
 const internalCall = await gate({ name: "workflow" }, async () => ({ kind: "allow" }));
 check("④ 无 agent 的内部调用放行", internalCall.kind === "allow");
 

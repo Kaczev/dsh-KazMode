@@ -48,7 +48,6 @@ check("① resolveFirstRoundTools：状态未知 → 兜底 pwsh/read/edit", JSO
 const SIX_MEMORY = ["memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"];
 check("② TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "glob", "grep", "web_search"].every((t) => TOOL_WHITELIST.includes(t)));
 check("② TOOL_WHITELIST 含记忆六工具", SIX_MEMORY.every((t) => TOOL_WHITELIST.includes(t)));
-check("② TOOL_WHITELIST 含诊断工具 kaz_mode_status", TOOL_WHITELIST.includes("kaz_mode_status"));
 const REMOVED_2026_08_21 = ["read_image", "ralph", "workflow", "create_goal", "get_goal", "update_goal", "str_replace_editor"];
 check("② 已按 2026-08-21 决定移除 read_image/ralph/workflow/goal/str_replace_editor", REMOVED_2026_08_21.every((t) => !TOOL_WHITELIST.includes(t)));
 check("② web_search 保留（复用 DeepSeek key，实测可用）", TOOL_WHITELIST.includes("web_search"));
@@ -59,8 +58,8 @@ const userList = ["pwsh", "edit", "web_search", "pwsh"];
 const eff = effectiveToolWhitelist(userList);
 check("③ 用户白名单原样生效（去重）", eff.length === 3 && eff.includes("pwsh") && eff.includes("edit") && eff.includes("web_search"));
 check("③ 不在白名单的工具不进入（哪怕被注册也无所谓——闸门只认清单）", !eff.includes("memory_save"));
-const withMemory = effectiveToolWhitelist([...userList, "memory_search", "kaz_mode_status"]);
-check("③ 白名单含记忆/诊断工具时它们进入有效白名单", withMemory.includes("memory_search") && withMemory.includes("kaz_mode_status"));
+const withMemory = effectiveToolWhitelist([...userList, "memory_search"]);
+check("③ 白名单含记忆工具时它们进入有效白名单", withMemory.includes("memory_search"));
 const fallback = effectiveToolWhitelist([]);
 check("③ 白名单缺失/为空时回退 TOOL_WHITELIST", fallback.length === TOOL_WHITELIST.length && fallback.every((t) => TOOL_WHITELIST.includes(t)));
 
@@ -71,7 +70,7 @@ const full = computeSurface({
   minimalPhase: false,
   firstRoundTools: ["memory_search"],
 });
-check("④ 全量阶段 = 有效白名单（含记忆/诊断工具）", full.has("pwsh") && full.has("read") && full.has("memory_search") && full.has("kaz_mode_status"));
+check("④ 全量阶段 = 有效白名单（含记忆工具）", full.has("pwsh") && full.has("read") && full.has("memory_search"));
 const restricted = computeSurface({ toolWhitelist: ["pwsh", "edit"], minimalPhase: false });
 check("④ 用户收窄白名单后全量阶段只含清单内工具", restricted.size === 2 && restricted.has("pwsh") && restricted.has("edit") && !restricted.has("memory_search"));
 const first = computeSurface({
@@ -133,7 +132,7 @@ check("⑤ 插件 ignored 时即便检测到也不进入工具面", surfaceIgnor
 // ⑥ 统一工具插件出厂默认：官方工具也走同一套插件分组格式
 {
   const factorySurface = computeToolPluginSurface({ factory: TOOL_PLUGIN_FACTORY, user: {}, project: {}, detected: {} });
-  const required = ["pwsh", "read", "write", "edit", "glob", "grep", "job_list", "job_output", "job_kill", "ask_user_question", "todo_write", "web_search", "memory_save", "memory_search", "kaz_mode_status"];
+  const required = ["pwsh", "read", "write", "edit", "glob", "grep", "job_list", "job_output", "job_kill", "ask_user_question", "todo_write", "web_search", "memory_save", "memory_search"];
   check("⑥ TOOL_PLUGIN_FACTORY 覆盖当前官方默认工具面", required.every((tool) => factorySurface.has(tool)));
   check("⑥ TOOL_PLUGIN_FACTORY 不含已移除的 read_image/str_replace_editor", !factorySurface.has("read_image") && !factorySurface.has("str_replace_editor"));
 }
