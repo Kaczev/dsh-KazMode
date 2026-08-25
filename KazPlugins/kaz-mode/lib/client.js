@@ -1100,7 +1100,7 @@ window.__ModuleLoader__.load({
 											disabled: disabled === true,
 											onClick: () => onPatch(plugin.id, { generation_kwargs: { ...DEEPSEEK_KAZ_KWARGS } }),
 										},
-										"使用 Kaz 模式的默认值（0.2 / 0.9 / 1.2）",
+										"使用 Kaz 模式的默认值（0.6 / 0.95 / 1.2）",
 									),
 								),
 						),
