@@ -39,7 +39,6 @@ import {
   DEFAULT_UNABLED_TOOL_PLUGINS,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
-  OFFICIAL_TOOL_NAMES,
   UNKNOWN_PLUGIN_KEY,
 } from "./tool-plugin-catalog.js";
 
@@ -227,7 +226,7 @@ export const TOOL_PLUGIN_DEFAULTS_FACTORY = {
 };
 
 /** 官方 / Kaz 插件分类目录（源码修改点，见 tool-plugin-catalog.js）。 */
-export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS, OFFICIAL_TOOL_NAMES, UNKNOWN_PLUGIN_KEY, DEFAULT_ENABLED_TOOL_PLUGINS, DEFAULT_UNABLED_TOOL_PLUGINS } from "./tool-plugin-catalog.js";
+export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS, UNKNOWN_PLUGIN_KEY, DEFAULT_ENABLED_TOOL_PLUGINS, DEFAULT_UNABLED_TOOL_PLUGINS } from "./tool-plugin-catalog.js";
 
 /** 通用别名：外置/官方统一叫“工具插件”，后续新代码优先用这些名字。 */
 export const emptyToolPluginState = emptyExternalToolPluginState;

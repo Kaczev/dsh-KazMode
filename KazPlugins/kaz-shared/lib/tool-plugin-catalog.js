@@ -117,9 +117,6 @@ export const DEFAULT_ENABLED_TOOL_PLUGINS = [
   "kaz-memory",
 ];
 
-/** DEFAULT_ENABLED_TOOL_PLUGINS 的语义别名：插件级“有能力启用”。 */
-export const DEFAULT_CAPABLE_TOOL_PLUGINS = DEFAULT_ENABLED_TOOL_PLUGINS;
-
 /**
  * 已知但默认没有“能力启用”的包名列表。
  * 这些插件已经在 TOOL_PLUGIN_CATALOG 里登记，因此检测时不会被当作“新插件”自动开启。
@@ -158,23 +155,4 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
 /** Kaz 模式自家插件（用于 UI 面板分栏）。 */
 export const KAZ_TOOL_PLUGIN_KEYS = [
   "kaz-memory",
-];
-
-/** 官方工具名（含不在 TOOL_PLUGIN_CATALOG 默认清单里的官方工具），用于 registeredTools 扫描时排除。 */
-export const OFFICIAL_TOOL_NAMES = [
-  "read_image",
-  "str_replace_editor",
-  "subagent",
-  "subagent_fork",
-  "send_message",
-  "interrupt_agent",
-  "list_agents",
-  "report",
-  "workflow",
-  "ralph",
-  "exit_plan_mode",
-  "create_goal",
-  "get_goal",
-  "update_goal",
-  "run_code",
 ];

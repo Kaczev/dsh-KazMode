@@ -60,7 +60,6 @@ import {
   pluginLayerToToolPluginState,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
-  OFFICIAL_TOOL_NAMES,
   UNKNOWN_PLUGIN_KEY,
 } from "kaz-shared";
 
@@ -905,7 +904,7 @@ export default {
 
     /**
      * 用 registeredTools（当前注册表）补检测：解决包装装得太晚导致漏抓的问题。
-     *  - 官方工具名/官方出厂工具/记忆工具直接跳过；
+     *  - 官方出厂工具/记忆工具直接跳过（已知禁用的工具也已写进原设置，无需再单独维护名单）；
      *  - 已知插件目录里的工具归入对应插件；
      *  - 其余未归属工具进入 unassignedTools，并归入“未知插件”。
      */
@@ -914,7 +913,6 @@ export default {
         const schemas = ctx.tools?.schemas?.();
         if (!Array.isArray(schemas)) return;
         const officialTools = new Set([
-          ...OFFICIAL_TOOL_NAMES,
           ...Object.values(TOOL_PLUGIN_FACTORY_STATE.plugins).flatMap((plugin) => Object.keys(plugin.tools ?? {})),
           ...MEMORY_TOOLS,
         ]);
