@@ -43,6 +43,8 @@ check("② mergeToolCatalogs 后层覆盖", mergeToolCatalogs({ a: { x: true } }
 
 const universe = buildToolUniverse(TOOL_PLUGIN_CATALOG, { "dsh-pixel-art": { render_pixel_art: true } });
 check("③ T0 含官方工具和用户添加插件", universe["tool-fs"]?.read === true && universe["dsh-pixel-art"]?.render_pixel_art === true);
+const universeProject = buildToolUniverse(TOOL_PLUGIN_CATALOG, {}, { "dsh-pixel-art": { render_pixel_art: true } });
+check("③ T0 含项目 other 添加的插件", universeProject["dsh-pixel-art"]?.render_pixel_art === true);
 
 const eff = computeEffectiveToolState({
   codeCatalog: TOOL_PLUGIN_CATALOG,
@@ -52,6 +54,13 @@ const eff = computeEffectiveToolState({
 });
 const surface = computeToolPluginSurfaceFromEffective(eff);
 check("④ 用户添加插件默认进入工具面", surface.has("render_pixel_art"));
+const effProj = computeEffectiveToolState({
+  codeCatalog: TOOL_PLUGIN_CATALOG,
+  codeEnabled: TOOL_PLUGINS,
+  projectOtherEnable: { "dsh-pixel-art": true },
+  projectOtherCatalog: { "dsh-pixel-art": { render_pixel_art: true } },
+});
+check("④ 项目 other 的外置插件/工具进入工具面", computeToolPluginSurfaceFromEffective(effProj).has("render_pixel_art"));
 check("④ 未启用插件工具不进入", !surface.has("subagent"));
 check("④ computeToolPluginSurface 一步到位", computeToolPluginSurface({
   codeCatalog: TOOL_PLUGIN_CATALOG,

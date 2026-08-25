@@ -1262,11 +1262,16 @@ window.__ModuleLoader__.load({
 				const T0 = effective.T0 ?? {};
 				const T = effective.T ?? {};
 				const P = effective.P !== null && typeof effective.P === "object" ? effective.P : {};
+				const defaultsP = effective.P1 !== null && typeof effective.P1 === "object" ? effective.P1 : {};
+				const defaultsT = effective.T1 !== null && typeof effective.T1 === "object" ? effective.T1 : {};
 				const enabledPlugins = new Set(Object.keys(P).filter((key) => P[key] === true));
 				const userOtherEnable = data.userOtherEnable !== null && typeof data.userOtherEnable === "object" ? data.userOtherEnable : {};
 				const projectOtherEnable = data.projectOtherEnable !== null && typeof data.projectOtherEnable === "object" ? data.projectOtherEnable : {};
 				const userEnable = data.userEnable !== null && typeof data.userEnable === "object" ? data.userEnable : {};
 				const projectEnable = data.projectEnable !== null && typeof data.projectEnable === "object" ? data.projectEnable : {};
+
+				const pluginOwned = (key) => (P[key] ?? false) !== (defaultsP[key] ?? false);
+				const toolOwned = (key, tool) => (T[key]?.[tool] ?? false) !== (defaultsT[key]?.[tool] ?? false);
 
 				const pluginKeys = [...new Set([...Object.keys(T0), ...Object.keys(userOtherEnable), ...Object.keys(projectOtherEnable), ...Object.keys(userEnable), ...Object.keys(projectEnable)])].sort();
 				const displayPluginKeys = pluginKeys.filter((key) => {
@@ -1327,6 +1332,7 @@ window.__ModuleLoader__.load({
 							"div",
 							{ className: "kzm-state-row" },
 							createElement("span", { className: "kzm-state-name", title: key }, key),
+							pluginOwned(key) && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							isExternal
 								? createElement("button", { type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyRemovePlugin(key) }, "移除")
 								: createElement("span", { className: "kzm-cfg-btn", style: { visibility: "hidden" }, "aria-hidden": true }, "移除"),
@@ -1350,6 +1356,7 @@ window.__ModuleLoader__.load({
 										"div",
 										{ key: tool, className: "kzm-field-line" },
 										createElement("span", { className: "kzm-state-name", title: tool }, tool),
+										toolOwned(key, tool) && createElement("span", { className: "kzm-override-badge" }, "专属"),
 										isExternal &&
 											createElement("button", { type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyDeleteTool(key, tool) }, "删除"),
 										createElement(Toggle, {

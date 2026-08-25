@@ -171,16 +171,16 @@ const sPlainMem = agentOf("s-plain-mem");
   check("①.6 getExternalToolPlugins 返回四文件模型", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.userEnable === "object" && typeof getRes.value.userCatalog === "object" && typeof getRes.value.effective === "object");
   check("①.6 初始 projectDiffers=false / userDiffersFactory=false", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
   const addP = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", addPlugin: true });
-  check("①.6 addPlugin 写入 other-enable/other-catalog", addP !== null && addP.ok === true && addP.value.userOtherEnable["dsh-pixel-art"] === true);
+  check("①.6 addPlugin 写入用户 other-enable/other-catalog", addP !== null && addP.ok === true && addP.value.userOtherEnable["dsh-pixel-art"] === true);
   const addT = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", toolName: "render_pixel_art", addTool: true });
-  check("①.6 addTool 写入 other-catalog", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true);
+  check("①.6 addTool 写入用户 other-catalog", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true);
   check("①.6 手动添加的插件/工具进入 Kaz 工具面", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
   const resetU = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "user" });
-  check("①.6 reset(user) 清空默认层并保留 other-*", resetU !== null && resetU.ok === true && Object.keys(resetU.value.userEnable).length === 0 && Object.keys(resetU.value.userCatalog).length === 0 && resetU.value.userOtherEnable["dsh-pixel-art"] === true);
+  check("①.6 reset(user) 用出厂数据替换默认层并把 other-* 全置 true", resetU !== null && resetU.ok === true && resetU.value.userEnable["tool-fs"] === true && resetU.value.userCatalog["tool-fs"]?.read === true && resetU.value.userOtherEnable["dsh-pixel-art"] === true && resetU.value.projectOtherEnable["dsh-pixel-art"] === undefined);
   const tog = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", layer: "project", capable: false });
-  check("①.6 capable false 写入 project enable 字典", tog !== null && tog.ok === true && tog.value.projectEnable["dsh-pixel-art"] === false);
+  check("①.6 外置插件 capable false 写入项目 other-enable 字典", tog !== null && tog.ok === true && tog.value.projectOtherEnable["dsh-pixel-art"] === false);
   const rem = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", removePlugin: true });
-  check("①.6 removePlugin 删除用户添加插件", rem !== null && rem.ok === true && rem.value.userOtherEnable["dsh-pixel-art"] === undefined && rem.value.projectEnable["dsh-pixel-art"] === undefined);
+  check("①.6 removePlugin 删除用户添加插件", rem !== null && rem.ok === true && rem.value.userOtherEnable["dsh-pixel-art"] === undefined && rem.value.projectOtherEnable["dsh-pixel-art"] === undefined && rem.value.projectOtherCatalog["dsh-pixel-art"] === undefined);
 }
 
 // ①.8 官方工具统一走 factory/JSON，不再依赖 settings.yaml 的 toolWhitelist

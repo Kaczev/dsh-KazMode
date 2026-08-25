@@ -11,6 +11,7 @@
 //   原设置   = 代码 TOOL_PLUGIN_CATALOG / TOOL_PLUGINS + 用户 other-*.json
 //   默认设置 = 用户 tool-plugin.json / tool-plugin-catalog.json + 用户 other-*.json
 //   专属设置 = 项目 tool-plugin.json / tool-plugin-catalog.json + 项目 other-*.json
+//   （外置插件/工具的专属开关写项目 other-*，官方/Kaz 写项目 tool-plugin 文件）
 // 工具面只放行：
 //   - 插件在“启用插件并集”里；
 //   - 工具在 T0 全集里；
@@ -199,11 +200,11 @@ export function mergeToolCatalogs(...catalogs) {
 }
 
 /**
- * 构造 T0 全集：代码 TOOL_PLUGIN_CATALOG 与用户 other-tool-plugin-catalog 的所有键，
+ * 构造 T0 全集：代码 TOOL_PLUGIN_CATALOG 与各层 other-tool-plugin-catalog 的所有键，
  * 全部视为 true（T0 只决定“是否允许出现”，不决定最终开关）。
  */
-export function buildToolUniverse(codeCatalog, otherCatalog) {
-  const merged = mergeToolCatalogs(codeCatalog, otherCatalog);
+export function buildToolUniverse(...catalogs) {
+  const merged = mergeToolCatalogs(...catalogs);
   const universe = {};
   for (const [key, tools] of Object.entries(merged)) {
     universe[key] = Object.fromEntries(Object.keys(tools).map((tool) => [tool, true]));
@@ -228,11 +229,11 @@ export function computeEffectiveToolState({
   projectOtherCatalog = {},
 } = {}) {
   const P0 = mergePluginEnableDicts(codeEnabled, userOtherEnable);
-  const T0 = buildToolUniverse(codeCatalog, userOtherCatalog);
+  const T0 = buildToolUniverse(codeCatalog, userOtherCatalog, projectOtherCatalog);
   // 默认以“代码原设置 + 用户 other-*”为基底，再叠加用户默认文件。
   const P1 = mergePluginEnableDicts(P0, userEnable);
   const T1 = mergeToolCatalogs(codeCatalog, userOtherCatalog, userCatalog);
-  // 专属在“默认”之上叠加项目文件；项目文件不出现时回落到默认/原设置。
+  // 专属在“默认”之上叠加项目 other-* 与项目 tool-plugin 文件；项目 other 可存外置插件/工具的专属开关。
   const P2 = mergePluginEnableDicts(P1, projectOtherEnable, projectEnable);
   const T2 = mergeToolCatalogs(T1, projectOtherCatalog, projectCatalog);
   const P = P2;

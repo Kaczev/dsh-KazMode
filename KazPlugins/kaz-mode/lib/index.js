@@ -132,12 +132,12 @@ let DEFAULTS_FILE = join(STORAGE_DIR, DEFAULTS_FILE_NAME);
 const USER_ENABLE_TOOL_PLUGIN_FILE = "tool-plugin.json";
 /** 用户目录：默认“工具开关”字典。 */
 const USER_TOOL_PLUGIN_CATALOG_FILE = "tool-plugin-catalog.json";
-/** 用户目录：用户添加的“插件启用”字典（原设置的用户部分）。 */
+/** 用户目录：用户手动添加的“插件启用”字典（共享到所有项目；恢复原设置时全部置 true）。 */
 const USER_OTHER_ENABLE_TOOL_PLUGIN_FILE = "other-tool-plugin.json";
-/** 用户目录：用户添加的“工具开关”字典（原设置的用户部分）。 */
+/** 用户目录：用户手动添加的“工具开关”字典（共享到所有项目；恢复原设置时全部置 true）。 */
 const USER_OTHER_TOOL_PLUGIN_CATALOG_FILE = "other-tool-plugin-catalog.json";
 
-/** 项目目录：与用户目录同名的四个文件。 */
+/** 项目目录：与用户目录同名的四个文件（外置插件/工具的专属开关写项目 other-*，官方/Kaz 写项目 tool-plugin 文件）。 */
 const PROJECT_ENABLE_TOOL_PLUGIN_FILE = USER_ENABLE_TOOL_PLUGIN_FILE;
 const PROJECT_TOOL_PLUGIN_CATALOG_FILE = USER_TOOL_PLUGIN_CATALOG_FILE;
 const PROJECT_OTHER_ENABLE_TOOL_PLUGIN_FILE = USER_OTHER_ENABLE_TOOL_PLUGIN_FILE;
@@ -376,10 +376,11 @@ function loadStateFile(cwd, logger) {
 // ---------------------------------------------------------------------------
 // 外置工具插件四文件模型（2026-08-25 用户新架构）
 //   原设置   = 代码 TOOL_PLUGIN_CATALOG / TOOL_PLUGINS
-//              + 用户 other-*.json（用户自己添加的插件和工具）
+//              + 用户 other-*.json（用户手动添加，共享到所有项目）
 //   默认设置 = 用户 tool-plugin.json / tool-plugin-catalog.json
 //              + 用户 other-*.json
-//   专属设置 = 项目里同名四个文件
+//   专属设置 = 项目 tool-plugin.json / tool-plugin-catalog.json + 项目 other-*.json
+//              （外置插件/工具的专属开关写项目 other-*，官方/Kaz 写项目 tool-plugin 文件）
 // ---------------------------------------------------------------------------
 
 /** 安全读取 JSON；不存在/损坏时回退 fallback。 */
@@ -596,9 +597,31 @@ function saveLayerFourFiles(layer, cwd, data, logger) {
   }
 }
 
+/** 把“插件启用”字典所有值置为 true（保留键）。 */
+function allTruePluginEnableDict(dict) {
+  const out = {};
+  for (const key of Object.keys(normalizePluginEnableDict(dict))) out[key] = true;
+  return out;
+}
+
+/** 把“工具开关”字典所有值置为 true（保留插件/工具键）。 */
+function allTrueToolCatalog(catalog) {
+  const out = {};
+  const normalized = normalizeToolCatalog(catalog);
+  for (const [key, tools] of Object.entries(normalized)) {
+    out[key] = Object.fromEntries(Object.keys(tools).map((tool) => [tool, true]));
+  }
+  return out;
+}
+
+/** 是否为官方/Kaz 插件（外置插件走 other-* 文件，官方/Kaz 走 tool-plugin 文件）。 */
+function isOfficialOrKazToolPluginKey(key) {
+  return OFFICIAL_TOOL_PLUGIN_KEYS.includes(key) || KAZ_TOOL_PLUGIN_KEYS.includes(key);
+}
+
 /** 永久删除一个用户添加的外置插件（从用户/项目四文件里都移除）。 */
 function deleteExternalPluginPermanently(pluginKey, cwd, logger) {
-  if (OFFICIAL_TOOL_PLUGIN_KEYS.includes(pluginKey) || KAZ_TOOL_PLUGIN_KEYS.includes(pluginKey)) return false;
+  if (isOfficialOrKazToolPluginKey(pluginKey)) return false;
   for (const layer of ["user", "project"]) {
     const data = loadLayerFourFiles(layer, cwd, logger);
     delete data.enable[pluginKey];
@@ -612,7 +635,7 @@ function deleteExternalPluginPermanently(pluginKey, cwd, logger) {
 
 /** 永久删除一个用户添加的工具（从用户/项目四文件里都移除）。 */
 function deleteExternalToolPermanently(pluginKey, toolName, cwd, logger) {
-  if (OFFICIAL_TOOL_PLUGIN_KEYS.includes(pluginKey) || KAZ_TOOL_PLUGIN_KEYS.includes(pluginKey)) return false;
+  if (isOfficialOrKazToolPluginKey(pluginKey)) return false;
   for (const layer of ["user", "project"]) {
     const data = loadLayerFourFiles(layer, cwd, logger);
     delete data.catalog[pluginKey]?.[toolName];
@@ -1466,7 +1489,7 @@ export default {
             return { ok: true, value: toolPluginValue(layers) };
           }
 
-          // 手动添加插件：写入用户 other-*（原设置的用户部分）。
+          // 手动添加插件：写入用户 other-*（共享到所有项目）。
           if (input.addPlugin === true) {
             const user = loadLayerFourFiles("user", cwd, ctx.logger);
             user.otherEnable[key] = true;
@@ -1476,7 +1499,7 @@ export default {
             return { ok: true, value: toolPluginValue(layers) };
           }
 
-          // 手动添加工具：写入用户 other-catalog，并确保插件在 other-enable 里。
+          // 手动添加工具：写入用户 other-catalog，并确保插件在用户 other-enable 里。
           if (input.addTool === true && tool.length > 0) {
             const user = loadLayerFourFiles("user", cwd, ctx.logger);
             user.otherEnable[key] = true;
@@ -1486,16 +1509,19 @@ export default {
             return { ok: true, value: toolPluginValue(layers) };
           }
 
-          // 其它开关：写指定层（默认/专属）的 enable / catalog。
+          // 其它开关：官方/Kaz 插件写 tool-plugin 文件；外置插件写 other-* 文件。
           const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
           if (layer === null) return rpcFail("缺少 layer");
           const data = loadLayerFourFiles(layer, cwd, ctx.logger);
+          const isExternal = !isOfficialOrKazToolPluginKey(key);
+          const enableTarget = isExternal ? data.otherEnable : data.enable;
+          const catalogTarget = isExternal ? data.otherCatalog : data.catalog;
 
           if (typeof input.capable === "boolean") {
-            data.enable[key] = input.capable;
+            enableTarget[key] = input.capable;
           }
           if (tool.length > 0 && typeof input.enabled === "boolean") {
-            data.catalog[key] = { ...(data.catalog[key] ?? {}), [tool]: input.enabled };
+            catalogTarget[key] = { ...(catalogTarget[key] ?? {}), [tool]: input.enabled };
           }
           saveLayerFourFiles(layer, cwd, data, ctx.logger);
           const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
@@ -1507,10 +1533,15 @@ export default {
           if (layer === null) return rpcFail("缺少 layer");
           const cwd = resolveExternalCwd();
           if (layer === "user") {
-            saveUserEnable({}, ctx.logger);
-            saveUserCatalog({}, ctx.logger);
-            // other-* 是“原设置”的用户部分，恢复原设置时保留。
+            // 恢复原设置：默认两个文件用代码出厂数据完全替换；
+            // 用户 other-* 保留键但全部置为 true。
+            const user = loadLayerFourFiles("user", cwd, ctx.logger);
+            saveUserEnable(TOOL_PLUGINS, ctx.logger);
+            saveUserCatalog(TOOL_PLUGIN_CATALOG, ctx.logger);
+            saveUserOtherEnable(allTruePluginEnableDict(user.otherEnable), ctx.logger);
+            saveUserOtherCatalog(allTrueToolCatalog(user.otherCatalog), ctx.logger);
           } else {
+            // 恢复默认设置：清空项目四个文件（含项目 other-* 的外置专属开关）。
             saveProjectEnable(cwd, {}, ctx.logger);
             saveProjectCatalog(cwd, {}, ctx.logger);
             saveProjectOtherEnable(cwd, {}, ctx.logger);
@@ -1525,6 +1556,7 @@ export default {
           const before = loadExternalToolPluginLayers(cwd, ctx.logger);
           if (!before.hasProjectOverrides) return rpcFail("当前没有项目专属设置可设为默认");
           const project = loadLayerFourFiles("project", cwd, ctx.logger);
+          // 用项目四个文件替换用户四个对应文件。
           saveUserEnable(project.enable, ctx.logger);
           saveUserCatalog(project.catalog, ctx.logger);
           saveUserOtherEnable(project.otherEnable, ctx.logger);

@@ -45,15 +45,20 @@ Kaz 模式同时具备两个入口，双向同步：
 
 - **原设置（factory）**：`kaz-shared/lib/tool-plugin-catalog.js`
   （`TOOL_PLUGIN_CATALOG` = 工具目录，`TOOL_PLUGINS` = 插件能力开关）
-  + 用户手动添加的 `~/.dsh/storages/other-tool-plugin.json` / `other-tool-plugin-catalog.json`；
+  + 用户 `~/.dsh/storages/other-tool-plugin.json` / `other-tool-plugin-catalog.json`
+  （用户手动添加，共享到所有项目）；
 - **用户默认**：`~/.dsh/storages/tool-plugin.json` + `tool-plugin-catalog.json`
   + `other-tool-plugin.json` + `other-tool-plugin-catalog.json`；
-- **项目专属**：`<项目>/.dsh/storages/` 下同名四个文件，覆盖用户默认。
+- **项目专属**：`<项目>/.dsh/storages/` 下四个同名文件，覆盖用户默认。
+  - 官方/Kaz 插件/工具的开关 → 项目 `tool-plugin.json` / `tool-plugin-catalog.json`
+  - 外置插件/工具的开关 → 项目 `other-tool-plugin.json` / `other-tool-plugin-catalog.json`
 
 Kaz 面板的「工具插件」区块是唯一白名单管理器：插件能力开关（大开关）、工具开关
-（小开关）、手动添加插件/工具、删除用户添加的外置插件/工具。**手动添加一律写入用户
-目录的 `other-*` 文件**（不会进项目目录，避免个人数据随项目上传 GitHub）。不做自动
-检测、不写“未知插件”、没有忽略/隐藏。“已知但默认关闭”的插件/工具保持关闭。
+（小开关）、手动添加插件/工具、删除用户添加的外置插件/工具。**手动添加插件/工具写入
+用户目录的 `other-*` 文件**（共享到所有项目）；**开关调整写入项目目录**（官方/Kaz 写
+`tool-plugin` 两个文件，外置写 `other-*` 两个文件，均为专属、不跨项目）；「设为默认设置」
+用项目四个文件替换用户四个对应文件；「恢复原设置」把用户默认两个文件替换为代码出厂
+数据，并把用户 `other-*` 全部置为 true。不做自动检测、不写“未知插件”、没有忽略/隐藏。“已知但默认关闭”的插件/工具保持关闭。
 
 ```jsonc
 // 插件启用字典（tool-plugin.json / other-tool-plugin.json）
@@ -99,9 +104,10 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   - 原设置：`kaz-shared/lib/tool-plugin-catalog.js`（`TOOL_PLUGIN_CATALOG` + `TOOL_PLUGINS`）；
   - 用户默认：`~/.dsh/storages/tool-plugin.json` + `tool-plugin-catalog.json`
     + `other-tool-plugin.json` + `other-tool-plugin-catalog.json`；
-  - 项目专属：`<项目>/.dsh/storages/` 下同名四个文件；
+  - 项目专属：`<项目>/.dsh/storages/` 下四个文件（官方/Kaz 写 `tool-plugin` 两个，外置写 `other-*` 两个）；
   - 官方/Kaz 分类修改点：`kaz-shared/lib/tool-plugin-catalog.js`；
-  - 不做自动检测；新插件/新工具只能手动添加，写入用户 `other-*` 文件。
+  - 不做自动检测；新插件/新工具只能手动添加，写入用户 `other-*` 文件（共享所有项目）；
+    开关调整写项目对应文件，可经「设为默认设置」把项目四个文件复制为用户默认。
 - `kaz-memory` 关闭 → 六工具自动移出。
 
 ### 5. round-minimal 信号（首阶段极简）
@@ -162,7 +168,7 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    第一次工具调用后恢复工具插件 JSON 定义的全部工具（kaz-memory 关闭时无记忆工具）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
-5. Kaz 面板「工具插件」区块可管理官方/外置插件（开关、忽略/还原、手动添加），改完即生效；
+5. Kaz 面板「工具插件」区块可管理官方/外置插件（开关、手动添加、删除外置），改完即生效；
 6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「专属设置/默认设置」——settings.yaml
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
    `kaz-defaults.json`、`kaz-session-states.json` 与工具插件 JSON。
