@@ -50,8 +50,6 @@ import {
   TOOL_PLUGIN_FACTORY,
   TOOL_PLUGIN_CATALOG_FACTORY,
   TOOL_PLUGIN_DEFAULTS_FACTORY,
-  DEFAULT_ENABLED_TOOL_PLUGINS,
-  DEFAULT_UNABLED_TOOL_PLUGINS,
   computeToolPluginSurface,
   emptyPluginCatalogState,
   emptyToolDefaultsState,
@@ -572,8 +570,8 @@ function saveExternalProjectToolDefaults(cwd, state, logger) {
   }
 }
 
-/** 旧版用户检测目录迁移：把 knownPlugins / unassignedTools 种进新的检测目录，
- *  并把未归属工具按“未知插件”写进用户默认设置（默认启用）。 */
+/** 旧版用户检测目录迁移：把 knownPlugins / unassignedTools 种进新的检测目录。
+ *  未归属工具不再写入“未知插件”（该容器已删除）。 */
 function migrateLegacyUserCatalog(logger) {
   const legacyFile = legacyToolPluginCatalogPath();
   const detectedFile = externalDetectedPath();
@@ -581,34 +579,9 @@ function migrateLegacyUserCatalog(logger) {
   try {
     const legacy = normalizeDetectedCatalog(JSON.parse(readFileSync(legacyFile, "utf8")));
     const detected = { ...legacy };
+    delete detected.removedTools?.[UNKNOWN_PLUGIN_KEY];
+    detected.unassignedTools = detected.unassignedTools ?? [];
     saveDetectedCatalog(detected, logger);
-    const pluginCatalog = loadExternalUserPluginCatalog(logger);
-    const toolDefaults = loadExternalUserToolDefaults(logger);
-    let changed = false;
-    const ensureUnknown = () => {
-      const key = UNKNOWN_PLUGIN_KEY;
-      if (pluginCatalog.plugins[key] === undefined) {
-        pluginCatalog.plugins[key] = { ignored: false, capable: true };
-        changed = true;
-      } else if (pluginCatalog.plugins[key].capable !== true) {
-        pluginCatalog.plugins[key] = { ...pluginCatalog.plugins[key], capable: true };
-        changed = true;
-      }
-      if (toolDefaults.plugins[key] === undefined) {
-        toolDefaults.plugins[key] = { tools: {}, hiddenTools: {} };
-      }
-    };
-    for (const tool of legacy.unassignedTools) {
-      ensureUnknown();
-      if (toolDefaults.plugins[UNKNOWN_PLUGIN_KEY].tools[tool] !== true) {
-        toolDefaults.plugins[UNKNOWN_PLUGIN_KEY].tools[tool] = true;
-        changed = true;
-      }
-    }
-    if (changed) {
-      saveExternalUserPluginCatalog(pluginCatalog, logger);
-      saveExternalUserToolDefaults(toolDefaults, logger);
-    }
     logger?.info?.("[kaz-mode] 已迁移旧版用户检测目录（kaz-tool-plugin-catalog.json → kaz-tool-plugin-detected.json）");
   } catch (error) {
     logger?.warn?.("[kaz-mode] 迁移旧版用户检测目录失败：" + safeMessage(error));
@@ -865,195 +838,14 @@ export default {
     let activeSession = null;
 
     // -----------------------------------------------------------------------
-    // 外置工具注册动态检测（2026-08-25 重构）
+    // 外置工具注册动态检测（只读收集，不自动写入设置）
     // 包装 ctx.tools.register + registeredTools 补扫，收集 { pluginName, tools[] }。
-    // 检测到的新插件/新工具会写进【用户默认设置】：
-    //   - 真正的新插件（不在原设置里）→ 插件级 capable=true，工具默认 true
-    //   - 已知但默认没能力的插件 → 不提升 capable，新工具默认 false
-    // 包名未知（unknown）统一归入“未知插件”（UNKNOWN_PLUGIN_KEY）。
+    // 检测结果只用于展示已检测工具；是否加入列表、是否启用，全部由用户手动操作。
+    // 没有插件归属的工具不再收集（“未知插件”已删除）。
     // -----------------------------------------------------------------------
     const detectedToolPlugins = new Map();
-    /** 用户目录检测/移除目录（knownPlugins / removedPlugins / unassignedTools），内存态 + 落盘。 */
+    /** 用户目录检测/移除目录（knownPlugins / removedPlugins / removedTools / unassignedTools），内存态 + 落盘。 */
     let toolPluginCatalog = emptyDetectedCatalog();
-
-    /** 把新检测到的工具写进用户默认设置（已移除的插件不自动加回）。
-     *  只补“尚不存在”的键，绝不覆盖用户已显式关闭/隐藏的开关。 */
-    function ensureDetectedInUserDefaults(pluginKey, toolName) {
-      if (toolPluginCatalog.removedPlugins[pluginKey] === true) return;
-      if (toolPluginCatalog.removedTools?.[pluginKey]?.includes(toolName)) return;
-      try {
-        const pluginCatalog = loadExternalUserPluginCatalog(ctx.logger);
-        const toolDefaults = loadExternalUserToolDefaults(ctx.logger);
-        const knownUnabled = DEFAULT_UNABLED_TOOL_PLUGINS.includes(pluginKey);
-        const isFactoryPlugin = Object.prototype.hasOwnProperty.call(TOOL_PLUGIN_FACTORY_STATE.plugins, pluginKey);
-        const factoryCapable = DEFAULT_ENABLED_TOOL_PLUGINS.includes(pluginKey);
-        let changed = false;
-        const userCapable = pluginCatalog.plugins[pluginKey] !== undefined && typeof pluginCatalog.plugins[pluginKey].capable === "boolean"
-          ? pluginCatalog.plugins[pluginKey].capable
-          : undefined;
-        let capableNow;
-        if (userCapable !== undefined) {
-          // 用户已显式改过能力开关，永远以用户为准。
-          capableNow = userCapable;
-        } else if (!isFactoryPlugin && knownUnabled) {
-          // 防御：已知但默认没能力的插件即使还没进 factory，也按“已知禁用”处理。
-          capableNow = false;
-          pluginCatalog.plugins[pluginKey] = { ...(pluginCatalog.plugins[pluginKey] ?? {}), capable: false };
-          changed = true;
-        } else if (!isFactoryPlugin) {
-          // 真正的新插件第一次检测到：默认“有能力启用”。
-          capableNow = true;
-          pluginCatalog.plugins[pluginKey] = { ...(pluginCatalog.plugins[pluginKey] ?? {}), capable: true };
-          changed = true;
-        } else {
-          capableNow = factoryCapable;
-        }
-        const t = toolDefaults.plugins[pluginKey] ?? { tools: {}, hiddenTools: {} };
-        if (!Object.prototype.hasOwnProperty.call(t.tools, toolName) && t.hiddenTools[toolName] !== true) {
-          t.tools[toolName] = capableNow;
-          delete t.hiddenTools[toolName];
-          toolDefaults.plugins[pluginKey] = t;
-          changed = true;
-        }
-        if (changed) {
-          saveExternalUserPluginCatalog(pluginCatalog, ctx.logger);
-          saveExternalUserToolDefaults(toolDefaults, ctx.logger);
-        }
-      } catch (error) {
-        ctx.logger?.debug?.("[kaz-mode] 写默认设置（检测到新工具）失败：" + safeMessage(error));
-      }
-    }
-
-    /** 用户手动创建插件时，把“未知插件”里的工具认领到这个插件名下。
-     *  这正好对应“新建插件输入正确插件名，再把未知工具放进去”的流程。 */
-    function adoptUnknownToolsToPlugin(pluginKey, logger) {
-      try {
-        const pluginCatalog = loadExternalUserPluginCatalog(logger);
-        const toolDefaults = loadExternalUserToolDefaults(logger);
-        const unknown = toolDefaults.plugins[UNKNOWN_PLUGIN_KEY];
-        if (unknown === undefined || Object.keys(unknown.tools ?? {}).length === 0) return;
-        const target = toolDefaults.plugins[pluginKey] ?? { tools: {}, hiddenTools: {} };
-        const moved = [];
-        for (const [tool, enabled] of Object.entries(unknown.tools)) {
-          target.tools[tool] = enabled === true;
-          if (enabled === true) delete target.hiddenTools[tool];
-          moved.push(tool);
-          delete unknown.tools[tool];
-        }
-        if (Object.keys(unknown.tools).length === 0) {
-          delete toolDefaults.plugins[UNKNOWN_PLUGIN_KEY];
-          delete pluginCatalog.plugins[UNKNOWN_PLUGIN_KEY];
-        } else {
-          toolDefaults.plugins[UNKNOWN_PLUGIN_KEY] = unknown;
-        }
-        if (Object.keys(target.tools).length > 0 || Object.keys(target.hiddenTools).length > 0) {
-          toolDefaults.plugins[pluginKey] = target;
-        }
-        if (pluginCatalog.plugins[pluginKey] === undefined) {
-          pluginCatalog.plugins[pluginKey] = { ignored: false, capable: true };
-        }
-        if (moved.length === 0) return;
-        saveExternalUserPluginCatalog(pluginCatalog, logger);
-        saveExternalUserToolDefaults(toolDefaults, logger);
-        // 同步检测目录与内存检测表，避免工具在“未知插件”里重复出现。
-        const knownUnknown = toolPluginCatalog.knownPlugins[UNKNOWN_PLUGIN_KEY] ?? { tools: [] };
-        knownUnknown.tools = knownUnknown.tools.filter((tool) => !moved.includes(tool));
-        if (knownUnknown.tools.length === 0) delete toolPluginCatalog.knownPlugins[UNKNOWN_PLUGIN_KEY];
-        else toolPluginCatalog.knownPlugins[UNKNOWN_PLUGIN_KEY] = knownUnknown;
-        const knownTarget = toolPluginCatalog.knownPlugins[pluginKey] ?? { tools: [] };
-        for (const tool of moved) {
-          if (!knownTarget.tools.includes(tool)) knownTarget.tools.push(tool);
-        }
-        toolPluginCatalog.knownPlugins[pluginKey] = knownTarget;
-        toolPluginCatalog.unassignedTools = toolPluginCatalog.unassignedTools.filter((tool) => !moved.includes(tool));
-        if (toolPluginCatalog.removedTools?.[pluginKey]) {
-          toolPluginCatalog.removedTools[pluginKey] = toolPluginCatalog.removedTools[pluginKey].filter((tool) => !moved.includes(tool));
-          if (toolPluginCatalog.removedTools[pluginKey].length === 0) delete toolPluginCatalog.removedTools[pluginKey];
-        }
-        saveDetectedCatalog(toolPluginCatalog, logger);
-        const unknownEntry = detectedToolPlugins.get(UNKNOWN_PLUGIN_KEY);
-        if (unknownEntry !== undefined) {
-          for (const tool of moved) unknownEntry.tools.delete(tool);
-          if (unknownEntry.tools.size === 0) detectedToolPlugins.delete(UNKNOWN_PLUGIN_KEY);
-        }
-        let targetEntry = detectedToolPlugins.get(pluginKey);
-        if (targetEntry === undefined) {
-          targetEntry = { pluginName: pluginKey, tools: new Set() };
-          detectedToolPlugins.set(pluginKey, targetEntry);
-        }
-        for (const tool of moved) targetEntry.tools.add(tool);
-      } catch (error) {
-        logger?.debug?.("[kaz-mode] 认领未知工具失败：" + safeMessage(error));
-      }
-    }
-
-    /** 把“未知插件”里的单个工具移动到指定插件名下（保留用户的开/关/隐藏状态）。 */
-    function moveUnknownToolToPlugin(pluginKey, toolName, logger) {
-      try {
-        const pluginCatalog = loadExternalUserPluginCatalog(logger);
-        const toolDefaults = loadExternalUserToolDefaults(logger);
-        const unknown = toolDefaults.plugins[UNKNOWN_PLUGIN_KEY];
-        const hasInUserDefaults = unknown !== undefined && Object.prototype.hasOwnProperty.call(unknown.tools ?? {}, toolName);
-        const hasInDetected =
-          toolPluginCatalog.unassignedTools.includes(toolName) ||
-          (detectedToolPlugins.get(UNKNOWN_PLUGIN_KEY)?.tools.has(toolName) ?? false);
-        if (!hasInUserDefaults && !hasInDetected) return false;
-        const enabled = hasInUserDefaults ? unknown.tools[toolName] === true : true;
-        const hidden = hasInUserDefaults && unknown.hiddenTools?.[toolName] === true;
-        const target = toolDefaults.plugins[pluginKey] ?? { tools: {}, hiddenTools: {} };
-        target.tools[toolName] = enabled;
-        if (hidden) target.hiddenTools[toolName] = true;
-        else delete target.hiddenTools[toolName];
-        toolDefaults.plugins[pluginKey] = target;
-        if (hasInUserDefaults) {
-          delete unknown.tools[toolName];
-          delete unknown.hiddenTools?.[toolName];
-          if (Object.keys(unknown.tools).length === 0 && Object.keys(unknown.hiddenTools ?? {}).length === 0) {
-            delete toolDefaults.plugins[UNKNOWN_PLUGIN_KEY];
-            delete pluginCatalog.plugins[UNKNOWN_PLUGIN_KEY];
-          } else {
-            toolDefaults.plugins[UNKNOWN_PLUGIN_KEY] = unknown;
-          }
-        }
-        const p = pluginCatalog.plugins[pluginKey];
-        if (p === undefined) {
-          pluginCatalog.plugins[pluginKey] = { ignored: false, capable: true };
-        } else if (p.capable !== true) {
-          pluginCatalog.plugins[pluginKey] = { ...p, capable: true };
-        }
-        saveExternalUserPluginCatalog(pluginCatalog, logger);
-        saveExternalUserToolDefaults(toolDefaults, logger);
-        // 同步检测目录与内存检测表。
-        const knownUnknown = toolPluginCatalog.knownPlugins[UNKNOWN_PLUGIN_KEY] ?? { tools: [] };
-        knownUnknown.tools = knownUnknown.tools.filter((tool) => tool !== toolName);
-        if (knownUnknown.tools.length === 0) delete toolPluginCatalog.knownPlugins[UNKNOWN_PLUGIN_KEY];
-        else toolPluginCatalog.knownPlugins[UNKNOWN_PLUGIN_KEY] = knownUnknown;
-        const knownTarget = toolPluginCatalog.knownPlugins[pluginKey] ?? { tools: [] };
-        if (!knownTarget.tools.includes(toolName)) knownTarget.tools.push(toolName);
-        toolPluginCatalog.knownPlugins[pluginKey] = knownTarget;
-        toolPluginCatalog.unassignedTools = toolPluginCatalog.unassignedTools.filter((tool) => tool !== toolName);
-        if (toolPluginCatalog.removedTools?.[pluginKey]) {
-          toolPluginCatalog.removedTools[pluginKey] = toolPluginCatalog.removedTools[pluginKey].filter((tool) => tool !== toolName);
-          if (toolPluginCatalog.removedTools[pluginKey].length === 0) delete toolPluginCatalog.removedTools[pluginKey];
-        }
-        saveDetectedCatalog(toolPluginCatalog, logger);
-        const unknownEntry = detectedToolPlugins.get(UNKNOWN_PLUGIN_KEY);
-        if (unknownEntry !== undefined) {
-          unknownEntry.tools.delete(toolName);
-          if (unknownEntry.tools.size === 0) detectedToolPlugins.delete(UNKNOWN_PLUGIN_KEY);
-        }
-        let targetEntry = detectedToolPlugins.get(pluginKey);
-        if (targetEntry === undefined) {
-          targetEntry = { pluginName: pluginKey, tools: new Set() };
-          detectedToolPlugins.set(pluginKey, targetEntry);
-        }
-        targetEntry.tools.add(toolName);
-        return true;
-      } catch (error) {
-        logger?.debug?.("[kaz-mode] 移动未知工具到指定插件失败：" + safeMessage(error));
-        return false;
-      }
-    }
 
     /** 永久删除一个用户添加的外置插件（从用户/项目设置和检测目录里都移除，不再进“还原”区）。 */
     function deleteExternalPluginPermanently(pluginKey, cwd, logger) {
@@ -1082,9 +874,13 @@ export default {
 
     /** 永久删除一个用户添加的工具（从用户/项目设置和检测目录里都移除，不再进“还原”区）。 */
     function deleteExternalToolPermanently(pluginKey, toolName, cwd, logger) {
+      // 官方 / Kaz 插件的工具不允许删除（它们属于原设置/官方能力范围）。
+      if (OFFICIAL_TOOL_PLUGIN_KEYS.includes(pluginKey) || KAZ_TOOL_PLUGIN_KEYS.includes(pluginKey)) {
+        return false;
+      }
       const factoryPlugin = TOOL_PLUGIN_FACTORY_STATE.plugins[pluginKey];
       if (factoryPlugin !== undefined && Object.prototype.hasOwnProperty.call(factoryPlugin.tools ?? {}, toolName)) {
-        return false; // 原设置里已有的工具不能“删除”，只能隐藏。
+        return false; // 原设置里已有的工具不能“删除”。
       }
       const userToolDefaults = loadExternalUserToolDefaults(logger);
       const projectToolDefaults = loadExternalProjectToolDefaults(cwd, logger);
@@ -1129,29 +925,13 @@ export default {
       return true;
     }
 
-    /** 判断某个插件是否已经安装（通过 Cordis 插件注册表 runtime.name 匹配）。 */
-    function isPluginInstalled(pluginKey) {
-      try {
-        const registry = ctx.registry;
-        if (registry === null || registry === undefined || typeof registry.values !== "function") return false;
-        const target = normalizeExternalKey(pluginKey);
-        for (const runtime of registry.values()) {
-          if (runtime !== null && typeof runtime === "object" && typeof runtime.name === "string") {
-            if (normalizeExternalKey(runtime.name) === target) return true;
-          }
-        }
-        return false;
-      } catch {
-        return false;
-      }
-    }
-
-    /** 记录一次工具注册；pluginName 可能缺失（核心/保留工具），归入 unknown。 */
+    /** 记录一次工具注册；pluginName 可能缺失。没有插件归属的工具不再收集（“未知插件”已删除）。 */
     function recordDetectedToolPlugin(pluginName, toolName) {
       if (typeof toolName !== "string" || toolName.length === 0) return;
       const key = normalizeExternalKey(pluginName);
       const safeKey = key.length > 0 ? key : UNKNOWN_PLUGIN_KEY;
-      // 已移除的插件/工具不再进入检测表，避免又从“未知/已移除”里冒出来。
+      if (safeKey === UNKNOWN_PLUGIN_KEY) return; // 不再创建“未知插件”。
+      // 已移除的插件/工具不再进入检测表，避免又从“已移除”里冒出来。
       if (toolPluginCatalog.removedPlugins[safeKey] === true) return;
       if (toolPluginCatalog.removedTools?.[safeKey]?.includes(toolName)) return;
       const label = typeof pluginName === "string" && pluginName.length > 0 ? pluginName : safeKey;
@@ -1172,7 +952,6 @@ export default {
           toolPluginCatalog.knownPlugins[safeKey] = known;
           saveDetectedCatalog(toolPluginCatalog, ctx.logger);
         }
-        ensureDetectedInUserDefaults(safeKey, toolName);
       }
     }
 
@@ -1190,7 +969,7 @@ export default {
      * 用 registeredTools（当前注册表）补检测：解决包装装得太晚导致漏抓的问题。
      *  - 官方出厂工具/记忆工具直接跳过（已知禁用的工具也已写进原设置，无需再单独维护名单）；
      *  - 已知插件目录里的工具归入对应插件；
-     *  - 其余未归属工具进入 unassignedTools，并归入“未知插件”。
+     *  - 没有插件归属的工具不再收集（“未知插件”已删除）。
      */
     function syncDetectedFromRegisteredTools() {
       try {
@@ -1221,12 +1000,11 @@ export default {
         for (const entry of detectedToolPlugins.values()) {
           for (const tool of entry.tools) detectedTools.add(tool);
         }
-        let changed = false;
         for (const schema of schemas) {
           const tool = schema?.name;
           if (typeof tool !== "string" || tool.length === 0) continue;
           if (officialTools.has(tool)) continue;
-          // 如果 schema 自带插件归属信息，优先用它归因，避免只能塞进“未知插件”。
+          // 如果 schema 自带插件归属信息，优先用它归因。
           const pluginHint =
             schema?.pluginName ??
             schema?.plugin ??
@@ -1249,32 +1027,27 @@ export default {
             }
             continue;
           }
-          if (detectedTools.has(tool)) continue;
-          if (toolPluginCatalog.removedTools?.[UNKNOWN_PLUGIN_KEY]?.includes(tool)) continue;
-          if (!toolPluginCatalog.unassignedTools.includes(tool)) {
-            toolPluginCatalog.unassignedTools.push(tool);
-            changed = true;
-          }
-          recordDetectedToolPlugin(UNKNOWN_PLUGIN_KEY, tool);
-          detectedTools.add(tool);
+          // 没有插件归属的工具不再收集（“未知插件”已删除）。
+          continue;
         }
-        if (changed) saveDetectedCatalog(toolPluginCatalog, ctx.logger);
       } catch (error) {
         ctx.logger?.debug?.("[kaz-mode] 用 registeredTools 补检测失败：" + safeMessage(error));
       }
     }
 
-    /** 返回检测结果的只读快照（数组，工具名排序）。 */
+    /** 返回检测结果的只读快照（数组，工具名排序；不含“未知插件”）。 */
     function detectedToolPluginsList() {
       return Array.from(detectedToolPlugins.entries())
+        .filter(([key]) => key !== UNKNOWN_PLUGIN_KEY)
         .map(([key, entry]) => ({ key, pluginName: entry.pluginName, tools: [...entry.tools].sort() }))
         .sort((left, right) => left.pluginName.localeCompare(right.pluginName));
     }
 
-    /** 返回 computeExternalToolSurface 可直接使用的 detected 映射（key → 工具名数组）。 */
+    /** 返回 computeExternalToolSurface 可直接使用的 detected 映射（key → 工具名数组；不含 unknown）。 */
     function detectedToolPluginsForCompute() {
       const out = {};
       for (const [key, entry] of detectedToolPlugins.entries()) {
+        if (key === UNKNOWN_PLUGIN_KEY) continue;
         out[key] = [...entry.tools];
       }
       return out;
@@ -1971,8 +1744,7 @@ export default {
           endpoint !== "getExternalToolPlugins" &&
           endpoint !== "setExternalToolPlugin" &&
           endpoint !== "resetExternalToolPlugins" &&
-          endpoint !== "setExternalToolPluginsAsDefault" &&
-          endpoint !== "assignUnknownTool"
+          endpoint !== "setExternalToolPluginsAsDefault"
         ) {
           return rpcFail("缺少 sessionId");
         }
@@ -2101,33 +1873,6 @@ export default {
           };
         }
 
-        if (endpoint === "assignUnknownTool") {
-          const pluginName = typeof input.pluginName === "string" ? input.pluginName : "";
-          const toolName = typeof input.toolName === "string" ? input.toolName : "";
-          if (pluginName.trim().length === 0) return rpcFail("缺少 pluginName");
-          if (toolName.trim().length === 0) return rpcFail("缺少 toolName");
-          const cwd = resolveExternalCwd();
-          const pluginKey = normalizeExternalKey(pluginName);
-          const tool = toolName.trim();
-          if (pluginKey.length === 0) return rpcFail("插件名无法归一化");
-          const userToolDefaults = loadExternalUserToolDefaults(ctx.logger);
-          const unknown = userToolDefaults.plugins[UNKNOWN_PLUGIN_KEY];
-          const inUserDefaults = unknown !== undefined && Object.prototype.hasOwnProperty.call(unknown.tools ?? {}, tool);
-          const inDetected =
-            toolPluginCatalog.unassignedTools.includes(tool) ||
-            (detectedToolPlugins.get(UNKNOWN_PLUGIN_KEY)?.tools.has(tool) ?? false);
-          if (!inUserDefaults && !inDetected) {
-            return rpcFail("该工具不在“未知插件”中");
-          }
-          if (!isPluginInstalled(pluginKey)) {
-            return rpcFail("未安装该插件，或插件列表中没有这个插件");
-          }
-          const moved = moveUnknownToolToPlugin(pluginKey, tool, ctx.logger);
-          if (!moved) return rpcFail("移动工具到指定插件失败");
-          const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
-          return { ok: true, value: toolPluginValue(layers) };
-        }
-
         if (endpoint === "setExternalToolPlugin") {
           const pluginName = typeof input.pluginName === "string" ? input.pluginName : "";
           if (pluginName.length === 0) return rpcFail("缺少 pluginName");
@@ -2169,21 +1914,6 @@ export default {
               ...(pluginCatalog.plugins[normalizedPluginKey] ?? {}),
               ignored: input.ignored,
             };
-            // 手动“新建插件”（ignored=false 且该插件此前在项目/用户/出厂里都不存在）时，
-            // 把“未知插件”里的工具认领到这个插件名下。
-            if (input.ignored === false) {
-              const userPluginCatalog = loadExternalUserPluginCatalog(ctx.logger);
-              const userToolDefaults = loadExternalUserToolDefaults(ctx.logger);
-              const isNewPlugin =
-                !Object.prototype.hasOwnProperty.call(TOOL_PLUGIN_FACTORY_STATE.plugins, normalizedPluginKey) &&
-                pluginCatalog.plugins[normalizedPluginKey] === undefined &&
-                toolDefaults.plugins[normalizedPluginKey] === undefined &&
-                userPluginCatalog.plugins[normalizedPluginKey] === undefined &&
-                userToolDefaults.plugins[normalizedPluginKey] === undefined;
-              if (isNewPlugin) {
-                adoptUnknownToolsToPlugin(normalizedPluginKey, ctx.logger);
-              }
-            }
           } else if (typeof input.capable === "boolean") {
             pluginCatalog.plugins[normalizedPluginKey] = {
               ...(pluginCatalog.plugins[normalizedPluginKey] ?? {}),

@@ -296,7 +296,6 @@ window.__ModuleLoader__.load({
 .kzm-cfg-btn:hover{background:var(--dsw-alias-interactive-bg-hover)}
 .kzm-danger-btn{color:#dc2626;border-color:rgba(220,38,38,.45)}
 .kzm-danger-btn:hover{background:rgba(220,38,38,.08)}
-.kzm-unknown-plugin{background:rgba(147,51,234,.06);border-left:3px solid rgba(147,51,234,.55);border-radius:8px;padding-left:6px}
 .kzm-fields{display:flex;flex-direction:column;gap:8px;padding:4px 0 2px}
 .kzm-preset-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
 .kzm-field{display:flex;flex-direction:column;gap:4px}
@@ -1279,7 +1278,7 @@ window.__ModuleLoader__.load({
 				const detectedMap = {};
 				for (const det of detected) {
 					const key = typeof det.key === "string" && det.key.length > 0 ? det.key : String(det.pluginName || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-					if (key.length === 0) continue;
+					if (key.length === 0 || key === "unknown") continue; // “未知插件”已删除，不再展示。
 					detectedMap[key] = Array.isArray(det.tools) ? det.tools : [];
 				}
 
@@ -1295,10 +1294,6 @@ window.__ModuleLoader__.load({
 					if (pluginsMap[key] === undefined) {
 						pluginsMap[key] = { key, plugin: { ignored: false, tools: {}, hiddenTools: {} } };
 					}
-				}
-				// 未知工具兜底：即使服务端 detected 未带 unknown，也显示为「未知插件」。
-				if (catalog.unassignedTools.length > 0 && pluginsMap["unknown"] === undefined) {
-					pluginsMap["unknown"] = { key: "unknown", plugin: { ignored: false, tools: {}, hiddenTools: {} } };
 				}
 				const pluginKeys = Object.keys(pluginsMap).sort();
 				const removedPlugins = catalog.removedPlugins !== null && typeof catalog.removedPlugins === "object" ? catalog.removedPlugins : {};
@@ -1358,11 +1353,6 @@ window.__ModuleLoader__.load({
 						await applyRestoreRemoved(key);
 						return;
 					}
-					const hiddenPlugin = displayPlugins[key] !== undefined && displayPlugins[key].ignored === true;
-					if (hiddenPlugin) {
-						await applyPatch({ pluginName: key, restore: true });
-						return;
-					}
 					// 手动添加插件：不需要先“检测到”，用户可能就是想手动建一个还没工具的插件。
 					await applyPatch({ pluginName: key, ignored: false });
 					await applyPatch({ pluginName: key, capable: true });
@@ -1379,11 +1369,6 @@ window.__ModuleLoader__.load({
 						await applyRestoreRemoved(key);
 					}
 					const tool = toolName.trim();
-					const plugin = displayPlugins[key];
-					if (plugin !== undefined && plugin.hiddenTools !== undefined && plugin.hiddenTools[tool] === true) {
-						await applyPatch({ pluginName: key, toolName: tool, toolHidden: false });
-						return;
-					}
 					// 手动添加工具：不需要先“检测到”。
 					await applyPatch({ pluginName: key, ignored: false });
 					await applyPatch({ pluginName: key, capable: true });
@@ -1394,31 +1379,10 @@ window.__ModuleLoader__.load({
 					const toolName = window.prompt("输入工具名");
 					if (toolName === null || toolName.trim().length === 0) return;
 					const tool = toolName.trim();
-					const plugin = displayPlugins[key];
-					if (plugin !== undefined && plugin.hiddenTools !== undefined && plugin.hiddenTools[tool] === true) {
-						await applyPatch({ pluginName: key, toolName: tool, toolHidden: false });
-						return;
-					}
 					// 手动添加工具：不需要先“检测到”。
 					await applyPatch({ pluginName: key, ignored: false });
 					await applyPatch({ pluginName: key, capable: true });
 					await applyPatch({ pluginName: key, toolName: tool, enabled: true });
-				};
-
-				const assignUnknownTool = async (key, tool) => {
-					const name = window.prompt("输入这个工具所属的插件名（fiber.name）");
-					if (name === null || name.trim().length === 0) return;
-					const res = await rpcCall("assignUnknownTool", {
-						sessionId: sessionId || "",
-						cwd: targetCwd(),
-						pluginName: name.trim(),
-						toolName: tool,
-					});
-					if (res !== null) {
-						setData(res);
-					} else {
-						window.alert("指定失败：" + lastRpcError);
-					}
 				};
 
 				const userDiffersFactory = data.userDiffersFactory === true;
@@ -1456,8 +1420,7 @@ window.__ModuleLoader__.load({
 					};
 				}
 
-				const mainPlugins = displayPluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true && removedPlugins[key] !== true);
-				const ignoredOnlyPlugins = displayPluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true && removedPlugins[key] !== true);
+				const mainPlugins = displayPluginKeys.filter((key) => removedPlugins[key] !== true);
 				const categoryOf = (key) => (catalog.official.includes(key) ? "official" : catalog.kaz.includes(key) ? "kaz" : "external");
 				const groups = [
 					{ id: "external", title: "外置插件", keys: mainPlugins.filter((key) => categoryOf(key) === "external") },
@@ -1472,31 +1435,24 @@ window.__ModuleLoader__.load({
 					const tools = toolsOf(key).filter((tool) => plugin.hiddenTools === undefined || plugin.hiddenTools[tool] !== true);
 					const pluginCapable = plugin.capable !== false;
 					const projectUnique = pluginUnique(key);
-					const displayName = key === "unknown" ? "未知插件" : key;
 					return createElement(
 						"div",
-						{ key, className: key === "unknown" ? "kzm-state-item kzm-unknown-plugin" : "kzm-state-item" },
+						{ key, className: "kzm-state-item" },
 						createElement(
 							"div",
 							{ className: "kzm-state-row" },
 							createElement(
 								"span",
 								{ className: "kzm-state-name", title: key },
-								displayName,
+								key,
 								projectUnique && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							),
 							categoryOf(key) === "external"
-								? (key === "unknown"
-									? createElement(
-										"button",
-										{ type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: true, title: "未知插件不能移除" },
-										"移除",
-									)
-									: createElement(
-										"button",
-										{ type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyRemovePlugin(key) },
-										"移除",
-									))
+								? createElement(
+									"button",
+									{ type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyRemovePlugin(key) },
+									"移除",
+								)
 								: createElement(
 									"span",
 									{ className: "kzm-cfg-btn", style: { visibility: "hidden" }, "aria-hidden": true },
@@ -1506,11 +1462,6 @@ window.__ModuleLoader__.load({
 								"button",
 								{ type: "button", className: "kzm-cfg-btn", onClick: () => setExpanded((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }) },
 								open ? "收起" : "展开",
-							),
-							createElement(
-								"button",
-								{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, ignored: true }) },
-								"忽略",
 							),
 							createElement(Toggle, {
 								checked: pluginCapable,
@@ -1541,23 +1492,12 @@ window.__ModuleLoader__.load({
 											tool,
 											unique && createElement("span", { className: "kzm-override-badge" }, "专属"),
 										),
-										key === "unknown" &&
-											createElement(
-												"button",
-												{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void assignUnknownTool(key, tool) },
-												"指定插件",
-											),
-										!factoryToolsOf(key).has(tool) &&
+										categoryOf(key) === "external" && !factoryToolsOf(key).has(tool) &&
 											createElement(
 												"button",
 												{ type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyDeleteTool(key, tool) },
 												"删除",
 											),
-										createElement(
-											"button",
-											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: true }) },
-											"隐藏",
-										),
 										createElement(Toggle, {
 											checked: enabled,
 											disabled: !writable || busy || !pluginCapable,
@@ -1615,64 +1555,6 @@ window.__ModuleLoader__.load({
 							group.keys.map((key) => renderPluginRow(key)),
 						),
 					),
-					(ignoredOnlyPlugins.length > 0 || displayPluginKeys.some((key) => { const p = pluginsMap[key].plugin; return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0; })) &&
-						createElement(
-							"div",
-							{ className: "kzm-tp-hidden" },
-							createElement("p", { className: "kzm-tp-hidden-title" }, "已忽略 / 已隐藏（不包括已移除）"),
-							ignoredOnlyPlugins.map((key) =>
-								createElement(
-									"div",
-									{ key, className: "kzm-state-row" },
-									createElement(
-										"span",
-										{ className: "kzm-state-name" },
-										key === "unknown" ? "未知插件" : key,
-										pluginUnique(key) && createElement("span", { className: "kzm-override-badge" }, "专属"),
-									),
-									createElement(
-										"button",
-										{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, restore: true }) },
-										"还原插件",
-									),
-								),
-							),
-							displayPluginKeys.filter((key) => {
-								const p = pluginsMap[key].plugin;
-								return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0;
-							}).map((key) => {
-								const p = pluginsMap[key].plugin;
-								return Object.keys(p.hiddenTools).map((tool) =>
-									createElement(
-										"div",
-										{ key: key + ":" + tool, className: "kzm-state-row" },
-										createElement(
-										"span",
-										{ className: "kzm-state-name" },
-										(key === "unknown" ? "未知插件" : key) + " / " + tool,
-										toolUnique(key, tool) && createElement("span", { className: "kzm-override-badge" }, "专属"),
-									),
-										key === "unknown" &&
-											createElement(
-												"button",
-												{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void assignUnknownTool(key, tool) },
-												"指定插件",
-											),
-										!factoryToolsOf(key).has(tool) &&
-											createElement(
-												"button",
-												{ type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyDeleteTool(key, tool) },
-												"删除",
-											),
-										createElement(
-											"button",
-											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: false }) },
-											"还原工具",
-										),
-									),
-								);
-							}),
-						),
 					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
 				);
 			}

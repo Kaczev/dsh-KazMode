@@ -51,9 +51,9 @@ Kaz 模式同时具备两个入口，双向同步：
   + `<项目>/.dsh/storages/kaz-tool-plugin-defaults.json`（与用户目录同名，覆盖用户默认）。
 
 Kaz 面板的「工具插件」区块可管理全部插件（官方/外置）：插件能力开关（大开关）、
-工具开关（小开关）、忽略/隐藏、还原、手动添加；动态检测到的**真正新插件/新工具**
-会写进**用户默认设置**并默认启用；已知但默认关闭的插件/工具（`DEFAULT_UNABLED_TOOL_PLUGINS`）
-保持关闭。包名未知时归入“未知插件”。
+工具开关（小开关）、手动添加；检测只做只读展示，不会自动写入设置。
+新插件/新工具需要用户手动添加；已知但默认关闭的插件/工具（`DEFAULT_UNABLED_TOOL_PLUGINS`）
+保持关闭。“未知插件”已移除。
 
 ```jsonc
 // 插件级 kaz-tool-plugin-catalog.json
@@ -101,7 +101,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   - 项目专属：`<项目>/.dsh/storages/kaz-tool-plugin-catalog.json` + `kaz-tool-plugin-defaults.json`；
   - 检测/移除目录（用户数据）：`~/.dsh/storages/kaz-tool-plugin-detected.json`；
   - 官方/Kaz 分类修改点：`kaz-shared/lib/tool-plugin-catalog.js`；
-  - 动态检测到的真正新插件/新工具写进用户默认设置并默认开启；已知禁用的保持关闭。
+  - 检测只做只读展示；新插件/新工具需要手动添加，不会自动写入设置。
 - `kaz-memory` 关闭 → 六工具自动移出。
 
 ### 5. round-minimal 信号（首阶段极简）

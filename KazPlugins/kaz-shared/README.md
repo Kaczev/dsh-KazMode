@@ -26,8 +26,7 @@ Kaz 模式的工具清单 / 工具插件模型**全部集中在这里**，其它
 ## 工具面语义（2026-08 统一）
 
 - **官方/外置统一为“工具插件”**：Kaz 工具面 = `factory → 用户默认 → 项目设置`
-  三层 JSON 合并后的 enabled 工具 + 动态检测到的真正新工具（默认开启；
-  已知但默认关闭的插件/工具保持关闭）。
+  三层 JSON 合并后的 enabled 工具；新插件/新工具不会自动写入，需要手动添加。
 - **官方出厂**：`TOOL_PLUGIN_FACTORY`（tool-fs / tool-pwsh / ... / kaz-memory）。
 - **旧 `kaz-mode.toolWhitelist` 已弃用**：kaz-mode 不再读取/写入 settings.yaml 的该字段；
   `TOOL_WHITELIST` / `effectiveToolWhitelist` 仅保留给 kaz-memory 可用性兜底等旧路径。
