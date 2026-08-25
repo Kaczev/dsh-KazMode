@@ -1443,17 +1443,22 @@ window.__ModuleLoader__.load({
 								displayName,
 								projectUnique && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							),
+							categoryOf(key) === "external"
+								? createElement(
+									"button",
+									{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyRemovePlugin(key) },
+									"移除",
+								)
+								: createElement(
+									"span",
+									{ className: "kzm-cfg-btn", style: { visibility: "hidden" }, "aria-hidden": true },
+									"移除",
+								),
 							createElement(
 								"button",
 								{ type: "button", className: "kzm-cfg-btn", onClick: () => setExpanded((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }) },
 								open ? "收起" : "展开",
 							),
-							categoryOf(key) === "external" &&
-								createElement(
-									"button",
-									{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyRemovePlugin(key) },
-									"移除",
-								),
 							createElement(
 								"button",
 								{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, ignored: true }) },
