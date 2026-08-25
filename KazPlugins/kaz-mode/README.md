@@ -28,7 +28,8 @@ Kaz 模式同时具备两个入口，双向同步：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
      （为空时自动：kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；
    - 首次工具调用后：恢复 **Kaz 全部工具** = 工具插件 JSON（官方/外置统一：
-     `factory → 用户默认 → 项目设置`，动态检测到的新工具默认开启）。
+     `factory → 用户默认 → 项目设置`；真正的新插件/新工具默认开启，
+     已知但默认关闭的插件/工具保持关闭）。
 3. **记忆工具按会话生效**：`kaz-memory` 关闭时，其六工具从该会话的工具面
    移出、调用被拒。
 4. **skill 已整体移除**（2026-08，Kaczev）：`skill` 工具、技能发现行与技能目录已从
@@ -50,8 +51,9 @@ Kaz 模式同时具备两个入口，双向同步：
   + `<项目>/.dsh/storages/kaz-tool-plugin-defaults.json`（与用户目录同名，覆盖用户默认）。
 
 Kaz 面板的「工具插件」区块可管理全部插件（官方/外置）：插件能力开关（大开关）、
-工具开关（小开关）、忽略/隐藏、还原、手动添加；动态检测到的新插件/新工具会写进
-**用户默认设置**并默认启用，包名未知时归入“未知插件”。
+工具开关（小开关）、忽略/隐藏、还原、手动添加；动态检测到的**真正新插件/新工具**
+会写进**用户默认设置**并默认启用；已知但默认关闭的插件/工具（`DEFAULT_UNABLED_TOOL_PLUGINS`）
+保持关闭。包名未知时归入“未知插件”。
 
 ```jsonc
 // 插件级 kaz-tool-plugin-catalog.json
@@ -99,7 +101,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   - 项目专属：`<项目>/.dsh/storages/kaz-tool-plugin-catalog.json` + `kaz-tool-plugin-defaults.json`；
   - 检测/移除目录（用户数据）：`~/.dsh/storages/kaz-tool-plugin-detected.json`；
   - 官方/Kaz 分类修改点：`kaz-shared/lib/tool-plugin-catalog.js`；
-  - 动态检测到的新插件/新工具写进用户默认设置并默认开启。
+  - 动态检测到的真正新插件/新工具写进用户默认设置并默认开启；已知禁用的保持关闭。
 - `kaz-memory` 关闭 → 六工具自动移出。
 
 ### 5. round-minimal 信号（首阶段极简）

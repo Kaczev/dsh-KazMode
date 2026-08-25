@@ -50,6 +50,8 @@ import {
   TOOL_PLUGIN_FACTORY,
   TOOL_PLUGIN_CATALOG_FACTORY,
   TOOL_PLUGIN_DEFAULTS_FACTORY,
+  DEFAULT_ENABLED_TOOL_PLUGINS,
+  DEFAULT_UNABLED_TOOL_PLUGINS,
   computeToolPluginSurface,
   emptyPluginCatalogState,
   emptyToolDefaultsState,
@@ -808,9 +810,9 @@ export default {
     // -----------------------------------------------------------------------
     // 外置工具注册动态检测（2026-08-25 重构）
     // 包装 ctx.tools.register + registeredTools 补扫，收集 { pluginName, tools[] }。
-    // 检测到的新插件/新工具会写进【用户默认设置】并默认启用：
-    //   - 非出厂插件 → 插件级 capable=true
-    //   - 新工具 → 工具级 tools[tool]=true
+    // 检测到的新插件/新工具会写进【用户默认设置】：
+    //   - 真正的新插件（不在原设置里）→ 插件级 capable=true，工具默认 true
+    //   - 已知但默认没能力的插件 → 不提升 capable，新工具默认 false
     // 包名未知（unknown）统一归入“未知插件”（UNKNOWN_PLUGIN_KEY）。
     // -----------------------------------------------------------------------
     const detectedToolPlugins = new Map();
@@ -824,16 +826,33 @@ export default {
       try {
         const pluginCatalog = loadExternalUserPluginCatalog(ctx.logger);
         const toolDefaults = loadExternalUserToolDefaults(ctx.logger);
+        const knownUnabled = DEFAULT_UNABLED_TOOL_PLUGINS.includes(pluginKey);
         const isFactoryPlugin = Object.prototype.hasOwnProperty.call(TOOL_PLUGIN_FACTORY_STATE.plugins, pluginKey);
+        const factoryCapable = DEFAULT_ENABLED_TOOL_PLUGINS.includes(pluginKey);
         let changed = false;
-        if (!isFactoryPlugin && pluginCatalog.plugins[pluginKey] === undefined) {
-          // 非出厂插件第一次检测到：默认“有能力启用”，不覆盖用户已有的任何显式设置。
-          pluginCatalog.plugins[pluginKey] = { ignored: false, capable: true };
+        const userCapable = pluginCatalog.plugins[pluginKey] !== undefined && typeof pluginCatalog.plugins[pluginKey].capable === "boolean"
+          ? pluginCatalog.plugins[pluginKey].capable
+          : undefined;
+        let capableNow;
+        if (userCapable !== undefined) {
+          // 用户已显式改过能力开关，永远以用户为准。
+          capableNow = userCapable;
+        } else if (!isFactoryPlugin && knownUnabled) {
+          // 防御：已知但默认没能力的插件即使还没进 factory，也按“已知禁用”处理。
+          capableNow = false;
+          pluginCatalog.plugins[pluginKey] = { ...(pluginCatalog.plugins[pluginKey] ?? {}), capable: false };
           changed = true;
+        } else if (!isFactoryPlugin) {
+          // 真正的新插件第一次检测到：默认“有能力启用”。
+          capableNow = true;
+          pluginCatalog.plugins[pluginKey] = { ...(pluginCatalog.plugins[pluginKey] ?? {}), capable: true };
+          changed = true;
+        } else {
+          capableNow = factoryCapable;
         }
         const t = toolDefaults.plugins[pluginKey] ?? { tools: {}, hiddenTools: {} };
         if (!Object.prototype.hasOwnProperty.call(t.tools, toolName) && t.hiddenTools[toolName] !== true) {
-          t.tools[toolName] = true;
+          t.tools[toolName] = capableNow;
           delete t.hiddenTools[toolName];
           toolDefaults.plugins[pluginKey] = t;
           changed = true;

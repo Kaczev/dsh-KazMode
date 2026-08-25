@@ -23,8 +23,11 @@ import {
   flattenEnabledExternalTools,
   computeExternalToolSurface,
   TOOL_PLUGIN_FACTORY,
+  DEFAULT_ENABLED_TOOL_PLUGINS,
+  DEFAULT_UNABLED_TOOL_PLUGINS,
   computeToolPluginSurface,
 } from "./lib/tool-lists.js";
+import { TOOL_PLUGIN_CATALOG } from "./lib/tool-plugin-catalog.js";
 
 let failures = 0;
 function check(label, ok) {
@@ -38,6 +41,7 @@ check("① DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = [pwsh, read, edit]", Array.isA
 check("① DEFAULT_FIRST_ROUND_TOOLS 兜底 = MEMORY_OFF", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 3 && DEFAULT_FIRST_ROUND_TOOLS[0] === "pwsh");
 check("① DEFAULT_DISABLED_TOOLS 存在", Array.isArray(DEFAULT_DISABLED_TOOLS) && DEFAULT_DISABLED_TOOLS.includes("tool-cordis"));
 check("① MANAGED_PLUGINS / FIXED_PERSONA 存在", Array.isArray(MANAGED_PLUGINS) && typeof FIXED_PERSONA === "string");
+check("① 原设置覆盖：每个 catalog 插件要么默认启用、要么明确不启用", Object.keys(TOOL_PLUGIN_CATALOG).every((key) => DEFAULT_ENABLED_TOOL_PLUGINS.includes(key) || DEFAULT_UNABLED_TOOL_PLUGINS.includes(key)));
 const exports0 = await import("./lib/tool-lists.js");
 check("① 已移除群组 API / DEFAULT_ 前缀常量", !("registerGroup" in exports0) && !("DEFAULT_TOOL_WHITELIST" in exports0) && !("DEFAULT_MINIMAL_TOOLS" in exports0));
 check("① resolveFirstRoundTools：kaz-memory 开 → memory_search", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: true })) === JSON.stringify(["memory_search"]));

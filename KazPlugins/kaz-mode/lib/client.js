@@ -1296,6 +1296,9 @@ window.__ModuleLoader__.load({
 					return [...names].sort();
 				};
 
+				// 没有工具的插件不显示在列表里（原设置里仍保留，防止被当成“新插件”自动开启）。
+				const displayPluginKeys = pluginKeys.filter((key) => toolsOf(key).length > 0);
+
 				/** 该插件是否有项目专属（插件级：ignored / capable 与用户默认不同）。 */
 				const pluginUnique = (key) => {
 					const eff = data.effective !== null && data.effective !== undefined && data.effective.plugins !== undefined ? data.effective.plugins[key] : undefined;
@@ -1410,9 +1413,9 @@ window.__ModuleLoader__.load({
 					};
 				}
 
-				const mainPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true && removedPlugins[key] !== true);
-				const ignoredOnlyPlugins = pluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true && removedPlugins[key] !== true);
-				const removedPluginKeys = pluginKeys.filter((key) => removedPlugins[key] === true);
+				const mainPlugins = displayPluginKeys.filter((key) => pluginsMap[key].plugin.ignored !== true && removedPlugins[key] !== true);
+				const ignoredOnlyPlugins = displayPluginKeys.filter((key) => pluginsMap[key].plugin.ignored === true && removedPlugins[key] !== true);
+				const removedPluginKeys = displayPluginKeys.filter((key) => removedPlugins[key] === true);
 				const categoryOf = (key) => (catalog.official.includes(key) ? "official" : catalog.kaz.includes(key) ? "kaz" : "external");
 				const groups = [
 					{ id: "external", title: "外置插件", keys: mainPlugins.filter((key) => categoryOf(key) === "external") },
@@ -1468,7 +1471,7 @@ window.__ModuleLoader__.load({
 								"div",
 								{ className: "kzm-tp-tools" },
 								createElement("p", { className: "kzm-tp-tools-title" }, "工具"),
-								tools.length === 0 && createElement("p", { className: "kzm-note" }, Object.keys(plugin.hiddenTools || {}).length > 0 ? "该插件当前没有可见工具（已全部隐藏）。" : "暂无已登记工具；检测到后会自动出现并默认开启。"),
+								tools.length === 0 && createElement("p", { className: "kzm-note" }, Object.keys(plugin.hiddenTools || {}).length > 0 ? "该插件当前没有可见工具（已全部隐藏）。" : "暂无已登记工具；检测到后按原设置能力决定是否默认开启。"),
 								tools.map((tool) => {
 									const hasExplicit = plugin.tools !== undefined && Object.prototype.hasOwnProperty.call(plugin.tools, tool);
 									const toolOn = hasExplicit
@@ -1547,7 +1550,7 @@ window.__ModuleLoader__.load({
 							group.keys.map((key) => renderPluginRow(key)),
 						),
 					),
-					(ignoredOnlyPlugins.length > 0 || removedPluginKeys.length > 0 || pluginKeys.some((key) => { const p = pluginsMap[key].plugin; return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0; })) &&
+					(ignoredOnlyPlugins.length > 0 || removedPluginKeys.length > 0 || displayPluginKeys.some((key) => { const p = pluginsMap[key].plugin; return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0; })) &&
 						createElement(
 							"div",
 							{ className: "kzm-tp-hidden" },
@@ -1586,7 +1589,7 @@ window.__ModuleLoader__.load({
 									),
 								),
 							),
-							pluginKeys.filter((key) => {
+							displayPluginKeys.filter((key) => {
 								const p = pluginsMap[key].plugin;
 								return p.hiddenTools !== undefined && Object.keys(p.hiddenTools).length > 0;
 							}).map((key) => {
