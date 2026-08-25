@@ -17,92 +17,75 @@
 /** 原设置：每个包的工具与白名单状态（出厂默认）。 */
 export const TOOL_PLUGIN_CATALOG = {
   // ---- 默认开启的官方工具 ----
-  "tool-pwsh": [
-    { name: "pwsh", enabled: true },
-  ],
-  "tool-fs": [
-    { name: "read", enabled: true },
-    { name: "write", enabled: true },
-    { name: "edit", enabled: true },
-    { name: "read_image", enabled: false },
-  ],
-  "tool-fs-search": [
-    { name: "glob", enabled: true },
-    { name: "grep", enabled: true },
-  ],
-  "tool-jobs": [
-    { name: "job_list", enabled: true },
-    { name: "job_output", enabled: true },
-    { name: "job_kill", enabled: true },
-  ],
-  "tool-ask-user": [
-    { name: "ask_user_question", enabled: true },
-  ],
-  "tool-todo": [
-    { name: "todo_write", enabled: true },
-  ],
-  "tool-web": [
-    { name: "web_search", enabled: true },
-  ],
-  "kaz-memory": [
-    { name: "memory_save", enabled: true },
-    { name: "memory_update", enabled: true },
-    { name: "memory_list", enabled: true },
-    { name: "memory_search", enabled: true },
-    { name: "memory_detail", enabled: true },
-    { name: "memory_forget", enabled: true },
-  ],
-
-  // ---- 已知但默认关闭的官方插件（工具写 enabled:false；工具未知的留空数组）----
-  "tool-bash": [
-    { name: "run_code", enabled: false },
-  ],
-  "tool-bash-persistent": [],
-  "tool-call-timeout-policy": [],
-  "tool-cordis": [],
-  "tool-goal": [],
-  "tool-ralph": [
-    { name: "ralph", enabled: false },
-  ],
-  "tool-skill": [],
-  "tool-str-replace-editor": [
-    { name: "str_replace_editor", enabled: false },
-  ],
-  "tool-subagent": [
-    { name: "subagent", enabled: false },
-    { name: "subagent_fork", enabled: false },
-  ],
-  "tool-subagent-control": [
-    { name: "send_message", enabled: false },
-    { name: "interrupt_agent", enabled: false },
-  ],
-  "tool-subagent-list-agents": [
-    { name: "list_agents", enabled: false },
-  ],
-  "tool-subagent-report": [
-    { name: "report", enabled: false },
-  ],
-  "tool-workflow": [
-    { name: "workflow", enabled: false },
-  ],
-  "plan-mode": [
-    { name: "exit_plan_mode", enabled: false },
-  ],
-  "plan-mode-controller": [],
-  "planmodecontroller": [],
-  "goal": [
-    { name: "create_goal", enabled: false },
-    { name: "get_goal", enabled: false },
-    { name: "update_goal", enabled: false },
-  ],
-  "goal-round-driver": [],
-  "command-goal": [],
-  "session-title": [],
-  "session-title-llm": [],
-  "agent-default-model": [],
-  "agent-instructions": [],
-  "web": [],
-  "web-search-deepseek": [],
+  "tool-pwsh": {
+    "pwsh" : true
+  },
+  "tool-fs": {
+    "read" : true,
+    "write" : true,
+    "edit" : true,
+    "read_image" : false
+  },
+  "tool-fs-search": {
+    "glob" : true,
+    "grep" : true
+  },
+  "tool-jobs": {
+    "job_list" : true,
+    "job_output" : true,
+    "job_kill" : true
+  },
+  "tool-ask-user": {
+    "ask_user_question" : true
+  },
+  "tool-todo": {
+    "todo_write" : true
+  },
+  "tool-web": {
+    "web_search" : true
+  },
+  "kaz-memory": {
+    "memory_save" : true,
+    "memory_update" : true,
+    "memory_list" : true,
+    "memory_search" : true,
+    "memory_detail" : true,
+    "memory_forget" : true
+  },
+  "tool-bash": {
+    "run_code" : false
+  },
+  "tool-ralph": {
+    "ralph" : false
+  },
+  "tool-str-replace-editor": {
+    "str_replace_editor" : false
+  },
+  "tool-subagent": {
+    "subagent" : false,
+    "subagent_fork" : false
+  },
+  "tool-subagent-control": {
+    "send_message" : false,
+    "interrupt_agent" : false
+  },
+  "tool-subagent-list-agents": {
+    "list_agents" : false
+  },
+  "tool-subagent-report": {
+    "report" : false
+  },
+  "tool-workflow": {
+    "workflow" : false
+  },
+  "plan-mode": {
+    "exit_plan_mode" : false
+  },
+  "goal": {
+    "create_goal" : false,
+    "get_goal" : false,
+    "update_goal" : false
+  }
 };
 
 /** 默认开启的包名列表（原设置）——即“插件是否有能力启用”的大开关。 */
@@ -116,17 +99,6 @@ export const DEFAULT_ENABLED_TOOL_PLUGINS = [
   "tool-web",
   "kaz-memory",
 ];
-
-/**
- * 已知但默认没有“能力启用”的包名列表。
- * 这些插件已经在 TOOL_PLUGIN_CATALOG 里登记，因此检测时不会被当作“新插件”自动开启。
- */
-export const DEFAULT_UNABLED_TOOL_PLUGINS = Object.keys(TOOL_PLUGIN_CATALOG).filter(
-  (key) => !DEFAULT_ENABLED_TOOL_PLUGINS.includes(key),
-);
-
-/** 未归属/未知包名使用的保留 key（UI 显示为“未知插件”）。 */
-export const UNKNOWN_PLUGIN_KEY = "unknown";
 
 /** DSH 官方插件（fiber.name 归一化后的 key）。 */
 export const OFFICIAL_TOOL_PLUGIN_KEYS = [

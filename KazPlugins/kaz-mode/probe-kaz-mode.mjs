@@ -156,81 +156,27 @@ await settle();
 // ① kazMode 服务按 agent 会话判定
 const kazMode = provided["kazMode"];
 check("① kazMode 服务已提供", kazMode !== undefined && typeof kazMode.toolVisible === "function");
-check("① kazMode 服务提供 detectedToolPlugins（只读检测）", kazMode !== undefined && typeof kazMode.detectedToolPlugins === "function");
+check("① kazMode 服务不提供已删除的 detectedToolPlugins", kazMode !== undefined && typeof kazMode.detectedToolPlugins !== "function");
 
-// ①.5 动态检测：包装 tools.register，用 this.ctx.fiber.name 归因
-{
-  const pluginCtx = { ...ctx, fiber: { name: "dsh-pixel-art", state: 0 } };
-  mockTools.ctx = pluginCtx;
-  mockTools.register({ name: "render_pixel_art" });
-  mockTools.register({ name: "convert_image_to_pixel_art" });
-  const detected = kazMode.detectedToolPlugins();
-  const pixel = detected.find((item) => item.pluginName === "dsh-pixel-art");
-  check("①.5 动态检测：dsh-pixel-art 被记录且工具归因正确", pixel !== undefined && pixel.tools.includes("render_pixel_art") && pixel.tools.includes("convert_image_to_pixel_art"));
-}
-
-// ①.6 三层存储 RPC（用户默认 / 项目设置）
-{
-  const rpc = rpcHandlers.get("/kaz-mode");
-  check("①.6 RPC 通道已注册", typeof rpc === "function");
-  const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
-  check("①.6 getExternalToolPlugins 返回三层结构", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.factory === "object" && typeof getRes.value.user === "object" && typeof getRes.value.project === "object" && typeof getRes.value.effective === "object");
-  check("①.6 初始 projectDiffers=false / userDiffersFactory=false（检测自动写入的新插件不算用户改动）", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
-  const setRes = await rpc("setExternalToolPlugin", {
-    cwd: TMP,
-    layer: "project",
-    pluginName: "dsh-pixel-art",
-    toolName: "render_pixel_art",
-    enabled: false,
-  });
-  check("①.6 setExternalToolPlugin 写入项目层", setRes !== null && setRes.ok === true && setRes.value.project.plugins["dsh-pixel-art"]?.tools["render_pixel_art"] === false && setRes.value.projectDiffers === true);
-  const getRes2 = await rpc("getExternalToolPlugins", { cwd: TMP });
-  check("①.6 项目层持久化后可读回", getRes2.value.project.plugins["dsh-pixel-art"]?.tools["render_pixel_art"] === false);
-  const resetRes = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
-  check("①.6 resetExternalToolPlugins 清空项目层", resetRes !== null && resetRes.ok === true && resetRes.value.projectDiffers === false && Object.keys(resetRes.value.project.plugins).length === 0);
-  const resetUser = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "user" });
-  check("①.6 reset user 写回出厂后 userDiffersFactory=false", resetUser !== null && resetUser.ok === true && resetUser.value.userDiffersFactory === false);
-}
+// ①.6 四文件模型 RPC：手动添加插件/工具后进入工具面
 const sKaz = agentOf("s-kaz");
 const sKazNomem = agentOf("s-kaz-nomem");
 const sPlain = agentOf("s-plain");
 const sPlainMem = agentOf("s-plain-mem");
 
-// ①.7 kazSurfaceFor 接入：外置插件第一次检测到默认开启
 {
   const rpc = rpcHandlers.get("/kaz-mode");
-  check("①.7 外置检测默认开启：render_pixel_art 进入 Kaz 工具面", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
-  check("①.7 surfaceOf 包含 render_pixel_art", kazMode.surfaceOf(sKaz).has("render_pixel_art") === true);
-  await rpc("setExternalToolPlugin", {
-    cwd: TMP,
-    layer: "project",
-    pluginName: "dsh-pixel-art",
-    toolName: "render_pixel_art",
-    enabled: false,
-  });
-  check("①.7 项目层关闭后 render_pixel_art 不可见", kazMode.toolVisible(sKaz, "render_pixel_art") === false);
-  check("①.7 convert_image_to_pixel_art 仍默认开启", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
-  await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
-  check("①.7 重置项目层后 render_pixel_art 恢复默认开启", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
-
-  await rpc("setExternalToolPlugin", {
-    cwd: TMP,
-    layer: "project",
-    pluginName: "dsh-pixel-art",
-    toolName: "convert_image_to_pixel_art",
-    toolHidden: true,
-  });
-  check("①.7 工具 hidden 后 convert_image_to_pixel_art 不可见", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === false);
-  check("①.7 render_pixel_art 仍默认开启", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
-  await rpc("setExternalToolPlugin", {
-    cwd: TMP,
-    layer: "project",
-    pluginName: "dsh-pixel-art",
-    toolName: "convert_image_to_pixel_art",
-    toolHidden: false,
-  });
-  check("①.7 取消 toolHidden 后恢复默认开启", kazMode.toolVisible(sKaz, "convert_image_to_pixel_art") === true);
-  await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "project" });
+  check("①.6 RPC 通道已注册", typeof rpc === "function");
+  const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
+  check("①.6 getExternalToolPlugins 返回四文件模型", getRes !== null && getRes.ok === true && getRes.value !== null && Array.isArray(getRes.value.userEnable) && typeof getRes.value.userCatalog === "object" && typeof getRes.value.effective === "object");
+  check("①.6 初始 projectDiffers=false / userDiffersFactory=false", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
+  const addP = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", addPlugin: true });
+  check("①.6 addPlugin 写入 other-enable/other-catalog", addP !== null && addP.ok === true && addP.value.userOtherEnable.includes("dsh-pixel-art"));
+  const addT = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", toolName: "render_pixel_art", addTool: true });
+  check("①.6 addTool 写入 other-catalog", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true);
+  check("①.6 手动添加的插件/工具进入 Kaz 工具面", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+  const rem = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", removePlugin: true });
+  check("①.6 removePlugin 删除用户添加插件", rem !== null && rem.ok === true && rem.value.userOtherEnable.includes("dsh-pixel-art") === false);
 }
 
 // ①.8 官方工具统一走 factory/JSON，不再依赖 settings.yaml 的 toolWhitelist
@@ -241,17 +187,11 @@ const sPlainMem = agentOf("s-plain-mem");
   check("①.8 only_unknown 不进入工具面", kazMode.toolVisible(sKaz, "only_unknown") === false);
 }
 
-// ①.9 用户目录外置插件目录：分类来自 catalog，remove/restoreRemoved 落盘
+// ①.9 listToolPlugins 只返回官方/Kaz 分类
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const list1 = await rpc("listToolPlugins", {});
   check("①.9 listToolPlugins 返回 catalog 且官方含 planmodecontroller", list1 !== null && list1.ok === true && list1.value.catalog !== null && Array.isArray(list1.value.catalog.official) && list1.value.catalog.official.includes("planmodecontroller"));
-  const rem = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", removePlugin: true });
-  check("①.9 removePlugin 落盘 removedPlugins", rem !== null && rem.ok === true && rem.value.removedPlugins["dsh-pixel-art"] === true);
-  const list2 = await rpc("listToolPlugins", {});
-  check("①.9 listToolPlugins 能看到 removedPlugins", list2.value.catalog.removedPlugins["dsh-pixel-art"] === true);
-  const rst = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", restoreRemoved: true });
-  check("①.9 restoreRemoved 清空 removedPlugins", rst !== null && rst.ok === true && rst.value.removedPlugins["dsh-pixel-art"] === undefined);
 }
 
 check("① kazEnabled(kaz 会话)=true", kazMode.kazEnabled(sKaz) === true);

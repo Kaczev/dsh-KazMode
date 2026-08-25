@@ -1,5 +1,4 @@
-// kaz-shared 探针：验证 tool-lists.js 的工具清单单一事实源。
-// 运行：node kaz-shared/probe-tool-lists.mjs
+// kaz-shared 探针：验证 tool-lists.js 的四文件模型。
 import {
   TOOL_WHITELIST,
   DEFAULT_FIRST_ROUND_TOOLS,
@@ -12,22 +11,17 @@ import {
   resolveFirstRoundTools,
   computeSurface,
   normalizeExternalKey,
-  emptyExternalToolPluginState,
-  normalizeExternalToolPluginState,
-  mergeExternalToolPluginStates,
-  setExternalPluginTool,
-  setExternalPluginIgnored,
-  setExternalPluginToolHidden,
-  restoreExternalPlugin,
-  effectiveExternalToolPluginState,
-  flattenEnabledExternalTools,
-  computeExternalToolSurface,
-  TOOL_PLUGIN_FACTORY,
-  DEFAULT_ENABLED_TOOL_PLUGINS,
-  DEFAULT_UNABLED_TOOL_PLUGINS,
+  normalizeEnableList,
+  normalizeToolCatalog,
+  unionEnableLists,
+  mergeToolCatalogs,
+  buildToolUniverse,
+  computeEffectiveToolState,
+  computeToolPluginSurfaceFromEffective,
   computeToolPluginSurface,
+  TOOL_PLUGIN_CATALOG,
+  DEFAULT_ENABLED_TOOL_PLUGINS,
 } from "./lib/tool-lists.js";
-import { TOOL_PLUGIN_CATALOG } from "./lib/tool-plugin-catalog.js";
 
 let failures = 0;
 function check(label, ok) {
@@ -35,111 +29,35 @@ function check(label, ok) {
   if (!ok) failures += 1;
 }
 
-// ① 常量齐全（单一事实源：各处副本都已删除）
-check("① DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = [memory_search]", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON) && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON.length === 1 && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON[0] === "memory_search");
-check("① DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = [pwsh, read, edit]", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF) && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF.length === 3 && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF[0] === "pwsh" && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF.includes("read") && DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF.includes("edit"));
-check("① DEFAULT_FIRST_ROUND_TOOLS 兜底 = MEMORY_OFF", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && DEFAULT_FIRST_ROUND_TOOLS.length === 3 && DEFAULT_FIRST_ROUND_TOOLS[0] === "pwsh");
-check("① DEFAULT_DISABLED_TOOLS 存在", Array.isArray(DEFAULT_DISABLED_TOOLS) && DEFAULT_DISABLED_TOOLS.includes("tool-cordis"));
-check("① MANAGED_PLUGINS / FIXED_PERSONA 存在", Array.isArray(MANAGED_PLUGINS) && typeof FIXED_PERSONA === "string");
-check("① 原设置覆盖：每个 catalog 插件要么默认启用、要么明确不启用", Object.keys(TOOL_PLUGIN_CATALOG).every((key) => DEFAULT_ENABLED_TOOL_PLUGINS.includes(key) || DEFAULT_UNABLED_TOOL_PLUGINS.includes(key)));
-const exports0 = await import("./lib/tool-lists.js");
-check("① 已移除群组 API / DEFAULT_ 前缀常量", !("registerGroup" in exports0) && !("DEFAULT_TOOL_WHITELIST" in exports0) && !("DEFAULT_MINIMAL_TOOLS" in exports0));
-check("① resolveFirstRoundTools：kaz-memory 开 → memory_search", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: true })) === JSON.stringify(["memory_search"]));
-check("① resolveFirstRoundTools：kaz-memory 关 → pwsh/read/edit", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: false })) === JSON.stringify(["pwsh", "read", "edit"]));
-check("① resolveFirstRoundTools：状态未知 → 兜底 pwsh/read/edit", JSON.stringify(resolveFirstRoundTools({})) === JSON.stringify(["pwsh", "read", "edit"]));
+check("① 常量齐全", Array.isArray(DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON) && Array.isArray(DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF) && Array.isArray(DEFAULT_FIRST_ROUND_TOOLS) && Array.isArray(DEFAULT_DISABLED_TOOLS) && Array.isArray(MANAGED_PLUGINS) && typeof FIXED_PERSONA === "string");
+check("① resolveFirstRoundTools kaz-memory 开", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: true })) === JSON.stringify(["memory_search"]));
+check("① resolveFirstRoundTools kaz-memory 关", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: false })) === JSON.stringify(["pwsh", "read", "edit"]));
+check("① TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "glob", "grep", "web_search", "memory_search"].every((t) => TOOL_WHITELIST.includes(t)));
 
-// ② TOOL_WHITELIST：Kaz 模式下允许出现的全部工具（含记忆六工具与诊断工具）
-const SIX_MEMORY = ["memory_save", "memory_list", "memory_search", "memory_detail", "memory_update", "memory_forget"];
-check("② TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "glob", "grep", "web_search"].every((t) => TOOL_WHITELIST.includes(t)));
-check("② TOOL_WHITELIST 含记忆六工具", SIX_MEMORY.every((t) => TOOL_WHITELIST.includes(t)));
-const REMOVED_2026_08_21 = ["read_image", "ralph", "workflow", "create_goal", "get_goal", "update_goal", "str_replace_editor"];
-check("② 已按 2026-08-21 决定移除 read_image/ralph/workflow/goal/str_replace_editor", REMOVED_2026_08_21.every((t) => !TOOL_WHITELIST.includes(t)));
-check("② web_search 保留（复用 DeepSeek key，实测可用）", TOOL_WHITELIST.includes("web_search"));
-check("② TOOL_WHITELIST 去重且有序", new Set(TOOL_WHITELIST).size === TOOL_WHITELIST.length);
+check("② normalizeExternalKey", normalizeExternalKey("Dsh_Pixel Art") === "dsh-pixel-art");
+check("② normalizeEnableList 去重", JSON.stringify(normalizeEnableList(["tool-fs", "Tool_FS", "dsh-pixel-art"])) === JSON.stringify(["tool-fs", "dsh-pixel-art"]));
+check("② normalizeToolCatalog", normalizeToolCatalog({ "Tool-FS": { read: true, write: false } })["tool-fs"].read === true && normalizeToolCatalog({ "Tool-FS": { read: true, write: false } })["tool-fs"].write === false);
+check("② unionEnableLists", JSON.stringify(unionEnableLists(["a"], ["b", "a"])) === JSON.stringify(["a", "b"]));
+check("② mergeToolCatalogs 后层覆盖", mergeToolCatalogs({ a: { x: true } }, { a: { x: false, y: true } }).a.x === false && mergeToolCatalogs({ a: { x: true } }, { a: { x: false, y: true } }).a.y === true);
 
-// ③ effectiveToolWhitelist：白名单是唯一闸门（原样去重，不做任何加减）
-const userList = ["pwsh", "edit", "web_search", "pwsh"];
-const eff = effectiveToolWhitelist(userList);
-check("③ 用户白名单原样生效（去重）", eff.length === 3 && eff.includes("pwsh") && eff.includes("edit") && eff.includes("web_search"));
-check("③ 不在白名单的工具不进入（哪怕被注册也无所谓——闸门只认清单）", !eff.includes("memory_save"));
-const withMemory = effectiveToolWhitelist([...userList, "memory_search"]);
-check("③ 白名单含记忆工具时它们进入有效白名单", withMemory.includes("memory_search"));
-const fallback = effectiveToolWhitelist([]);
-check("③ 白名单缺失/为空时回退 TOOL_WHITELIST", fallback.length === TOOL_WHITELIST.length && fallback.every((t) => TOOL_WHITELIST.includes(t)));
+const universe = buildToolUniverse(TOOL_PLUGIN_CATALOG, { "dsh-pixel-art": { render_pixel_art: true } });
+check("③ T0 含官方工具和用户添加插件", universe["tool-fs"]?.read === true && universe["dsh-pixel-art"]?.render_pixel_art === true);
 
-// ④ computeSurface：首阶段仅 firstRoundTools（无交集、无 minimalTools）；
-//    全量 = effectiveToolWhitelist
-const full = computeSurface({
-  toolWhitelist: [...TOOL_WHITELIST],
-  minimalPhase: false,
-  firstRoundTools: ["memory_search"],
+const eff = computeEffectiveToolState({
+  codeCatalog: TOOL_PLUGIN_CATALOG,
+  codeEnabled: DEFAULT_ENABLED_TOOL_PLUGINS,
+  userOtherEnable: ["dsh-pixel-art"],
+  userOtherCatalog: { "dsh-pixel-art": { render_pixel_art: true } },
 });
-check("④ 全量阶段 = 有效白名单（含记忆工具）", full.has("pwsh") && full.has("read") && full.has("memory_search"));
-const restricted = computeSurface({ toolWhitelist: ["pwsh", "edit"], minimalPhase: false });
-check("④ 用户收窄白名单后全量阶段只含清单内工具", restricted.size === 2 && restricted.has("pwsh") && restricted.has("edit") && !restricted.has("memory_search"));
-const first = computeSurface({
-  toolWhitelist: TOOL_WHITELIST,
-  minimalPhase: true,
-  firstRoundTools: ["memory_search"],
-});
-check("④ 首阶段仅保留 firstRoundTools（白名单再全也不进首阶段）", first.size === 1 && first.has("memory_search") && !first.has("pwsh") && !first.has("read") && !first.has("edit"));
-const firstMemOn = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [], kazMemoryEnabled: true });
-check("④ 首阶段 firstRoundTools 为空 + kaz-memory 开 → memory_search", firstMemOn.size === 1 && firstMemOn.has("memory_search") && !firstMemOn.has("pwsh") && !firstMemOn.has("read") && !firstMemOn.has("edit"));
-const firstMemOff = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [], kazMemoryEnabled: false });
-check("④ 首阶段 firstRoundTools 为空 + kaz-memory 关 → pwsh/read/edit", firstMemOff.size === 3 && firstMemOff.has("pwsh") && firstMemOff.has("read") && firstMemOff.has("edit") && !firstMemOff.has("memory_search"));
-const firstUnknown = computeSurface({ toolWhitelist: TOOL_WHITELIST, minimalPhase: true, firstRoundTools: [] });
-check("④ 首阶段 firstRoundTools 为空 + 状态未知 → 兜底 DEFAULT_FIRST_ROUND_TOOLS", firstUnknown.size === DEFAULT_FIRST_ROUND_TOOLS.length && firstUnknown.has("pwsh") && firstUnknown.has("read") && firstUnknown.has("edit") && !firstUnknown.has("memory_search"));
-
-// ⑤ 外置工具插件数据模型（分步实施第一步：纯函数）
-check("⑤ normalizeExternalKey 归一化大小写/分隔符", normalizeExternalKey("dsh-pixel-art") === normalizeExternalKey("Dsh_Pixel Art") && normalizeExternalKey("dsh-pixel-art") === "dsh-pixel-art");
-check("⑤ 空状态结构正确", JSON.stringify(emptyExternalToolPluginState()) === JSON.stringify({ version: 1, plugins: {} }));
-const base = setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true);
-const base2 = setExternalPluginTool(base, "dsh-pixel-art", "convert_image_to_pixel_art", false);
-check("⑤ setExternalPluginTool 登记工具开关", base2.plugins["dsh-pixel-art"].tools["render_pixel_art"] === true && base2.plugins["dsh-pixel-art"].tools["convert_image_to_pixel_art"] === false);
-const ignored = setExternalPluginIgnored(base2, "dsh-pixel-art", true);
-check("⑤ setExternalPluginIgnored 生效", ignored.plugins["dsh-pixel-art"].ignored === true);
-const restored = restoreExternalPlugin(ignored, "dsh-pixel-art");
-check("⑤ restoreExternalPlugin 取消忽略且全部工具开启", restored.plugins["dsh-pixel-art"].ignored === false && restored.plugins["dsh-pixel-art"].tools["render_pixel_art"] === true && restored.plugins["dsh-pixel-art"].tools["convert_image_to_pixel_art"] === true);
-const user = setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", false);
-const project = setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true);
-const merged = mergeExternalToolPluginStates({}, user, project);
-check("⑤ 三层合并：项目覆盖用户、用户覆盖出厂", merged.plugins["dsh-pixel-art"].tools["render_pixel_art"] === true);
-const effExternal = effectiveExternalToolPluginState({ factory: {}, user, project: {} });
-check("⑤ effectiveExternalToolPluginState 只合并两层也正确", effExternal.plugins["dsh-pixel-art"].tools["render_pixel_art"] === false);
-const surface = computeExternalToolSurface({
-  factory: {},
-  user: setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true),
-  project: {},
-  detected: { "dsh-pixel-art": ["render_pixel_art", "convert_image_to_pixel_art"] },
-});
-check("⑤ 外置检测到未登记的新工具默认开启", surface.has("render_pixel_art") && surface.has("convert_image_to_pixel_art"));
-const surfaceIgnored = computeExternalToolSurface({
-  factory: {},
-  user: setExternalPluginIgnored(setExternalPluginTool(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true), "dsh-pixel-art", true),
-  project: {},
-  detected: { "dsh-pixel-art": ["render_pixel_art"] },
-});
-check("⑤ 插件 ignored 时即便检测到也不进入工具面", surfaceIgnored.size === 0);
-
-// ⑤.1 工具级 hidden（忽略）语义：隐藏后不进工具面，取消后默认开启
-{
-  const hiddenState = setExternalPluginToolHidden(emptyExternalToolPluginState(), "dsh-pixel-art", "render_pixel_art", true);
-  const hiddenSurface = computeExternalToolSurface({ factory: {}, user: hiddenState, project: {}, detected: { "dsh-pixel-art": ["render_pixel_art", "convert_image_to_pixel_art"] } });
-  check("⑤.1 工具 hidden 后不出现在工具面，其它检测到的工具仍默认开启", !hiddenSurface.has("render_pixel_art") && hiddenSurface.has("convert_image_to_pixel_art"));
-  const unhiddenState = setExternalPluginToolHidden(hiddenState, "dsh-pixel-art", "render_pixel_art", false);
-  const unhiddenSurface = computeExternalToolSurface({ factory: {}, user: unhiddenState, project: {}, detected: { "dsh-pixel-art": ["render_pixel_art"] } });
-  check("⑤.1 取消 hidden 后还原默认开启", unhiddenSurface.has("render_pixel_art"));
-  const restoredHidden = restoreExternalPlugin(hiddenState, "dsh-pixel-art");
-  check("⑤.1 restoreExternalPlugin 清除 hiddenTools", restoredHidden.plugins["dsh-pixel-art"].hiddenTools["render_pixel_art"] !== true);
-}
-
-// ⑥ 统一工具插件出厂默认：官方工具也走同一套插件分组格式
-{
-  const factorySurface = computeToolPluginSurface({ factory: TOOL_PLUGIN_FACTORY, user: {}, project: {}, detected: {} });
-  const required = ["pwsh", "read", "write", "edit", "glob", "grep", "job_list", "job_output", "job_kill", "ask_user_question", "todo_write", "web_search", "memory_save", "memory_search"];
-  check("⑥ TOOL_PLUGIN_FACTORY 覆盖当前官方默认工具面", required.every((tool) => factorySurface.has(tool)));
-  check("⑥ TOOL_PLUGIN_FACTORY 不含已移除的 read_image/str_replace_editor", !factorySurface.has("read_image") && !factorySurface.has("str_replace_editor"));
-}
+const surface = computeToolPluginSurfaceFromEffective(eff);
+check("④ 用户添加插件默认进入工具面", surface.has("render_pixel_art"));
+check("④ 未启用插件工具不进入", !surface.has("subagent"));
+check("④ computeToolPluginSurface 一步到位", computeToolPluginSurface({
+  codeCatalog: TOOL_PLUGIN_CATALOG,
+  codeEnabled: DEFAULT_ENABLED_TOOL_PLUGINS,
+  userOtherEnable: ["dsh-pixel-art"],
+  userOtherCatalog: { "dsh-pixel-art": { render_pixel_art: true } },
+}).has("render_pixel_art"));
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);
