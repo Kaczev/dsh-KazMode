@@ -175,7 +175,7 @@ check("① kazMode 服务提供 detectedToolPlugins（只读检测）", kazMode 
   check("①.6 RPC 通道已注册", typeof rpc === "function");
   const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
   check("①.6 getExternalToolPlugins 返回三层结构", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.factory === "object" && typeof getRes.value.user === "object" && typeof getRes.value.project === "object" && typeof getRes.value.effective === "object");
-  check("①.6 初始 projectDiffers=false / userDiffersFactory=true（检测到的新插件已写入用户默认）", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === true);
+  check("①.6 初始 projectDiffers=false / userDiffersFactory=false（检测自动写入的新插件不算用户改动）", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
   const setRes = await rpc("setExternalToolPlugin", {
     cwd: TMP,
     layer: "project",

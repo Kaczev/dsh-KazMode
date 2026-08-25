@@ -681,7 +681,9 @@ function loadExternalToolPluginLayers(cwd, logger) {
   const effective = effectiveExternalToolPluginState({ factory, user, project });
   const userEffective = effectiveExternalToolPluginState({ factory, user });
   const projectDiffers = !externalStateEquals(effective, userEffective);
-  const userDiffersFactory = !externalStateEquals(userEffective, factory);
+  // “用户是否改过默认设置”只看非自动检测默认的改动，避免重启后检测自动写入的
+  // 新插件/新工具让“恢复原设置”误变橙色。
+  const userDiffersFactory = hasToolPluginModifications(user, factory);
   return {
     cwd: safeCwd,
     factory,
@@ -695,8 +697,8 @@ function loadExternalToolPluginLayers(cwd, logger) {
     projectToolDefaults,
     projectDiffers,
     userDiffersFactory,
-    effectiveEqualsFactory: externalStateEquals(effective, factory),
-    effectiveEqualsUser: externalStateEquals(effective, userEffective),
+    effectiveEqualsFactory: !userDiffersFactory && !projectDiffers,
+    effectiveEqualsUser: !projectDiffers,
     hasProjectOverrides: projectDiffers,
   };
 }
@@ -704,6 +706,51 @@ function loadExternalToolPluginLayers(cwd, logger) {
 /** 判断两个规范化状态是否内容一致（用于还原按钮状态）。 */
 function externalStateEquals(left, right) {
   return JSON.stringify(normalizeExternalToolPluginState(left)) === JSON.stringify(normalizeExternalToolPluginState(right));
+}
+
+/**
+ * 判断某个插件状态是否只是“自动检测默认”而没有任何用户改动。
+ * 自动检测默认包括：
+ *   - 非出厂插件：capable 不是 false、没有隐藏、没有忽略、工具全为 true；
+ *   - 出厂插件：capable 与出厂一致、没有隐藏/忽略、已知工具状态与出厂一致、
+ *     新增工具处于“该插件出厂能力对应的默认值”。
+ * 这样重启后即使检测自动写入了用户默认，也不会被误判成“用户改过设置”。
+ */
+function isAutoDefaultPluginState(key, plugin, factory) {
+  if (plugin.ignored === true) return false;
+  const hidden = plugin.hiddenTools ?? {};
+  if (Object.keys(hidden).length > 0) return false;
+  const factoryPlugin = factory?.plugins?.[key];
+  if (factoryPlugin !== undefined) {
+    const factoryCapable = factoryPlugin.capable === true;
+    if (plugin.capable !== undefined && plugin.capable !== factoryCapable) return false;
+    const tools = plugin.tools ?? {};
+    for (const [tool, enabled] of Object.entries(tools)) {
+      const factoryTool = factoryPlugin.tools?.[tool];
+      if (factoryTool !== undefined) {
+        if (enabled !== (factoryTool === true)) return false;
+      } else if (enabled !== factoryCapable) {
+        return false;
+      }
+    }
+    return true;
+  }
+  // 非出厂插件：自动检测默认 = 有能力、工具全开、无隐藏。
+  if (plugin.capable === false) return false;
+  const tools = plugin.tools ?? {};
+  for (const enabled of Object.values(tools)) {
+    if (enabled !== true) return false;
+  }
+  return true;
+}
+
+/** 判断某一层里是否存在“用户真正改动”（区别于自动检测默认）。 */
+function hasToolPluginModifications(state, factory) {
+  const normalized = normalizeExternalToolPluginState(state);
+  for (const [key, plugin] of Object.entries(normalized.plugins)) {
+    if (!isAutoDefaultPluginState(key, plugin, factory)) return true;
+  }
+  return false;
 }
 
 /** 读取某一层的两个拆分文件（user/project）。 */
