@@ -1296,8 +1296,20 @@ window.__ModuleLoader__.load({
 					return [...names].sort();
 				};
 
-				// 没有工具的插件不显示在列表里（原设置里仍保留，防止被当成“新插件”自动开启）。
-				const displayPluginKeys = pluginKeys.filter((key) => toolsOf(key).length > 0);
+				// 没有工具的插件默认不显示；但用户手动添加的非出厂插件要显示出来，
+				// 否则用户还没来得及给插件添加工具，插件就从列表里消失了。
+				const factoryPluginKeys = new Set(Object.keys(data.factory?.plugins ?? {}));
+				const displayPluginKeys = pluginKeys.filter((key) => {
+					if (toolsOf(key).length > 0) return true;
+					if (factoryPluginKeys.has(key)) return false;
+					const inProject =
+						data.projectPluginCatalog?.plugins?.[key] !== undefined ||
+						data.projectToolDefaults?.plugins?.[key] !== undefined;
+					const inUser =
+						data.userPluginCatalog?.plugins?.[key] !== undefined ||
+						data.userToolDefaults?.plugins?.[key] !== undefined;
+					return inProject || inUser;
+				});
 
 				/** 该插件是否有项目专属（插件级：ignored / capable 与用户默认不同）。 */
 				const pluginUnique = (key) => {
@@ -1333,8 +1345,7 @@ window.__ModuleLoader__.load({
 						await applyPatch({ pluginName: key, restore: true });
 						return;
 					}
-					const detectedNow = detected.some((d) => d.key === key || String(d.pluginName || "").toLowerCase() === name.trim().toLowerCase());
-					if (!detectedNow && !window.confirm(`未检测到插件 "${name.trim()}"，仍要添加吗？（请确认是 fiber.name）`)) return;
+					// 手动添加插件：不需要先“检测到”，用户可能就是想手动建一个还没工具的插件。
 					await applyPatch({ pluginName: key, ignored: false });
 					await applyPatch({ pluginName: key, capable: true });
 				};
@@ -1355,8 +1366,7 @@ window.__ModuleLoader__.load({
 						await applyPatch({ pluginName: key, toolName: tool, toolHidden: false });
 						return;
 					}
-					const detectedNow = detectedMap[key] !== undefined && detectedMap[key].includes(tool);
-					if (!detectedNow && !window.confirm(`未检测到工具 "${tool}"，仍要添加吗？`)) return;
+					// 手动添加工具：不需要先“检测到”。
 					await applyPatch({ pluginName: key, ignored: false });
 					await applyPatch({ pluginName: key, capable: true });
 					await applyPatch({ pluginName: key, toolName: tool, enabled: true });
@@ -1371,11 +1381,26 @@ window.__ModuleLoader__.load({
 						await applyPatch({ pluginName: key, toolName: tool, toolHidden: false });
 						return;
 					}
-					const detectedNow = detectedMap[key] !== undefined && detectedMap[key].includes(tool);
-					if (!detectedNow && !window.confirm(`未检测到工具 "${tool}"，仍要添加吗？`)) return;
+					// 手动添加工具：不需要先“检测到”。
 					await applyPatch({ pluginName: key, ignored: false });
 					await applyPatch({ pluginName: key, capable: true });
 					await applyPatch({ pluginName: key, toolName: tool, enabled: true });
+				};
+
+				const assignUnknownTool = async (key, tool) => {
+					const name = window.prompt("输入这个工具所属的插件名（fiber.name）");
+					if (name === null || name.trim().length === 0) return;
+					const res = await rpcCall("assignUnknownTool", {
+						sessionId: sessionId || "",
+						cwd: targetCwd(),
+						pluginName: name.trim(),
+						toolName: tool,
+					});
+					if (res !== null) {
+						setData(res);
+					} else {
+						window.alert("指定失败：" + lastRpcError);
+					}
 				};
 
 				const userDiffersFactory = data.userDiffersFactory === true;
@@ -1493,6 +1518,12 @@ window.__ModuleLoader__.load({
 											tool,
 											unique && createElement("span", { className: "kzm-override-badge" }, "专属"),
 										),
+										key === "unknown" &&
+											createElement(
+												"button",
+												{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void assignUnknownTool(key, tool) },
+												"指定插件",
+											),
 										createElement(
 											"button",
 											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: true }) },
@@ -1609,6 +1640,12 @@ window.__ModuleLoader__.load({
 										(key === "unknown" ? "未知插件" : key) + " / " + tool,
 										toolUnique(key, tool) && createElement("span", { className: "kzm-override-badge" }, "专属"),
 									),
+										key === "unknown" &&
+											createElement(
+												"button",
+												{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void assignUnknownTool(key, tool) },
+												"指定插件",
+											),
 										createElement(
 											"button",
 											{ type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void applyPatch({ pluginName: key, toolName: tool, toolHidden: false }) },
