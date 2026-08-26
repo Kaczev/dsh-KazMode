@@ -27,7 +27,7 @@ Kaz 模式同时具备两个入口，双向同步：
 2. **工具面两阶段**：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
      （为空时自动：kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；
-   - 首次工具调用后：恢复 **Kaz 全部工具** = 工具插件 JSON（官方/外置统一：
+   - 首次工具调用后：恢复 **Kaz 全部工具** = 工具控制面板 JSON（官方/外置统一：
      `factory → 用户默认 → 项目设置`；真正的新插件/新工具默认开启，
      已知但默认关闭的插件/工具保持关闭）。
 3. **记忆工具按会话生效**：`kaz-memory` 关闭时，其六工具从该会话的工具面
@@ -39,7 +39,7 @@ Kaz 模式同时具备两个入口，双向同步：
    `<项目>/.dsh/storages/kaz-session-states.json`（会话覆盖），经 `kazMode` 服务在
    使用时刻按 agent 会话读取；**kaz-mode 不再把任何插件状态写进 settings.yaml**。
 
-### 工具插件（官方 / 外置统一管理）
+### 工具控制面板（官方 / 外置统一管理）
 
 **不再使用 settings.yaml 的 `kaz-mode.toolWhitelist`。** 官方工具与外置插件统一走同一套四文件模型：
 
@@ -53,7 +53,7 @@ Kaz 模式同时具备两个入口，双向同步：
   - 官方/Kaz 插件/工具的开关 → 项目 `tool-plugin.json` / `tool-plugin-catalog.json`
   - 外置插件/工具的开关 → 项目 `other-tool-plugin.json` / `other-tool-plugin-catalog.json`
 
-Kaz 面板的「工具插件」区块是唯一白名单管理器：插件能力开关（大开关）、工具开关
+Kaz 面板的「工具控制面板」区块是唯一白名单管理器：插件能力开关（大开关）、工具开关
 （小开关）、手动添加插件/工具、删除用户添加的外置插件/工具。**手动添加插件/工具写入
 用户目录的 `other-*` 文件**（共享到所有项目）；**开关调整写入项目目录**（官方/Kaz 写
 `tool-plugin` 两个文件，外置写 `other-*` 两个文件，均为专属、不跨项目）；「设为默认设置」
@@ -98,9 +98,9 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   （模式默认 + 会话覆盖），settings.yaml 只作 standalone 兜底；
 - Kaz 面板里可单独开/关每个插件（改会话覆盖或模式默认），改动即时生效。
 
-### 4. Kaz 工具面（工具插件 JSON 唯一闸门）
+### 4. Kaz 工具面（工具控制面板 JSON 唯一闸门）
 
-- **工具插件 JSON** = Kaz 模式的「全部工具来源」——官方/外置统一，按插件分组；
+- **工具控制面板 JSON** = Kaz 模式的「全部工具来源」——官方/外置统一，按插件分组；
   - 原设置：`kaz-shared/lib/tool-plugin-catalog.js`（`TOOL_PLUGIN_CATALOG` + `TOOL_PLUGINS`）；
   - 用户默认：`~/.dsh/storages/tool-plugin.json` + `tool-plugin-catalog.json`
     + `other-tool-plugin.json` + `other-tool-plugin-catalog.json`；
@@ -115,7 +115,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件。kaz-mode
 据此在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集（为空时自动：
 kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；首次工具调用后
-恢复工具插件 JSON 定义的全部工具。Kaz 模式下 round-minimal 的 `guidanceHeadEnabled` 默认开，
+恢复工具控制面板 JSON 定义的全部工具。Kaz 模式下 round-minimal 的 `guidanceHeadEnabled` 默认开，
 会在第一轮开始时注入一条「先使用首轮工具，之后才能用其它工具」的精简提示。
 
 ### 6. 设置（`~/.dsh/settings.yaml`，热重载）
@@ -126,7 +126,7 @@ kaz-mode:
   previousPreset: router-standard     # 最近一个非 kaz 预设（自动维护）
   savedPluginStates: {}               # 信息快照（自动维护，勿手改）
 ```
-> 工具面不再由 `kaz-mode.toolWhitelist` 控制；官方/外置工具请用 Kaz 面板「工具插件」或上面的四文件模型。
+> 工具面不再由 `kaz-mode.toolWhitelist` 控制；官方/外置工具请用 Kaz 面板「工具控制面板」或上面的四文件模型。
 
 ## 发新版必做（给未来的我和 agent）
 
@@ -165,10 +165,10 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    默认是 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时是
    记忆优先提示词（+ 计划模式段）；
 2. 首次工具调用前工具面：kaz-memory 开 = `memory_search`；关 = `pwsh` + `read` + `edit`；
-   第一次工具调用后恢复工具插件 JSON 定义的全部工具（kaz-memory 关闭时无记忆工具）；
+   第一次工具调用后恢复工具控制面板 JSON 定义的全部工具（kaz-memory 关闭时无记忆工具）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
-5. Kaz 面板「工具插件」区块可管理官方/外置插件（开关、手动添加、删除外置），改完即生效；
+5. Kaz 面板「工具控制面板」区块可管理官方/外置插件（开关、手动添加、删除外置），改完即生效；
 6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「专属设置/默认设置」——settings.yaml
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
-   `kaz-defaults.json`、`kaz-session-states.json` 与工具插件 JSON。
+   `kaz-defaults.json`、`kaz-session-states.json` 与工具控制面板 JSON。

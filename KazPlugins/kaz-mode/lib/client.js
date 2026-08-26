@@ -1255,7 +1255,7 @@ window.__ModuleLoader__.load({
 				};
 
 				if (data === null) {
-					return createElement("div", { className: "kzm-state-section" }, createElement("p", { className: "kzm-note" }, "工具插件（当前项目）加载中…"));
+					return createElement("div", { className: "kzm-state-section" }, createElement("p", { className: "kzm-note" }, "工具控制面板（当前项目）加载中…"));
 				}
 
 				const effective = data.effective !== null && typeof data.effective === "object" ? data.effective : {};
@@ -1378,7 +1378,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"div",
 						{ className: "kzm-state-head" },
-						createElement("span", { className: "kzm-state-title" }, "工具插件（当前项目）"),
+						createElement("span", { className: "kzm-state-title" }, "工具控制面板（当前项目）"),
 						restoreLabel !== null &&
 							createElement("button", { type: "button", className: "kzm-reset-btn", "data-drifted": restoreOrange ? "true" : "false", disabled: !writable || busy, onClick: restoreAction }, restoreLabel),
 						hasProjectOverrides &&
@@ -1630,7 +1630,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 You are a helpful software engineer assistant.，kaz-memory 启用时切换为记忆优先提示词）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（工具插件四文件模型的生效白名单，子代理会话同样适用）；" +
+						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 You are a helpful software engineer assistant.，kaz-memory 启用时切换为记忆优先提示词）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（工具控制面板四文件模型的生效白名单，子代理会话同样适用）；" +
 							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory；" +
 							"kaz-memory 关闭时其工具自动移出白名单。",
 					),

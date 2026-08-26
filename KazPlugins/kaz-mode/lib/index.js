@@ -1225,8 +1225,8 @@ export default {
           return {
             kind: "deny",
             reason:
-              `工具 "${name}" 不在本会话 Kaz 模式工具面内（工具插件 JSON：官方/外置 + 已启用记忆插件）。` +
-              `如需使用，请在 Kaz 面板的「工具插件」或项目/用户 JSON 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
+              `工具 "${name}" 不在本会话 Kaz 模式工具面内（工具控制面板 JSON：官方/外置 + 已启用记忆插件）。` +
+              `如需使用，请在 Kaz 面板的「工具控制面板」或项目/用户 JSON 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
           };
         }
         return next();
