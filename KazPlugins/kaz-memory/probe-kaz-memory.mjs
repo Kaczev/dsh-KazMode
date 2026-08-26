@@ -9,6 +9,7 @@
 //   ⑦ openFolder 动作：target=global/project 分别打开对应文件夹（config.openFolder 覆盖，不真开资源管理器）。
 // 运行：node kaz-memory/probe-kaz-memory.mjs
 import { apply } from "./lib/index.js";
+import { applyContentEdits, applyKeywordPatch } from "./lib/engine.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -92,10 +93,15 @@ function makeMemoryEngine(records) {
     update(id, patch = {}) {
       const rec = list.find((r) => r.id === id);
       if (rec === undefined) return Promise.reject(new Error(`cannot update unknown memory '${id}'`));
-      const contentChanged = typeof patch.content === "string" && patch.content !== rec.content;
-      if (contentChanged) rec.content = patch.content;
-      if (Array.isArray(patch.keywords)) rec.keywords = patch.keywords.map((k) => String(k).toLowerCase());
-      if (typeof patch.name === "string") rec.name = patch.name.trim();
+      const hasFullContent = typeof patch.content === "string";
+      const hasEdits = Array.isArray(patch.edits);
+      if (patch.edits !== undefined && !hasEdits) throw new Error("edits must be an array");
+      if (hasFullContent && hasEdits) throw new Error("cannot use content and edits together");
+      const nextContent = hasEdits ? applyContentEdits(rec.content, patch.edits) : (hasFullContent ? patch.content : rec.content);
+      const contentChanged = nextContent !== rec.content;
+      if (contentChanged) rec.content = nextContent;
+      if (typeof patch.name === "string" && patch.name.trim().length > 0) rec.name = patch.name.trim();
+      rec.keywords = applyKeywordPatch(rec.keywords, patch);
       if (typeof patch.summary === "string") rec.summary = patch.summary;
       if (contentChanged && (rec.status === "applied" || rec.status === "auto")) rec.status = "pending";
       rec.updated_at = iso(Date.now());
@@ -567,6 +573,50 @@ const m1AfterContent = await memory.get("m1");
 check("⑥b 修改 applied 正文后降级为 pending", m1AfterContent !== undefined && m1AfterContent.status === "pending" && m1AfterContent.content.includes("新内容"));
 const unknownUpdate = await updateTool.execute({ id: "no-such-id" }, execProjA).then(() => null, () => "rejected");
 check("⑥b 不存在的 id 会拒绝", unknownUpdate === "rejected");
+
+// ⑥b2 memory_update 新版：精确小改（edits）+ 标题继承 + keywords 增删
+const editRec = await memory.remember({ name: "编辑测试", keywords: ["edit"], summary: "编辑测试摘要", content: "旧文字 保留 旧文字 中间 旧文字", namespace: "project", projectRoot: "C:/projA" });
+const preserveName = await updateTool.execute({ id: "m1", edits: [{ type: "replace", find: "新内容", replace: "新内容2" }] }, execProjA);
+const m1Preserve = await memory.get("m1");
+check("⑥b2 小改不传 name 时继承旧标题", preserveName?.updated === true && m1Preserve.name === "新标题" && m1Preserve.content.includes("新内容2"));
+const ambiguous = await updateTool.execute({ id: editRec.id, edits: [{ type: "replace", find: "旧文字", replace: "新文字" }] }, execProjA).then(() => null, () => "rejected");
+check("⑥b2 多处匹配且无上下文/occurrence 时拒绝", ambiguous === "rejected");
+const contextEdit = await updateTool.execute({ id: editRec.id, edits: [{ type: "replace", find: "旧文字", before: "保留 ", after: " 中间", replace: "新文字" }] }, execProjA);
+const editAfterContext = await memory.get(editRec.id);
+check("⑥b2 before/after 上下文精确定位第二处", contextEdit?.updated === true && editAfterContext.content === "旧文字 保留 新文字 中间 旧文字");
+const occEdit = await updateTool.execute({ id: editRec.id, edits: [{ type: "replace", find: "旧文字", replace: "末字", occurrence: 2 }] }, execProjA);
+const editAfterOcc = await memory.get(editRec.id);
+check("⑥b2 occurrence=2 改第二处", occEdit?.updated === true && editAfterOcc.content === "旧文字 保留 新文字 中间 末字");
+const fullReset = await updateTool.execute({ id: editRec.id, content: "x x x", name: "编辑测试" }, execProjA);
+const allEdit = await updateTool.execute({ id: editRec.id, edits: [{ type: "replace", find: "x", replace: "y", occurrence: "all" }] }, execProjA);
+const editAfterAll = await memory.get(editRec.id);
+check("⑥b2 occurrence=all 全文替换", fullReset?.updated === true && allEdit?.updated === true && editAfterAll.content === "y y y");
+const insertEdit = await updateTool.execute({ id: editRec.id, edits: [
+  { type: "insertAfter", find: "y", text: "A", occurrence: 2 },
+  { type: "insertBefore", find: "y", text: "B", occurrence: 3 },
+  { type: "append", text: "!" },
+  { type: "prepend", text: "# " },
+] }, execProjA);
+const editAfterInsert = await memory.get(editRec.id);
+check("⑥b2 insertAfter/insertBefore/append/prepend 按锚点插入", insertEdit?.updated === true && editAfterInsert.content === "# y yA By!");
+const kwRec = await memory.remember({ name: "kw", keywords: ["a", "b"], summary: "kw摘要", content: "kw正文", namespace: "project", projectRoot: "C:/projA" });
+const kwEdit = await updateTool.execute({ id: kwRec.id, keywordsAdd: ["B", "c"], keywordsRemove: ["a"] }, execProjA);
+const kwAfter = await memory.get(kwRec.id);
+check("⑥b2 keywordsAdd/Remove 增量增删", kwEdit?.updated === true && kwAfter.keywords.join(",") === "b,c");
+const fullNamePreserve = await updateTool.execute({ id: kwRec.id, content: "新全文" }, execProjA);
+const kwAfterFull = await memory.get(kwRec.id);
+check("⑥b2 content 整段重写不传 name 时也继承旧标题", fullNamePreserve?.updated === true && kwAfterFull.name === "kw" && kwAfterFull.content === "新全文");
+const contentConflict = await updateTool.execute({ id: kwRec.id, content: "x", edits: [{ type: "replace", find: "x", replace: "y" }] }, execProjA).then(() => null, () => "rejected");
+check("⑥b2 content 与 edits 同时传会拒绝", contentConflict === "rejected");
+const keywordsConflict = await updateTool.execute({ id: kwRec.id, keywords: ["z"], keywordsAdd: ["y"] }, execProjA).then(() => null, () => "rejected");
+check("⑥b2 keywords 与 keywordsAdd 同时传会拒绝", keywordsConflict === "rejected");
+const atomicRec = await memory.remember({ name: "atomic", keywords: [], summary: "s", content: "旧文字", namespace: "project", projectRoot: "C:/projA" });
+const atomicEdit = await updateTool.execute({ id: atomicRec.id, edits: [
+  { type: "replace", find: "旧文字", replace: "新文字" },
+  { type: "replace", find: "不存在的锚点", replace: "x" },
+] }, execProjA).then(() => null, () => "rejected");
+const atomicAfter = await memory.get(atomicRec.id);
+check("⑥b2 edits 任一步失败整体不写入（原子性）", atomicEdit === "rejected" && atomicAfter.content === "旧文字");
 
 // ⑥c memory_detail：按 id 分片读取全文
 const detailTool = registeredTools.get("memory_detail");

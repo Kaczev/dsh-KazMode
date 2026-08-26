@@ -96,6 +96,139 @@ function deriveName(content, max = 140) {
     const head = (title ?? lines[0]).replace(/^#+\s*/, '').trim();
     return head.length > max ? head.slice(0, max) + '…' : head;
 }
+
+/** 规整关键词：小写、去重、丢弃空串。 */
+function normalizeKeywords(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const result = [];
+    for (const item of value) {
+        const keyword = typeof item === 'string' ? item.trim().toLowerCase() : '';
+        if (keyword.length === 0 || seen.has(keyword)) continue;
+        seen.add(keyword);
+        result.push(keyword);
+    }
+    return result;
+}
+
+/**
+ * 在 content 中查找 `find` 的所有非重叠匹配位置。
+ * `before` / `after` 存在时，要求匹配片段的前/后紧邻文字完全一致（字面量、大小写敏感）。
+ */
+function findMatches(content, find, before, after) {
+    if (typeof find !== 'string' || find.length === 0) {
+        throw new Error('edit.find must be a non-empty string');
+    }
+    if (before !== undefined && typeof before !== 'string') throw new Error('edit.before must be a string');
+    if (after !== undefined && typeof after !== 'string') throw new Error('edit.after must be a string');
+    const beforeText = before ?? '';
+    const afterText = after ?? '';
+    const matches = [];
+    let index = 0;
+    while (index <= content.length) {
+        const pos = content.indexOf(find, index);
+        if (pos === -1) break;
+        const beforeOk = beforeText.length === 0 || (pos >= beforeText.length && content.slice(pos - beforeText.length, pos) === beforeText);
+        const afterOk = afterText.length === 0 || (pos + find.length + afterText.length <= content.length && content.slice(pos + find.length, pos + find.length + afterText.length) === afterText);
+        if (beforeOk && afterOk) matches.push(pos);
+        index = pos + find.length;
+    }
+    return matches;
+}
+
+/** 取一个 edit 的目标匹配位置；未指定 occurrence 时要求唯一匹配。 */
+function targetMatches(edit, matches, label) {
+    const occurrence = edit.occurrence;
+    if (occurrence === undefined) {
+        if (matches.length !== 1) {
+            throw new Error(`${label}: find ${JSON.stringify(edit.find)} matches ${matches.length} times; add before/after context or occurrence`);
+        }
+        return [matches[0]];
+    }
+    if (occurrence === 'all') return matches;
+    const numeric = typeof occurrence === 'number'
+        ? occurrence
+        : (typeof occurrence === 'string' && /^\d+$/.test(occurrence) ? Number(occurrence) : Number.NaN);
+    if (Number.isInteger(numeric) && numeric >= 1) {
+        if (numeric > matches.length) {
+            throw new Error(`${label}: occurrence ${numeric} out of range (${matches.length} match${matches.length === 1 ? '' : 'es'})`);
+        }
+        return [matches[numeric - 1]];
+    }
+    throw new Error(`${label}: occurrence must be a positive integer or "all"`);
+}
+
+/** 对正文按 edits 列表逐条应用字面量编辑；任一步失败即抛错，不产生部分结果。 */
+export function applyContentEdits(content, edits) {
+    if (!Array.isArray(edits)) throw new Error('edits must be an array');
+    let result = content;
+    for (let i = 0; i < edits.length; i += 1) {
+        const edit = edits[i];
+        const label = `edit ${i + 1}`;
+        if (edit === null || typeof edit !== 'object') throw new Error(`${label} must be an object`);
+        const type = edit.type;
+        if (type === 'append' || type === 'prepend') {
+            if (typeof edit.text !== 'string') throw new Error(`${label}: text must be a string`);
+            result = type === 'append' ? result + edit.text : edit.text + result;
+            continue;
+        }
+        if (type !== 'replace' && type !== 'insertAfter' && type !== 'insertBefore') {
+            throw new Error(`${label}: unknown type ${JSON.stringify(type)}`);
+        }
+        const find = edit.find;
+        const matches = findMatches(result, find, edit.before, edit.after);
+        const targets = targetMatches(edit, matches, label);
+        if (type === 'replace' && typeof edit.replace !== 'string') {
+            throw new Error(`${label}: replace must be a string (use "" to delete)`);
+        }
+        if (type !== 'replace' && typeof edit.text !== 'string') {
+            throw new Error(`${label}: text must be a string`);
+        }
+        const insertion = type === 'replace' ? edit.replace : edit.text;
+        const sorted = [...targets].sort((a, b) => a - b);
+        let out = '';
+        let cursor = 0;
+        for (const pos of sorted) {
+            out += result.slice(cursor, pos);
+            if (type === 'insertBefore') out += insertion;
+            if (type === 'replace') {
+                out += insertion;
+            } else {
+                out += result.slice(pos, pos + find.length);
+            }
+            if (type === 'insertAfter') out += insertion;
+            cursor = pos + find.length;
+        }
+        out += result.slice(cursor);
+        result = out;
+    }
+    return result;
+}
+
+/**
+ * 计算更新后的 keywords：
+ * - `patch.keywords` 提供时整体替换（与 keywordsAdd/Remove 互斥）；
+ * - 否则按 keywordsRemove → keywordsAdd 增量调整，缺失/已存在均静默 no-op。
+ */
+export function applyKeywordPatch(keywords, patch) {
+    const hasFull = Array.isArray(patch.keywords);
+    const hasAdd = Array.isArray(patch.keywordsAdd);
+    const hasRemove = Array.isArray(patch.keywordsRemove);
+    if (hasFull && (hasAdd || hasRemove)) {
+        throw new Error('cannot use keywords together with keywordsAdd/keywordsRemove');
+    }
+    let next = hasFull ? normalizeKeywords(patch.keywords) : normalizeKeywords(keywords);
+    if (hasRemove) {
+        const removeSet = new Set(normalizeKeywords(patch.keywordsRemove));
+        next = next.filter((keyword) => !removeSet.has(keyword));
+    }
+    if (hasAdd) {
+        for (const keyword of normalizeKeywords(patch.keywordsAdd)) {
+            if (!next.includes(keyword)) next.push(keyword);
+        }
+    }
+    return next;
+}
 function toRecord(id, block, projectRoot) {
     const { created_at, updated_at } = timestampsOf(block);
     const { createdAt, updatedAt, ...rest } = block;
@@ -334,15 +467,24 @@ export class MemoryEngine extends Service {
      */
     async update(id, patch = {}) {
         const applyPatch = (block) => {
-            const contentChanged = typeof patch.content === 'string' && patch.content !== block.content;
-            const content = contentChanged ? patch.content : block.content;
-            const name = typeof patch.name === 'string'
+            const hasFullContent = typeof patch.content === 'string';
+            const hasEdits = Array.isArray(patch.edits);
+            if (hasFullContent && hasEdits) {
+                throw new Error('cannot use content and edits together');
+            }
+            if (patch.edits !== undefined && !hasEdits) {
+                throw new Error('edits must be an array');
+            }
+            const content = hasEdits
+                ? applyContentEdits(block.content, patch.edits)
+                : (hasFullContent ? patch.content : block.content);
+            const contentChanged = content !== block.content;
+            // 标题不自动推导：没传 name（或传空串）就继承旧标题。
+            const name = typeof patch.name === 'string' && patch.name.trim().length > 0
                 ? patch.name.trim()
-                : (contentChanged ? deriveName(content) : block.name);
+                : block.name;
             const summary = typeof patch.summary === 'string' ? patch.summary : block.summary;
-            const keywords = Array.isArray(patch.keywords)
-                ? patch.keywords.map((keyword) => String(keyword).toLowerCase())
-                : block.keywords;
+            const keywords = applyKeywordPatch(block.keywords, patch);
             const currentStatus = normalizeStatus(block.status);
             const status = currentStatus === 'applied' && contentChanged ? 'pending' : currentStatus;
             return writtenBlock({ ...block, content, name, summary, keywords, status });

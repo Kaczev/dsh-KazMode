@@ -72,6 +72,32 @@ const UPDATE_RESULT_SCHEMA = {
   },
 };
 
+/** memory_update.edits 的单项 schema：字面量查找替换 / 按锚点插入 / 首尾追加。 */
+const EDIT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    type: {
+      type: "string",
+      enum: ["replace", "insertAfter", "insertBefore", "append", "prepend"],
+      required: true,
+      description: "replace = 替换 find；insertAfter/insertBefore = 在 find 后/前插入 text；append/prepend = 在正文末尾/开头追加 text。",
+    },
+    find: { type: "string", description: "Literal text to locate (required for replace/insertAfter/insertBefore)." },
+    replace: { type: "string", description: "Replacement text for replace; use \"\" to delete the matched text." },
+    text: { type: "string", description: "Text to insert for insertAfter/insertBefore/append/prepend." },
+    before: { type: "string", description: "Literal text that must immediately precede find (disambiguates matches)." },
+    after: { type: "string", description: "Literal text that must immediately follow find (disambiguates matches)." },
+    occurrence: {
+      oneOf: [
+        { type: "integer" },
+        { type: "string", enum: ["all"] },
+      ],
+      description: '1-based occurrence, or "all"; omit to require a unique match.',
+    },
+  },
+};
+
 /** memory_search 的返回项：只给摘要信息（id/name/summary/keywords/score），不含 content。 */
 const SEARCH_HIT_SCHEMA = {
   type: "object",
@@ -1160,26 +1186,33 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_update",
       description:
-        'Update an existing memory by id: content, keywords, name and/or summary. Changing the content of an "applied" memory demotes it back to "pending" for human re-confirmation; metadata-only edits (name / keywords / summary) keep the status. id comes from memory_list or memory_search. Pass name="" to fall back to deriving it from content, and keywords=[] to clear. On success returns { updated: true } only (no memory content).',
+        'Update an existing memory by id. You can change name, summary, keywords, and content. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content demotes an applied memory back to pending for re-confirmation. On success returns { updated: true } only (no memory content).',
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         name: { type: "string", description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
         keywords: { type: "array", items: { type: "string" }, description: "Anchor keywords used by memory_search (BM25)." },
-        content: { type: "string", description: "Full memory content (plain text)." },
+        keywordsAdd: { type: "array", items: { type: "string" }, description: "Add anchor keywords (case-insensitive, deduplicated; missing/duplicate items are no-ops)." },
+        keywordsRemove: { type: "array", items: { type: "string" }, description: "Remove anchor keywords (case-insensitive; missing keywords are no-ops)." },
         summary: { type: "string", description: "One-sentence summary (~100 chars), written by you when saving; it is the only summary text shown in memory_search results." },
+        content: { type: "string", description: "Full memory content (plain text)." },
+        edits: { type: "array", items: EDIT_SCHEMA, description: "Precise literal content edits; applied sequentially and atomically." },
       },
       output: {
         schema: UPDATE_RESULT_SCHEMA,
         render: (_args, value) => renderJson(value),
       },
       execute(args, _exec) {
+        const patch = {
+          ...(args.name === undefined ? {} : { name: args.name }),
+          ...(args.summary === undefined ? {} : { summary: args.summary }),
+          ...(args.keywords === undefined ? {} : { keywords: args.keywords }),
+          ...(args.keywordsAdd === undefined ? {} : { keywordsAdd: args.keywordsAdd }),
+          ...(args.keywordsRemove === undefined ? {} : { keywordsRemove: args.keywordsRemove }),
+          ...(args.content === undefined ? {} : { content: args.content }),
+          ...(args.edits === undefined ? {} : { edits: args.edits }),
+        };
         return Promise.resolve(
-          memory.update(String(args.id), {
-            ...(args.content === undefined ? {} : { content: args.content }),
-            ...(args.keywords === undefined ? {} : { keywords: args.keywords }),
-            ...(args.name === undefined ? {} : { name: args.name }),
-            ...(args.summary === undefined ? {} : { summary: args.summary }),
-          }),
+          memory.update(String(args.id), patch),
         ).then(() => ({ updated: true }));
       },
       presentCall: (args) => present("更新记忆", "other", args.id),

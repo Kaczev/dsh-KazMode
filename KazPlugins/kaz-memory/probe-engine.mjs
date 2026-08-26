@@ -104,6 +104,38 @@ const c = await memory.remember({ content: "写入才建目录", namespace: "pro
 check("写入后才创建项目记忆文件", existsSync(join(projC, ".dsh", "storages", "memory_project.json")));
 check("写入后的记忆可读回", (await memory.list({ projectRoot: projC })).some((r) => r.id === c.id));
 
+// memory_update 新版：edits 精确小改、标题继承、keywords 增删、原子性
+const editReal = await memory.remember({ name: "原标题", keywords: ["a", "b"], summary: "旧摘要", content: "a 旧 保留 旧 中间 旧", namespace: "global" });
+await memory.setStatus(editReal.id, "applied");
+const editOnce = await memory.update(editReal.id, { edits: [{ type: "replace", find: "旧", before: "保留 ", after: " 中间", replace: "新" }] });
+check("engine: before/after 上下文精确替换目标处", editOnce.content === "a 旧 保留 新 中间 旧");
+check("engine: 小改不传 name 继承旧标题", editOnce.name === "原标题");
+check("engine: applied 正文小改降级 pending", editOnce.status === "pending");
+const editAll = await memory.update(editReal.id, { edits: [{ type: "replace", find: "旧", replace: "x", occurrence: "all" }] });
+check("engine: occurrence=all 全文替换", editAll.content === "a x 保留 新 中间 x");
+const editInsert = await memory.update(editReal.id, { edits: [
+  { type: "insertAfter", find: "x", text: "A", occurrence: 2 },
+  { type: "prepend", text: "# " },
+  { type: "append", text: "!" },
+] });
+check("engine: insertAfter/prepend/append 按锚点插入", editInsert.content === "# a x 保留 新 中间 xA!");
+const ambiguous = await memory.update(editReal.id, { edits: [{ type: "replace", find: "x", replace: "y" }] }).then(() => null, () => "rejected");
+check("engine: 多处匹配且无上下文/occurrence 时拒绝", ambiguous === "rejected");
+const beforeAtomic = (await memory.get(editReal.id)).content;
+const atomic = await memory.update(editReal.id, { edits: [
+  { type: "replace", find: "xA", replace: "yA" },
+  { type: "replace", find: "不存在的锚点", replace: "z" },
+] }).then(() => null, () => "rejected");
+check("engine: edits 任一步失败整体不写入", atomic === "rejected" && (await memory.get(editReal.id)).content === beforeAtomic);
+const kwEdit = await memory.update(editReal.id, { keywordsAdd: ["C", "a"], keywordsRemove: ["b"] });
+check("engine: keywordsAdd/Remove 增量增删", kwEdit.keywords.join(",") === "a,c");
+const namedEdit = await memory.update(editReal.id, { name: "新标题", summary: "新摘要", content: "全新正文" });
+check("engine: 显式 name/summary/content 生效", namedEdit.name === "新标题" && namedEdit.summary === "新摘要" && namedEdit.content === "全新正文");
+const fullNoName = await memory.update(editReal.id, { content: "只有正文" });
+check("engine: content 整段重写不传 name 也继承旧标题", fullNoName.name === "新标题" && fullNoName.content === "只有正文");
+const conflict = await memory.update(editReal.id, { content: "x", edits: [{ type: "replace", find: "x", replace: "y" }] }).then(() => null, () => "rejected");
+check("engine: content 与 edits 同时传会拒绝", conflict === "rejected");
+
 await engineFiber.dispose();
 await storageFiber.dispose();
 rmSync(root, { recursive: true, force: true });

@@ -7,7 +7,7 @@
 | kaz-memory |
 | --- | --- | --- |
 | 引擎 / 存储 | MemoryEngine，`$DSH_HOME/storages/memory.json`（global）+ `<cwd>/.dsh/storages/memory_project.json`（project） | **vendored 同一引擎（MIT），格式兼容**；global 存 `$DSH_HOME/storages/memory.json`，project 按**项目文件夹**各存一份 `<项目>/.dsh/storages/memory_project.json`（2026-08-17 起不再用 `process.cwd()`）。2026-08 升级：每条记录含 `name / keywords / summary / content / created_at / updated_at`（时间戳为 ISO 字符串；旧记录 `createdAt/updatedAt` 毫秒数字读取时自动迁移，写回时落新格式） |
-| 工具 | memory_save / memory_update / memory_list / memory_search / memory_forget | 六个工具：`memory_save`（必填 name/keywords/content/summary）、`memory_update`（可改正文/标签/标题/摘要）、`memory_list`（只回 id/namespace/status/autoLoad/名称）、`memory_search`（**BM25 相关性排序**，返回 id/name/summary/keywords/score，**不含 content**，支持 limit/offset 分页）、`memory_detail`（**新增**：按 id 分片读取全文）、`memory_forget`；所有工具描述与参数为英文 |
+| 工具 | memory_save / memory_update / memory_list / memory_search / memory_forget | 六个工具：`memory_save`（必填 name/keywords/content/summary）、`memory_update`（可改正文/标题/摘要/keywords，支持 `edits` 精确小改与 `keywordsAdd/Remove` 增删）、`memory_list`（只回 id/namespace/status/autoLoad/名称）、`memory_search`（**BM25 相关性排序**，返回 id/name/summary/keywords/score，**不含 content**，支持 limit/offset 分页）、`memory_detail`（**新增**：按 id 分片读取全文）、`memory_forget`；所有工具描述与参数为英文 |
 | 固定指引 | tool:memory | 固定指引默认关闭（`guidanceHeadEnabled=false`）；开启后首轮工具调用后以上下文消息注入，并从下一轮起在每轮开头重复注入（`guidanceHead` 留空 = 内置默认）；每轮首次 `memory_search` 后默认注入一次遗忘指引（`guidanceForgetEnabled=true`，`guidanceForget` 留空 = 内置默认）；已确认且标记自动载入的记忆会在对话开始时自动注入一次 |
 | 上下文注入 | `memory:recall` 把 applied 记忆逐条注入系统提示 | **按需注入一次**：已确认（applied）且标记「自动载入」（autoLoad）的记忆，在**对话开始**（首个 pre-step）以上下文注入方式注入一次；其余记忆靠模型主动 `memory_search` |
 | 人工确认闸门 | setStatus 仅存于服务层，**无 UI / 工具 / CLI（断头路）** | 客户端半：会话头部「记忆」按钮（Kaz 按钮左侧，order -2）+ 面板（待确认：确认生效/忽略/删除；**全部记忆：点标题按需取全文 / 改名 / 删除**），经**专用 Connection RPC 通道 `/kaz-memory`（loopback）**读写——settings.yaml 不再承载任何记忆存储信息；模型没有任何对应工具 |
@@ -35,6 +35,7 @@
 - **memory_detail（2026-08 新增）**：按 `id` 读取单条记忆的完整正文，支持分片：`offset`（默认 0）+ `limit`（默认 500，上限 5000）返回 `content_preview`，并给出 `total_length` 与 `has_more`（`offset + limit < total_length`）。`id` 不存在时报错；`offset` 超出正文长度时返回空串（`total_length` 提示真实长度）且 `has_more=false`。
 - **memory_save 必填四件套（2026-08 升级）**：`name` / `keywords` / `content` / `summary` 全部必填（缺任一报错），`namespace` 可选（默认 global）。`name` 建议 ≤80 字 / 5–10 词；`summary` 由调用方（模型）提供，插件不生成。
 - **memory_save / memory_update 只回成功（2026-08）**：成功时分别只返回 `{ "saved": true }` / `{ "updated": true }`，**不回传记忆正文或元数据**，避免把刚写的内容重新灌进模型上下文；失败仍照常报错。
+- **memory_update 精确小改（2026-08）**：正文可继续用 `content` 整段重写，也可用 `edits` 做字面量精确编辑：`replace` / `insertAfter` / `insertBefore` / `append` / `prepend`。`replace` 与 `insert*` 可用 `before` / `after` 上下文锚定；未指定 `occurrence` 时要求匹配唯一，多匹配会拒绝执行；`occurrence` 支持 1-based 数字或 `"all"`。`name` 不传就继承旧标题（**不再自动推导**）。`keywords` 新增 `keywordsAdd` / `keywordsRemove` 增量增删（与整体替换 `keywords` 互斥）。正文变化时 `applied` 降回 `pending`，只改 metadata 保持 `applied`。
 - **name 入 JSON（2026-08-19）**：每条记录持久化 `name` 字段；面板可「改名」，改完写回 JSON。旧记录没有 `name` 时读取端按旧逻辑从正文现算（不强制迁移）。
 - **自动载入（2026-08-19 引入，2026-08 重构触发时机）**：每条记忆新增 `autoLoad` 布尔字段（默认 `false`，旧记录读作 false）。面板可逐条切换「自动载入」，已确认且标记的记忆在**对话开始时**（首个 `agent/pre-step`，step === 1）以 `source: {kind:'plugin', form:'recall'}` 的用户消息**注入一次**；每个会话只注入一次。**只注入 status=applied 且 autoLoad=true 的记忆**，pending/ignored 不注入。跨重启去重（2026-08-19）："已注入"标记持久化在 `~/.dsh/storages/kaz-memory-auto-injected.json`（agent/session id 集合，仅实际注入成功后落标）；插件加载时还会预标记当前已存在的所有 agent——dsh 重启后恢复的会话不会重复注入，新会话仍正常注入一次。
 - **其余记忆按需拉取**：未标记自动载入的记忆不进上下文，模型需要时主动 `memory_search` → `memory_detail`。
@@ -141,7 +142,7 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-memory\probe-engine.mjs"
 8b. 自动载入时机：对话开始（首个 pre-step）即注入一次已确认且勾选自动载入的记忆全文，每会话只注入一次。
 9. 项目记忆按项目隔离：在 A 工作区 `memory_save(namespace=project)` 后，A 工作区的 `memory_list`/`memory_search`/`memory_detail` 能看到，B 工作区看不到；json 落在 `<A>/.dsh/storages/memory_project.json`，且桌面不再出现 `.dsh`。
 10. 每一轮第一次调用 `memory_search` 后，注入一次遗忘指引，每个 turn 内不重复；`memory_forget` 不可用或插件关闭时不发。固定指引首轮工具调用后注入，并从下一轮起在每轮开头重复注入。
-11. `memory_update` 可按 id 修改正文/标签/标题/摘要；修改 `applied` 记忆的正文后状态降级为 `pending`，只改标签/标题/摘要保持 `applied`；不存在的 id 报错。
+11. `memory_update` 可按 id 修改正文/标题/摘要/keywords；正文支持 `content` 整段重写或 `edits` 精确编辑（replace/insertAfter/insertBefore/append/prepend，`before/after` 上下文 + `occurrence` 定位）；`name` 不传继承旧标题；`keywordsAdd/Remove` 增量增删；修改 `applied` 记忆的正文后状态降级为 `pending`，只改 metadata 保持 `applied`；不存在的 id 报错。
 12. 记忆 JSON 文件里新记录含 `created_at`/`updated_at`（ISO 字符串）与 `summary`，不再含 `createdAt`/`updatedAt` 数字键；旧文件记录照常读取（时间戳迁移为 ISO、summary 为空串），被更新后自动落新格式。
 
 > **通道说明**：记忆面板已改走**专用 RPC 通道**（`/kaz-memory`，loopback），不经过 settings 网关，不再需要 `WEB_SETTINGS_NAMESPACES` 白名单补丁。若仍想通过配置界面编辑 kaz-memory 的配置段（`settings.yaml` 的 `kaz-memory` 段，含 bm25），才需要该白名单补丁（旧补丁可保留）。
