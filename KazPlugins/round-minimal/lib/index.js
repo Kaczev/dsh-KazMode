@@ -369,7 +369,14 @@ export default {
     const roundMinimalService = {
       version: 1,
       enabled: () => source().enabled === true,
-      firstRoundTools: () => (Array.isArray(source().firstRoundTools) ? source().firstRoundTools : []),
+      /** 首轮工具白名单：传入 agent 时返回该对话的生效值（Kaz 面板覆盖优先），
+       *  不传时兼容旧调用，返回插件自身 settings.yaml 的全局值。 */
+      firstRoundTools: (agent) => {
+        if (agent !== null && agent !== undefined && typeof agent === "object") {
+          return effectiveFirstRoundTools(agent);
+        }
+        return Array.isArray(source().firstRoundTools) ? source().firstRoundTools : [];
+      },
       isMinimal: (agent) => isFirstRound(agent),
       turnOf: (agent) => currentTurnOf(agent),
     };
@@ -391,7 +398,7 @@ export default {
           agent,
           minimal,
           turn: currentTurnOf(agent),
-          firstRoundTools: roundMinimalService.firstRoundTools(),
+          firstRoundTools: roundMinimalService.firstRoundTools(agent),
         });
       } catch {
         // 信号发送失败不影响主流程

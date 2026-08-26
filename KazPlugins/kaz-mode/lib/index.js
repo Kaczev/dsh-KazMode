@@ -1095,7 +1095,9 @@ export default {
         try {
           const rm = ctx.get("roundMinimal");
           if (rm !== undefined && rm !== null && typeof rm.firstRoundTools === "function") {
-            const tools = rm.firstRoundTools();
+            // 传 agent：读取该对话的生效首轮工具（Kaz 面板覆盖优先），
+            // 而不是 round-minimal 自身 settings.yaml 的全局空值。
+            const tools = rm.firstRoundTools(agent);
             if (Array.isArray(tools)) firstRoundTools = tools;
           }
         } catch {
