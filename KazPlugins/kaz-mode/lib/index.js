@@ -23,7 +23,8 @@
 //          kaz-memory 把工具完全注销）且仍在工具插件 JSON 中。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
-//      再按会话/默认状态应用。变为 false（关闭 / 切走）时按会话/非 Kaz 默认状态应用。
+//      再按项目/默认状态应用（同一项目内所有会话共享）。变为 false（关闭 / 切走）
+//      时按项目/非 Kaz 默认状态应用。
 //   4) 预设联动：Kaz 模式已注册为 agent preset（id: kaz）。default 切到 "kaz"
 //      或会话切换到 kaz 时把 kaz-mode.enabled 置 true（触发上面的插件联动）；
 //      切到其它预设 / 其它会话时置 false。同时把最近一个非 kaz 预设记录到
@@ -34,7 +35,7 @@
 
 import z from "@deepseek-ai/schemastery";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -120,8 +121,8 @@ for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   }
 }
 
-/** 会话级插件状态文件名（放在项目 .dsh/ 下）。 */
-const SESSION_STATES_FILE = "kaz-session-states.json";
+/** 项目级插件状态文件名（放在项目 .dsh/storages/ 下，同一项目所有对话共享）。 */
+const PROJECT_STATES_FILE = "kaz-project-states.json";
 /** 两个模式的默认设置文件名（放在 DSH_HOME/storages 下，缺省 ~/.dsh/storages）。
  *  2026-08-21 修复：原实现硬编码为作者机器的 C:\Users\Kaczev\.dsh\storages，
  *  换机/分享时读写会落到错误路径；现在用 DSH_HOME 解析，并支持 config.storageDir 覆盖。 */
@@ -242,7 +243,7 @@ export function ensureSettingsDefaults(settings, ns, defaults, logger) {
 
 
 // ---------------------------------------------------------------------------
-// 会话级插件状态持久化（.dsh/kaz-session-states.json）
+// 项目级插件状态持久化（.dsh/storages/kaz-project-states.json）
 // ---------------------------------------------------------------------------
 
 /** 深拷贝可 JSON 序列化的对象（避免默认值被后续修改污染）。 */
@@ -308,68 +309,46 @@ function saveDefaults(defaults, logger) {
   }
 }
 
-/** 会话状态文件新路径：<项目>/.dsh/storages/kaz-session-states.json（2026-08-21
- *  与 kaz-memory 的 memory_project.json 同目录约定；旧路径 <项目>/.dsh/ 仅迁移用）。 */
-function sessionStatesPath(cwd) {
-  return join(cwd, ".dsh", "storages", SESSION_STATES_FILE);
-}
-function legacySessionStatesPath(cwd) {
-  return join(cwd, ".dsh", SESSION_STATES_FILE);
+/** 项目状态文件路径：<项目>/.dsh/storages/kaz-project-states.json（与 kaz-memory
+ *  的 memory_project.json 同目录约定；2026-08 起改为按项目隔离，不再读取按对话的
+ *  kaz-session-states.json）。 */
+function projectStatesPath(cwd) {
+  return join(cwd, ".dsh", "storages", PROJECT_STATES_FILE);
 }
 
-/** 读取项目目录下的会话专属状态；不存在或损坏时返回空对象。 */
-function loadSessions(cwd, logger) {
-  const tryRead = (file) => {
-    if (!existsSync(file)) return null;
+/** 读取项目目录下的项目专属状态；不存在或损坏时返回空对象。 */
+function loadProjectStates(cwd, logger) {
+  try {
+    const file = projectStatesPath(cwd);
+    if (!existsSync(file)) return {};
     let raw = readFileSync(file, "utf8");
     if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
     const parsed = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object") return {};
-    return parsed.sessions !== null && typeof parsed.sessions === "object" ? parsed.sessions : {};
-  };
-  try {
-    const current = tryRead(sessionStatesPath(cwd));
-    if (current !== null) return current;
-    // 旧路径迁移：读到旧文件即返回（下次 save 会写到新路径并删除旧文件）。
-    const legacy = tryRead(legacySessionStatesPath(cwd));
-    if (legacy !== null) {
-      logger?.info?.("[kaz-mode] 检测到旧路径会话状态文件，将在下次写入时迁移到 .dsh/storages/");
-      return legacy;
-    }
-    return {};
+    return parsed.states !== null && typeof parsed.states === "object" ? parsed.states : {};
   } catch (error) {
-    logger?.warn?.("[kaz-mode] 读取会话状态文件失败：" + safeMessage(error));
+    logger?.warn?.("[kaz-mode] 读取项目状态文件失败：" + safeMessage(error));
     return {};
   }
 }
 
-/** 写回项目目录下的会话专属状态（.dsh/storages/；写成功后删除旧路径残留）。 */
-function saveSessions(cwd, sessions, logger) {
+/** 写回项目目录下的项目专属状态（.dsh/storages/）。 */
+function saveProjectStates(cwd, states, logger) {
   const dir = join(cwd, ".dsh", "storages");
-  const file = join(dir, SESSION_STATES_FILE);
+  const file = join(dir, PROJECT_STATES_FILE);
   try {
     mkdirSync(dir, { recursive: true });
-    writeFileSync(file, JSON.stringify({ version: 1, sessions }, null, 2) + "\n", "utf8");
+    writeFileSync(file, JSON.stringify({ version: 1, states }, null, 2) + "\n", "utf8");
   } catch (error) {
-    logger?.warn?.("[kaz-mode] 写入会话状态文件失败：" + safeMessage(error));
-    return;
-  }
-  try {
-    const legacy = legacySessionStatesPath(cwd);
-    if (existsSync(legacy)) {
-      unlinkSync(legacy);
-      logger?.info?.("[kaz-mode] 已迁移会话状态文件到 .dsh/storages/（删除旧路径文件）");
-    }
-  } catch (error) {
-    logger?.warn?.("[kaz-mode] 删除旧路径会话状态文件失败（不影响新文件）：" + safeMessage(error));
+    logger?.warn?.("[kaz-mode] 写入项目状态文件失败：" + safeMessage(error));
   }
 }
 
-/** 读取完整状态：默认设置来自插件目录，会话专属来自项目目录。 */
+/** 读取完整状态：默认设置来自用户 storages，项目专属来自项目目录。 */
 function loadStateFile(cwd, logger) {
   return {
     defaults: loadDefaults(logger),
-    sessions: loadSessions(cwd, logger),
+    project: loadProjectStates(cwd, logger),
   };
 }
 
@@ -709,7 +688,7 @@ export default {
     /** 联动事务防重入：一次联动（快照+启用 / 恢复+清空）未结束前不重复触发。 */
     let linking = false;
 
-    /** 当前由客户端告知的活跃会话（用于按会话应用插件状态）。 */
+    /** 当前由客户端告知的活跃会话（用于在没有 sessionId 时解析项目 cwd）。 */
     let activeSession = null;
 
     /**
@@ -786,7 +765,7 @@ export default {
       return process.cwd();
     }
 
-    /** 读取某会话的状态文件；返回 { cwd, data }。 */
+    /** 读取某会话所在项目的状态文件；返回 { cwd, data }。 */
     function loadSessionData(sessionId) {
       const cwd = resolveSessionCwd(sessionId);
       const data = loadStateFile(cwd, ctx.logger);
@@ -813,17 +792,17 @@ export default {
       return source().enabled === true;
     }
 
-    /** 计算某会话当前应生效的插件状态 map：专属覆盖 > 当前模式默认。
+    /** 计算某项目当前应生效的插件状态 map：项目专属覆盖 > 当前模式默认。
      *  纯方案 A：此 map 只经 kazMode.pluginConfig / getState.effective 提供给
      *  被管理插件与客户端面板，kaz-mode 不再把它写入任何插件的 settings.yaml。 */
-    function effectivePluginStates(data, sessionId, kazEnabled) {
+    function effectivePluginStates(data, kazEnabled) {
       const mode = kazEnabled ? "kaz" : "nonKaz";
       const defaults = data.defaults?.[mode] ?? {};
-      const sessionOverrides = data.sessions?.[sessionId] ?? {};
+      const projectOverrides = data.project ?? {};
       const result = {};
       for (const plugin of managedList()) {
         const base = defaults[plugin.id] !== null && typeof defaults[plugin.id] === "object" ? defaults[plugin.id] : {};
-        const override = sessionOverrides[plugin.id] !== null && typeof sessionOverrides[plugin.id] === "object" ? sessionOverrides[plugin.id] : {};
+        const override = projectOverrides[plugin.id] !== null && typeof projectOverrides[plugin.id] === "object" ? projectOverrides[plugin.id] : {};
         result[plugin.id] = { ...base, ...override };
       }
       return result;
@@ -979,14 +958,14 @@ export default {
     }
 
     // -----------------------------------------------------------------------
-    // 会话级解析（方案 A：工具面按 agent 会话计算，不再全局注册/注销）。
-    // kaz-memory 的工具常驻注册；本插件在每个请求的组装/执行层按 agent 的
-    // 会话状态决定它们是否进入该会话的工具面——切换对话不再影响后台正在
-    // 运行的会话。
+    // 项目级解析（方案 A：工具面按 agent 所在项目计算，不再全局注册/注销）。
+    // kaz-memory 的工具常驻注册；本插件在每个请求的组装/执行层按 agent 所在
+    // 项目的 kaz-project-states.json 决定它们是否进入工具面——切换对话不再影响
+    // 后台正在运行的会话，同一项目内的对话共享同一套项目专属设置。
     // -----------------------------------------------------------------------
 
     /** 从 agent 会话头解析原始会话 id（子代理归入父会话）；读不到返回 ""。
-     *  与 RPC 使用的会话状态文件键一致（原始 id，不做 sanitize）。 */
+     *  仅用于解析该会话所在项目 cwd，不再作为状态文件键。 */
     function agentSessionIdOf(agent) {
       try {
         const header = agent?.session?.header;
@@ -1052,17 +1031,17 @@ export default {
       return source().enabled === true;
     }
 
-    /** 读取 agent 会话的生效插件状态 map（专属覆盖 > 该会话所在模式的默认）。 */
+    /** 读取 agent 所在项目的生效插件状态 map（项目专属覆盖 > 当前模式默认）。 */
     function agentEffectiveStates(agent) {
       const sessionId = agentSessionIdOf(agent);
       if (sessionId.length === 0) return {};
       try {
         const cwd = resolveSessionCwd(sessionId);
         const data = loadStateFile(cwd, ctx.logger);
-        const states = effectivePluginStates(data, sessionId, agentKazEnabled(agent));
+        const states = effectivePluginStates(data, agentKazEnabled(agent));
         return states;
       } catch (error) {
-        ctx.logger.debug(`[kaz-mode] 读取 agent 会话状态失败：${safeMessage(error)}`);
+        ctx.logger.debug(`[kaz-mode] 读取 agent 项目状态失败：${safeMessage(error)}`);
         return {};
       }
     }
@@ -1122,11 +1101,11 @@ export default {
     }
 
     /**
-     * kazMode 服务（供被管理插件在使用时刻按 agent 会话读取生效配置）：
+     * kazMode 服务（供被管理插件在使用时刻按 agent 所在项目读取生效配置）：
      *   - kazEnabled(agent)            该 agent 会话是否 Kaz 模式；
-     *   - pluginEnabled(agent, pluginId) 该 agent 会话某被管理插件是否启用；
-     *   - pluginConfig(agent, pluginId)  该 agent 会话某插件的【完整生效配置】
-     *     = 工厂默认 + 当前模式默认(kaz-defaults.json) + 会话专属覆盖(kaz-session-states.json)。
+     *   - pluginEnabled(agent, pluginId) 该 agent 项目里某被管理插件是否启用；
+     *   - pluginConfig(agent, pluginId)  该 agent 项目里某插件的【完整生效配置】
+     *     = 工厂默认 + 当前模式默认(kaz-defaults.json) + 项目专属覆盖(kaz-project-states.json)。
      *     无会话/无覆盖时返回 null，调用方回落到插件自身 settings.yaml。
      *   - toolVisible(agent, name)    该 agent 会话里某工具是否在工具面内；
      *   - surfaceOf(agent)            Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
@@ -1146,7 +1125,7 @@ export default {
         return state !== null && state !== undefined && typeof state === "object" ? { ...state } : null;
       },
       toolVisible: (agent, name) => {
-        // 无 agent / 会话状态缺失时按「不可见」处理（2026-08-21 加固，避免误判为启用）。
+        // 无 agent / 项目状态缺失时按「不可见」处理（2026-08-21 加固，避免误判为启用）。
         if (agent === null || agent === undefined || typeof agent !== "object") return false;
         const current = source();
         const states = agentEffectiveStates(agent);
@@ -1232,12 +1211,12 @@ export default {
         return next();
       }
 
-      // 非 Kaz 会话：记忆工具按会话开关拒绝（常驻注册但该会话不可用）。
+      // 非 Kaz 会话：记忆工具按项目开关拒绝（常驻注册但该项目不可用）。
       if (MEMORY_TOOLS.includes(name) && states["kaz-memory"]?.enabled === false) {
-        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（本会话 kaz-memory 已关闭）`);
+        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（该项目 kaz-memory 已关闭）`);
         return {
           kind: "deny",
-          reason: `工具 "${name}" 在本会话不可用（kaz-memory 已关闭）；如需使用请在本会话的 Kaz 面板开启 kaz-memory。`,
+          reason: `工具 "${name}" 在当前项目不可用（kaz-memory 已关闭）；如需使用请在 Kaz 面板的当前项目专属设置中开启 kaz-memory。`,
         };
       }
       return next();
@@ -1347,7 +1326,7 @@ export default {
     }
 
     // -----------------------------------------------------------------------
-    // 面板 RPC 通道（/kaz-mode，loopback）：会话级插件状态读写与默认设置管理
+    // 面板 RPC 通道（/kaz-mode，loopback）：项目级插件状态读写与默认设置管理
     // -----------------------------------------------------------------------
     function rpcFail(message) {
       return { ok: false, error: { code: "internal", message: String(message), details: {} } };
@@ -1366,13 +1345,24 @@ export default {
           endpoint !== "getExternalToolPlugins" &&
           endpoint !== "setExternalToolPlugin" &&
           endpoint !== "resetExternalToolPlugins" &&
-          endpoint !== "setExternalToolPluginsAsDefault"
+          endpoint !== "setExternalToolPluginsAsDefault" &&
+          endpoint !== "setProjectPlugin" &&
+          endpoint !== "clearProject" &&
+          endpoint !== "clearProjectPlugin"
         ) {
           return rpcFail("缺少 sessionId");
         }
 
         /** 外置工具插件端点统一解析项目 cwd：显式 cwd > 会话 cwd > 活跃会话 > 进程 cwd。 */
         const resolveExternalCwd = () => {
+          if (typeof input.cwd === "string" && input.cwd.trim().length > 0) return input.cwd.trim();
+          if (sessionId.length > 0) return resolveSessionCwd(sessionId);
+          if (activeSession !== null && activeSession !== undefined) return activeSession.cwd;
+          return process.cwd();
+        };
+
+        /** 项目状态端点统一解析项目 cwd（与工具面板同规则）。 */
+        const resolveStateCwd = () => {
           if (typeof input.cwd === "string" && input.cwd.trim().length > 0) return input.cwd.trim();
           if (sessionId.length > 0) return resolveSessionCwd(sessionId);
           if (activeSession !== null && activeSession !== undefined) return activeSession.cwd;
@@ -1407,9 +1397,9 @@ export default {
           if (sessionId.length > 0) activeSession = { sessionId, cwd };
           // 会话自己的 Kaz 状态（事件优先判定，与面板/组装层同源），不是全局开关。
           const kazEnabled = sessionKazEnabledById(sessionId);
-          // 直接算好每个被管理插件的生效 enabled（工厂+模式默认+会话覆盖），
+          // 直接算好每个被管理插件的生效 enabled（工厂+模式默认+项目覆盖），
           // 供 kaz-memory / round-display 客户端面板判断显隐，无需各自重复计算。
-          const effective = effectivePluginStates(data, sessionId, kazEnabled);
+          const effective = effectivePluginStates(data, kazEnabled);
           const effectiveEnabled = {};
           for (const [pid, st] of Object.entries(effective)) {
             effectiveEnabled[pid] = { enabled: st !== null && typeof st === "object" ? st.enabled !== false : false };
@@ -1421,7 +1411,7 @@ export default {
               cwd,
               kazEnabled,
               defaults: data.defaults,
-              session: data.sessions[sessionId] || null,
+              project: data.project,
               effective: effectiveEnabled,
               factory: {
                 nonKaz: deepClone(FACTORY_NON_KAZ_DEFAULTS),
@@ -1575,18 +1565,16 @@ export default {
           return { ok: true, value: { applied: true, sessionId } };
         }
 
-        if (endpoint === "setSessionPlugin") {
+        if (endpoint === "setProjectPlugin") {
           const pluginId = typeof input.pluginId === "string" ? input.pluginId : "";
           const patch = input.patch !== null && typeof input.patch === "object" ? input.patch : null;
           if (pluginId.length === 0 || patch === null) return rpcFail("缺少 pluginId 或 patch");
-          const { cwd, data } = loadSessionData(sessionId);
-          if (data.sessions[sessionId] === undefined || data.sessions[sessionId] === null) {
-            data.sessions[sessionId] = {};
+          const cwd = resolveStateCwd();
+          const data = loadStateFile(cwd, ctx.logger);
+          if (data.project[pluginId] === undefined || data.project[pluginId] === null) {
+            data.project[pluginId] = {};
           }
-          if (data.sessions[sessionId][pluginId] === undefined || data.sessions[sessionId][pluginId] === null) {
-            data.sessions[sessionId][pluginId] = {};
-          }
-          const merged = { ...data.sessions[sessionId][pluginId] };
+          const merged = { ...data.project[pluginId] };
           for (const [key, value] of Object.entries(patch)) {
             if (value === null) {
               delete merged[key];
@@ -1595,13 +1583,13 @@ export default {
             }
           }
           if (Object.keys(merged).length === 0) {
-            delete data.sessions[sessionId][pluginId];
+            delete data.project[pluginId];
           } else {
-            data.sessions[sessionId][pluginId] = merged;
+            data.project[pluginId] = merged;
           }
-          saveSessions(cwd, data.sessions, ctx.logger);
-          activeSession = { sessionId, cwd };
-          return { ok: true, value: { session: data.sessions[sessionId] } };
+          saveProjectStates(cwd, data.project, ctx.logger);
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          return { ok: true, value: { project: data.project[pluginId] ?? null } };
         }
 
         if (endpoint === "setDefaultPlugin") {
@@ -1634,13 +1622,14 @@ export default {
         if (endpoint === "setAsDefault") {
           const mode = input.mode === "nonKaz" || input.mode === "kaz" ? input.mode : null;
           if (mode === null) return rpcFail("mode 必须是 nonKaz 或 kaz");
-          const { cwd, data } = loadSessionData(sessionId);
-          // "当前对话的插件状态" = 有效状态（专属覆盖 > 该会话当前模式默认）。
+          const cwd = resolveStateCwd();
+          const data = loadStateFile(cwd, ctx.logger);
+          // "当前项目的插件状态" = 有效状态（项目专属覆盖 > 当前模式默认）。
           // 用会话自身预设（事件优先）计算，避免把上一个会话的模式带进来。
-          const effective = effectivePluginStates(data, sessionId, sessionKazEnabledById(sessionId));
+          const effective = effectivePluginStates(data, sessionKazEnabledById(sessionId));
           data.defaults[mode] = deepClone(effective);
           saveDefaults(data.defaults, ctx.logger);
-          activeSession = { sessionId, cwd };
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
           return { ok: true, value: { defaults: data.defaults } };
         }
 
@@ -1661,47 +1650,29 @@ export default {
           return { ok: true, value: { defaults: data.defaults } };
         }
 
-        if (endpoint === "clearSession") {
-          // 清除某会话的全部专属覆盖 → 生效状态回落到当前模式默认
+        if (endpoint === "clearProject") {
+          // 清除当前项目的全部专属覆盖 → 生效状态回落到当前模式默认
           // （Kaz 会话回落到 Kaz 默认，非 Kaz 会话回落到非 Kaz 默认）。
-          const { cwd, data } = loadSessionData(sessionId);
-          delete data.sessions[sessionId];
-          saveSessions(cwd, data.sessions, ctx.logger);
-          activeSession = { sessionId, cwd };
-          return { ok: true, value: { session: data.sessions[sessionId] ?? null } };
+          const cwd = resolveStateCwd();
+          const data = loadStateFile(cwd, ctx.logger);
+          data.project = {};
+          saveProjectStates(cwd, data.project, ctx.logger);
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          return { ok: true, value: { project: null } };
         }
 
-        if (endpoint === "clearSessionPlugin") {
-          // 清除某会话里单个插件的专属覆盖（该插件回落到当前模式默认）。
+        if (endpoint === "clearProjectPlugin") {
+          // 清除当前项目里单个插件的专属覆盖（该插件回落到当前模式默认）。
           const pluginId = typeof input.pluginId === "string" ? input.pluginId : "";
           if (pluginId.length === 0) return rpcFail("缺少 pluginId");
-          const { cwd, data } = loadSessionData(sessionId);
-          if (data.sessions[sessionId] !== undefined && data.sessions[sessionId] !== null && typeof data.sessions[sessionId] === "object") {
-            delete data.sessions[sessionId][pluginId];
-            if (Object.keys(data.sessions[sessionId]).length === 0) {
-              delete data.sessions[sessionId];
-            }
-            saveSessions(cwd, data.sessions, ctx.logger);
-          }
-          activeSession = { sessionId, cwd };
-          return { ok: true, value: { session: data.sessions[sessionId] ?? null } };
-        }
-
-        if (endpoint === "forgetSession") {
-          // 对话归档/删除时清理 kaz-session-states.json 里该会话的条目（2026-08-21）。
-          // 与 clearSession 不同：只删状态文件条目，不应用插件状态、不改 activeSession。
-          // cwd 由客户端随会话 summary 上报；缺失时经 agents 服务推断（归档会话通常
-          // 仍存活可解析），实在找不到回退 process.cwd()。
-          const cwd = typeof input.cwd === "string" && input.cwd.trim().length > 0
-            ? input.cwd.trim()
-            : resolveSessionCwd(sessionId);
+          const cwd = resolveStateCwd();
           const data = loadStateFile(cwd, ctx.logger);
-          if (data.sessions[sessionId] !== undefined && data.sessions[sessionId] !== null) {
-            delete data.sessions[sessionId];
-            saveSessions(cwd, data.sessions, ctx.logger);
-            ctx.logger.info(`[kaz-mode] 已清理归档/删除会话 ${sessionId} 的 kaz-session-states 条目`);
+          if (data.project[pluginId] !== undefined && data.project[pluginId] !== null && typeof data.project[pluginId] === "object") {
+            delete data.project[pluginId];
+            saveProjectStates(cwd, data.project, ctx.logger);
           }
-          return { ok: true, value: { purged: true, sessionId } };
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          return { ok: true, value: { project: data.project ?? null } };
         }
 
         return rpcFail("unknown endpoint '" + String(endpoint) + "'");

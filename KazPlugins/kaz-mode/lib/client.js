@@ -354,8 +354,6 @@ window.__ModuleLoader__.load({
 
 			/** 会话列表 binding（由下方 conversation/sessions inject 填充）。 */
 			let sessionListBinding = null;
-			/** 已清理过 kaz-session-states 的归档会话 id（避免重复 RPC；2026-08-21）。 */
-			const cleanedArchivedIds = new Set();
 
 			/** 广播「生效状态已变化」：kaz-memory / round-display 面板据此立即刷新显隐。
 			 *  触发点：Kaz 面板状态 RPC 成功、会话联动切模式成功。 */
@@ -407,7 +405,7 @@ window.__ModuleLoader__.load({
 				return snap.value === undefined ? null : snap.value;
 			}
 
-			/** 判断会话专属覆盖是否与当前模式默认设置不一致（不一致才显示“专属”）。 */
+			/** 判断项目专属覆盖是否与当前模式默认设置不一致（不一致才显示“专属”）。 */
 			function stateDiffers(base, override) {
 				if (override === null || override === undefined || typeof override !== "object") return false;
 				for (const [key, value] of Object.entries(override)) {
@@ -803,8 +801,8 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			/** 会话/默认状态字段编辑器：值来自 RPC 返回的插件状态对象，写入经
-			 *  onCommit 回调转成 setSessionPlugin（编辑 a/b 也会成为当前对话专属覆盖）。 */
+			/** 项目/默认状态字段编辑器：值来自 RPC 返回的插件状态对象，写入经
+			 *  onCommit 回调转成 setProjectPlugin（编辑 a/b 也会成为当前项目专属覆盖）。 */
 			function StateFieldEditor({ field, state, onCommit, disabled }) {
 				const path = Array.isArray(field.path) ? field.path : [];
 				const current = state !== null && typeof state === "object" ? getByPath(state[field.key], path) : undefined;
@@ -1106,8 +1104,8 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			/** 三个层级的设置区块：a=非 Kaz 默认，b=Kaz 默认，c=当前对话专属。
-			 *  onRestore：区块级「恢复」按钮（默认段 = 重置该模式默认；专属段 = 清除全部专属覆盖）。
+			/** 两个层级的设置区块：a=非 Kaz 默认，b=Kaz 默认，c=当前项目专属。
+			 *  onRestore：区块级「恢复」按钮（默认段 = 重置该模式默认；专属段 = 清除全部项目专属覆盖）。
 			 *  restoreLabel：按钮文案（默认「恢复原设置」）。onRestorePlugin：专属段里单行插件的恢复。 */
 			function StateSection({ title, desc, stateMap, overriddenMap, onPatch, onRestore, onRestorePlugin, restoreLabel, onSetNonKazDefault, onSetKazDefault, disabled, plugins = PLUGINS, restoreDrifted }) {
 				return createElement(
@@ -1418,7 +1416,7 @@ window.__ModuleLoader__.load({
 				};
 				const { sessionId, summary } = useCurrentSession();
 
-				// 有会话（含空白的新建对话）就按“对话”处理：编辑会写入会话专属覆盖。
+				// 编辑始终按“当前项目”处理（同一项目的所有对话共享），不再按对话隔离。
 				const hasSession = summary !== null && summary !== undefined;
 				const isBlank = hasSession && summary.blank === true;
 				const inEstablished = hasSession && !isBlank;
@@ -1469,7 +1467,7 @@ window.__ModuleLoader__.load({
 				const effectiveLocalVersion = localVersion !== null && localVersion.length > 0 ? localVersion : KAZ_CURRENT_VERSION;
 
 				const defaults = stateData !== null && stateData.defaults !== undefined ? stateData.defaults : { nonKaz: {}, kaz: {} };
-				const sessionOverrides = stateData !== null && stateData.session !== null && typeof stateData.session === "object" ? stateData.session : {};
+				const projectOverrides = stateData !== null && stateData.project !== null && typeof stateData.project === "object" ? stateData.project : {};
 				// 新建对话页面优先使用空白会话上已暂存/已应用的 agentPreset；
 				// 取不到时用空白会话出现时捕获的默认预设（不再实时跟随设置）。
 				const newConversationPreset = !inEstablished && hasSession && typeof summary.agentPreset === "string"
@@ -1493,50 +1491,44 @@ window.__ModuleLoader__.load({
 				const overriddenMap = {};
 				for (const plugin of PLUGINS) {
 					const base = baseMap[plugin.id] !== null && typeof baseMap[plugin.id] === "object" ? baseMap[plugin.id] : {};
-					const override = sessionOverrides[plugin.id] !== null && typeof sessionOverrides[plugin.id] === "object" ? sessionOverrides[plugin.id] : {};
+					const override = projectOverrides[plugin.id] !== null && typeof projectOverrides[plugin.id] === "object" ? projectOverrides[plugin.id] : {};
 					effectiveMap[plugin.id] = { ...base, ...override };
 					overriddenMap[plugin.id] = stateDiffers(base, override);
 				}
 				const hasOverrides = PLUGINS.some((plugin) => overriddenMap[plugin.id] === true);
 
-				const patchSession = useCallback(
+				const patchProject = useCallback(
 					async (pluginId, patch) => {
-						if (!sessionId) return null;
-						const res = await rpcCall("setSessionPlugin", { sessionId, pluginId, patch });
+						const cwd = stateData !== null && stateData.cwd !== undefined ? stateData.cwd : "";
+						const res = await rpcCall("setProjectPlugin", { sessionId: sessionId || "", cwd, pluginId, patch });
 						if (res !== null) {
-							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+							setStateData((prev) => {
+								if (prev === null) return prev;
+								const next = { ...(prev.project ?? {}) };
+								if (res.project === null) delete next[pluginId];
+								else next[pluginId] = res.project;
+								return { ...prev, project: next };
+							});
 							notifyEffectiveChanged();
 						}
 						return res;
 					},
-					[sessionId],
-				);
-
-				const patchDefault = useCallback(
-					async (targetMode, pluginId, patch, cwd) => {
-						const res = await rpcCall("setDefaultPlugin", { mode: targetMode, pluginId, patch, cwd: cwd || "" });
-						if (res !== null) {
-							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
-							notifyEffectiveChanged();
-						}
-						return res;
-					},
-					[],
+					[sessionId, stateData],
 				);
 
 				const setAsDefault = useCallback(
 					async (targetMode) => {
-						if (!sessionId) return null;
 						const label = targetMode === "kaz" ? "Kaz" : "非 Kaz";
-						if (typeof window !== "undefined" && !window.confirm("确定将当前对话设置设为" + label + "模式默认设置吗？")) return null;
-						const res = await rpcCall("setAsDefault", { sessionId, mode: targetMode });
+						const cwd = stateData !== null && stateData.cwd !== undefined ? stateData.cwd : "";
+						if (typeof window !== "undefined" && !window.confirm("确定将当前项目设置设为" + label + "模式默认设置吗？")) return null;
+						const res = await rpcCall("setAsDefault", { sessionId: sessionId || "", cwd, mode: targetMode });
 						if (res !== null) {
 							setStateData((prev) => (prev !== null ? { ...prev, defaults: res.defaults } : prev));
 							notifyEffectiveChanged();
 						}
 						return res;
 					},
-					[sessionId],
+					[sessionId, stateData],
 				);
 
 				const resetDefault = useCallback(
@@ -1551,39 +1543,40 @@ window.__ModuleLoader__.load({
 					[sessionId],
 				);
 
-				// 清除当前对话的全部专属覆盖 → 回落到当前模式默认
+				// 清除当前项目的全部专属覆盖 → 回落到当前模式默认
 				// （Kaz 会话回落到 Kaz 默认，非 Kaz 会话回落到非 Kaz 默认）。
-				const clearSessionOverrides = useCallback(
+				const clearProjectOverrides = useCallback(
 					async () => {
-						if (!sessionId) return null;
-						if (typeof window !== "undefined" && !window.confirm("确定清除当前对话的全部专属设置，恢复为当前模式默认设置吗？")) return null;
-						const res = await rpcCall("clearSession", { sessionId });
+						const cwd = stateData !== null && stateData.cwd !== undefined ? stateData.cwd : "";
+						if (typeof window !== "undefined" && !window.confirm("确定清除当前项目的全部专属设置，恢复为当前模式默认设置吗？")) return null;
+						const res = await rpcCall("clearProject", { sessionId: sessionId || "", cwd });
 						if (res !== null) {
-							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+							setStateData((prev) => (prev !== null ? { ...prev, project: {} } : prev));
 							notifyEffectiveChanged();
 						}
 						return res;
 					},
-					[sessionId],
+					[sessionId, stateData],
 				);
 
-				// 清除当前对话里单个插件的专属覆盖 → 该插件回落到当前模式默认。
-				const clearSessionPluginOverride = useCallback(
+				// 清除当前项目里单个插件的专属覆盖 → 该插件回落到当前模式默认。
+				const clearProjectPluginOverride = useCallback(
 					async (pluginId) => {
-						if (!sessionId) return null;
-						const res = await rpcCall("clearSessionPlugin", { sessionId, pluginId });
+						const cwd = stateData !== null && stateData.cwd !== undefined ? stateData.cwd : "";
+						const res = await rpcCall("clearProjectPlugin", { sessionId: sessionId || "", cwd, pluginId });
 						if (res !== null) {
-							setStateData((prev) => (prev !== null ? { ...prev, session: res.session } : prev));
+							setStateData((prev) => {
+								if (prev === null) return prev;
+								const next = { ...(prev.project ?? {}) };
+								delete next[pluginId];
+								return { ...prev, project: next };
+							});
 							notifyEffectiveChanged();
 						}
 						return res;
 					},
-					[sessionId],
+					[sessionId, stateData],
 				);
-
-				const sessionTitle = summary !== null && summary !== undefined && typeof summary.title === "string" && summary.title.trim().length > 0
-					? summary.title
-					: "当前对话";
 
 				return createElement(
 					"div",
@@ -1649,49 +1642,33 @@ window.__ModuleLoader__.load({
 						"p",
 						{ className: "kzm-note" },
 						writable
-							? (hasSession
-								? (hasOverrides
-									? "当前对话专属设置会覆盖默认设置；可随时将当前设置设为默认。"
-									: "当前对话与当前模式默认设置一致；修改后将变为专属设置。")
-								: "正在调整新建对话的默认设置：开关会直接保存为当前模式默认值。")
+							? (hasOverrides
+								? "当前项目专属设置会覆盖默认设置；同一项目的所有对话共享这些设置。"
+								: "当前项目与" + (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "默认设置一致；修改后将变为项目专属设置。")
 							: "当前页面处于远程内存模式，设置不可写（请在本机 127.0.0.1 页面操作）。",
 					),
-					hasSession
-						? (hasOverrides
-							? createElement(StateSection, {
-								key: "session-" + (sessionId || ""),
-								title: sessionTitle + " 专属设置",
-								desc: "当前对话的插件状态，覆盖默认设置；可直接修改，也可设为非 Kaz / Kaz 默认。「恢复默认设置」会清除全部专属覆盖，回落到当前模式默认（Kaz 对话回落到 Kaz 默认，非 Kaz 对话回落到非 Kaz 默认）。",
-								stateMap: effectiveMap,
-								overriddenMap,
-								onPatch: patchSession,
-								onRestore: () => clearSessionOverrides(),
-								restoreLabel: "恢复默认设置",
-								onRestorePlugin: (pluginId) => clearSessionPluginOverride(pluginId),
-								onSetNonKazDefault: () => setAsDefault("nonKaz"),
-								onSetKazDefault: () => setAsDefault("kaz"),
-								disabled: !writable,
-							})
-							: createElement(StateSection, {
-								key: "default-conv-" + mode,
-								title: (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "默认设置",
-								desc: "当前对话与" + (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "默认设置一致；修改后将变为专属设置。",
-								stateMap: effectiveMap,
-								overriddenMap,
-								onPatch: patchSession,
-								onRestore: () => resetDefault(mode, stateData !== null ? stateData.cwd : undefined),
-								restoreDrifted,
-								disabled: !writable,
-							}))
-						: createElement(StateSection, {
-							key: "default-" + mode,
-							title: (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "下的默认设置",
-							desc: mode === "kaz"
-								? "新建对话若选择 Kaz 模式，将使用这里的插件状态。"
-								: "新建对话若未选择 Kaz 模式，将使用这里的插件状态。",
-							stateMap: mode === "kaz" ? defaults.kaz : defaults.nonKaz,
+					hasOverrides
+						? createElement(StateSection, {
+							key: "project-" + (stateData !== null && stateData.cwd ? stateData.cwd : "unknown"),
+							title: "当前项目专属设置",
+							desc: "当前项目的插件状态，覆盖默认设置；可直接修改，也可设为非 Kaz / Kaz 默认。「恢复默认设置」会清除全部项目专属覆盖，回落到当前模式默认（Kaz 对话回落到 Kaz 默认，非 Kaz 对话回落到非 Kaz 默认）。当前项目：" + (stateData !== null && stateData.cwd ? stateData.cwd : "（未知）"),
+							stateMap: effectiveMap,
 							overriddenMap,
-							onPatch: (pluginId, patch) => patchDefault(mode, pluginId, patch, stateData !== null ? stateData.cwd : undefined),
+							onPatch: patchProject,
+							onRestore: () => clearProjectOverrides(),
+							restoreLabel: "恢复默认设置",
+							onRestorePlugin: (pluginId) => clearProjectPluginOverride(pluginId),
+							onSetNonKazDefault: () => setAsDefault("nonKaz"),
+							onSetKazDefault: () => setAsDefault("kaz"),
+							disabled: !writable,
+						})
+						: createElement(StateSection, {
+							key: "default-project-" + mode,
+							title: (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "默认设置",
+							desc: "当前项目与" + (mode === "kaz" ? "Kaz 模式" : "非 Kaz 模式") + "默认设置一致；修改后将变为项目专属设置，同一项目的所有对话共享。当前项目：" + (stateData !== null && stateData.cwd ? stateData.cwd : "（未知）"),
+							stateMap: effectiveMap,
+							overriddenMap,
+							onPatch: patchProject,
 							onRestore: () => resetDefault(mode, stateData !== null ? stateData.cwd : undefined),
 							restoreDrifted,
 							disabled: !writable,
@@ -1868,35 +1845,7 @@ window.__ModuleLoader__.load({
 					subscribe: (listener) => scope.sessions.list.subscribe(listener),
 					getSnapshot: () => scope.sessions.list.getSnapshot(),
 				};
-				// workspaces 服务（可选）：其 list 快照带 archivedSessionIds，用于在
-				// 对话归档时清理 kaz-session-states.json（2026-08-21）。拿不到就跳过。
-				let workspaces = null;
-				try {
-					workspaces = ctx.get("workspaces");
-				} catch {
-					workspaces = null;
-				}
-				/** 归档会话清理：新增的归档 id → RPC forgetSession 删除 kaz-session-states 条目。
-				 *  成功后才记账（RPC 失败可随下次 workspaces 变化重试）。 */
-				const cleanupArchived = () => {
-					try {
-						if (workspaces === null || workspaces === undefined || workspaces.list === undefined || workspaces.list === null) return;
-						const ws = workspaces.list.getSnapshot();
-						const archived = ws !== null && ws !== undefined && Array.isArray(ws.archivedSessionIds) ? ws.archivedSessionIds : [];
-						const sessionsState = scope.sessions.list.getSnapshot();
-						const byId = sessionsState !== null && sessionsState !== undefined && sessionsState.byId !== null && typeof sessionsState.byId === "object" ? sessionsState.byId : {};
-						for (const id of archived) {
-							if (cleanedArchivedIds.has(id)) continue;
-							const summary = byId[id];
-							const cwd = summary !== undefined && summary !== null && typeof summary.cwd === "string" ? summary.cwd : "";
-							void rpcCall("forgetSession", { sessionId: id, cwd }).then((res) => {
-								if (res !== null) cleanedArchivedIds.add(id);
-							});
-						}
-					} catch {
-						// 忽略：归档清理失败不影响主流程
-					}
-				};
+				// 项目级专属设置按 cwd 持久化，与对话归档/删除无关，无需清理。
 				let lastAppliedSessionId = null;
 				const sync = () => {
 					const state = scope.sessions.list.getSnapshot();
@@ -1941,15 +1890,9 @@ window.__ModuleLoader__.load({
 				};
 				scope.effect(() => {
 					sync();
-					cleanupArchived(); // 启动时补清此前已归档的会话
 					const stopSessions = scope.sessions.list.subscribe(() => sync());
-					let stopWorkspaces = () => {};
-					if (workspaces !== null && workspaces !== undefined && workspaces.list !== undefined && workspaces.list !== null && typeof workspaces.list.subscribe === "function") {
-						stopWorkspaces = workspaces.list.subscribe(() => cleanupArchived());
-					}
 					return () => {
 						stopSessions();
-						stopWorkspaces();
 					};
 				});
 			});

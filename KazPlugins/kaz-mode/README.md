@@ -1,6 +1,6 @@
 # kaz-mode —— 「Kaz 模式」超级模式插件
 
-> **作用**：Kaz 模式的总开关与中枢——预设联动 + 会话头部按钮 + 集中管理面板（Kaz 面板），统一管理全家桶插件的开关与参数，并按会话决定工具面。
+> **作用**：Kaz 模式的总开关与中枢——预设联动 + 会话头部按钮 + 集中管理面板（Kaz 面板），统一管理全家桶插件的开关与参数，并按项目决定工具面（同一项目的所有对话共享）。
 
 Kaz 模式同时具备两个入口，双向同步：
 
@@ -30,14 +30,15 @@ Kaz 模式同时具备两个入口，双向同步：
    - 首次工具调用后：恢复 **Kaz 全部工具** = 工具控制面板 JSON（官方/外置统一：
      `factory → 用户默认 → 项目设置`；真正的新插件/新工具默认开启，
      已知但默认关闭的插件/工具保持关闭）。
-3. **记忆工具按会话生效**：`kaz-memory` 关闭时，其六工具从该会话的工具面
+3. **记忆工具按项目生效**：`kaz-memory` 关闭时，其六工具从该项目所有会话的工具面
    移出、调用被拒。
 4. **skill 已整体移除**（2026-08，Kaczev）：`skill` 工具、技能发现行与技能目录已从
    kaz 预设删除，白名单里也没有 `skill`。
 5. **配置不写 settings.yaml（纯方案 A）**：被管理插件的生效配置 =
    工厂默认 + `~/.dsh/storages/kaz-defaults.json`（Kaz/非Kaz 模式默认）+
-   `<项目>/.dsh/storages/kaz-session-states.json`（会话覆盖），经 `kazMode` 服务在
-   使用时刻按 agent 会话读取；**kaz-mode 不再把任何插件状态写进 settings.yaml**。
+   `<项目>/.dsh/storages/kaz-project-states.json`（项目专属覆盖，同一项目所有对话共享），
+   经 `kazMode` 服务在使用时刻按 agent 项目读取；**kaz-mode 不再把任何插件状态写进
+   settings.yaml**。旧的 `kaz-session-states.json` 已不再读取，可直接删除。
 
 ### 工具控制面板（官方 / 外置统一管理）
 
@@ -94,9 +95,9 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 
 - **进入 Kaz**：只把被管理插件在 settings.yaml 里的原始 `enabled` 状态快照到
   `kaz-mode.savedPluginStates`（**仅供面板/诊断展示**，不再驱动任何恢复）；
-- **各插件在使用时刻**经 `kazMode.pluginConfig(agent, pluginId)` 读取会话生效配置
-  （模式默认 + 会话覆盖），settings.yaml 只作 standalone 兜底；
-- Kaz 面板里可单独开/关每个插件（改会话覆盖或模式默认），改动即时生效。
+- **各插件在使用时刻**经 `kazMode.pluginConfig(agent, pluginId)` 读取项目生效配置
+  （模式默认 + 项目覆盖），settings.yaml 只作 standalone 兜底；
+- Kaz 面板里可单独开/关每个插件（改项目覆盖或模式默认），改动即时生效。
 
 ### 4. Kaz 工具面（工具控制面板 JSON 唯一闸门）
 
@@ -169,6 +170,6 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
 5. Kaz 面板「工具控制面板」区块可管理官方/外置插件（开关、手动添加、删除外置），改完即生效；
-6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「专属设置/默认设置」——settings.yaml
+6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「项目专属设置/默认设置」——settings.yaml
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
-   `kaz-defaults.json`、`kaz-session-states.json` 与工具控制面板 JSON。
+   `kaz-defaults.json`、`kaz-project-states.json` 与工具控制面板 JSON。

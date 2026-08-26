@@ -1,10 +1,10 @@
-// kaz-mode 探针（方案 A 重构后）：按 agent 会话计算工具面，不做全局注销。
+// kaz-mode 探针（方案 A 重构后）：按 agent 所在项目计算工具面，不做全局注销。
 // 覆盖：
-//   ① kazMode 服务：kazEnabled / pluginEnabled / toolVisible 按 agent 会话判定；
-//   ② 组装层：Kaz 会话按白名单过滤（记忆/诊断工具按该会话开关增减）；
-//   ③ 组装层：非 Kaz 会话只移除该会话禁用的记忆/诊断工具（标准工具保留）；
+//   ① kazMode 服务：kazEnabled / pluginEnabled / toolVisible 按 agent 项目判定；
+//   ② 组装层：Kaz 会话按白名单过滤（记忆/诊断工具按该项目开关增减）；
+//   ③ 组装层：非 Kaz 会话只移除该项目禁用的记忆/诊断工具（标准工具保留）；
 //   ④ 执行层：Kaz 会话拒绝白名单外调用；非 Kaz 会话拒绝已禁用插件的工具；
-//   ⑤ 记忆/诊断工具常驻注册——工具面完全由会话状态计算，不随全局 enabled 注销。
+//   ⑤ 记忆/诊断工具常驻注册——工具面完全由项目状态计算，不随全局 enabled 注销。
 // 运行：node kaz-mode/probe-kaz-mode.mjs
 import plugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/kaz-mode/lib/index.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
@@ -18,25 +18,34 @@ function check(label, ok) {
 }
 
 const TMP = mkdtempSync(join(tmpdir(), "kzm-probe-"));
-mkdirSync(join(TMP, ".dsh"), { recursive: true });
-const SESSION_FILE = join(TMP, ".dsh", "kaz-session-states.json");
-
-// 会话：agentPreset 决定 Kaz/非 Kaz；会话状态文件决定 kaz-memory 开关。
-const SESSIONS = {
-  "s-kaz": { agentPreset: "kaz", states: { "kaz-memory": { enabled: true } } },
-  "s-kaz-nomem": { agentPreset: "kaz", states: { "kaz-memory": { enabled: false } } },
-  "s-plain": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: false } } },
-  "s-plain-mem": { agentPreset: "router-standard", states: { "kaz-memory": { enabled: true } } },
-};
-{
-  const sessionsJson = { version: 1, sessions: {} };
-  for (const [id, info] of Object.entries(SESSIONS)) sessionsJson.sessions[id] = info.states;
-  writeFileSync(SESSION_FILE, JSON.stringify(sessionsJson, null, 2), "utf8");
+const PROJECT_A = join(TMP, "proj-a"); // 无项目覆盖：Kaz 默认记忆开 / 非 Kaz 默认记忆关
+const PROJECT_B = join(TMP, "proj-b"); // 项目覆盖记忆关
+const PROJECT_C = join(TMP, "proj-c"); // 项目覆盖记忆开
+for (const dir of [PROJECT_A, PROJECT_B, PROJECT_C]) {
+  mkdirSync(join(dir, ".dsh", "storages"), { recursive: true });
 }
+function writeProjectStates(dir, states) {
+  writeFileSync(
+    join(dir, ".dsh", "storages", "kaz-project-states.json"),
+    JSON.stringify({ version: 1, states }, null, 2),
+    "utf8",
+  );
+}
+writeProjectStates(PROJECT_A, {});
+writeProjectStates(PROJECT_B, { "kaz-memory": { enabled: false } });
+writeProjectStates(PROJECT_C, { "kaz-memory": { enabled: true } });
+
+// 会话：agentPreset 决定 Kaz/非 Kaz；项目状态文件（按 cwd）决定 kaz-memory 开关。
+const SESSIONS = {
+  "s-kaz": { cwd: PROJECT_A, agentPreset: "kaz" },
+  "s-kaz-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
+  "s-plain": { cwd: PROJECT_B, agentPreset: "router-standard" },
+  "s-plain-mem": { cwd: PROJECT_C, agentPreset: "router-standard" },
+};
 
 const agentOf = (id) => ({
   id,
-  session: { header: { id, cwd: TMP, agentPreset: SESSIONS[id].agentPreset }, events: [] },
+  session: { header: { id, cwd: SESSIONS[id].cwd, agentPreset: SESSIONS[id].agentPreset }, events: [] },
 });
 
 // ---- mock settings ----
@@ -91,7 +100,7 @@ const listeners = new Map();
 const provided = {};
 const agentsBySession = new Map();
 for (const [id, info] of Object.entries(SESSIONS)) {
-  agentsBySession.set(id, { id, session: { header: { id, cwd: TMP, agentPreset: info.agentPreset } } });
+  agentsBySession.set(id, { id, session: { header: { id, cwd: info.cwd, agentPreset: info.agentPreset } } });
 }
 const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search"];
 
@@ -153,7 +162,7 @@ plugin.apply(ctx, { enabled: true, toolWhitelist: [...WHITELIST], storageDir: jo
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 await settle();
 
-// ① kazMode 服务按 agent 会话判定
+// ① kazMode 服务按 agent 所在项目判定
 const kazMode = provided["kazMode"];
 check("① kazMode 服务已提供", kazMode !== undefined && typeof kazMode.toolVisible === "function");
 check("① kazMode 服务不提供已删除的 detectedToolPlugins", kazMode !== undefined && typeof kazMode.detectedToolPlugins !== "function");
@@ -196,6 +205,21 @@ const sPlainMem = agentOf("s-plain-mem");
   const rpc = rpcHandlers.get("/kaz-mode");
   const list1 = await rpc("listToolPlugins", {});
   check("①.9 listToolPlugins 返回 catalog 且官方含 planmodecontroller", list1 !== null && list1.ok === true && list1.value.catalog !== null && Array.isArray(list1.value.catalog.official) && list1.value.catalog.official.includes("planmodecontroller"));
+}
+
+// ①.10 项目级插件状态 RPC：setProjectPlugin / clearProjectPlugin / clearProject
+{
+  const rpc = rpcHandlers.get("/kaz-mode");
+  const getRes = await rpc("getState", { sessionId: "s-kaz" });
+  check("①.10 getState 返回项目状态对象", getRes !== null && getRes.ok === true && getRes.value.project !== null && typeof getRes.value.project === "object");
+  const setRes = await rpc("setProjectPlugin", { sessionId: "s-kaz", pluginId: "round-minimal", patch: { enabled: false } });
+  check("①.10 setProjectPlugin 写入项目状态", setRes !== null && setRes.ok === true && setRes.value.project?.enabled === false);
+  const clearOne = await rpc("clearProjectPlugin", { sessionId: "s-kaz", pluginId: "round-minimal" });
+  check("①.10 clearProjectPlugin 清除单插件项目覆盖", clearOne !== null && clearOne.ok === true && clearOne.value.project?.["round-minimal"] === undefined);
+  const setAgain = await rpc("setProjectPlugin", { cwd: PROJECT_A, pluginId: "output-beep", patch: { enabled: true } });
+  check("①.10 setProjectPlugin 支持仅按 cwd 写入", setAgain !== null && setAgain.ok === true && setAgain.value.project?.enabled === true);
+  const clearAll = await rpc("clearProject", { cwd: PROJECT_A });
+  check("①.10 clearProject 清除全部项目覆盖", clearAll !== null && clearAll.ok === true && clearAll.value.project === null);
 }
 
 check("① kazEnabled(kaz 会话)=true", kazMode.kazEnabled(sKaz) === true);
@@ -248,7 +272,7 @@ check("④ 非 Kaz 会话（记忆开）：放行 memory_search", allowMemPlain.
 const internalCall = await gate({ name: "workflow" }, async () => ({ kind: "allow" }));
 check("④ 无 agent 的内部调用放行", internalCall.kind === "allow");
 
-// ⑤ 工具面完全由会话状态计算（常驻注册语义：不看全局 enabled 注销）
+// ⑤ 工具面完全由项目状态计算（常驻注册语义：不看全局 enabled 注销）
 check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）", kazMode.toolVisible(sKaz, "memory_search") === true && kazMode.toolVisible(sPlain, "memory_search") === false);
 
 // ⑥ 组装层不再改写系统提示词（已交给 kaz 预设的 kaz-system-prompt.mjs）

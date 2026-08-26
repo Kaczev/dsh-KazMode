@@ -261,11 +261,13 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund
 output-beep / round-display / deepseek-default-model / kaz-memory /
 first-round-hints）的生效配置由 kazMode 服务读取：
 - `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认）（会自动创建）
-- `<项目>/.dsh/storages/kaz-session-states.json`（会话专属覆盖）（在会话的时候自动创建）
+- `<项目>/.dsh/storages/kaz-project-states.json`（项目专属覆盖，同一项目所有对话共享）（修改时自动创建）
 
 settings.yaml **不再承载这些插件的段**，仅有kaz-mode和补丁插件的设置（这两个都有自愈写入）
 
 > 被管理插件在 **Kaz 面板**（专属设置 / 默认设置）里改，改动落到上面两个 json，
+> 其中“专属设置”按项目隔离（像工具控制面板一样），不再是按对话隔离。
+> 旧的 `kaz-session-states.json` 已不再读取，可直接删除。
 
 ### 3.7 重启 dsh 并验证
 
