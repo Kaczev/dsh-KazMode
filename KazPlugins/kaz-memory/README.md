@@ -34,6 +34,7 @@
 - **memory_search 只回摘要（2026-08 升级）**：命中项只含 `id / name / summary / keywords / score`，**不返回 content**；要看全文用 `memory_detail`。旧版「search 返回全文」的行为不再保留。
 - **memory_detail（2026-08 新增）**：按 `id` 读取单条记忆的完整正文，支持分片：`offset`（默认 0）+ `limit`（默认 500，上限 5000）返回 `content_preview`，并给出 `total_length` 与 `has_more`（`offset + limit < total_length`）。`id` 不存在时报错；`offset` 超出正文长度时返回空串（`total_length` 提示真实长度）且 `has_more=false`。
 - **memory_save 必填四件套（2026-08 升级）**：`name` / `keywords` / `content` / `summary` 全部必填（缺任一报错），`namespace` 可选（默认 global）。`summary` 由调用方（模型）提供，插件不生成。
+- **memory_save / memory_update 只回成功（2026-08）**：成功时分别只返回 `{ "saved": true }` / `{ "updated": true }`，**不回传记忆正文或元数据**，避免把刚写的内容重新灌进模型上下文；失败仍照常报错。
 - **name 入 JSON（2026-08-19）**：每条记录持久化 `name` 字段；面板可「改名」，改完写回 JSON。旧记录没有 `name` 时读取端按旧逻辑从正文现算（不强制迁移）。
 - **自动载入（2026-08-19 引入，2026-08 重构触发时机）**：每条记忆新增 `autoLoad` 布尔字段（默认 `false`，旧记录读作 false）。面板可逐条切换「自动载入」，已确认且标记的记忆在**对话开始时**（首个 `agent/pre-step`，step === 1）以 `source: {kind:'plugin', form:'recall'}` 的用户消息**注入一次**；每个会话只注入一次。**只注入 status=applied 且 autoLoad=true 的记忆**，pending/ignored 不注入。跨重启去重（2026-08-19）："已注入"标记持久化在 `~/.dsh/storages/kaz-memory-auto-injected.json`（agent/session id 集合，仅实际注入成功后落标）；插件加载时还会预标记当前已存在的所有 agent——dsh 重启后恢复的会话不会重复注入，新会话仍正常注入一次。
 - **其余记忆按需拉取**：未标记自动载入的记忆不进上下文，模型需要时主动 `memory_search` → `memory_detail`。

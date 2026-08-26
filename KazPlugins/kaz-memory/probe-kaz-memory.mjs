@@ -542,22 +542,27 @@ check("⑤ RPC open 带回 m1 正文", openRpc !== null && openRpc.ok === true &
 const saveTool = registeredTools.get("memory_save");
 check("⑥ memory_save 已注册", saveTool !== undefined);
 const saved = await saveTool.execute({ name: "临时探针记忆", keywords: ["probe", "临时"], summary: "探针保存的临时记忆。", content: "临时探针记忆", namespace: "project" }, execProjB);
-check("⑥ 保存到项目 B 成功且返回 record（含 summary 与 ISO 时间戳）", saved !== undefined && saved.id !== undefined && saved.namespace === "project" && saved.summary === "探针保存的临时记忆。" && typeof saved.created_at === "string" && typeof saved.updated_at === "string");
+check("⑥ 保存到项目 B 成功且只返回 saved=true", saved !== undefined && saved.saved === true && Object.keys(saved).length === 1);
 const missingName = await saveTool.execute({ keywords: ["x"], summary: "s", content: "c" }, execProjA).then(() => null, () => "rejected");
 check("⑥ 缺 name 时 memory_save 报错（必填）", missingName === "rejected");
 const missingSummary = await saveTool.execute({ name: "n", keywords: ["x"], content: "c" }, execProjA).then(() => null, () => "rejected");
 check("⑥ 缺 summary 时 memory_save 报错（必填）", missingSummary === "rejected");
 const afterSaveB = await listTool.execute({ namespace: "project" }, execProjB);
 const afterSaveA = await listTool.execute({ namespace: "project" }, execProjA);
-check("⑥ 项目 B 能看到新记忆、项目 A 看不到", afterSaveB.some((item) => item.id === saved.id) && !afterSaveA.some((item) => item.id === saved.id));
+const savedId = afterSaveB.find((item) => item.name === "临时探针记忆")?.id;
+check("⑥ 项目 B 能看到新记忆、项目 A 看不到", typeof savedId === "string" && afterSaveB.some((item) => item.id === savedId) && !afterSaveA.some((item) => item.id === savedId));
 
 // ⑥b memory_update：可改正文/标签/标题/summary；applied 正文变更降级 pending
 const updateTool = registeredTools.get("memory_update");
 check("⑥b memory_update 已注册", updateTool !== undefined);
 const metaOnly = await updateTool.execute({ id: "m1", keywords: ["kaczev", "鲸鱼", "updated"], name: "新标题", summary: "更新后的摘要" }, execProjA);
-check("⑥b 只改标签/标题/summary 时 applied 保持 applied", metaOnly !== undefined && metaOnly.status === "applied" && metaOnly.keywords.includes("updated") && metaOnly.name === "新标题" && metaOnly.summary === "更新后的摘要");
+check("⑥b 只改标签/标题/summary 返回 updated=true", metaOnly !== undefined && metaOnly.updated === true && Object.keys(metaOnly).length === 1);
+const m1Meta = await memory.get("m1");
+check("⑥b 只改标签/标题/summary 时 applied 保持 applied", m1Meta !== undefined && m1Meta.status === "applied" && m1Meta.keywords.includes("updated") && m1Meta.name === "新标题" && m1Meta.summary === "更新后的摘要");
 const contentChange = await updateTool.execute({ id: "m1", content: "# 关于 Kaczev 的新内容\n\n更新后的正文。" }, execProjA);
-check("⑥b 修改 applied 正文后降级为 pending", contentChange !== undefined && contentChange.status === "pending" && contentChange.content.includes("新内容"));
+check("⑥b 修改 applied 正文后返回 updated=true", contentChange !== undefined && contentChange.updated === true);
+const m1AfterContent = await memory.get("m1");
+check("⑥b 修改 applied 正文后降级为 pending", m1AfterContent !== undefined && m1AfterContent.status === "pending" && m1AfterContent.content.includes("新内容"));
 const unknownUpdate = await updateTool.execute({ id: "no-such-id" }, execProjA).then(() => null, () => "rejected");
 check("⑥b 不存在的 id 会拒绝", unknownUpdate === "rejected");
 

@@ -55,20 +55,20 @@ export const inject = ["storage", "systemPrompt", "tools", "connection"];
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-memory: 段（面板桥接镜像）。 */
 const NAMESPACE = settingsNamespace("kaz-memory");
 
-const RECORD_SCHEMA = {
+/** memory_save / memory_update 的成功返回：只告诉模型操作成功与否，不回传记忆正文。 */
+const SAVE_RESULT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    id: { type: "string", required: true },
-    namespace: { type: "string", required: true, enum: ["global", "project"] },
-    status: { type: "string", required: true, enum: ["pending", "ignored", "applied"] },
-    autoLoad: { type: "boolean", required: true },
-    name: { type: "string", required: true },
-    summary: { type: "string", required: true },
-    content: { type: "string", required: true },
-    keywords: { type: "array", required: true, items: { type: "string" } },
-    created_at: { type: "string", required: true },
-    updated_at: { type: "string", required: true },
+    saved: { type: "boolean", required: true },
+  },
+};
+
+const UPDATE_RESULT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    updated: { type: "boolean", required: true },
   },
 };
 
@@ -119,21 +119,6 @@ function nameOf(content, max = 140) {
   const title = lines.find((line) => line.startsWith("#"));
   const head = (title ?? lines[0]).replace(/^#+\s*/, "").trim();
   return head.length > max ? head.slice(0, max) + "…" : head;
-}
-
-function recordValue(record) {
-  return {
-    id: String(record.id),
-    namespace: record.namespace,
-    status: record.status,
-    name: typeof record.name === "string" && record.name.length > 0 ? record.name : nameOf(record.content),
-    autoLoad: record.autoLoad === true,
-    summary: typeof record.summary === "string" ? record.summary : "",
-    content: record.content,
-    keywords: record.keywords,
-    created_at: record.created_at,
-    updated_at: record.updated_at,
-  };
 }
 
 /** memory_list 项：只给名称，不给正文。 */
@@ -1138,7 +1123,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_save",
       description:
-        'Save one cross-session memory as "pending" (待确认). It does NOT take effect automatically — a human must confirm it in the web panel before it becomes "applied"; never treat a pending memory as effective. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json).',
+        'Save one cross-session memory as "pending" (待确认). It does NOT take effect automatically — a human must confirm it in the web panel before it becomes "applied"; never treat a pending memory as effective. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
       parameters: {
         name: { type: "string", required: true, description: "Short title for the memory (<=140 chars)." },
         keywords: { type: "array", items: { type: "string" }, required: true, description: "Anchor keywords used by memory_search (BM25)." },
@@ -1147,7 +1132,7 @@ export async function apply(ctx, config = {}) {
         namespace: { type: "string", enum: ["global", "project"], description: "Scope: global (harness home) / project (current project folder); default global." },
       },
       output: {
-        schema: RECORD_SCHEMA,
+        schema: SAVE_RESULT_SCHEMA,
         render: (_args, value) => renderJson(value),
       },
       execute(args, exec) {
@@ -1167,7 +1152,7 @@ export async function apply(ctx, config = {}) {
             ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
             projectRoot: projectRootOf(exec),
           }),
-        ).then(recordValue);
+        ).then(() => ({ saved: true }));
       },
       presentCall: (args) => present("保存记忆", "other", args.content),
     }),
@@ -1175,7 +1160,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_update",
       description:
-        'Update an existing memory by id: content, keywords, name and/or summary. Changing the content of an "applied" memory demotes it back to "pending" for human re-confirmation; metadata-only edits (name / keywords / summary) keep the status. id comes from memory_list or memory_search.',
+        'Update an existing memory by id: content, keywords, name and/or summary. Changing the content of an "applied" memory demotes it back to "pending" for human re-confirmation; metadata-only edits (name / keywords / summary) keep the status. id comes from memory_list or memory_search. On success returns { updated: true } only (no memory content).',
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         content: { type: "string", description: "New memory content (plain text)." },
@@ -1184,7 +1169,7 @@ export async function apply(ctx, config = {}) {
         summary: { type: "string", description: "New one-sentence summary (~100 chars)." },
       },
       output: {
-        schema: RECORD_SCHEMA,
+        schema: UPDATE_RESULT_SCHEMA,
         render: (_args, value) => renderJson(value),
       },
       execute(args, _exec) {
@@ -1195,7 +1180,7 @@ export async function apply(ctx, config = {}) {
             ...(args.name === undefined ? {} : { name: args.name }),
             ...(args.summary === undefined ? {} : { summary: args.summary }),
           }),
-        ).then(recordValue);
+        ).then(() => ({ updated: true }));
       },
       presentCall: (args) => present("更新记忆", "other", args.id),
     }),
