@@ -555,6 +555,8 @@ check("⑥ 项目 B 能看到新记忆、项目 A 看不到", typeof savedId ===
 // ⑥b memory_update：可改正文/标签/标题/summary；applied 正文变更降级 pending
 const updateTool = registeredTools.get("memory_update");
 check("⑥b memory_update 已注册", updateTool !== undefined);
+const sharedParamNames = ["name", "keywords", "content", "summary"];
+check("⑥b memory_save / memory_update 相同参数描述一致", sharedParamNames.every((key) => saveTool.parameters?.[key]?.description === updateTool.parameters?.[key]?.description));
 const metaOnly = await updateTool.execute({ id: "m1", keywords: ["kaczev", "鲸鱼", "updated"], name: "新标题", summary: "更新后的摘要" }, execProjA);
 check("⑥b 只改标签/标题/summary 返回 updated=true", metaOnly !== undefined && metaOnly.updated === true && Object.keys(metaOnly).length === 1);
 const m1Meta = await memory.get("m1");

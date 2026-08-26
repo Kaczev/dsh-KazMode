@@ -1125,7 +1125,7 @@ export async function apply(ctx, config = {}) {
       description:
         'Save one cross-session memory as "pending" (待确认). It does NOT take effect automatically — a human must confirm it in the web panel before it becomes "applied"; never treat a pending memory as effective. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
       parameters: {
-        name: { type: "string", required: true, description: "Short title for the memory (<=140 chars)." },
+        name: { type: "string", required: true, description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
         keywords: { type: "array", items: { type: "string" }, required: true, description: "Anchor keywords used by memory_search (BM25)." },
         content: { type: "string", required: true, description: "Full memory content (plain text)." },
         summary: { type: "string", required: true, description: "One-sentence summary (~100 chars), written by you when saving; it is the only summary text shown in memory_search results." },
@@ -1160,13 +1160,13 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_update",
       description:
-        'Update an existing memory by id: content, keywords, name and/or summary. Changing the content of an "applied" memory demotes it back to "pending" for human re-confirmation; metadata-only edits (name / keywords / summary) keep the status. id comes from memory_list or memory_search. On success returns { updated: true } only (no memory content).',
+        'Update an existing memory by id: content, keywords, name and/or summary. Changing the content of an "applied" memory demotes it back to "pending" for human re-confirmation; metadata-only edits (name / keywords / summary) keep the status. id comes from memory_list or memory_search. Pass name="" to fall back to deriving it from content, and keywords=[] to clear. On success returns { updated: true } only (no memory content).',
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
-        content: { type: "string", description: "New memory content (plain text)." },
-        keywords: { type: "array", items: { type: "string" }, description: "New anchor keywords; pass [] to clear." },
-        name: { type: "string", description: 'New title; pass "" to fall back to deriving it from the content.' },
-        summary: { type: "string", description: "New one-sentence summary (~100 chars)." },
+        name: { type: "string", description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
+        keywords: { type: "array", items: { type: "string" }, description: "Anchor keywords used by memory_search (BM25)." },
+        content: { type: "string", description: "Full memory content (plain text)." },
+        summary: { type: "string", description: "One-sentence summary (~100 chars), written by you when saving; it is the only summary text shown in memory_search results." },
       },
       output: {
         schema: UPDATE_RESULT_SCHEMA,

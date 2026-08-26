@@ -19,7 +19,7 @@
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | string | 唯一标识（UUID） |
-| `name` | string | 简短标题（保存时必填；旧记录回退从正文标题行/首行推导，≤140 字） |
+| `name` | string | 简短标题（保存时必填，建议 ≤80 字 / 5–10 词；旧记录回退从正文标题行/首行推导，内部上限 140 字） |
 | `keywords` | string[] | 关键词数组（保存时必填；供 BM25 检索的锚点词，统一小写） |
 | `summary` | string | **一句话摘要（约 100 字）——由模型在 `memory_save` 时提供，插件不生成**；旧记录回退空串 |
 | `content` | string | 完整的记忆正文 |
@@ -33,7 +33,7 @@
 - **BM25 检索（2026-08 升级）**：`memory_search` 对每条记忆的 `content`（主要）+ `summary` + `keywords` 实时计算 **BM25 相关性分数**（vendored [okapibm25](https://github.com/FurkanToprak/OkapiBM25)，MIT，见 `lib/okapibm25.js` 与 `LICENSE-okapibm25`——**随插件内置，安装无需联网**），按分数降序返回，支持 `limit`（默认 10，上限 100）与 `offset`（默认 0，上限 1000）分页。分数参数 `k1`（默认 1.2）、`b`（默认 0.75）在 `settings.yaml` 的 `kaz-memory.bm25` 段调整（见下「配置」），无需暴露 UI。每次搜索实时重算（记忆量 ≤1000 时性能可接受），保证结果与当前记忆库一致；**评分异步分块计算**（每 200 条让出一次事件循环），不阻塞主线程。无命中返回**空数组**（不是错误）；`query` 为空报错。
 - **memory_search 只回摘要（2026-08 升级）**：命中项只含 `id / name / summary / keywords / score`，**不返回 content**；要看全文用 `memory_detail`。旧版「search 返回全文」的行为不再保留。
 - **memory_detail（2026-08 新增）**：按 `id` 读取单条记忆的完整正文，支持分片：`offset`（默认 0）+ `limit`（默认 500，上限 5000）返回 `content_preview`，并给出 `total_length` 与 `has_more`（`offset + limit < total_length`）。`id` 不存在时报错；`offset` 超出正文长度时返回空串（`total_length` 提示真实长度）且 `has_more=false`。
-- **memory_save 必填四件套（2026-08 升级）**：`name` / `keywords` / `content` / `summary` 全部必填（缺任一报错），`namespace` 可选（默认 global）。`summary` 由调用方（模型）提供，插件不生成。
+- **memory_save 必填四件套（2026-08 升级）**：`name` / `keywords` / `content` / `summary` 全部必填（缺任一报错），`namespace` 可选（默认 global）。`name` 建议 ≤80 字 / 5–10 词；`summary` 由调用方（模型）提供，插件不生成。
 - **memory_save / memory_update 只回成功（2026-08）**：成功时分别只返回 `{ "saved": true }` / `{ "updated": true }`，**不回传记忆正文或元数据**，避免把刚写的内容重新灌进模型上下文；失败仍照常报错。
 - **name 入 JSON（2026-08-19）**：每条记录持久化 `name` 字段；面板可「改名」，改完写回 JSON。旧记录没有 `name` 时读取端按旧逻辑从正文现算（不强制迁移）。
 - **自动载入（2026-08-19 引入，2026-08 重构触发时机）**：每条记忆新增 `autoLoad` 布尔字段（默认 `false`，旧记录读作 false）。面板可逐条切换「自动载入」，已确认且标记的记忆在**对话开始时**（首个 `agent/pre-step`，step === 1）以 `source: {kind:'plugin', form:'recall'}` 的用户消息**注入一次**；每个会话只注入一次。**只注入 status=applied 且 autoLoad=true 的记忆**，pending/ignored 不注入。跨重启去重（2026-08-19）："已注入"标记持久化在 `~/.dsh/storages/kaz-memory-auto-injected.json`（agent/session id 集合，仅实际注入成功后落标）；插件加载时还会预标记当前已存在的所有 agent——dsh 重启后恢复的会话不会重复注入，新会话仍正常注入一次。
