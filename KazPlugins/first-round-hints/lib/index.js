@@ -40,10 +40,6 @@ const DEFAULT_MESSAGE = [
   "- We need to ask the user for clarification when the task goal or context is ambiguous.",
   "- we need to ask the user to resolve conflicts when multiple requirements cannot be satisfied simultaneously.",
   "<",
-  "[first-round-hints web_search]",
-  ">",
-  "- We should avoid web_search when we have sufficient information.",
-  "<",
 ].join("\n");
 
 const SETTINGS_SCHEMA = z.object({
