@@ -18,11 +18,15 @@
 
 ## 二、快速开始
 
-本仓库保存 **Kaz 模式全家桶**：Kaczev 在 dsh（DeepSeek Harness）里使用的全部插件和 `kaz` 预设；既是仓库说明，也是写给 DeepSeek 的安装指引。
+本仓库保存 **Kaz 模式全家桶**：Kaczev 在 dsh（DeepSeek Harness）里使用的全部插件和 `kaz` 预设；这是仓库说明，写给 DeepSeek 的安装步骤已拆到专用指引文件。
 
 > 安装时最需要注意两件事：
 > 1. **插件必须装到 `KazPlugins` 文件夹**（不是 `plugins`）；
 > 2. **预设必须装成 `.agent-presets/kaz`**（小写 `kaz`，文件直接放在该目录根部）。
+
+> **给 DeepSeek 用（ds 安装法）**：安装 / 更新时让 DeepSeek 直接读专用指引，不要让它读本 README：
+> - 全新安装 → `ds安装指引.md`（提示词见 `ds安装法的提示词.txt`）
+> - 旧版更新 → `ds更新指引.md`（提示词见 `ds更新法的提示词.txt`）
 
 > 写安装程序老是出错，我决定使用最先进的 ds 安装法，根本无需考虑那么多（推荐在梁文谷的时候安装）
 
@@ -47,124 +51,18 @@
 3. **`agent.cordis.yml` 和 `preset.yml` 必须直接位于 `.agent-presets\kaz\` 根部**。  
    dsh 的预设发现规则不递归扫描，嵌套会装不上。
 
-### 2.3 复制插件和预设
+### 2.3 安装 / 更新步骤一览
 
-在 PowerShell 中执行：
+| # | 做什么 | 详见 |
+| --- | --- | --- |
+| 1 | 复制插件 `KazPlugins` 与预设 `kaz` | `ds安装指引.md` 第 2–3 步 |
+| 2 | 在 `profiles/web/package.json` 注册依赖（`kaz-shared` 必需） | `ds安装指引.md` 第 4 步 |
+| 3 | `npm install` 安装依赖 / 建立 junction | `ds安装指引.md` 第 5 步 |
+| 4 | 编辑 `profiles/web/cordis.patch.yml` | `ds安装指引.md` 第 6 步 |
+| 5 | `settings.yaml` 无需修改（纯方案 A） | `ds安装指引.md` 第 7 步 |
+| 6 | 重启 dsh web + 强刷 + 选 Kaz 预设 | `ds安装指引.md` 第 8–9 步 |
 
-```powershell
-$repo = "存仓库的文件夹\dsh-KazMode"
-
-# 1) 插件 -> profiles/web/KazPlugins（目录名严格保持 KazPlugins）
-$pluginDst = Join-Path $env:USERPROFILE ".dsh\profiles\web\KazPlugins"
-New-Item -ItemType Directory -Force -Path $pluginDst | Out-Null
-Copy-Item -Path "$repo\KazPlugins\*" -Destination $pluginDst -Recurse -Force
-
-# 2) 预设 -> .agent-presets/kaz（目录名严格保持小写 kaz）
-$presetDst = Join-Path $env:USERPROFILE ".dsh\.agent-presets\kaz"
-New-Item -ItemType Directory -Force -Path $presetDst | Out-Null
-Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
-```
-
-> 注意：复制的是 `KazPlugins\*` 和 `kaz\*` 的**内容**，避免把源文件夹套进目标文件夹里形成 `KazPlugins\KazPlugins` 或 `kaz\kaz`。
-
-### 2.4 在 `profiles/web/package.json` 注册插件依赖
-
-打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中加入：
-
-```json
-"deepseek-default-model": "file:KazPlugins/deepseek-default-model",
-"first-round-hints": "file:KazPlugins/first-round-hints",
-"kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
-"kaz-memory": "file:KazPlugins/kaz-memory",
-"kaz-mode": "file:KazPlugins/kaz-mode",
-"kaz-shared": "file:KazPlugins/kaz-shared",
-"output-beep": "file:KazPlugins/output-beep",
-"plugin-filter": "file:KazPlugins/plugin-filter",
-"round-display": "file:KazPlugins/round-display",
-"round-minimal": "file:KazPlugins/round-minimal",
-"thinking-anchor": "file:KazPlugins/thinking-anchor"
-```
-
-> **kaz-shared 是必需依赖**（Kaz 模式工具清单单一事实源，见 `KazPlugins/kaz-shared/`）：kaz-mode / kaz-memory / round-minimal / plugin-filter 都 import 它，漏装会导致这些插件无法加载。它不是 cordis 插件，只是纯模块包。
-
-完整示例：
-
-```json
-{
-  "name": "dsh-profile-web",
-  "private": true,
-  "dependencies": {
-    "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
-    "first-round-hints": "file:KazPlugins/first-round-hints",
-    "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
-    "kaz-memory": "file:KazPlugins/kaz-memory",
-    "kaz-mode": "file:KazPlugins/kaz-mode",
-    "kaz-shared": "file:KazPlugins/kaz-shared",
-    "output-beep": "file:KazPlugins/output-beep",
-    "plugin-filter": "file:KazPlugins/plugin-filter",
-    "round-display": "file:KazPlugins/round-display",
-    "round-minimal": "file:KazPlugins/round-minimal",
-    "thinking-anchor": "file:KazPlugins/thinking-anchor"
-  }
-}
-```
-
-### 2.5 安装依赖 / 建立 junction
-
-在 `%USERPROFILE%\.dsh\profiles\web` 下执行：
-
-```powershell
-cd "$env:USERPROFILE\.dsh\profiles\web"
-Remove-Item Env:npm_config_allow_scripts   # 本机 npm 11 兼容坑
-npm.cmd install --legacy-peer-deps --no-audit --no-fund
-```
-
-安装成功后，`profiles/web/node_modules/` 下会为每个 Kaz 插件生成指向 `KazPlugins/<插件名>` 的 junction。
-
-### 2.6 编辑 `profiles/web/cordis.patch.yml`
-
-在 `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml` 中加入各组合行（如果已存在相同行则不要重复添加）：
-
-- `kaz-memory`（`memory`）
-- `thinking-anchor`（`enabled: true`）
-- `plugin-filter`（`enabled: true`，`mode: remove`，禁用 `tool-cordis` / `tool-subagent-report` / `codex` / `claude-code`）
-- `kaz-agent-preset-display`（`enabled: true`）
-- `round-minimal`（`enabled: true`）
-- `kaz-mode`（`enabled: false`）
-- `output-beep`（`enabled: true`）
-- `round-display`（`enabled: true`）
-- `deepseek-default-model`（`enabled: true`）
-- `first-round-hints`（`enabled: true`）
-
-> `kaz-mode` 的组合行默认 `enabled: false` 是正常的：它由“选择 `kaz` 预设”这一动作联动开启。
->
-> **完整 YAML 示例见文末「附录 A」**，可直接整体复制。
-
-### 2.7 编辑 `%USERPROFILE%\.dsh\settings.yaml`
-
-纯方案 A（2026-08-21）：被管理插件（thinking-anchor / round-minimal / plugin-filter /
-output-beep / round-display / deepseek-default-model / kaz-memory /
-first-round-hints）的生效配置由 kazMode 服务读取：
-- `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认）（会自动创建）
-- `<项目>/.dsh/storages/kaz-project-states.json`（项目专属覆盖，同一项目所有对话共享）（修改时自动创建）
-
-settings.yaml **不再承载这些插件的段**，仅有kaz-mode和补丁插件的设置（这两个都有自愈写入）
-
-> 被管理插件在 **Kaz 面板**（专属设置 / 默认设置）里改，改动落到上面两个 json，
-> 其中“专属设置”按项目隔离（像工具控制面板一样），不再是按对话隔离。
-> 旧的 `kaz-session-states.json` 已不再读取，可直接删除。
-
-### 2.8 重启 dsh 并验证
-
-1. **重启 `dsh web`**（插件代码 / cordis 组合改动必须重启才加载）。
-2. **强刷浏览器页面**（Ctrl+F5 或 Cmd+Shift+R），让客户端插件生效。
-3. 在预设选择器中选择 **Kaz 模式**（`kaz`）。
-4. 验证：
-   - `dsh --profile web --dump-config` 能看到 `kaz-mode`、`round-minimal`、`plugin-filter`、`kaz-memory`、`kaz-agent-preset-display`、`deepseek-default-model` 等组合行；
-   - 新对话系统的思考内不再出现"Let me"，而有很多的"We need"、"Let's"之类的；
-   - 首次工具调用前工具面只有 `pwsh` + `read` + `edit`；
-   - 第一次工具调用后恢复 `toolWhitelist` 里的全部工具；
-   - Kaz 面板出现各被管理插件的开关行。
+> 完整命令、完整 JSON / YAML、出错处理都在 `ds安装指引.md` / `ds更新指引.md` 里，README 不再重复维护，避免两处漂移。
 
 ---
 
@@ -198,6 +96,8 @@ dsh-KazMode/
 ├── kaz/                            # kaz 预设（不是 KazPlugins/kaz-mode/kaz-preset）
 │   ├── preset.yml
 │   └── agent.cordis.yml
+├── ds安装指引.md / ds更新指引.md      # 给 DeepSeek 的安装/更新步骤（决策完备，勿让 DS 读 README）
+├── ds安装法的提示词.txt / ds更新法的提示词.txt  # 发给 DeepSeek 的提示词，指向对应指引
 ├── 其它好用的工具/                   # 可选：DSH 实用插件
 │   └── dsh-deepseek-balance/
 └── 其它好用的预设/                   # 可选：实验性 Router 预设
@@ -230,18 +130,16 @@ dsh-KazMode/
 
 ---
 
-## 五、完整安装指引（写给 DeepSeek）
+## 五、给 DeepSeek 的安装 / 更新指引
 
-> **请仅安装用tag标注了的最新版本，未使用tag标注的是超级不稳定的版本，或者测试版**
+> **请仅安装用 tag 标注了的最新版本，未使用 tag 标注的是超级不稳定的版本，或者测试版**
 
-「二、快速开始」已给出精简步骤；本节是同一安装流程的完整说明，供 DeepSeek 安装 agent 逐步执行：
+DeepSeek 收到提示词后直接读对应指引文件，不要读本 README：
 
-1. **复制插件和预设** → 见「2.3」。
-2. **在 `profiles/web/package.json` 注册依赖** → 见「2.4」（注意 `kaz-shared` 是必需依赖）。
-3. **安装依赖 / 建立 junction** → 见「2.5」。
-4. **编辑 `profiles/web/cordis.patch.yml`** → 见「2.6」，完整 YAML 见「附录 A」。
-5. **编辑 `settings.yaml`** → 见「2.7」（纯方案 A）。
-6. **重启并验证** → 见「2.8」。
+- **全新安装** → 读 **`ds安装指引.md`**；对应提示词 `ds安装法的提示词.txt`。
+- **旧版更新** → 读 **`ds更新指引.md`**；对应提示词 `ds更新法的提示词.txt`。
+
+两份指引是决策完备的：每步只有一种做法，包含完整命令、完整 JSON / YAML 与就地出错处理。
 
 ---
 
@@ -264,6 +162,7 @@ dsh-KazMode/
 - **预设目录名写成 `Kaz` / `KazMode`**：preset id 必须匹配 `^[a-z0-9][a-z0-9-]*$`，所以用 `kaz`。
 - **改完 `cordis.patch.yml` 不重启**：设置段（settings.yaml）可热重载，但插件装配和代码改动必须重启 dsh web。
 - **`npm install` 报 scripts 相关错误**：先执行 `Remove-Item Env:npm_config_allow_scripts`。
+- **PowerShell 报 "running scripts is disabled" / 无法加载 `dsh.ps1`**：执行策略拦截了 PowerShell 版命令，改用 `dsh.cmd --profile web --dump-config` 即可。
 - **用 `Set-Content -Encoding UTF8` 写 YAML/JSON 产生 BOM**：BOM 可能破坏 JSON.parse；建议用支持 UTF-8 无 BOM 的编辑器/工具。
 - **遇到 `write/edit` 报 `ReplaceFileW EIO (Win32 1175)`**：这是 Windows 偶发文件系统错误，重试同一次编辑即可，不要换工具或放弃。
 
@@ -282,6 +181,9 @@ dsh-KazMode/
 | `KazPlugins/kaz-mode/kaz-preset/` | kaz-mode 内置的预设副本（安装预设时不从这里取） |
 | `kaz/preset.yml` | `kaz` 预设的显示名称与描述 |
 | `kaz/agent.cordis.yml` | `kaz` 预设的完整 Cordis 组合定义 |
+| `ds安装指引.md` | 给 DeepSeek 的全新安装步骤（决策完备，唯一做法） |
+| `ds更新指引.md` | 给 DeepSeek 的旧版更新步骤（含清理与迁移） |
+| `ds安装法的提示词.txt` / `ds更新法的提示词.txt` | 发给 DeepSeek 的简短提示词，指向对应指引 |
 | `其它好用的工具/` | 可选独立 DSH 工具/插件 |
 | `其它好用的预设/` | 可选实验性 Router 预设 |
 
@@ -303,77 +205,11 @@ node KazPlugins/kaz-mode/check-version.mjs
 
 ## 附录 A：`cordis.patch.yml` 完整示例
 
-对应正文「2.6」，整体复制到 `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`（如果已存在相同行则不要重复添加）：
-
-```yaml
-- insert:
-    - id: memory
-      name: kaz-memory
-
-- insert:
-    - id: thinking-anchor
-      name: thinking-anchor
-      config:
-        enabled: true
-
-- insert:
-    - id: plugin-filter
-      name: plugin-filter
-      config:
-        enabled: true
-        mode: remove
-        disabledTools:
-          - tool-cordis
-          - tool-subagent-report
-          - codex
-          - claude-code
-
-- insert:
-    - id: kaz-agent-preset-display
-      name: kaz-agent-preset-display
-      config:
-        enabled: true
-
-- insert:
-    - id: round-minimal
-      name: round-minimal
-      config:
-        enabled: true
-
-- insert:
-    - id: kaz-mode
-      name: kaz-mode
-      config:
-        enabled: false
-
-- insert:
-    - id: output-beep
-      name: output-beep
-      config:
-        enabled: true
-
-- insert:
-    - id: round-display
-      name: round-display
-      config:
-        enabled: true
-
-- insert:
-    - id: deepseek-default-model
-      name: deepseek-default-model
-      config:
-        enabled: true
-
-- insert:
-    - id: first-round-hints
-      name: first-round-hints
-      config:
-        enabled: true
-```
+完整内容（10 个 insert 块）见 **`ds安装指引.md` 第 6 步** / **`ds更新指引.md` 第 8 步**，README 不再重复维护，避免两处漂移。安装 / 更新时按指引步骤操作即可。
 
 ## 附录 B：`settings.yaml` 说明（纯方案 A）
 
-对应正文「2.7」。被管理插件的生效配置由 kazMode 服务从以下两个 json 读取：
+安装 / 更新时**无需修改 settings.yaml**（见 `ds安装指引.md` 第 7 步 / `ds更新指引.md` 第 9 步）。被管理插件的生效配置由 kazMode 服务从以下两个 json 读取：
 
 - `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认，自动创建）
 - `<项目>/.dsh/storages/kaz-project-states.json`（项目专属覆盖，同一项目所有对话共享，修改时自动创建）
