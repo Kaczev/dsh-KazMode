@@ -60,13 +60,13 @@ window.__ModuleLoader__.load({
 .kzm-chevron{color:var(--dsw-alias-label-tertiary);font-size:10px;flex:none}
 .kzm-panel{position:absolute;top:calc(100% + 10px);right:0;z-index:60;width:480px;max-height:70vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:4px;transition:opacity .16s ease,transform .16s ease}
 .kzm-portal{position:fixed;z-index:1200}
-.kzm-panel-wrap{position:relative;display:flex;flex-direction:column}
 .kzm-portal .kzm-panel{position:static;top:auto;bottom:auto;left:auto;right:auto;width:100%;box-sizing:border-box}
 .kzm-portal.kzm-opening .kzm-panel{opacity:1;transform:translateY(0)}
 .kzm-portal.kzm-closing .kzm-panel{opacity:0;transform:translateY(-6px)}
-.kzm-bubbles{position:absolute;left:12px;right:12px;bottom:calc(100% + 8px);display:flex;flex-direction:column;align-items:flex-start;gap:6px;pointer-events:none;z-index:5}
-.kzm-bubble{position:relative;padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.4;color:#fff;background:linear-gradient(135deg,#8b5cf6,#6366f1);box-shadow:0 6px 16px rgba(99,102,241,.35);animation:kzm-bubble-in .25s ease-out,kzm-bubble-out .35s ease-in 2.2s forwards}
-.kzm-bubble::after{content:"";position:absolute;left:28px;bottom:-6px;border:6px solid transparent;border-top-color:#6366f1;border-bottom:0}
+.kzm-bubbles{display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none}
+.kzm-bubble-portal{position:fixed;z-index:1300}
+.kzm-bubble{position:relative;max-width:340px;padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.4;color:#fff;background:linear-gradient(135deg,#8b5cf6,#6366f1);box-shadow:0 6px 16px rgba(99,102,241,.35);animation:kzm-bubble-in .25s ease-out,kzm-bubble-out .35s ease-in 2.2s forwards}
+.kzm-bubble::after{content:"";position:absolute;right:18px;bottom:-6px;border:6px solid transparent;border-top-color:#6366f1;border-bottom:0}
 @keyframes kzm-bubble-in{from{opacity:0;transform:translateY(-10px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
 @keyframes kzm-bubble-out{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-6px) scale(.97)}}
 .kzm-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
@@ -238,28 +238,6 @@ window.__ModuleLoader__.load({
 				const [opened, setOpened] = useState(null);
 				const [busy, setBusy] = useState(false);
 				const [loadErrorMsg, setLoadErrorMsg] = useState("");
-				const [bubbles, setBubbles] = useState([]);
-				const changeCursor = useRef({ initialized: false, lastSeq: 0 });
-				const bubbleTimers = useRef(new Map());
-
-				const showBubbles = useCallback((entries) => {
-					if (!Array.isArray(entries) || entries.length === 0) return;
-					const additions = entries
-						.slice(-3)
-						.map((entry) => ({
-							key: String(entry.seq) + ":" + String(entry.id),
-							text: (entry.operation === "remembered" ? "记忆保存" : "记忆更新") + "「" + (typeof entry.title === "string" ? entry.title : "") + "」",
-						}));
-					if (additions.length === 0) return;
-					setBubbles((prev) => [...prev, ...additions].slice(-3));
-					for (const bubble of additions) {
-						const timer = setTimeout(() => {
-							setBubbles((cur) => cur.filter((item) => item.key !== bubble.key));
-							bubbleTimers.current.delete(bubble.key);
-						}, 2600);
-						bubbleTimers.current.set(bubble.key, timer);
-					}
-				}, []);
 
 				const refresh = useCallback(async () => {
 					const res = await rpcCall("list", { project });
@@ -270,17 +248,7 @@ window.__ModuleLoader__.load({
 					} else {
 						setLoadErrorMsg(lastRpcError || "RPC list 失败");
 					}
-					const changesRes = await rpcCall("recentChanges", { project, after: changeCursor.current.lastSeq });
-					if (changesRes !== null && Array.isArray(changesRes.changes)) {
-						const changes = Array.isArray(changesRes.changes) ? changesRes.changes : [];
-						if (changeCursor.current.initialized) {
-							showBubbles(changes);
-						}
-						changeCursor.current.initialized = true;
-						const nextSeq = Number(changesRes.nextSeq);
-						if (Number.isFinite(nextSeq)) changeCursor.current.lastSeq = nextSeq;
-					}
-				}, [project, showBubbles]);
+				}, [project]);
 
 				// 打开时拉取 + 打开期间每 2 秒轮询（模型用记忆工具改数据也会反映）；另有手动刷新按钮。
 				useEffect(() => {
@@ -288,12 +256,6 @@ window.__ModuleLoader__.load({
 					const timer = setInterval(() => { void refresh(); }, 2000);
 					return () => clearInterval(timer);
 				}, [refresh]);
-
-				// 组件卸载时清理气泡定时器，避免面板关闭后 setState。
-				useEffect(() => () => {
-					for (const timer of bubbleTimers.current.values()) clearTimeout(timer);
-					bubbleTimers.current.clear();
-				}, []);
 
 				const run = async (endpoint, id, extra) => {
 					setBusy(true);
@@ -320,18 +282,7 @@ window.__ModuleLoader__.load({
 
 				return createElement(
 					"div",
-					{ className: "kzm-panel-wrap" },
-					bubbles.length > 0 &&
-						createElement(
-							"div",
-							{ className: "kzm-bubbles" },
-							bubbles.map((bubble) =>
-								createElement("div", { key: bubble.key, className: "kzm-bubble" }, bubble.text),
-							),
-						),
-					createElement(
-						"div",
-						{ className: "kzm-panel", role: "dialog", "aria-label": "记忆面板" },
+					{ className: "kzm-panel", role: "dialog", "aria-label": "记忆面板" },
 					createElement(
 						"p",
 						{ className: "kzm-panel-title" },
@@ -454,7 +405,6 @@ window.__ModuleLoader__.load({
 						),
 					),
 					busy && createElement("p", { className: "kzm-note" }, "处理中…"),
-					),
 				);
 			}
 
@@ -476,6 +426,29 @@ window.__ModuleLoader__.load({
 				const [closing, setClosing] = useState(false);
 				const closeTimer = useRef(null);
 				const compact = wide === false;
+				const [bubbles, setBubbles] = useState([]);
+				const [bubblePos, setBubblePos] = useState(null);
+				const changeCursor = useRef({ initialized: false, lastSeq: 0 });
+				const bubbleTimers = useRef(new Map());
+
+				const showBubbles = useCallback((entries) => {
+					if (!Array.isArray(entries) || entries.length === 0) return;
+					const additions = entries
+						.slice(-3)
+						.map((entry) => ({
+							key: String(entry.seq) + ":" + String(entry.id),
+							text: (entry.operation === "remembered" ? "记忆保存" : "记忆更新") + "「" + (typeof entry.title === "string" ? entry.title : "") + "」",
+						}));
+					if (additions.length === 0) return;
+					setBubbles((prev) => [...prev, ...additions].slice(-3));
+					for (const bubble of additions) {
+						const timer = setTimeout(() => {
+							setBubbles((cur) => cur.filter((item) => item.key !== bubble.key));
+							bubbleTimers.current.delete(bubble.key);
+						}, 2600);
+						bubbleTimers.current.set(bubble.key, timer);
+					}
+				}, []);
 
 				// 当前会话所在项目（权威信号）：useSessions.current 会话的 cwd。
 				let currentCwd = "";
@@ -494,6 +467,31 @@ window.__ModuleLoader__.load({
 						currentCwd = "";
 					}
 				}
+
+				// 常驻轮询 recentChanges：即使面板收起，也能在「记忆」按钮上方弹气泡。
+				useEffect(() => {
+					if (!currentCwd) return;
+					let alive = true;
+					const poll = async () => {
+						const changesRes = await rpcCall("recentChanges", { project: currentCwd, after: changeCursor.current.lastSeq });
+						if (!alive) return;
+						if (changesRes !== null && Array.isArray(changesRes.changes)) {
+							const changes = Array.isArray(changesRes.changes) ? changesRes.changes : [];
+							if (changeCursor.current.initialized) {
+								showBubbles(changes);
+							}
+							changeCursor.current.initialized = true;
+							const nextSeq = Number(changesRes.nextSeq);
+							if (Number.isFinite(nextSeq)) changeCursor.current.lastSeq = nextSeq;
+						}
+					};
+					void poll();
+					const timer = setInterval(() => { void poll(); }, 2000);
+					return () => {
+						alive = false;
+						clearInterval(timer);
+					};
+				}, [currentCwd, showBubbles]);
 
 				const rootRef = useRef(null);
 				const [panelPos, setPanelPos] = useState(null);
@@ -519,7 +517,33 @@ window.__ModuleLoader__.load({
 
 				useEffect(() => () => {
 					if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+					for (const timer of bubbleTimers.current.values()) clearTimeout(timer);
+					bubbleTimers.current.clear();
 				}, []);
+
+				// 气泡定位：跟随「记忆」按钮上方，用 portal 避免被侧边栏 overflow 裁剪。
+				useEffect(() => {
+					if (bubbles.length === 0) {
+						setBubblePos(null);
+						return;
+					}
+					const update = () => {
+						const el = rootRef.current;
+						if (el === null) return;
+						const rect = el.getBoundingClientRect();
+						const width = Math.min(340, window.innerWidth - 24);
+						let left = rect.right - width;
+						if (left < 12) left = 12;
+						setBubblePos({
+							left: Math.round(left) + "px",
+							bottom: Math.round(window.innerHeight - rect.top + 8) + "px",
+							width: Math.round(width) + "px",
+						});
+					};
+					update();
+					window.addEventListener("resize", update);
+					return () => window.removeEventListener("resize", update);
+				}, [bubbles.length > 0]);
 
 				// 点击面板外的空白区域时平滑收起（再次点击按钮展开）。
 				useEffect(() => {
@@ -572,6 +596,17 @@ window.__ModuleLoader__.load({
 						"data-side": "true",
 						"data-compact": compact ? "true" : "false",
 					},
+					bubbles.length > 0 && bubblePos !== null &&
+						createPortal(
+							createElement(
+								"div",
+								{ className: "kzm-bubbles kzm-bubble-portal", style: bubblePos },
+								bubbles.map((bubble) =>
+									createElement("div", { key: bubble.key, className: "kzm-bubble" }, bubble.text),
+								),
+							),
+							document.body,
+						),
 					createElement(
 						"button",
 						{
