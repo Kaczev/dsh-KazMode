@@ -27,9 +27,9 @@ export const TOOL_PLUGIN_CATALOG = {
     "grep" : true
   },
   "tool-jobs": {
-    "job_list" : true,
-    "job_output" : true,
-    "job_kill" : true
+    "job_list" : false,
+    "job_output" : false,
+    "job_kill" : false
   },
   "tool-ask-user": {
     "ask_user_question" : true
@@ -89,7 +89,7 @@ export const TOOL_PLUGINS = {
   "tool-pwsh" : true,
   "tool-fs" : true,
   "tool-fs-search" : true,
-  "tool-jobs" : true,
+  "tool-jobs" : false,
   "tool-ask-user" : true,
   "tool-todo" : true,
   "tool-web" : true,
