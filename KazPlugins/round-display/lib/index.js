@@ -329,9 +329,10 @@ export default {
               const byTurn = byAgent.get(agent.id);
               const list = byTurn !== undefined ? byTurn.get(turn) : undefined;
               if (Array.isArray(list)) {
+                // 2026-08-28：新消息排上（at 降序），与「越新越靠上」一致。
                 entries = list
                   .slice()
-                  .sort((a, b) => a.at - b.at)
+                  .sort((a, b) => b.at - a.at)
                   .map(toPublic);
               }
             }
@@ -357,9 +358,11 @@ export default {
                   .sort((a, b) => a[0] - b[0])
                   .map(([turn, list]) => ({
                     turn,
+                    // 2026-08-28：轮内条目新消息排上（at 降序）；轮次本身
+                    // 仍由客户端倒序展示（新轮在上）。
                     entries: list
                       .slice()
-                      .sort((a, b) => a.at - b.at)
+                      .sort((a, b) => b.at - a.at)
                       .map(toPublic),
                   }));
               }

@@ -5,6 +5,13 @@
  * 之前这段逻辑内嵌在 kaz-mode 插件里，现在移到 preset 层，
  * 这样改提示词不用动插件，直接改这个文件即可。
  *
+ * 同时也负责把展示信息上报 round-display（best-effort）：
+ *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
+ *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
+ *     plan 模式激活时 = plan:policy 段 + persona 段）；
+ *   - agent/pre-step 与 session/event 双通道上报 dsh-plan-mode 的进入/退出
+ *     通知（source.plugin === "plan-mode"）。
+ *
  * 规则按顺序匹配：第一个 `test` 返回 true 的规则胜出。
  * 需要新增“某种情况下的系统提示词”时，在 PROMPT_RULES 里加一条即可。
  *
@@ -32,16 +39,72 @@ function pluginEnabled(ctx, agent, pluginId) {
   return false
 }
 
-/** 把系统提示词上报给 round-display（best-effort，服务不存在时静默跳过）。 */
-function reportRoundDisplay(ctx, agent, content) {
+/** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。 */
+function reportRoundDisplay(ctx, agent, content, plugin = "kaz-system-prompt", title = "system prompt") {
   try {
     const rd = ctx.get('roundDisplay')
     if (rd && typeof rd.report === 'function' && agent && typeof content === 'string' && content.trim().length > 0) {
-      rd.report({ agent, plugin: 'kaz-system-prompt', title: 'system prompt', content })
+      rd.report({ agent, plugin, title, content })
     }
   } catch {
-    // 上报失败不影响系统提示词
+    // 上报失败不影响主流程
   }
+}
+
+/** 组装真实系统提示词：与 dsh-system-prompt 的 renderPrompt 一致（空段过滤、"\n\n" 连接）。 */
+function realPromptOf(sections) {
+  const parts = []
+  for (const section of Array.isArray(sections) ? sections : []) {
+    if (section === null || typeof section !== "object") continue
+    const text = typeof section.text === "string" ? section.text : ""
+    if (text.trim().length > 0) parts.push(text)
+  }
+  return parts.join("\n\n")
+}
+
+/** 从 user 消息中提取纯文本（content 数组的 text 部分；缺失时回退 source.summary）。 */
+function textOfMessage(message) {
+  try {
+    if (message === null || typeof message !== "object") return ""
+    const content = Array.isArray(message.content) ? message.content : []
+    const parts = content
+      .filter(
+        (part) =>
+          part !== null &&
+          typeof part === "object" &&
+          typeof part.text === "string" &&
+          part.text.trim().length > 0,
+      )
+      .map((part) => part.text)
+    if (parts.length > 0) return parts.join("\n")
+    const source = message.source
+    if (source !== null && typeof source === "object" && typeof source.summary === "string") {
+      return source.summary
+    }
+    return ""
+  } catch {
+    return ""
+  }
+}
+
+/** 从 session 解析对应 agent（session/event 事件只给 session，没有 agent；同 output-beep 模式）。 */
+function sessionAgentOf(ctx, session) {
+  try {
+    const id =
+      session !== null && typeof session === "object" && typeof session.id === "string"
+        ? session.id
+        : session?.sessionId
+    if (typeof id === "string" && id.length > 0) {
+      const agents = ctx.get("agents")
+      if (agents !== undefined && agents !== null && typeof agents.get === "function") {
+        const agent = agents.get(id)
+        if (agent !== undefined && agent !== null) return agent
+      }
+    }
+  } catch {
+    // 服务缺失时返回 undefined
+  }
+  return undefined
 }
 
 /**
@@ -124,7 +187,69 @@ export function apply(ctx, _config) {
     }
 
     assembly.sections = kept
-    reportRoundDisplay(ctx, agent, prompt)
-    return next()
+    // 等后续监听器（round-minimal / kaz-mode 只过滤工具段，不动 sections）跑完，
+    // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
+    // renderPrompt 一致：空段过滤、"\n\n" 连接）。plan 模式激活时内容 =
+    // plan:policy 段 + persona 段，正是模型真实看到的 system 字段。
+    const nextResult = await next()
+    const finalAssembly = nextResult ?? assembly
+    const finalPrompt = realPromptOf(finalAssembly?.sections)
+    if (finalPrompt.length > 0) reportRoundDisplay(ctx, agent, finalPrompt)
+    return nextResult
+  })
+
+  // 进入/退出 plan 模式通知上报（source.plugin === "plan-mode" 的 user 消息）：
+  //   - agent/pre-step：直接扫描本次 step 的 messages（dsh-plan-mode 在开放 turn
+  //     内由瀑布追加 notice；轮间切换则 notice 已由 inbox.claim 进 messages）；
+  //   - session/event：兜底，通知消息真正落盘（步骤被接受）时必然触发，
+  //     不受 pre-step 监听器顺序影响。重复上报由 round-display 按 (plugin, content) 去重。
+  ctx.on('agent/pre-step', async (payload, next) => {
+    const decision = await next()
+    if (decision === null || typeof decision !== 'object' || decision.kind !== 'enter') return decision
+    const agent = payload?.agent
+    if (agent === null || agent === undefined || typeof agent !== 'object') return decision
+
+    // 非 Kaz 会话不应被这个 preset 脚本干预（防御性检查）。
+    try {
+      const svc = ctx.get('kazMode')
+      if (svc && typeof svc.kazEnabled === 'function' && agent && svc.kazEnabled(agent) !== true) {
+        return decision
+      }
+    } catch {
+      // 服务缺失时不拦截，继续按 Kaz 预设处理
+    }
+
+    const messages = Array.isArray(decision.messages) ? decision.messages : []
+    for (const message of messages) {
+      const source = message?.source
+      if (source === null || typeof source !== 'object') continue
+      if (source.plugin !== 'plan-mode') continue
+      const text = textOfMessage(message)
+      if (text.length === 0) continue
+      reportRoundDisplay(ctx, agent, text, 'plan-mode', 'plan mode notice')
+    }
+    return decision
+  })
+
+  ctx.on('session/event', (session, event) => {
+    if (event === null || typeof event !== 'object' || event.type !== 'user/message') return
+    const source = event.data?.source
+    if (source === null || typeof source !== 'object' || source.plugin !== 'plan-mode') return
+    const agent = sessionAgentOf(ctx, session)
+    if (agent === undefined) return
+
+    // 非 Kaz 会话不应被这个 preset 脚本干预（防御性检查）。
+    try {
+      const svc = ctx.get('kazMode')
+      if (svc && typeof svc.kazEnabled === 'function' && agent && svc.kazEnabled(agent) !== true) {
+        return
+      }
+    } catch {
+      // 服务缺失时不拦截，继续按 Kaz 预设处理
+    }
+
+    const text = textOfMessage(event.data)
+    if (text.length === 0) return
+    reportRoundDisplay(ctx, agent, text, 'plan-mode', 'plan mode notice')
   })
 }

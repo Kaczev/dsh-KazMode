@@ -255,7 +255,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "rd-note" },
-						"Kaz 模式联动/附属插件在本轮（每次用户消息 = 一轮）给模型发送的信息，以及 round-minimal 上报的首轮工具提示与工具面增删明细。格式：[插件名]>（信息内容）<。",
+						"Kaz 模式联动/附属插件在本轮（每次用户消息 = 一轮）给模型发送的信息，含 kaz-system-prompt 上报的真实系统提示词（plan 模式时含 plan:policy 段）与 plan-mode 进入/退出通知，以及 round-minimal 上报的首轮工具提示与工具面增删明细。格式：[插件名]>（信息内容）<。",
 						lastRpcError.length > 0 && createElement("span", { className: "rd-note" }, "  RPC 通道未就绪：" + lastRpcError),
 					),
 					createElement(
