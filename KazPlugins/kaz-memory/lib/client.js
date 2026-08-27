@@ -65,10 +65,10 @@ window.__ModuleLoader__.load({
 .kzm-portal.kzm-closing .kzm-panel{opacity:0;transform:translateY(-6px)}
 .kzm-bubbles{display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none}
 .kzm-bubble-portal{position:fixed;z-index:1300}
-.kzm-bubble{position:relative;max-width:340px;padding:8px 12px;border-radius:10px;font-size:12px;line-height:1.4;color:#fff;background:linear-gradient(135deg,#8b5cf6,#6366f1);box-shadow:0 6px 16px rgba(99,102,241,.35);animation:kzm-bubble-in .25s ease-out,kzm-bubble-out .35s ease-in 2.2s forwards}
-.kzm-bubble::after{content:"";position:absolute;right:18px;bottom:-6px;border:6px solid transparent;border-top-color:#6366f1;border-bottom:0}
-@keyframes kzm-bubble-in{from{opacity:0;transform:translateY(-10px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
-@keyframes kzm-bubble-out{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-6px) scale(.97)}}
+.kzm-bubble{position:relative;max-width:340px;padding:8px 12px 8px 14px;border-radius:10px;font-size:12px;line-height:1.45;font-weight:500;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border:1px solid var(--dsw-alias-border-l1);border-left:3px solid #7c3aed;box-shadow:0 4px 12px rgb(0 0 0 / .10);animation:kzm-bubble-in .2s ease-out,kzm-bubble-out .3s ease-in 2.2s forwards}
+.kzm-bubble::after{content:"";position:absolute;right:18px;bottom:-5px;width:10px;height:10px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-right:1px solid var(--dsw-alias-border-l1);border-bottom:1px solid var(--dsw-alias-border-l1);transform:rotate(45deg)}
+@keyframes kzm-bubble-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes kzm-bubble-out{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-4px)}}
 .kzm-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
 .kzm-badge{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary)}
 .kzm-badge[data-count="true"]{color:#16a34a;border-color:rgba(22,163,74,.45)}
