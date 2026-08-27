@@ -656,6 +656,30 @@ check("⑧b RPC rename 修改 m1 名称", renameRpc !== null && renameRpc.ok ===
 const forgetRpc = await rpcHandler("forget", { id: "m3", project: "C:/projA" });
 check("⑧b RPC forget 删除 m3", forgetRpc !== null && forgetRpc.ok === true && forgetRpc.value.deleted === true);
 
+// ⑧c recentChanges：面板「记忆保存/更新」气泡数据源
+{
+  const changeListeners = listeners.get("memory/changed") ?? [];
+  const emitChange = (payload) => {
+    for (const fn of changeListeners) fn(payload);
+  };
+  const initialChanges = await rpcHandler("recentChanges", { project: "C:/projA", after: 0 });
+  check("⑧c recentChanges 初始为空", initialChanges !== null && initialChanges.ok === true && Array.isArray(initialChanges.value.changes) && initialChanges.value.changes.length === 0 && initialChanges.value.nextSeq === 0);
+
+  emitChange({ operation: "remembered", record: { id: "r1", namespace: "global", name: "全局新记忆", content: "# 全局新记忆\n\n内容" } });
+  emitChange({ operation: "updated", record: { id: "u1", namespace: "project", name: "A 项目记忆", content: "内容" }, projectRoot: "C:/projA" });
+  emitChange({ operation: "updated", record: { id: "u2", namespace: "project", name: "B 项目记忆", content: "内容" }, projectRoot: "C:/projB" });
+  emitChange({ operation: "renamed", record: { id: "x", namespace: "global", name: "改名事件" } });
+
+  const changesA = await rpcHandler("recentChanges", { project: "C:/projA", after: 0 });
+  check("⑧c recentChanges 返回全局 remembered + 项目A updated，过滤项目B", changesA !== null && changesA.ok === true && Array.isArray(changesA.value.changes) && changesA.value.changes.length === 2 && changesA.value.changes.some((c) => c.operation === "remembered" && c.title === "全局新记忆") && changesA.value.changes.some((c) => c.operation === "updated" && c.title === "A 项目记忆"));
+  check("⑧c renamed 不进入 recentChanges", changesA.ok === true && !changesA.value.changes.some((c) => c.id === "x"));
+  const changesB = await rpcHandler("recentChanges", { project: "C:/projB", after: 0 });
+  check("⑧c 项目B recentChanges 含全局 + 项目B updated", changesB !== null && changesB.ok === true && changesB.value.changes.some((c) => c.id === "r1") && changesB.value.changes.some((c) => c.id === "u2") && !changesB.value.changes.some((c) => c.id === "u1"));
+  const afterSeq = changesA.value.nextSeq;
+  const changesAfter = await rpcHandler("recentChanges", { project: "C:/projA", after: afterSeq });
+  check("⑧c nextSeq 游标增量：之后不再返回旧事件", changesAfter !== null && changesAfter.ok === true && changesAfter.value.changes.length === 0 && changesAfter.value.nextSeq === afterSeq);
+}
+
 // ⑨ 会话工具面里 memory_forget 不可见、但 memory_search 可见（方案 A：
 // kazMode.toolVisible 判定）→ 仍发总述指引，不发遗忘指引
 mockKazVisible.set("memory_search", true);

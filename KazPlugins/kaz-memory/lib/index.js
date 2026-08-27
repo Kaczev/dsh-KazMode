@@ -29,7 +29,7 @@
 //     <项目文件夹>/.dsh/storages/memory_project.json，项目根从 agent 会话 cwd
 //     （exec.agent.session.header.cwd）解析——不再用 dsh 进程的 process.cwd()。
 //   * 面板数据通道 = 专用 Connection RPC（/kaz-memory，loopback）：list / open /
-//     rename / status / autoLoad / forget / openFolder。记忆数据（含 name）全部
+//     rename / status / autoLoad / forget / openFolder / recentChanges。记忆数据（含 name）全部
 //     存在 JSON 文件里，settings.yaml 不再承载任何记忆存储信息（2026-08-19）。
 //   * 人工确认闸门已取消（2026-08）：模型 memory_save 直接写 applied，
 //     旧 JSON 里的 pending/suggested 读取时自动归一为 applied；面板不再有待确认区。
@@ -650,6 +650,42 @@ export async function apply(ctx, config = {}) {
     });
   }
 
+  // ---- 面板「记忆保存/更新」事件队列 ----
+  // 只在进程内保留最近 50 条 remembered/updated 事件，供客户端 recentChanges
+  // 增量拉取；改名 / 自动载入 / 状态 / 删除等不进入队列，避免面板误报「更新」。
+  const recentChanges = [];
+  const RECENT_CHANGES_LIMIT = 50;
+  let recentChangeSeq = 0;
+  ctx.on("memory/changed", (payload) => {
+    if (payload === null || typeof payload !== "object") return;
+    const operation = payload.operation;
+    if (operation !== "remembered" && operation !== "updated") return;
+    const record = payload.record;
+    if (record === null || record === undefined || typeof record !== "object") return;
+    const title =
+      typeof record.name === "string" && record.name.trim().length > 0
+        ? record.name.trim()
+        : nameOf(typeof record.content === "string" ? record.content : "");
+    recentChangeSeq += 1;
+    recentChanges.push({
+      seq: recentChangeSeq,
+      operation,
+      id: String(record.id),
+      title,
+      namespace: record.namespace === "project" ? "project" : "global",
+      projectRoot:
+        typeof payload.projectRoot === "string"
+          ? payload.projectRoot
+          : record.namespace === "project"
+            ? record.projectRoot
+            : undefined,
+      ts: Date.now(),
+    });
+    if (recentChanges.length > RECENT_CHANGES_LIMIT) {
+      recentChanges.splice(0, recentChanges.length - RECENT_CHANGES_LIMIT);
+    }
+  });
+
   // ---- 面板数据通道（Connection RPC，不经过 settings.yaml） ----
   // 客户端经 createWebConnectionRpc() 调用 /kaz-memory 通道；记忆数据（含 name）
   // 全部存在 JSON 文件里，settings.yaml 不再承载任何记忆存储信息。
@@ -681,6 +717,19 @@ export async function apply(ctx, config = {}) {
             },
           },
         };
+      }
+      if (endpoint === "recentChanges") {
+        const project = rootOf(payload);
+        const after = Number.isFinite(Number(payload?.after)) ? Math.max(0, Math.trunc(Number(payload?.after))) : 0;
+        const changes = recentChanges
+          .filter(
+            (change) =>
+              change.seq > after &&
+              (change.namespace !== "project" || change.projectRoot === undefined || change.projectRoot === project),
+          )
+          .slice(0, 20);
+        const nextSeq = changes.length > 0 ? changes[changes.length - 1].seq : after;
+        return { ok: true, value: { changes, nextSeq } };
       }
       if (endpoint === "open") {
         const project = rootOf(payload);
