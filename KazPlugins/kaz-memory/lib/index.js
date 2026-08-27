@@ -19,7 +19,7 @@
 //     同一固定指引；
 //   * 每一轮对话第一次调用 memory_search 之后，都会注入一次遗忘指引
 //     （memory_forget 清理已完成任务）；
-//   * 已确认且标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）
+//   * 已生效且标记「自动载入」（autoLoad）的记忆会在对话开始时（首个 pre-step）
 //     以上下文注入方式注入一次（2026-08 重构：不再等 memory_search 首次可用）
 //   * memory_list 只返回 id/name/updated_at/keywords，不返回正文——避免列表
 //     调用把记忆灌进上下文；按时间倒序（updated_at，缺失回退 created_at，
@@ -31,8 +31,8 @@
 //   * 面板数据通道 = 专用 Connection RPC（/kaz-memory，loopback）：list / open /
 //     rename / status / autoLoad / forget / openFolder。记忆数据（含 name）全部
 //     存在 JSON 文件里，settings.yaml 不再承载任何记忆存储信息（2026-08-19）。
-//   * 人工确认闸门：模型 memory_save 只能写 pending，只有人在面板确认才置为
-//     applied；模型没有任何对应工具，闸门成立。
+//   * 人工确认闸门已取消（2026-08）：模型 memory_save 直接写 applied，
+//     旧 JSON 里的 pending/suggested 读取时自动归一为 applied；面板不再有待确认区。
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
@@ -1006,7 +1006,7 @@ export async function apply(ctx, config = {}) {
     }
   }
 
-  // ---- 自动载入：对话开始时（首个 pre-step）把已确认且标记「自动载入」的记忆
+  // ---- 自动载入：对话开始时（首个 pre-step）把已生效且标记「自动载入」的记忆
   // 注入一次（2026-08 重构：不再等 memory_search 首次可用——对话一开始就注入）----
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
@@ -1149,7 +1149,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_save",
       description:
-        'Save one cross-session memory as "pending" (待确认). It does NOT take effect automatically — a human must confirm it in the web panel before it becomes "applied"; never treat a pending memory as effective. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
+        'Save one cross-session memory. It takes effect immediately (status is "applied") — no manual confirmation is needed. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
       parameters: {
         name: { type: "string", required: true, description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
         keywords: { type: "array", items: { type: "string" }, required: true, description: "Anchor keywords used by memory_search (BM25)." },
@@ -1186,7 +1186,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_update",
       description:
-        'Update an existing memory by id. You can change name, summary, keywords, and content. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content demotes an applied memory back to pending for re-confirmation. On success returns { updated: true } only (no memory content).',
+        'Update an existing memory by id. You can change name, summary, keywords, and content. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content keeps the memory applied (no re-confirmation). On success returns { updated: true } only (no memory content).',
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         name: { type: "string", description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
@@ -1224,7 +1224,7 @@ export async function apply(ctx, config = {}) {
         "List memories sorted by time, newest first (by updated_at, falling back to created_at), limited to limit entries. Each entry contains only id/name/updated_at/keywords (name = title line or first line, truncated to 140 chars) — no content, no namespace/status/autoLoad. Use memory_search for relevance hits, memory_detail for the full content of a single memory.",
       parameters: {
         namespace: { type: "string", enum: ["global", "project"], description: "Restrict to a namespace; project = current project folder." },
-        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "Restrict to a status." },
+        status: { type: "string", enum: ["ignored", "applied"], description: "Restrict to a status." },
         limit: { type: "number", description: "Max memories to return (default 10, max 100)." },
       },
       output: {
@@ -1262,7 +1262,7 @@ export async function apply(ctx, config = {}) {
         limit: { type: "number", description: "Max hits to return (default 10, max 100)." },
         offset: { type: "number", description: "Hits to skip for pagination (default 0, max 1000)." },
         namespace: { type: "string", enum: ["global", "project"], description: "Restrict to a namespace; project = current project folder." },
-        status: { type: "string", enum: ["pending", "ignored", "applied"], description: "Restrict to a status." },
+        status: { type: "string", enum: ["ignored", "applied"], description: "Restrict to a status." },
       },
       output: {
         schema: { type: "array", items: SEARCH_HIT_SCHEMA },
@@ -1318,7 +1318,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_forget",
       description:
-        "Delete one memory by id. The owner can delete any memory (pending, ignored or applied). id comes from memory_list or memory_search.",
+        "Delete one memory by id. The owner can delete any memory (applied or ignored). id comes from memory_list or memory_search.",
       parameters: {
         id: { type: "string", required: true, description: "Memory id to delete (from memory_list or memory_search)." },
       },

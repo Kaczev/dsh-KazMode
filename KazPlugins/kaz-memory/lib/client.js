@@ -22,9 +22,8 @@ window.__ModuleLoader__.load({
 		const inject = ["slots", "connection", "settingsScope"];
 
 		function statusLabel(status) {
-			if (status === "applied" || status === "auto") return "已生效";
 			if (status === "ignored" || status === "suggest") return "已忽略";
-			return "待确认";
+			return "已生效";
 		}
 
 		/** 取路径的文件夹短名（展示用）。 */
@@ -85,9 +84,7 @@ window.__ModuleLoader__.load({
 .kzm-section-title{display:flex;align-items:center;gap:8px;margin:6px 0 0;font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary)}
 .kzm-status{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);flex:none}
 .kzm-status[data-status="applied"]{color:#16a34a;border-color:rgba(22,163,74,.45)}
-.kzm-status[data-status="pending"]{color:#d97706;border-color:rgba(217,119,6,.45)}
 .kzm-status[data-status="auto"]{color:#16a34a;border-color:rgba(22,163,74,.45)}
-.kzm-status[data-status="suggested"]{color:#d97706;border-color:rgba(217,119,6,.45)}
 .kzm-autoload-badge{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid rgba(139,92,246,.55);color:#8b5cf6;flex:none;font-weight:600}
 .kzm-autoload-toggle{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-tertiary);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:12px}
 .kzm-autoload-toggle:hover{background:var(--dsw-alias-interactive-bg-hover)}
@@ -254,8 +251,6 @@ window.__ModuleLoader__.load({
 					return () => clearInterval(timer);
 				}, [refresh]);
 
-				const pending = memories.filter((item) => item.status === "pending" || item.status === "suggested");
-
 				const run = async (endpoint, id, extra) => {
 					setBusy(true);
 					try {
@@ -287,11 +282,6 @@ window.__ModuleLoader__.load({
 						{ className: "kzm-panel-title" },
 						"记忆面板",
 						createElement(
-							"span",
-							{ className: "kzm-badge", "data-count": pending.length > 0 ? "true" : "false" },
-							pending.length > 0 ? "待确认 " + pending.length + " 条" : "待确认 无",
-						),
-						createElement(
 							"button",
 							{ type: "button", className: "kzm-act", disabled: busy, title: "手动刷新", onClick: () => void refresh() },
 							"刷新",
@@ -300,7 +290,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"模型只能提交「待确认」，是否生效由你决定：确认生效（applied）/ 忽略（ignored）/ 删除。数据（含名称）全部存在记忆 JSON 文件里；「自动载入」的记忆会在对话开始时自动注入上下文（每会话一次）。",
+						"模型保存的记忆直接生效（applied），无需人工确认；已忽略（ignored）的旧记忆仍保留状态。数据（含名称）全部存在记忆 JSON 文件里；「自动载入」的记忆会在对话开始时自动注入上下文（每会话一次）。",
 						loadErrorMsg.length > 0 &&
 							createElement(
 								"p",
@@ -340,62 +330,6 @@ window.__ModuleLoader__.load({
 								createElement("button", { type: "button", className: "kzm-act", onClick: closeOpened }, "收起全文"),
 							),
 						),
-					createElement("p", { className: "kzm-section-title" }, "待确认建议"),
-					pending.length === 0 && createElement("p", { className: "kzm-note" }, "没有待确认的记忆建议。（蹭蹭）"),
-					pending.map((item) =>
-						createElement(
-							"div",
-							{ className: "kzm-item", key: "pending-" + item.id },
-							createElement(
-								"div",
-								{ className: "kzm-item-head" },
-								createElement("span", { className: "kzm-item-ns" }, item.namespace === "global" ? "全局" : "项目"),
-								item.namespace === "project" && item.project
-									? createElement("span", { className: "kzm-item-ns kzm-item-folder", title: item.project }, baseName(item.project))
-									: null,
-								item.autoLoad === true
-									? createElement("span", { className: "kzm-autoload-badge" }, "自动载入")
-									: null,
-								createElement("span", { className: "kzm-item-when" }, "建议于 " + fmtTime(item.created_at)),
-							),
-							createElement(
-								"span",
-								{ className: "kzm-summary", title: "查看全文", onClick: () => void openItem(item.id) },
-								item.name,
-							),
-							createElement(
-								"div",
-								{ className: "kzm-item-actions" },
-								createElement(
-									"button",
-									{
-										type: "button",
-										className: "kzm-autoload-toggle",
-										"data-on": item.autoLoad === true ? "true" : "false",
-										disabled: busy,
-										title: "标记为自动载入：memory_search 首次可用时自动注入（未确认前不生效）",
-										onClick: () => void run("autoLoad", item.id, { autoLoad: item.autoLoad !== true }),
-									},
-									"自动载入",
-								),
-								createElement(
-									"button",
-									{ type: "button", className: "kzm-act kzm-act-good", disabled: busy, onClick: () => void run("status", item.id, { status: "applied" }) },
-									"确认生效",
-								),
-								createElement(
-									"button",
-									{ type: "button", className: "kzm-act", disabled: busy, onClick: () => void run("status", item.id, { status: "ignored" }) },
-									"忽略",
-								),
-								createElement(
-									"button",
-									{ type: "button", className: "kzm-act kzm-act-danger", disabled: busy, onClick: () => void run("forget", item.id) },
-									"删除",
-								),
-							),
-						),
-					),
 					createElement("p", { className: "kzm-section-title" }, "全部记忆（" + memories.length + " 条）"),
 					createElement(
 						"p",
@@ -470,8 +404,8 @@ window.__ModuleLoader__.load({
 
 			/**
 			 * 记忆按钮：常驻侧边栏底部工具栏（root 作用域——未开始对话时也能
-			 * 查看 / 确认记忆），排在 Kaz 按钮左侧（order -2）。待确认数量 > 0
-			 * 时绿点 + 数字，点击展开记忆面板；收起面板时清空按需正文。
+			 * 查看 / 管理记忆），排在 Kaz 按钮左侧（order -2）。点击展开记忆面板；
+			 * 收起面板时清空按需正文。
 			 * 面板经 portal 挂到 document.body 并用 fixed 定位：侧边栏容器的
 			 * overflow 裁剪曾把 absolute 面板挡住（必须拉开侧边栏才能看到）；
 			 * 现在面板从按钮右侧展开、按视口边界收拢，任何宽度都不被裁切。
@@ -485,7 +419,6 @@ window.__ModuleLoader__.load({
 				const [panelOpen, setPanelOpen] = useState(false);
 				const [closing, setClosing] = useState(false);
 				const closeTimer = useRef(null);
-				const [memories, setMemories] = useState([]);
 				const compact = wide === false;
 
 				// 当前会话所在项目（权威信号）：useSessions.current 会话的 cwd。
@@ -505,21 +438,6 @@ window.__ModuleLoader__.load({
 						currentCwd = "";
 					}
 				}
-
-				// 待确认数量：面板关闭时也要显示绿点，随轮询刷新。
-				const refreshCount = useCallback(async () => {
-					const res = await rpcCall("list", { project: currentCwd });
-					if (res !== null && Array.isArray(res.memories)) {
-						setMemories(res.memories);
-					}
-				}, [currentCwd]);
-				useEffect(() => {
-					refreshCount();
-					const timer = setInterval(() => { void refreshCount(); }, 2000);
-					return () => clearInterval(timer);
-				}, [refreshCount]);
-
-				const count = memories.filter((item) => item.status === "pending" || item.status === "suggested").length;
 
 				const rootRef = useRef(null);
 				const [panelPos, setPanelPos] = useState(null);
@@ -595,7 +513,6 @@ window.__ModuleLoader__.load({
 					{
 						ref: rootRef,
 						className: "kzm-root",
-						"data-count": count > 0 ? "true" : "false",
 						"data-side": "true",
 						"data-compact": compact ? "true" : "false",
 					},
@@ -604,11 +521,11 @@ window.__ModuleLoader__.load({
 						{
 							type: "button",
 							className: "kzm-button",
-							title: count > 0 ? "有 " + count + " 条记忆建议待确认" : "记忆面板（暂无待确认建议）",
+							title: "记忆面板",
 							onClick: toggle,
 						},
 						createElement("span", { className: "kzm-dot" }),
-						createElement("span", { className: "kzm-label" }, "记忆" + (count > 0 ? " " + count : "")),
+						createElement("span", { className: "kzm-label" }, "记忆"),
 						createElement("span", { className: "kzm-chevron" }, panelOpen ? "▲" : "▼"),
 					),
 					(panelOpen || closing) &&
@@ -628,7 +545,7 @@ window.__ModuleLoader__.load({
 
 			// ---- 注册 ----
 			// 记忆按钮：注册进侧边栏底部工具栏（sidebar.footer.action，root 作用域。
-			// 常驻可见——未开始对话时也能查看 / 确认记忆），排在 Kaz 按钮左侧（order -2）。
+			// 常驻可见——未开始对话时也能查看 / 管理记忆），排在 Kaz 按钮左侧（order -2）。
 			// 外面包一层开关门：优先按「与 Kaz 面板同源的当前会话生效值」显示，
 			// 取不到（kaz-mode 未加载/无会话）时回退 settings.yaml 开关。
 			function useSessionPluginEnabled(pluginId, sessionId) {

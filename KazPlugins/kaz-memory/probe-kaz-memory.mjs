@@ -72,7 +72,7 @@ function makeMemoryEngine(records) {
       const rec = {
         id: "new-" + (list.length + 1),
         namespace: input.namespace ?? "global",
-        status: "pending",
+        status: "applied",
         autoLoad: false,
         name: typeof input.name === "string" && input.name.trim().length > 0 ? input.name.trim() : String(input.content ?? "").split("\n")[0].slice(0, 140),
         summary: typeof input.summary === "string" ? input.summary : "",
@@ -98,12 +98,11 @@ function makeMemoryEngine(records) {
       if (patch.edits !== undefined && !hasEdits) throw new Error("edits must be an array");
       if (hasFullContent && hasEdits) throw new Error("cannot use content and edits together");
       const nextContent = hasEdits ? applyContentEdits(rec.content, patch.edits) : (hasFullContent ? patch.content : rec.content);
-      const contentChanged = nextContent !== rec.content;
-      if (contentChanged) rec.content = nextContent;
+      if (nextContent !== rec.content) rec.content = nextContent;
       if (typeof patch.name === "string" && patch.name.trim().length > 0) rec.name = patch.name.trim();
       rec.keywords = applyKeywordPatch(rec.keywords, patch);
       if (typeof patch.summary === "string") rec.summary = patch.summary;
-      if (contentChanged && (rec.status === "applied" || rec.status === "auto")) rec.status = "pending";
+      if (rec.status !== "ignored" && rec.status !== "suggest") rec.status = "applied";
       rec.updated_at = iso(Date.now());
       return Promise.resolve(rec);
     },
@@ -192,7 +191,7 @@ const records = [
   {
     id: "m2",
     namespace: "project",
-    status: "pending",
+    status: "applied",
     summary: "项目约定：读写中文文件必须用 -Encoding UTF8。",
     content: "项目约定：PowerShell 中文编码坑\n\n读写中文文件必须 -Encoding UTF8。",
     keywords: ["powershell", "编码"],
@@ -334,8 +333,8 @@ check("① limit 生效（limit=2 只回最新 2 条）", (await listTool.execut
 check("① namespace 过滤生效（project 只回 m2）", (await listTool.execute({ namespace: "project" }, execProjA)).every((item) => item.id === "m2"));
 const projBList = await listTool.execute({}, execProjB);
 check("① 项目 B 上下文只看到全局 + B 自己的项目记忆（m1/m3/m4）", Array.isArray(projBList) && projBList.length === 3 && projBList.some((item) => item.id === "m4") && !projBList.some((item) => item.id === "m2"));
-check("① 默认不按 status 过滤（applied m1/m3 与 pending m2 都返回）", ["m1", "m2", "m3"].every((id) => listAll.some((item) => item.id === id)));
-check("① status=applied 过滤只回 applied（m1/m3）", (await listTool.execute({ status: "applied" }, execProjA)).every((item) => item.id === "m1" || item.id === "m3"));
+check("① 默认不按 status 过滤（applied m1/m2/m3 都返回）", ["m1", "m2", "m3"].every((id) => listAll.some((item) => item.id === id)));
+check("① status=applied 过滤只回 applied（m1/m2/m3）", (await listTool.execute({ status: "applied" }, execProjA)).every((item) => item.id === "m1" || item.id === "m2" || item.id === "m3"));
 
 // ② memory_search：BM25 摘要命中（不含 content），项目隔离生效，分页与错误处理
 const searchTool = registeredTools.get("memory_search");
@@ -558,7 +557,7 @@ const afterSaveA = await listTool.execute({ namespace: "project" }, execProjA);
 const savedId = afterSaveB.find((item) => item.name === "临时探针记忆")?.id;
 check("⑥ 项目 B 能看到新记忆、项目 A 看不到", typeof savedId === "string" && afterSaveB.some((item) => item.id === savedId) && !afterSaveA.some((item) => item.id === savedId));
 
-// ⑥b memory_update：可改正文/标签/标题/summary；applied 正文变更降级 pending
+// ⑥b memory_update：可改正文/标签/标题/summary；applied 正文变更保持 applied
 const updateTool = registeredTools.get("memory_update");
 check("⑥b memory_update 已注册", updateTool !== undefined);
 const sharedParamNames = ["name", "keywords", "content", "summary"];
@@ -570,7 +569,7 @@ check("⑥b 只改标签/标题/summary 时 applied 保持 applied", m1Meta !== 
 const contentChange = await updateTool.execute({ id: "m1", content: "# 关于 Kaczev 的新内容\n\n更新后的正文。" }, execProjA);
 check("⑥b 修改 applied 正文后返回 updated=true", contentChange !== undefined && contentChange.updated === true);
 const m1AfterContent = await memory.get("m1");
-check("⑥b 修改 applied 正文后降级为 pending", m1AfterContent !== undefined && m1AfterContent.status === "pending" && m1AfterContent.content.includes("新内容"));
+check("⑥b 修改 applied 正文后保持 applied", m1AfterContent !== undefined && m1AfterContent.status === "applied" && m1AfterContent.content.includes("新内容"));
 const unknownUpdate = await updateTool.execute({ id: "no-such-id" }, execProjA).then(() => null, () => "rejected");
 check("⑥b 不存在的 id 会拒绝", unknownUpdate === "rejected");
 
@@ -646,8 +645,8 @@ check("⑧ RPC list(project=projB) 显示 m4 不含 m2", listB !== null && listB
 check("⑧ RPC list paths.project 指向新项目文件夹", listB.ok === true && typeof listB.value.paths.project === "string" && listB.value.paths.project.includes("projB"));
 
 // ⑧b RPC 状态 / 自动载入 / 改名 / 删除
-const statusRpc = await rpcHandler("status", { id: "m2", status: "applied", project: "C:/projA" });
-check("⑧b RPC status 把 m2 置为 applied", statusRpc !== null && statusRpc.ok === true && statusRpc.value.status === "applied");
+const statusRpc = await rpcHandler("status", { id: "m2", status: "pending", project: "C:/projA" });
+check("⑧b RPC status 不接受 pending（归一为 applied）", statusRpc !== null && statusRpc.ok === true && statusRpc.value.status === "applied");
 const autoRpc = await rpcHandler("autoLoad", { id: "m2", autoLoad: true, project: "C:/projA" });
 check("⑧b RPC autoLoad 把 m2 置为自动载入", autoRpc !== null && autoRpc.ok === true && autoRpc.value.autoLoad === true);
 const listAfterAuto = await listTool.execute({}, execProjA);

@@ -2,7 +2,8 @@
  * The memory service (`ctx.memory`): durable plaintext records over two
  * storage roots — `global` in the harness home, `project` in the current
  * project folder (`.dsh/`), so project memory follows the repository. A record
- * is always created `pending` and becomes effective only through `setStatus`.
+ * is created `applied` directly (no manual confirmation gate); legacy
+ * `pending` records are normalized to `applied` when read.
  *
  * Project memory is PER-PROJECT-FOLDER: each distinct project root gets its
  * own `memory_project.json` under `<project>/.dsh/storages/`, opened lazily
@@ -29,9 +30,11 @@ import { bm25ScoresAsync } from "./bm25.js";
 export function MemoryId(id) {
     return id;
 }
-/** 旧状态 → 新状态兼容映射：suggested→pending、suggest→ignored、auto→applied。 */
+/** 旧状态 → 新状态兼容映射：suggested/pending→applied、suggest→ignored、auto→applied。
+ *  不再有 pending 状态：旧 JSON 里的 pending/suggested 读取时直接归一为 applied。 */
 const STATUS_ALIASES = {
-    suggested: 'pending',
+    pending: 'applied',
+    suggested: 'applied',
     suggest: 'ignored',
     auto: 'applied',
 };
@@ -41,7 +44,7 @@ export function normalizeStatus(status) {
 }
 const blockSchema = z.object({
     namespace: z.enum(['global', 'project']),
-    // 同时接受旧值，保证旧 JSON 可读；对外统一返回 pending/ignored/applied。
+    // 同时接受旧值，保证旧 JSON 可读；对外统一返回 applied/ignored（pending/suggested 归一为 applied）。
     status: z.enum(['pending', 'ignored', 'applied', 'suggested', 'suggest', 'auto']),
     autoLoad: z.boolean().default(false),
     name: z.string().default(''),
@@ -350,15 +353,16 @@ export class MemoryEngine extends Service {
     projectRoots() {
         return [...this.projectEntries.keys()];
     }
-    /** Create one record in `pending` status — never self-promoting.
-     *  `name` / `summary` are taken from the input when provided (name falls
-     *  back to deriving from the content; summary defaults to ''). */
+    /** Create one record in `applied` status — memories take effect immediately
+     *  (no human confirmation gate). `name` / `summary` are taken from the input
+     *  when provided (name falls back to deriving from the content; summary
+     *  defaults to ''). */
     async remember(input) {
         const namespace = input.namespace ?? 'global';
         const id = randomUUID();
         const block = writtenBlock({
             namespace,
-            status: 'pending',
+            status: 'applied',
             autoLoad: false,
             name: typeof input.name === 'string' && input.name.trim().length > 0 ? input.name.trim() : deriveName(input.content),
             summary: typeof input.summary === 'string' ? input.summary : '',
@@ -461,9 +465,9 @@ export class MemoryEngine extends Service {
     }
     /**
      * Update an existing record's content / keywords / name / summary.
-     * If an `applied` record's content changes, it is demoted to `pending` so a
-     * human can re-confirm the new body; metadata-only edits (name / keywords /
-     * summary) keep the status.
+     * Content changes keep the record `applied` — there is no pending status or
+     * re-confirmation gate. Legacy `ignored` records keep their status; legacy
+     * `pending` records are normalized to `applied` on the way in.
      */
     async update(id, patch = {}) {
         const applyPatch = (block) => {
@@ -478,7 +482,6 @@ export class MemoryEngine extends Service {
             const content = hasEdits
                 ? applyContentEdits(block.content, patch.edits)
                 : (hasFullContent ? patch.content : block.content);
-            const contentChanged = content !== block.content;
             // 标题不自动推导：没传 name（或传空串）就继承旧标题。
             const name = typeof patch.name === 'string' && patch.name.trim().length > 0
                 ? patch.name.trim()
@@ -486,7 +489,7 @@ export class MemoryEngine extends Service {
             const summary = typeof patch.summary === 'string' ? patch.summary : block.summary;
             const keywords = applyKeywordPatch(block.keywords, patch);
             const currentStatus = normalizeStatus(block.status);
-            const status = currentStatus === 'applied' && contentChanged ? 'pending' : currentStatus;
+            const status = currentStatus === 'ignored' ? 'ignored' : 'applied';
             return writtenBlock({ ...block, content, name, summary, keywords, status });
         };
         const global = this.requireTable('global').get(id);

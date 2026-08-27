@@ -30,11 +30,11 @@ const memory = ctx.get("memory");
 check("memory 服务已注册", memory !== undefined);
 
 const a = await memory.remember({ content: "项目 A 的记忆", namespace: "project", projectRoot: projA });
-check("项目 A 保存成功", a.namespace === "project" && a.projectRoot === projA);
+check("项目 A 保存成功且直接 applied", a.namespace === "project" && a.projectRoot === projA && a.status === "applied");
 const b = await memory.remember({ content: "项目 B 的记忆", namespace: "project", projectRoot: projB });
-check("项目 B 保存成功", b.namespace === "project" && b.projectRoot === projB);
+check("项目 B 保存成功且直接 applied", b.namespace === "project" && b.projectRoot === projB && b.status === "applied");
 const g = await memory.remember({ content: "全局记忆", namespace: "global" });
-check("全局保存成功", g.namespace === "global");
+check("全局保存成功且直接 applied", g.namespace === "global" && g.status === "applied");
 
 const listA = await memory.list({ projectRoot: projA });
 const listB = await memory.list({ projectRoot: projB });
@@ -86,6 +86,20 @@ const legacy = await memory.get("legacy-1");
 check("旧格式记录读取时迁移为 ISO 时间戳", typeof legacy.created_at === "string" && legacy.created_at.startsWith("2023-") && typeof legacy.updated_at === "string" && legacy.updated_at.startsWith("2023-"));
 check("旧格式记录 summary 回退空串", legacy.summary === "");
 
+// 旧 pending 兼容：读取时直接归一为 applied（不再有待确认状态）
+await table.put("legacy-pending-1", {
+  namespace: "global",
+  status: "pending",
+  autoLoad: false,
+  name: "Legacy Pending",
+  content: "旧待确认记录",
+  keywords: [],
+  created_at: "2023-11-01T00:00:00.000Z",
+  updated_at: "2023-11-01T00:00:00.000Z",
+});
+const legacyPending = await memory.get("legacy-pending-1");
+check("旧 pending 记录读取时归一为 applied", legacyPending.status === "applied");
+
 // 只读不建目录（Kaczev 2026-08-17 的 bug：JsonStorageBackend 一打开域就 mkdir，
 // 之前镜像读操作会在没有真实项目根时去桌面建出空的 .dsh/storages）。
 const projC = join(root, "projC");
@@ -110,7 +124,7 @@ await memory.setStatus(editReal.id, "applied");
 const editOnce = await memory.update(editReal.id, { edits: [{ type: "replace", find: "旧", before: "保留 ", after: " 中间", replace: "新" }] });
 check("engine: before/after 上下文精确替换目标处", editOnce.content === "a 旧 保留 新 中间 旧");
 check("engine: 小改不传 name 继承旧标题", editOnce.name === "原标题");
-check("engine: applied 正文小改降级 pending", editOnce.status === "pending");
+check("engine: applied 正文小改保持 applied", editOnce.status === "applied");
 const editAll = await memory.update(editReal.id, { edits: [{ type: "replace", find: "旧", replace: "x", occurrence: "all" }] });
 check("engine: occurrence=all 全文替换", editAll.content === "a x 保留 新 中间 x");
 const editInsert = await memory.update(editReal.id, { edits: [
