@@ -163,6 +163,8 @@ export function apply(ctx, _config) {
     const prompt = resolvePrompt(ctx, agent)
 
     // 保持 plan mode 段，其余提示段收敛为 persona 一句。
+    // 顺序：persona 绝对最前（与 dsh 原生 order 排序一致：persona 0 < plan:policy 50），
+    // plan 段跟在 persona 后面。
     const planSection = assembly.sections.find(
       (section) =>
         section !== null &&
@@ -171,7 +173,6 @@ export function apply(ctx, _config) {
         /plan/i.test(section.name),
     )
     const kept = []
-    if (planSection !== undefined) kept.push(planSection)
 
     let personaKept = false
     for (const section of assembly.sections) {
@@ -185,12 +186,13 @@ export function apply(ctx, _config) {
     if (!personaKept) {
       kept.push({ name: PERSONA_SECTION, order: 0, text: prompt })
     }
+    if (planSection !== undefined) kept.push(planSection)
 
     assembly.sections = kept
     // 等后续监听器（round-minimal / kaz-mode 只过滤工具段，不动 sections）跑完，
     // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
     // renderPrompt 一致：空段过滤、"\n\n" 连接）。plan 模式激活时内容 =
-    // plan:policy 段 + persona 段，正是模型真实看到的 system 字段。
+    // persona 段 + plan:policy 段，persona 在最前，正是模型真实看到的 system 字段。
     const nextResult = await next()
     const finalAssembly = nextResult ?? assembly
     const finalPrompt = realPromptOf(finalAssembly?.sections)

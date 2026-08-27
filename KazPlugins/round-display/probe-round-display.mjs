@@ -127,7 +127,7 @@ function makeSettings() {
   });
   kspApply(mock.ctx, {});
 
-  // ①.a plan 激活：plan:policy + persona → 真实 system = 两者 "\n\n" 连接
+  // ①.a plan 激活：persona + plan:policy → 真实 system = persona 在最前，plan 段随后
   {
     const assemble = mock.listeners.get("system-prompt/assemble")[0];
     const assembly = {
@@ -143,12 +143,12 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
     check(
-      "①.a assemble 上报真实系统提示词（plan 段 + persona，\\n\\n 连接）",
+      "①.a assemble 上报真实系统提示词（persona 在最前，plan 段随后，\\n\\n 连接）",
       systemReport !== undefined &&
-        systemReport.content === "PLAN_SECTION\n\nYou are a helpful software engineer assistant.",
+        systemReport.content === "You are a helpful software engineer assistant.\n\nPLAN_SECTION",
     );
     check("①.a assemble 返回值原样透传", result === assembly);
-    check("①.a 过滤后 sections 只剩 plan + persona", assembly.sections.length === 2 && assembly.sections[0].name === "plan:policy" && assembly.sections[1].name === "deployment:persona");
+    check("①.a 过滤后 sections 只剩 persona + plan", assembly.sections.length === 2 && assembly.sections[0].name === "deployment:persona" && assembly.sections[1].name === "plan:policy");
   }
 
   // ①.b plan 未激活（plan 段为空）：只报 persona
