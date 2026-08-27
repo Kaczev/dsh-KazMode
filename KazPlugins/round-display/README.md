@@ -2,7 +2,9 @@
 
 > **作用**：记录并展示每一轮 Kaz 联动/附属插件（thinking-anchor / kaz-memory /
 > first-round-hints / kaz-system-prompt 等）给模型注入了什么信息，也展示
-> round-minimal 上报的首轮工具提示与本轮工具面增删明细，方便你看到模型"额外看到了什么"以及工具面怎么变。
+> round-minimal 上报的首轮工具提示与本轮工具面增删明细，以及 goal-round-driver
+> 的 `<goal_round>`、tool-goal 的 `<goal_complete>`/`<goal_blocked>`，
+> 方便你看到模型"额外看到了什么"以及工具面怎么变。
 
 只负责「显示」，不向模型注入任何内容：记录每一轮开始时 Kaz 模式联动/附属插件
 （thinking-anchor / round-minimal / kaz-memory / kaz-system-prompt 等）给模型发送的

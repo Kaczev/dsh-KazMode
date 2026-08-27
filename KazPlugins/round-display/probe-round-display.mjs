@@ -1,9 +1,10 @@
-// round-display + kaz-system-prompt 探针（2026-08-28，Kaz 适配 Plan 模式）
+// round-display + kaz-system-prompt 探针（2026-08-28，Kaz 适配 Plan 模式；追加 Goal）
 // 覆盖：
 //   ① kaz-system-prompt.mjs：system-prompt/assemble 后上报“真实系统提示词”
-//     （plan:policy 段 + persona 段，"\n\n" 连接，空段过滤）；
-//   ② kaz-system-prompt.mjs：agent/pre-step 上报 plan-mode 进入/退出通知，
-//      reject 的 step 不上报；session/event 兜底同样上报；
+//     （persona + plan:policy + tool:goal，"\n\n" 连接，空段过滤）；
+//   ② kaz-system-prompt.mjs：agent/pre-step 上报 plan-mode 通知、goal-round-driver
+//      <goal_round>、tool-goal <goal_complete>/<goal_blocked>；reject 的 step 不上报；
+//      session/event 兜底同样上报；
 //   ③ round-display：list / history 内条目按 at 降序（新消息排上）+ 同轮去重。
 // 运行：node KazPlugins/round-display/probe-round-display.mjs
 import { apply as kspApply } from "file:///C:/Users/Kaczev/Documents/GitHub/dsh-KazMode/kaz/kaz-system-prompt.mjs";
@@ -212,6 +213,140 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const noticeReport = reports.find((r) => r.plugin === "plan-mode");
     check("②.c session/event 兜底上报 plan-mode 退出通知", noticeReport !== undefined && noticeReport.content === "The user switched this session back to the default mode.");
+  }
+
+  // ①.c tool:goal 段保留：persona + tool:goal → 真实 system = persona + tool:goal
+  {
+    const assemble = mock.listeners.get("system-prompt/assemble")[0];
+    const assembly = {
+      sections: [
+        { name: "tool:goal", text: "GOAL_SECTION" },
+        { name: "deployment:persona", text: "ignored" },
+      ],
+      contexts: [],
+      variables: {},
+    };
+    const before = kspReports.length;
+    await assemble(assembly, { agent: AGENT }, async () => assembly);
+    const reports = kspReports.slice(before);
+    const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
+    check(
+      "①.c assemble 保留 tool:goal 段（persona 在最前，tool:goal 随后）",
+      systemReport !== undefined &&
+        systemReport.content === "You are a helpful software engineer assistant.\n\nGOAL_SECTION",
+    );
+    check(
+      "①.c 过滤后 sections 只剩 persona + tool:goal",
+      assembly.sections.length === 2 &&
+        assembly.sections[0].name === "deployment:persona" &&
+        assembly.sections[1].name === "tool:goal",
+    );
+  }
+
+  // ①.d plan + tool:goal 同时存在：persona → plan:policy → tool:goal
+  {
+    const assemble = mock.listeners.get("system-prompt/assemble")[0];
+    const assembly = {
+      sections: [
+        { name: "tool:goal", text: "GOAL_SECTION" },
+        { name: "plan:policy", text: "PLAN_SECTION" },
+        { name: "deployment:persona", text: "ignored" },
+      ],
+      contexts: [],
+      variables: {},
+    };
+    const before = kspReports.length;
+    await assemble(assembly, { agent: AGENT }, async () => assembly);
+    const reports = kspReports.slice(before);
+    const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
+    check(
+      "①.d plan + tool:goal 真实 system = persona + plan + tool:goal",
+      systemReport !== undefined &&
+        systemReport.content === "You are a helpful software engineer assistant.\n\nPLAN_SECTION\n\nGOAL_SECTION",
+    );
+    check(
+      "①.d 过滤后 sections 顺序 persona → plan:policy → tool:goal",
+      assembly.sections.length === 3 &&
+        assembly.sections[0].name === "deployment:persona" &&
+        assembly.sections[1].name === "plan:policy" &&
+        assembly.sections[2].name === "tool:goal",
+    );
+  }
+
+  // ②.d pre-step：goal-round-driver 的 <goal_round> 上报
+  {
+    const preStep = mock.listeners.get("agent/pre-step")[0];
+    const roundMessage = {
+      role: "user",
+      content: [{ type: "text", text: "<goal_round>\nObjective: \"x\"\nRound: 1/3\n</goal_round>" }],
+      source: { kind: "goal", goalId: "g1", revision: 1, round: 1 },
+    };
+    const decision = { kind: "enter", messages: [roundMessage] };
+    const before = kspReports.length;
+    const returned = await preStep({ agent: AGENT }, async () => decision);
+    const reports = kspReports.slice(before);
+    const goalReport = reports.find((r) => r.plugin === "goal-round-driver");
+    check("②.d pre-step 上报 goal_round", goalReport !== undefined && goalReport.content.includes("<goal_round>"));
+    check("②.d pre-step 返回值原样透传", returned === decision);
+  }
+
+  // ②.e pre-step：tool-goal 的 <goal_complete> wrapup 上报
+  {
+    const preStep = mock.listeners.get("agent/pre-step")[0];
+    const wrapup = {
+      role: "user",
+      content: [{ type: "text", text: "<goal_complete>\nObjective: \"x\"\n</goal_complete>" }],
+      source: { kind: "plugin", plugin: "tool-goal", form: "notice", summary: "complete: x" },
+    };
+    const decision = { kind: "enter", messages: [wrapup] };
+    const before = kspReports.length;
+    await preStep({ agent: AGENT }, async () => decision);
+    const reports = kspReports.slice(before);
+    const wrapReport = reports.find((r) => r.plugin === "tool-goal");
+    check("②.e pre-step 上报 tool-goal wrapup", wrapReport !== undefined && wrapReport.content.includes("<goal_complete>"));
+  }
+
+  // ②.f session/event：goal_round 兜底上报
+  {
+    const sessionEvent = mock.listeners.get("session/event")[0];
+    const roundMessage = {
+      role: "user",
+      content: [{ type: "text", text: "<goal_round>\nObjective: \"x\"\nRound: 2/3\n</goal_round>" }],
+      source: { kind: "goal", goalId: "g1", revision: 1, round: 2 },
+    };
+    const before = kspReports.length;
+    sessionEvent({ id: AGENT.id }, { type: "user/message", data: roundMessage });
+    const reports = kspReports.slice(before);
+    const goalReport = reports.find((r) => r.plugin === "goal-round-driver");
+    check("②.f session/event 兜底上报 goal_round", goalReport !== undefined && goalReport.content.includes("<goal_round>"));
+  }
+
+  // ②.g session/event：tool-goal wrapup 兜底上报
+  {
+    const sessionEvent = mock.listeners.get("session/event")[0];
+    const wrapup = {
+      role: "user",
+      content: [{ type: "text", text: "<goal_blocked>\nObjective: \"x\"\nBlocked: \"y\"\n</goal_blocked>" }],
+      source: { kind: "plugin", plugin: "tool-goal", form: "notice", summary: "blocked: x" },
+    };
+    const before = kspReports.length;
+    sessionEvent({ id: AGENT.id }, { type: "user/message", data: wrapup });
+    const reports = kspReports.slice(before);
+    const wrapReport = reports.find((r) => r.plugin === "tool-goal");
+    check("②.g session/event 兜底上报 tool-goal wrapup", wrapReport !== undefined && wrapReport.content.includes("<goal_blocked>"));
+  }
+
+  // ②.h pre-step：goal round 被 reject 的 step 不上报
+  {
+    const preStep = mock.listeners.get("agent/pre-step")[0];
+    const roundMessage = {
+      role: "user",
+      content: [{ type: "text", text: "<goal_round>stale</goal_round>" }],
+      source: { kind: "goal", goalId: "g1", revision: 1, round: 3 },
+    };
+    const before = kspReports.length;
+    await preStep({ agent: AGENT }, async () => ({ kind: "reject", messages: [roundMessage] }));
+    check("②.h pre-step reject 不上报 goal_round", kspReports.length === before);
   }
 }
 

@@ -8,9 +8,13 @@
  * 同时也负责把展示信息上报 round-display（best-effort）：
  *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
- *     plan 模式激活时 = plan:policy 段 + persona 段）；
- *   - agent/pre-step 与 session/event 双通道上报 dsh-plan-mode 的进入/退出
- *     通知（source.plugin === "plan-mode"）。
+ *     plan 模式激活时 = persona 段 + plan:policy 段；goal 工具段启用时再追加
+ *     tool:goal 段，顺序 persona → plan:policy → tool:goal）；
+ *   - agent/pre-step 与 session/event 双通道上报：
+ *       - dsh-plan-mode 的进入/退出通知（source.plugin === "plan-mode"）；
+ *       - dsh-goal-round-driver 的 <goal_round>（source.kind === "goal"）；
+ *       - dsh-tool-goal 的 <goal_complete>/<goal_blocked>
+ *         （source.plugin === "tool-goal"）。
  *
  * 规则按顺序匹配：第一个 `test` 返回 true 的规则胜出。
  * 需要新增“某种情况下的系统提示词”时，在 PROMPT_RULES 里加一条即可。
@@ -107,6 +111,25 @@ function sessionAgentOf(ctx, session) {
   return undefined
 }
 
+/** 把一条带 source 的注入消息上报 round-display（goal_round / goal wrapup / plan 通知）。 */
+function reportInjectedMessage(ctx, agent, message) {
+  try {
+    const source = message === null || typeof message !== "object" ? undefined : message.source
+    if (source === null || typeof source !== "object") return
+    const text = textOfMessage(message)
+    if (text.length === 0) return
+    if (source.kind === "goal" && typeof source.round === "number" && source.round > 0) {
+      reportRoundDisplay(ctx, agent, text, "goal-round-driver", "goal round")
+    } else if (source.plugin === "tool-goal") {
+      reportRoundDisplay(ctx, agent, text, "tool-goal", "goal wrapup")
+    } else if (source.plugin === "plan-mode") {
+      reportRoundDisplay(ctx, agent, text, "plan-mode", "plan mode notice")
+    }
+  } catch {
+    // 上报失败不影响主流程
+  }
+}
+
 /**
  * 各种情况下的系统提示词。
  * `test` 返回 true 时使用 `text`；多条规则时取第一条命中的。
@@ -162,15 +185,22 @@ export function apply(ctx, _config) {
 
     const prompt = resolvePrompt(ctx, agent)
 
-    // 保持 plan mode 段，其余提示段收敛为 persona 一句。
-    // 顺序：persona 绝对最前（与 dsh 原生 order 排序一致：persona 0 < plan:policy 50），
-    // plan 段跟在 persona 后面。
+    // 保持 plan mode 段与 tool:goal 段，其余提示段收敛为 persona 一句。
+    // 顺序：persona 绝对最前（与 dsh 原生 order 排序一致：
+    // persona 0 < plan:policy 50 < tool:goal 114），plan 段、tool:goal 段随后。
     const planSection = assembly.sections.find(
       (section) =>
         section !== null &&
         typeof section === 'object' &&
         typeof section.name === 'string' &&
         /plan/i.test(section.name),
+    )
+    const goalSection = assembly.sections.find(
+      (section) =>
+        section !== null &&
+        typeof section === 'object' &&
+        typeof section.name === 'string' &&
+        section.name === 'tool:goal',
     )
     const kept = []
 
@@ -187,12 +217,15 @@ export function apply(ctx, _config) {
       kept.push({ name: PERSONA_SECTION, order: 0, text: prompt })
     }
     if (planSection !== undefined) kept.push(planSection)
+    if (goalSection !== undefined) kept.push(goalSection)
 
     assembly.sections = kept
-    // 等后续监听器（round-minimal / kaz-mode 只过滤工具段，不动 sections）跑完，
+    // 等后续监听器（kaz-mode 只过滤工具段；round-minimal 首轮还会按首轮工具
+    // 白名单过滤 tool:* 段）跑完，
     // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
     // renderPrompt 一致：空段过滤、"\n\n" 连接）。plan 模式激活时内容 =
-    // persona 段 + plan:policy 段，persona 在最前，正是模型真实看到的 system 字段。
+    // persona 段 + plan:policy 段；goal 工具段启用时再含 tool:goal 段。
+    // persona 在最前，正是模型真实看到的 system 字段。
     const nextResult = await next()
     const finalAssembly = nextResult ?? assembly
     const finalPrompt = realPromptOf(finalAssembly?.sections)
@@ -200,10 +233,11 @@ export function apply(ctx, _config) {
     return nextResult
   })
 
-  // 进入/退出 plan 模式通知上报（source.plugin === "plan-mode" 的 user 消息）：
-  //   - agent/pre-step：直接扫描本次 step 的 messages（dsh-plan-mode 在开放 turn
-  //     内由瀑布追加 notice；轮间切换则 notice 已由 inbox.claim 进 messages）；
-  //   - session/event：兜底，通知消息真正落盘（步骤被接受）时必然触发，
+  // goal/plan 注入消息上报：
+  //   - agent/pre-step：直接扫描本次 step 的 messages（goal_round 由 followup 进
+  //     inbox、tool-goal wrapup 由 deferContext 进 next-step、plan-mode 通知由
+  //     瀑布追加或 inbox.claim 进 messages）；
+  //   - session/event：兜底，消息真正落盘（步骤被接受）时必然触发，
   //     不受 pre-step 监听器顺序影响。重复上报由 round-display 按 (plugin, content) 去重。
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
@@ -223,12 +257,7 @@ export function apply(ctx, _config) {
 
     const messages = Array.isArray(decision.messages) ? decision.messages : []
     for (const message of messages) {
-      const source = message?.source
-      if (source === null || typeof source !== 'object') continue
-      if (source.plugin !== 'plan-mode') continue
-      const text = textOfMessage(message)
-      if (text.length === 0) continue
-      reportRoundDisplay(ctx, agent, text, 'plan-mode', 'plan mode notice')
+      reportInjectedMessage(ctx, agent, message)
     }
     return decision
   })
@@ -236,7 +265,8 @@ export function apply(ctx, _config) {
   ctx.on('session/event', (session, event) => {
     if (event === null || typeof event !== 'object' || event.type !== 'user/message') return
     const source = event.data?.source
-    if (source === null || typeof source !== 'object' || source.plugin !== 'plan-mode') return
+    if (source === null || typeof source !== 'object') return
+    if (source.kind !== 'goal' && source.plugin !== 'tool-goal' && source.plugin !== 'plan-mode') return
     const agent = sessionAgentOf(ctx, session)
     if (agent === undefined) return
 
@@ -250,8 +280,6 @@ export function apply(ctx, _config) {
       // 服务缺失时不拦截，继续按 Kaz 预设处理
     }
 
-    const text = textOfMessage(event.data)
-    if (text.length === 0) return
-    reportRoundDisplay(ctx, agent, text, 'plan-mode', 'plan mode notice')
+    reportInjectedMessage(ctx, agent, event.data)
   })
 }
