@@ -88,16 +88,16 @@ function goalBlockedThreshold(originalText) {
 function customGoalSystemPrompt(originalText) {
   const threshold = goalBlockedThreshold(originalText)
   return `We are in goal mode. Stay in goal mode until the goal is marked complete, blocked, or the user switches mode. The goal is a long-running objective that spans multiple turns — do not create a goal for routine single-turn work.
-  ---
-  When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'.
+---
+When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'.
 
-  If the session is resumed or forked, the active goal is disarmed. When the user asks to continue in any wording or language, use 'update_goal action resume' to rearm it.
-  ---
-  Mark the goal as 'complete' only when the objective is actually achieved.
+If the session is resumed or forked, the active goal is disarmed. When the user asks to continue in any wording or language, use 'update_goal action resume' to rearm it.
+---
+Mark the goal as 'complete' only when the objective is actually achieved.
 
-  Mark the goal as 'blocked' only when the same blocking condition persists for at least ${threshold} consecutive goal rounds. In 'blocked_reason', report the concrete condition. Difficulty, uncertainty, or useful remaining work does not count as blocked.
-  ---
-  If the goal is blocked, stay in goal mode and report the blocking condition to the user. If the user provides new information or direction, incorporate it and resume progress.`
+Mark the goal as 'blocked' only when the same blocking condition persists for at least ${threshold} consecutive goal rounds. In 'blocked_reason', report the concrete condition. Difficulty, uncertainty, or useful remaining work does not count as blocked.
+---
+If the goal is blocked, stay in goal mode and report the blocking condition to the user. If the user provides new information or direction, incorporate it and resume progress.`
 }
 
 /** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。 */
