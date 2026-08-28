@@ -1,7 +1,7 @@
 // round-display + kaz-system-prompt 探针（2026-08-28，Kaz 适配 Plan 模式；追加 Goal）
 // 覆盖：
 //   ① kaz-system-prompt.mjs：system-prompt/assemble 后上报“真实系统提示词”
-//     （persona + plan:policy + tool:goal，"\n\n" 连接，空段过滤）；
+//     （persona + plan:policy，goal 工具启用时再加 tool:goal，"\n\n" 连接，空段过滤）；
 //   ② kaz-system-prompt.mjs：agent/pre-step 上报 plan-mode 通知、goal-round-driver
 //      <goal_round>、tool-goal <goal_complete>/<goal_blocked>；reject 的 step 不上报；
 //      plan/mode 状态事件由 pre-step 扫描 agent.session.events 合成通知
@@ -122,7 +122,7 @@ function makeSettings() {
   const kspReports = [];
   const mock = makeMockCtx({
     provided: {
-      kazMode: { kazEnabled: () => true, pluginEnabled: () => false },
+      kazMode: { kazEnabled: () => true, pluginEnabled: () => false, toolVisible: () => true },
       roundDisplay: { report: (p) => kspReports.push(p) },
       agents: { get: (id) => (id === AGENT.id ? AGENT : undefined) },
     },
@@ -247,7 +247,7 @@ function makeSettings() {
     check("②.c3 旧事件基线已推进，不重复补报", kspReports.length === before2);
   }
 
-  // ①.c tool:goal 段保留：persona + tool:goal → 真实 system = persona + tool:goal
+  // ①.c goal 工具启用时保留 tool:goal 段：persona + tool:goal → 真实 system = persona + tool:goal
   {
     const assemble = mock.listeners.get("system-prompt/assemble")[0];
     const assembly = {
@@ -263,7 +263,7 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
     check(
-      "①.c assemble 保留 tool:goal 段（persona 在最前，tool:goal 随后）",
+      "①.c goal 工具启用时保留 tool:goal 段（persona 在最前，tool:goal 随后）",
       systemReport !== undefined &&
         systemReport.content === "You are a helpful software engineer assistant.\n\nGOAL_SECTION",
     );
@@ -275,7 +275,7 @@ function makeSettings() {
     );
   }
 
-  // ①.d plan + tool:goal 同时存在：persona → plan:policy → tool:goal
+  // ①.d goal 工具启用 + plan + tool:goal 同时存在：persona → plan:policy → tool:goal
   {
     const assemble = mock.listeners.get("system-prompt/assemble")[0];
     const assembly = {
@@ -292,7 +292,7 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
     check(
-      "①.d plan + tool:goal 真实 system = persona + plan + tool:goal",
+      "①.d goal 工具启用时 plan + tool:goal 真实 system = persona + plan + tool:goal",
       systemReport !== undefined &&
         systemReport.content === "You are a helpful software engineer assistant.\n\nPLAN_SECTION\n\nGOAL_SECTION",
     );
@@ -302,6 +302,75 @@ function makeSettings() {
         assembly.sections[0].name === "deployment:persona" &&
         assembly.sections[1].name === "plan:policy" &&
         assembly.sections[2].name === "tool:goal",
+    );
+  }
+
+  // ①.e goal 工具未启用：tool:goal 段被丢弃（即使官方 section 存在）
+  {
+    const OFF_AGENT = { id: "s-kaz-goal-off", session: { events: [] } };
+    const offReports = [];
+    const offMock = makeMockCtx({
+      provided: {
+        kazMode: { kazEnabled: () => true, pluginEnabled: () => false, toolVisible: () => false },
+        roundDisplay: { report: (p) => offReports.push(p) },
+        agents: { get: (id) => (id === OFF_AGENT.id ? OFF_AGENT : undefined) },
+      },
+    });
+    kspApply(offMock.ctx, {});
+    const assemble = offMock.listeners.get("system-prompt/assemble")[0];
+    const assembly = {
+      sections: [
+        { name: "tool:goal", text: "GOAL_SECTION" },
+        { name: "deployment:persona", text: "ignored" },
+      ],
+      contexts: [],
+      variables: {},
+    };
+    await assemble(assembly, { agent: OFF_AGENT }, async () => assembly);
+    const systemReport = offReports.find((r) => r.plugin === "kaz-system-prompt");
+    check(
+      "①.e goal 未启用时 tool:goal 被丢弃，真实 system 只有 persona",
+      systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.",
+    );
+    check(
+      "①.e 过滤后 sections 只剩 persona",
+      assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona",
+    );
+  }
+
+  // ①.f goal 未启用 + plan 激活：persona → plan:policy（不带 tool:goal）
+  {
+    const OFF_AGENT = { id: "s-kaz-goal-off-plan", session: { events: [] } };
+    const offReports = [];
+    const offMock = makeMockCtx({
+      provided: {
+        kazMode: { kazEnabled: () => true, pluginEnabled: () => false, toolVisible: () => false },
+        roundDisplay: { report: (p) => offReports.push(p) },
+        agents: { get: (id) => (id === OFF_AGENT.id ? OFF_AGENT : undefined) },
+      },
+    });
+    kspApply(offMock.ctx, {});
+    const assemble = offMock.listeners.get("system-prompt/assemble")[0];
+    const assembly = {
+      sections: [
+        { name: "tool:goal", text: "GOAL_SECTION" },
+        { name: "plan:policy", text: "PLAN_SECTION" },
+        { name: "deployment:persona", text: "ignored" },
+      ],
+      contexts: [],
+      variables: {},
+    };
+    await assemble(assembly, { agent: OFF_AGENT }, async () => assembly);
+    const systemReport = offReports.find((r) => r.plugin === "kaz-system-prompt");
+    check(
+      "①.f goal 未启用时 plan + tool:goal 只剩 persona + plan",
+      systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.\n\nPLAN_SECTION",
+    );
+    check(
+      "①.f 过滤后 sections 只剩 persona + plan:policy",
+      assembly.sections.length === 2 &&
+        assembly.sections[0].name === "deployment:persona" &&
+        assembly.sections[1].name === "plan:policy",
     );
   }
 

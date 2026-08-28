@@ -8,8 +8,9 @@
  * 同时也负责把展示信息上报 round-display（best-effort）：
  *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
- *     plan 模式激活时 = persona 段 + plan:policy 段；goal 工具段启用时再追加
- *     tool:goal 段，顺序 persona → plan:policy → tool:goal）；
+ *     plan 模式激活时 = persona 段 + plan:policy 段；goal 工具启用时
+ *     （Kaz 白名单里任一 goal 工具可见）再追加 tool:goal 段，顺序
+ *     persona → plan:policy → tool:goal）；
  *   - agent/pre-step 扫描上报：
  *       - dsh-plan-mode 的进入/退出通知（source.plugin === "plan-mode"）；
  *       - dsh-goal-round-driver 的 <goal_round>（source.kind === "goal"）；
@@ -46,6 +47,22 @@ function pluginEnabled(ctx, agent, pluginId) {
     const svc = ctx.get('kazMode')
     if (svc && typeof svc.pluginEnabled === 'function' && agent) {
       return svc.pluginEnabled(agent, pluginId) === true
+    }
+  } catch {
+    // 服务不可用时按未启用处理
+  }
+  return false
+}
+
+/** Kaz 白名单里 goal 工具名（任一可见即视为 goal 模式开启）。 */
+const GOAL_TOOLS = ['create_goal', 'get_goal', 'update_goal']
+
+/** 判断 goal 工具是否已在本会话工具面启用（经 kazMode 服务读取白名单）。 */
+function goalToolsEnabled(ctx, agent) {
+  try {
+    const svc = ctx.get('kazMode')
+    if (svc && typeof svc.toolVisible === 'function' && agent) {
+      return GOAL_TOOLS.some((name) => svc.toolVisible(agent, name) === true)
     }
   } catch {
     // 服务不可用时按未启用处理
@@ -175,8 +192,8 @@ export function apply(ctx, _config) {
 
     const prompt = resolvePrompt(ctx, agent)
 
-    // 保持 plan mode 段与 tool:goal 段，其余提示段收敛为 persona 一句。
-    // 顺序：persona 绝对最前（与 dsh 原生 order 排序一致：
+    // 保持 plan mode 段与 tool:goal 段（仅 goal 工具启用时），其余提示段
+    // 收敛为 persona 一句。顺序：persona 绝对最前（与 dsh 原生 order 排序一致：
     // persona 0 < plan:policy 50 < tool:goal 114），plan 段、tool:goal 段随后。
     const planSection = assembly.sections.find(
       (section) =>
@@ -207,7 +224,7 @@ export function apply(ctx, _config) {
       kept.push({ name: PERSONA_SECTION, order: 0, text: prompt })
     }
     if (planSection !== undefined) kept.push(planSection)
-    if (goalSection !== undefined) kept.push(goalSection)
+    if (goalSection !== undefined && goalToolsEnabled(ctx, agent)) kept.push(goalSection)
 
     assembly.sections = kept
     // 等后续监听器（kaz-mode 只过滤工具段；round-minimal 首轮还会按首轮工具
