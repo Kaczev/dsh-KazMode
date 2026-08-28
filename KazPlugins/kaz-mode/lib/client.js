@@ -1860,7 +1860,10 @@ window.__ModuleLoader__.load({
 					// 避免 sessions 列表的频繁细碎更新导致反复写 settings.yaml。
 					if (typeof current === "string" && current.length > 0 && current !== lastAppliedSessionId) {
 						lastAppliedSessionId = current;
-						void rpcCall("applySession", { sessionId: current });
+						// applySession 让宿主把 activeSession 指向当前会话/项目 cwd；
+						// 完成后广播一次，round-display / kaz-memory 等面板会重新拉取
+						// getState，避免新对话刚加载时因 agent/cwd 尚未就绪而误判显隐。
+						void rpcCall("applySession", { sessionId: current }).then(() => notifyEffectiveChanged());
 					}
 					if (kazScope === null) return;
 					const snap = kazScope.getSnapshot();

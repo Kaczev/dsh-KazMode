@@ -622,6 +622,41 @@ function makeSettings() {
   check("③ history 轮内条目新消息排上", JSON.stringify(turnContents) === JSON.stringify(["third", "second", "first"]));
 }
 
+// ---------------------------------------------------------------------------
+// ④ round-display：同轮系统提示词只保留最终一条
+// ---------------------------------------------------------------------------
+{
+  const AGENT_SYS = { id: "s-rd-sys", session: { events: [{ type: "turn/start", data: { turn: 1 } }] } };
+  const settings = makeSettings();
+  const recordsStore = join(TMP, "round-display-records-system.json");
+  const mock = makeMockCtx({
+    settings,
+    agents: { get: (id) => (id === AGENT_SYS.id ? AGENT_SYS : undefined) },
+    provided: {},
+  });
+  rdPlugin.apply(mock.ctx, { enabled: true, recordsStore });
+
+  const rd = mock.provided["roundDisplay"];
+  const rpc = mock.rpcHandlers.get("/round-display");
+  const realNow = Date.now;
+  let nowTick = 2000000;
+  Date.now = () => nowTick++;
+  try {
+    // 同一轮先出现“不全”的中间态，再出现最终系统提示词。
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "partial persona" });
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "final persona + plan + goal" });
+  } finally {
+    Date.now = realNow;
+  }
+
+  const listRes = await rpc("list", { sessionId: AGENT_SYS.id });
+  const listEntries = Array.isArray(listRes?.value?.entries) ? listRes.value.entries : [];
+  check(
+    "④ 同轮系统提示词只保留最终一条",
+    listEntries.length === 1 && listEntries[0].content === "final persona + plan + goal",
+  );
+}
+
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures === 0 ? "\nROUND-DISPLAY PROBE OK" : `\nROUND-DISPLAY PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

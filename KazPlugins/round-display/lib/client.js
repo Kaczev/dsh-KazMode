@@ -23,7 +23,7 @@ window.__ModuleLoader__.load({
 
 		function apply(ctx) {
 			// ---- 局部样式（随 dsh 主题） ----
-			const css = ".rd-root{position:relative;display:inline-flex;flex-direction:column;align-items:flex-end;font-family:Inter,var(--dsw-font-family)}\n.rd-button{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;line-height:1;white-space:nowrap}\n.rd-button:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-button[data-open=\"true\"]{border-color:var(--dsw-alias-label-tertiary)}\n.rd-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary);flex:none}\n.rd-root[data-count=\"true\"] .rd-dot{background:#16a34a}\n.rd-chevron{color:var(--dsw-alias-label-tertiary);font-size:10px;flex:none}\n.rd-portal{position:fixed;z-index:1300}\n.rd-portal .rd-panel{position:static;top:auto;bottom:auto;left:auto;right:auto;width:100%;box-sizing:border-box}\n.rd-panel{max-height:70vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:8px;transition:opacity .16s ease,transform .16s ease}\n.rd-portal.rd-opening .rd-panel{opacity:1;transform:translateY(0)}\n.rd-portal.rd-closing .rd-panel{opacity:0;transform:translateY(-6px)}\n.rd-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}\n.rd-badge{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);flex:none}\n.rd-note{font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:1.5;margin:2px 0 4px}\n.rd-group{border-top:1px solid var(--dsw-alias-border-l2);padding-top:6px;display:flex;flex-direction:column;gap:4px}\n.rd-group:first-of-type{border-top:none;padding-top:0}\n.rd-group-head{display:flex;align-items:center;gap:8px}\n.rd-plugin{font-size:11px;color:#8b5cf6;border:1px solid rgba(139,92,246,.5);border-radius:8px;padding:1px 6px;flex:none;font-weight:600}\n.rd-turn{font-size:11px;color:var(--dsw-alias-label-tertiary);flex:1;text-align:right}\n.rd-content{font-size:12px;color:var(--dsw-alias-label-primary);line-height:1.6;white-space:pre-wrap;word-break:break-word;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));margin:0}\n.rd-act{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px}\n.rd-act:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-act:disabled{cursor:not-allowed;opacity:.55}\n.rd-tab{display:flex;gap:4px;margin:0}\n.rd-tab-btn{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-tertiary);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px}\n.rd-tab-btn[data-on=\"true\"]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-tertiary)}\n";
+			const css = ".rd-root{position:relative;display:inline-flex;flex-direction:column;align-items:flex-end;font-family:Inter,var(--dsw-font-family)}\n.rd-button{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:14px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);cursor:pointer;font-size:12px;line-height:1;white-space:nowrap}\n.rd-button:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-button[data-open=\"true\"]{border-color:var(--dsw-alias-label-tertiary)}\n.rd-dot{width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary);flex:none}\n.rd-root[data-count=\"true\"] .rd-dot{background:#16a34a}\n.rd-chevron{color:var(--dsw-alias-label-tertiary);font-size:10px;flex:none}\n.rd-portal{position:fixed;z-index:1300}\n.rd-portal .rd-panel{position:static;top:auto;bottom:auto;left:auto;right:auto;width:100%;box-sizing:border-box}\n.rd-panel{max-height:70vh;overflow:auto;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;box-shadow:0 10px 30px rgb(0 0 0 / .2);padding:10px;display:flex;flex-direction:column;gap:8px;transition:opacity .16s ease,transform .16s ease}\n.rd-portal.rd-opening .rd-panel{opacity:1;transform:translateY(0)}\n.rd-portal.rd-closing .rd-panel{opacity:0;transform:translateY(-6px)}\n.rd-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}\n.rd-badge{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);flex:none}\n.rd-note{font-size:12px;color:var(--dsw-alias-label-tertiary);line-height:1.5;margin:2px 0 4px}\n.rd-group{border-top:1px solid var(--dsw-alias-border-l2);padding-top:6px;display:flex;flex-direction:column;gap:4px}\n.rd-group:first-of-type{border-top:none;padding-top:0}\n.rd-group-head{display:flex;align-items:center;gap:8px}\n.rd-plugin{font-size:11px;color:#8b5cf6;border:1px solid rgba(139,92,246,.5);border-radius:8px;padding:1px 6px;flex:none;font-weight:600}\n.rd-turn{font-size:11px;color:var(--dsw-alias-label-tertiary);flex:1;text-align:right}\n.rd-content{font-size:12px;color:var(--dsw-alias-label-primary);line-height:1.6;white-space:pre-wrap;word-break:break-word;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:8px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));margin:0}.rd-entry{display:flex;flex-direction:column;gap:4px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px}.rd-entry-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.rd-entry-title{font-size:11px;color:var(--dsw-alias-label-tertiary)}.rd-plugin-unknown{color:#dc2626;border-color:rgba(220,38,38,.5)}\n.rd-act{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-primary);border-radius:6px;padding:2px 10px;cursor:pointer;font-size:12px}\n.rd-act:hover{background:var(--dsw-alias-interactive-bg-hover)}\n.rd-act:disabled{cursor:not-allowed;opacity:.55}\n.rd-tab{display:flex;gap:4px;margin:0}\n.rd-tab-btn{border:1px solid var(--dsw-alias-border-l1);background:transparent;color:var(--dsw-alias-label-tertiary);border-radius:6px;padding:2px 8px;cursor:pointer;font-size:11px}\n.rd-tab-btn[data-on=\"true\"]{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-label-tertiary)}\n";
 			const tagId = "round-display/styles";
 			if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 				const tag = document.createElement("style");
@@ -183,31 +183,25 @@ window.__ModuleLoader__.load({
 				const entries = data !== null && Array.isArray(data.entries) ? data.entries : [];
 				const turns = data !== null && Array.isArray(data.turns) ? data.turns : [];
 
-				/** 按插件分组（保持出现顺序）。 */
-				function groupByPlugin(list) {
-					const groups = [];
-					const seen = new Set();
-					for (const item of list) {
-						if (item === null || typeof item !== "object") continue;
-						const plugin = typeof item.plugin === "string" && item.plugin.length > 0 ? item.plugin : "?";
-						if (!seen.has(plugin)) {
-							seen.add(plugin);
-							groups.push({ plugin, items: [] });
-						}
-						groups[groups.length - 1].items.push(item);
-					}
-					return groups;
+				/** 取条目的来源名；空/缺失时返回空串（显示为「未知来源」）。 */
+				function sourceLabelOf(item) {
+					return typeof item.plugin === "string" && item.plugin.trim().length > 0 ? item.plugin.trim() : "";
 				}
 
-				/** 一组（plugin + 若干条内容）渲染成一个块。 */
-				function groupBlock(group, keyPrefix) {
+				/** 一条消息渲染成一个独立卡片：左上角紫色来源标签（未知来源用红色兜底）。 */
+				function entryBlock(item, key) {
+					const plugin = sourceLabelOf(item);
+					const known = plugin.length > 0;
 					return createElement(
 						"div",
-						{ className: "rd-group", key: keyPrefix + "-g" },
-						createElement("div", { className: "rd-group-head" }, createElement("span", { className: "rd-plugin" }, "[" + group.plugin + "]")),
-						group.items.map((item, ii) =>
-							createElement("pre", { className: "rd-content", key: keyPrefix + "-c" + ii }, item.content),
+						{ className: "rd-entry", key },
+						createElement(
+							"div",
+							{ className: "rd-entry-head" },
+							createElement("span", { className: known ? "rd-plugin" : "rd-plugin rd-plugin-unknown" }, known ? "[" + plugin + "]" : "未知来源"),
+							typeof item.title === "string" && item.title.length > 0 && createElement("span", { className: "rd-entry-title" }, item.title),
 						),
+						createElement("pre", { className: "rd-content" }, item.content),
 					);
 				}
 
@@ -215,7 +209,7 @@ window.__ModuleLoader__.load({
 				if (entries.length === 0) {
 					currentBody = createElement("p", { className: "rd-note" }, "本轮没有插件注入信息。（蹭蹭）");
 				} else {
-					currentBody = groupByPlugin(entries).map((group, gi) => groupBlock(group, "cur" + gi));
+					currentBody = entries.map((item, ii) => entryBlock(item, "cur" + ii));
 				}
 
 				let historyBody;
@@ -233,8 +227,8 @@ window.__ModuleLoader__.load({
 									createElement("span", { className: "rd-badge" }, "第 " + turnEntry.turn + " 轮"),
 									createElement("span", { className: "rd-turn" }, (Array.isArray(turnEntry.entries) ? turnEntry.entries.length : 0) + " 条"),
 								),
-								groupByPlugin(Array.isArray(turnEntry.entries) ? turnEntry.entries : []).map((group, gi) =>
-									groupBlock(group, "t" + ti + "-" + gi),
+								(Array.isArray(turnEntry.entries) ? turnEntry.entries : []).map((item, ii) =>
+									entryBlock(item, "t" + ti + "-" + ii),
 								),
 							),
 						);
@@ -381,19 +375,37 @@ window.__ModuleLoader__.load({
 				const [enabled, setEnabled] = useState(null);
 				useEffect(() => {
 					let alive = true;
+					let retries = 0;
+					let timer = null;
 					setEnabled(null);
 					const refresh = async () => {
 						const state = await kazModeGetState(sessionId);
 						if (!alive) return;
-						setEnabled(state !== null ? effectiveEnabledOf(state, pluginId) : null);
+						const next = state !== null ? effectiveEnabledOf(state, pluginId) : null;
+						setEnabled(next);
+						// 新会话刚加载时 agent/项目 cwd 可能尚未就绪，getState 可能短暂返回
+						// false；有界重试覆盖该竞态（真实关闭时重试后仍保持 false 并停止）。
+						if (next === false && typeof sessionId === "string" && sessionId.length > 0 && retries < 3) {
+							const delay = [300, 800, 2000][retries];
+							retries += 1;
+							timer = setTimeout(() => { void refresh(); }, delay);
+						}
 					};
 					void refresh();
 					// 事件驱动：Kaz 面板改动生效状态后广播 kaz-mode:effective-changed，
 					// 收到即刷新（替代轮询）。会话切换由 sessionId 依赖触发。
-					const onChanged = () => void refresh();
+					const onChanged = () => {
+						retries = 0;
+						if (timer !== null) {
+							clearTimeout(timer);
+							timer = null;
+						}
+						void refresh();
+					};
 					window.addEventListener("kaz-mode:effective-changed", onChanged);
 					return () => {
 						alive = false;
+						if (timer !== null) clearTimeout(timer);
 						window.removeEventListener("kaz-mode:effective-changed", onChanged);
 					};
 				}, [pluginId, sessionId]);

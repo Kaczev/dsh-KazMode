@@ -161,6 +161,14 @@ export default {
       for (const turn of turns.slice(0, removeCount)) byTurn.delete(turn);
     }
 
+    /** 是否为本插件认定的「系统提示词」记录（kaz-system-prompt 上报，title 为
+     *  system prompt 或旧数据里缺 title）。同轮只保留最终一条，避免早期不全的
+     *  组装结果与最终系统提示词重复显示。 */
+    function isSystemPromptEntry(entry) {
+      if (entry === null || typeof entry !== "object") return false;
+      return entry.plugin === "kaz-system-prompt" && (entry.title === "system prompt" || entry.title === "");
+    }
+
     /** 加载持久化记录：{ agents: { [agentId]: { [turn]: Entry[] } } }。 */
     function loadRecords() {
       try {
@@ -182,13 +190,19 @@ export default {
               const content = typeof item.content === "string" ? item.content : "";
               if (content.trim().length === 0) continue;
               const plugin = typeof item.plugin === "string" ? item.plugin : "";
-              entries.push({
+              const entry = {
                 key: plugin + "|" + content,
                 plugin,
                 title: typeof item.title === "string" ? item.title : "",
                 content,
                 at: typeof item.at === "number" ? item.at : Date.now(),
-              });
+              };
+              // 历史旧数据同轮可能存了多条系统提示词：只保留文件顺序里最后一条。
+              if (isSystemPromptEntry(entry)) {
+                const prevIndex = entries.findIndex(isSystemPromptEntry);
+                if (prevIndex !== -1) entries.splice(prevIndex, 1);
+              }
+              entries.push(entry);
             }
             if (entries.length > 0) byTurn.set(turn, entries);
           }
@@ -254,12 +268,20 @@ export default {
         entries = [];
         byTurn.set(turn, entries);
       }
-      const key = String(plugin ?? "") + "|" + content;
+      const normalizedPlugin = String(plugin ?? "");
+      const normalizedTitle = typeof title === "string" ? title : "";
+      // 系统提示词同一轮只保留最终一条（kaz-system-prompt 可能在同一轮内多次
+      // assemble，早期的是不全的中间态，最终上报的才是模型真正收到的系统提示词）。
+      if (isSystemPromptEntry({ plugin: normalizedPlugin, title: normalizedTitle, content })) {
+        const prevIndex = entries.findIndex(isSystemPromptEntry);
+        if (prevIndex !== -1) entries.splice(prevIndex, 1);
+      }
+      const key = normalizedPlugin + "|" + content;
       if (entries.some((item) => item.key === key)) return;
       entries.push({
         key,
-        plugin: String(plugin ?? ""),
-        title: typeof title === "string" ? title : "",
+        plugin: normalizedPlugin,
+        title: normalizedTitle,
         content,
         at: Date.now(),
       });
