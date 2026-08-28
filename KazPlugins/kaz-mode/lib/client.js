@@ -189,10 +189,11 @@ window.__ModuleLoader__.load({
 				namespace: "ka-whale-workflow",
 				name: "ka-whale-workflow",
 				tag: "鲸鱼工作流 · 任务重构→任务分类",
-				note: "用户消息后先任务重构，再任务分类；whale_report / create_goal / create_plan 由「工具自动启用」面板临时放行。",
+				note: "用户消息后先任务重构，再任务分类；whale_report / create_goal / create_plan 由「工具自动启用」面板临时放行；任务重构工具清单在下方代码框中编辑（白名单之上的过滤器）。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不进入鲸鱼工作流）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走鲸鱼工作流；默认关）" },
+					{ key: "reconstructionTools", kind: "codebox", label: "reconstructionTools（任务重构工具，逗号分隔）" },
 				],
 			},
 			{
@@ -237,7 +238,7 @@ window.__ModuleLoader__.load({
 			"plan-mode-controller",
 		]);
 		/** Kaz 模式自家插件，排序时位于官方之上、外置之下。 */
-		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory", "ka-whale-workflow"]);
+		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory"]);
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
 		const RPC_CHANNEL = "/kaz-mode";
@@ -302,6 +303,8 @@ window.__ModuleLoader__.load({
 .kzm-state-item{display:flex;flex-direction:column;padding:3px 0;border-top:1px solid var(--dsw-alias-border-l2)}
 .kzm-state-item:first-of-type{border-top:none}
 .kzm-state-row{display:flex;align-items:center;gap:6px}
+.kzm-sub-item{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding-left:10px;border-left:2px solid var(--dsw-alias-border-l2)}
+.kzm-sub-item .kzm-state-name{color:var(--dsw-alias-label-secondary)}
 .kzm-state-name{flex:1;min-width:0;font-size:12px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}
 .kzm-name{flex:1;min-width:0;font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:help}
 .kzm-tag{font-size:11px;color:var(--dsw-alias-label-tertiary)}
@@ -326,6 +329,8 @@ window.__ModuleLoader__.load({
 .kzm-input:focus{outline:none;border-color:var(--dsw-alias-label-tertiary)}
 .kzm-select{padding:4px 6px}
 .kzm-textarea{min-height:64px;resize:vertical;line-height:1.5}
+.kzm-codebox{min-height:80px;resize:vertical;line-height:1.6;font-family:Consolas,Menlo,monospace;font-size:12px}
+.kzm-codebox::placeholder{color:var(--dsw-alias-label-tertiary)}
 .kzm-error{color:#dc2626;font-size:11px;line-height:1.4}
 .kzm-saving{font-size:11px;color:var(--dsw-alias-label-tertiary)}
 .kzm-drift{display:flex;align-items:center;gap:8px;border:1px solid rgba(217,119,6,.5);background:rgba(217,119,6,.08);border-radius:8px;padding:6px 10px;margin:2px 0 6px}
@@ -704,6 +709,32 @@ window.__ModuleLoader__.load({
 						});
 						break;
 					}
+					case "codebox": {
+						// 与其它输入框同底色的代码框：逗号分隔工具清单，适合 ka-whale-workflow 重构清单。
+						const text = draft !== null ? draft : Array.isArray(current) ? current.join(", ") : "";
+						editor = createElement("textarea", {
+							className: "kzm-input kzm-codebox",
+							value: text,
+							disabled: !writable,
+							placeholder: "ask_user_question, read, glob, grep, web_search, memory_search, memory_list, memory_detail",
+							spellCheck: false,
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								const trimmed = draft.trim();
+								if (trimmed === "") {
+									commit(undefined, true);
+									return;
+								}
+								const parsed = trimmed
+									.split(",")
+									.map((part) => part.trim())
+									.filter((part) => part.length > 0);
+								commit(parsed);
+							},
+						});
+						break;
+					}
 					case "number": {
 						const text = draft !== null ? draft : typeof current === "number" ? String(current) : "";
 						editor = createElement("input", {
@@ -956,6 +987,32 @@ window.__ModuleLoader__.load({
 								} else {
 									commit(draft.trim());
 								}
+							},
+						});
+						break;
+					}
+					case "codebox": {
+						// 与其它输入框同底色的代码框：逗号分隔工具清单，适合 ka-whale-workflow 重构清单。
+						const text = draft !== null ? draft : Array.isArray(current) ? current.join(", ") : "";
+						editor = createElement("textarea", {
+							className: "kzm-input kzm-codebox",
+							value: text,
+							disabled: disabled === true,
+							placeholder: "ask_user_question, read, glob, grep, web_search, memory_search, memory_list, memory_detail",
+							spellCheck: false,
+							onChange: (event) => setDraft(event.target.value),
+							onBlur: () => {
+								if (draft === null) return;
+								const trimmed = draft.trim();
+								if (trimmed === "") {
+									commit(undefined, true);
+									return;
+								}
+								const parsed = trimmed
+									.split(",")
+									.map((part) => part.trim())
+									.filter((part) => part.length > 0);
+								commit(parsed);
 							},
 						});
 						break;
@@ -1588,11 +1645,11 @@ window.__ModuleLoader__.load({
 						),
 						createElement(
 							"div",
-							{ className: "kzm-state-item", style: { marginLeft: "14px", borderTop: "1px dashed var(--dsw-alias-border-l2)" } },
+							{ className: "kzm-sub-item" },
 							createElement(
 								"div",
 								{ className: "kzm-state-row" },
-								createElement("span", { className: "kzm-state-name", title: "仅任务分类时临时放行 create_goal / create_plan。" }, "各模式的启动工具"),
+								createElement("span", { className: "kzm-state-name", title: "各模式的启动工具：仅在任务分类阶段临时放行这些工具" }, "各模式的启动工具"),
 								createElement("span", { className: "kzm-auto-on-status", "data-on": whaleLaunchActive ? "true" : "false" }, whaleLaunchActive ? "启用中" : "未启用"),
 								whaleLaunchFlags.overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
 								whaleLaunchFlags.overridden === true &&
@@ -1614,29 +1671,25 @@ window.__ModuleLoader__.load({
 									onChange: (next) => void applyPatch({ feature: "whale", sub: "launch", enabled: next }),
 								}),
 							),
-							createElement(
-								"div",
-								{ className: "kzm-field" },
-								createElement("label", null, "各模式启动工具（逗号分隔，仅分类时临时放行）"),
-								createElement("input", {
-									className: "kzm-input",
-									type: "text",
-									value: whaleLaunchText,
-									disabled: !writable || busy,
-									placeholder: "create_goal, create_plan",
-									spellCheck: false,
-									onChange: (event) => setDrafts((prev) => ({ ...prev, whaleLaunch: event.target.value })),
-									onBlur: () => {
-										if (whaleLaunchDraft === null) return;
-										const parsed = whaleLaunchDraft
-											.split(",")
-											.map((part) => part.trim())
-											.filter((part) => part.length > 0);
-										setDrafts((prev) => ({ ...prev, whaleLaunch: null }));
-										void applyPatch({ feature: "whale", sub: "launch", tools: parsed });
-									},
-								}),
-							),
+							createElement("p", { className: "kzm-note" }, "仅任务分类时临时放行（逗号分隔）"),
+							createElement("input", {
+								className: "kzm-input",
+								type: "text",
+								value: whaleLaunchText,
+								disabled: !writable || busy,
+								placeholder: "create_goal, create_plan",
+								spellCheck: false,
+								onChange: (event) => setDrafts((prev) => ({ ...prev, whaleLaunch: event.target.value })),
+								onBlur: () => {
+									if (whaleLaunchDraft === null) return;
+									const parsed = whaleLaunchDraft
+										.split(",")
+										.map((part) => part.trim())
+										.filter((part) => part.length > 0);
+									setDrafts((prev) => ({ ...prev, whaleLaunch: null }));
+									void applyPatch({ feature: "whale", sub: "launch", tools: parsed });
+								},
+							}),
 						),
 					);
 

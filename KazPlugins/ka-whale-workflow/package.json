@@ -1,7 +1,7 @@
 {
   "name": "ka-whale-workflow",
   "version": "0.1.0",
-  "description": "鲸鱼工作流：用户消息后先任务重构、再任务分类；whale_report 工具汇报阶段完成；任务重构工具清单可在工具控制面板的 ka-whale-workflow 插件下修改，whale_report/create_goal/create_plan 由 kaz_tool_auto_on 临时放行。",
+  "description": "鲸鱼工作流：用户消息后先任务重构、再任务分类；whale_report 工具汇报阶段完成；任务重构工具清单在 ka-whale-workflow 配置面板的代码框中修改，whale_report/create_goal/create_plan 由 kaz_tool_auto_on 临时放行。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -13,6 +13,9 @@
     "lib/index.js"
   ],
   "license": "MIT",
+  "dependencies": {
+    "kaz-shared": "file:../kaz-shared"
+  },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-settings": "^0.1.0-rc.6",

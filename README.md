@@ -134,7 +134,7 @@ dsh-KazMode/
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
-| `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单可在工具控制面板修改，`whale_report` / `create_goal` / `create_plan` 由工具自动启用面板临时放行 |
+| `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单在 ka-whale-workflow 配置面板的代码框中修改（与其它输入框同底色），`whale_report` / `create_goal` / `create_plan` 由工具自动启用面板临时放行 |
 | `create-plan` | `create-plan` | 挂在 Kaz 预设 planning isolate 组：`create_plan` 工具，让鲸鱼自己启用 plan 模式 |
 
 其中几个值得知道的插件（完整清单见上表）：

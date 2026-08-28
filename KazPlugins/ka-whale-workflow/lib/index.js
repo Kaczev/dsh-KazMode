@@ -4,7 +4,7 @@
 //   1) 用户发出任意一条消息后进入「任务重构」：
 //        - 系统提示词段 ka-whale-workflow:prompt 显示重构 prompt；
 //        - 上下文注入 [ka-whale-workflow 任务重构]；
-//        - 工具面收敛为「工具控制面板 ka-whale-workflow 插件清单 ∩ Kaz 白名单」
+//        - 工具面收敛为「ka-whale-workflow 配置面板重构清单 ∩ Kaz 白名单」
 //          + 自动启用面板临时放行的 whale_report。
 //   2) whale_report 后进入「任务分类」：
 //        - 系统提示词段切为分类 prompt；
@@ -25,21 +25,12 @@ import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
+import { DEFAULT_RECONSTRUCTION_TOOLS } from "kaz-shared";
+
+export { DEFAULT_RECONSTRUCTION_TOOLS };
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
-
-/** 任务重构阶段：工具控制面板 ka-whale-workflow 插件下的默认清单（白名单默认启用）。 */
-export const DEFAULT_RECONSTRUCTION_TOOLS = [
-  "ask_user_question",
-  "read",
-  "glob",
-  "grep",
-  "web_search",
-  "memory_search",
-  "memory_list",
-  "memory_detail",
-];
 
 /** 任务分类阶段：由 kaz_tool_auto_on「各模式的启动工具」临时放行。 */
 export const CLASSIFICATION_LAUNCH_TOOLS = ["create_goal", "create_plan"];
@@ -75,12 +66,15 @@ const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
   /** 子代理是否也走鲸鱼工作流；默认关（与 round-minimal 的语义一致）。 */
   includeSubagents: z.boolean().default(false),
+  /** 任务重构工具清单（配置面板代码框；白名单之上的过滤器）。 */
+  reconstructionTools: z.array(z.string()).default([...DEFAULT_RECONSTRUCTION_TOOLS]),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
 export const DEFAULT_SECTION = {
   enabled: true,
   includeSubagents: false,
+  reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
 };
 
 // ---------------------------------------------------------------------------
@@ -110,12 +104,25 @@ function installSettingsWithDefaults(ctx, ns, schema, entry, defaults, hooks) {
   });
 }
 
+/** 归一化工具清单：只保留非空字符串、trim、去重。 */
+function normalizeToolList(value) {
+  const out = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    if (typeof item !== "string") continue;
+    const tool = item.trim();
+    if (tool.length > 0 && !out.includes(tool)) out.push(tool);
+  }
+  return out;
+}
+
 /** 归一化任意来源（组合行 config / settings 解析值）的配置。 */
 function normalizeConfig(raw) {
   const value = raw && typeof raw === "object" ? raw : {};
+  const tools = normalizeToolList(value.reconstructionTools);
   return {
     enabled: value.enabled !== false,
     includeSubagents: value.includeSubagents === true,
+    reconstructionTools: tools.length > 0 ? tools : [...DEFAULT_RECONSTRUCTION_TOOLS],
   };
 }
 
@@ -276,18 +283,13 @@ export default {
       return false;
     }
 
-    /** 工具控制面板里 ka-whale-workflow 插件当前启用的工具清单（重构过滤器）。 */
+    /** ka-whale-workflow 配置面板里的重构工具清单（白名单之上的过滤器）。 */
     function reconstructionToolsFor(agent) {
-      try {
-        const svc = ctx.get("kazMode");
-        if (svc !== undefined && svc !== null && typeof svc.pluginTools === "function") {
-          const tools = svc.pluginTools(agent, "ka-whale-workflow");
-          if (Array.isArray(tools)) return tools;
-        }
-      } catch {
-        // fall through
-      }
-      return [...DEFAULT_RECONSTRUCTION_TOOLS];
+      const current = liveFor(agent);
+      const tools = Array.isArray(current.reconstructionTools)
+        ? current.reconstructionTools.filter((tool) => typeof tool === "string" && tool.trim().length > 0)
+        : [];
+      return tools.length > 0 ? tools : [...DEFAULT_RECONSTRUCTION_TOOLS];
     }
 
     /** 当前阶段实际可见工具（供 prompt 里的 <工具列表> 渲染）。 */
@@ -417,7 +419,7 @@ export default {
     // 启动：真实用户消息被 inbox claim 后、assembly 之前进入重构。
     // round-minimal 极简阶段只记 pending，等首次 tool/call 后再进入。
     // -----------------------------------------------------------------------
-    const pendingStart = new WeakMap();
+    const pendingStart = new Set();
 
     ctx.on("agent/inbox/claimed", ({ agent, message }) => {
       if (agent === null || agent === undefined || typeof agent !== "object") return;
@@ -426,8 +428,9 @@ export default {
       if (!isUserMessage(message)) return;
       const current = stageOf(agent);
       if (current === "reconstruction" || current === "classification") return;
+      const sessionId = agent?.session?.id || agent?.id;
       if (isMinimal(agent)) {
-        pendingStart.set(agent, true);
+        if (typeof sessionId === "string" && sessionId.length > 0) pendingStart.add(sessionId);
         return;
       }
       if (setStage(agent, "reconstruction")) {
@@ -457,10 +460,13 @@ export default {
 
     ctx.on("session/event", (session, event) => {
       if (event === null || typeof event !== "object" || event.type !== "tool/call") return;
+      const sessionId = session !== null && typeof session === "object" && typeof session.id === "string"
+        ? session.id
+        : session?.sessionId;
+      if (typeof sessionId !== "string" || sessionId.length === 0 || !pendingStart.has(sessionId)) return;
+      pendingStart.delete(sessionId);
       const agent = sessionAgentOf(session);
       if (agent === null || agent === undefined || typeof agent !== "object") return;
-      if (pendingStart.get(agent) !== true) return;
-      pendingStart.delete(agent);
       if (liveFor(agent).enabled !== true) return;
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOf(agent);
@@ -474,9 +480,29 @@ export default {
     // 上下文注入：重构/分类各注入一次，跨重启由会话事件去重。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
+      const agent = payload?.agent;
+      if (agent !== null && agent !== undefined && typeof agent === "object") {
+        const live = liveFor(agent);
+        const skipSubagent = live.includeSubagents !== true && isSubagent(agent);
+        const stage = stageOf(agent);
+        const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+        const hasRealUserMessage = messages.some((message) => isUserMessage(message));
+        // 兜底：session/event 路径（pendingStart）万一没触发时，在 pre-step 补一次。
+        // round-minimal 极简阶段不进入；解除极简后（或 round-minimal 关闭时）进入重构。
+        if (
+          live.enabled === true &&
+          !skipSubagent &&
+          stage === "idle" &&
+          !isMinimal(agent) &&
+          (hasToolCall(agent) || hasRealUserMessage)
+        ) {
+          if (setStage(agent, "reconstruction")) {
+            reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（pre-step 兜底）。", "阶段切换");
+          }
+        }
+      }
       const decision = await next();
       if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
-      const agent = payload?.agent;
       if (agent === null || agent === undefined || typeof agent !== "object") return decision;
       if (liveFor(agent).enabled !== true) return decision;
       const stage = stageOf(agent);

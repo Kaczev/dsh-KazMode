@@ -48,16 +48,6 @@ export const TOOL_PLUGIN_CATALOG = {
     "memory_detail" : true,
     "memory_forget" : true
   },
-  "ka-whale-workflow": {
-    "ask_user_question" : true,
-    "read" : true,
-    "glob" : true,
-    "grep" : true,
-    "web_search" : true,
-    "memory_search" : true,
-    "memory_list" : true,
-    "memory_detail" : true
-  },
   "tool-bash": {
     "run_code" : false
   },
@@ -104,7 +94,6 @@ export const TOOL_PLUGINS = {
   "tool-todo" : true,
   "tool-web" : true,
   "kaz-memory" : true,
-  "ka-whale-workflow" : true,
   "tool-bash" : false,
   "tool-ralph" : false,
   "tool-str-replace-editor" : false,
@@ -144,5 +133,4 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
 /** Kaz 模式自家插件（用于 UI 面板分栏）。 */
 export const KAZ_TOOL_PLUGIN_KEYS = [
   "kaz-memory",
-  "ka-whale-workflow",
 ];

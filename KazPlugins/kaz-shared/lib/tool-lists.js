@@ -34,6 +34,18 @@ export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = ["pwsh", "read", "edit"];
 /** 兜底默认（kaz-memory 状态未知时）：pwsh + read + edit（旧行为）。 */
 export const DEFAULT_FIRST_ROUND_TOOLS = DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF;
 
+/** ka-whale-workflow 任务重构阶段的默认工具清单（配置面板黑底白字框展示/编辑）。 */
+export const DEFAULT_RECONSTRUCTION_TOOLS = [
+  "ask_user_question",
+  "read",
+  "glob",
+  "grep",
+  "web_search",
+  "memory_search",
+  "memory_list",
+  "memory_detail",
+];
+
 const FIRST_ROUND_TOOL_RULES = [
   {
     id: "kaz-memory",

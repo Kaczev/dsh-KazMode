@@ -41,6 +41,7 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
   DEFAULT_DISABLED_TOOLS,
+  DEFAULT_RECONSTRUCTION_TOOLS,
   MANAGED_PLUGINS,
   MEMORY_TOOLS,
   MANAGED_CARRIER_TOOLS,
@@ -107,7 +108,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   },
   "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "first-round-hints": { enabled: false },
-  "ka-whale-workflow": { enabled: false, includeSubagents: false },
+  "ka-whale-workflow": { enabled: false, includeSubagents: false, reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS] },
   "create-plan": { enabled: false },
 };
 
@@ -1397,7 +1398,6 @@ export default {
      *   - pluginConfig(agent, pluginId)  该 agent 项目里某插件的【完整生效配置】
      *     = 工厂默认 + 当前模式默认(kaz-defaults.json) + 项目专属覆盖(kaz-project-states.json)。
      *     无会话/无覆盖时返回 null，调用方回落到插件自身 settings.yaml。
-     *   - pluginTools(agent, pluginId) 该 agent 项目工具控制面板中某插件当前启用的工具名列表；
      *   - toolVisible(agent, name)    该 agent 会话里某工具是否在工具面内；
      *   - surfaceOf(agent)            Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
      */
@@ -1414,20 +1414,6 @@ export default {
         const states = agentEffectiveStates(agent);
         const state = states[pluginId];
         return state !== null && state !== undefined && typeof state === "object" ? { ...state } : null;
-      },
-      pluginTools: (agent, pluginId) => {
-        // 返回工具控制面板中该插件当前启用的工具名列表（ka-whale-workflow 重构清单用）。
-        if (agent === null || agent === undefined || typeof agent !== "object") return [];
-        if (typeof pluginId !== "string" || pluginId.length === 0) return [];
-        try {
-          const layers = loadExternalToolPluginLayers(workspaceOfAgent(agent), ctx.logger);
-          if (layers.effective.P?.[pluginId] !== true) return [];
-          const tools = layers.effective.T?.[pluginId] ?? {};
-          return Object.keys(tools).filter((tool) => tools[tool] === true);
-        } catch (error) {
-          ctx.logger?.debug?.(`[kaz-mode] pluginTools(${pluginId}) 读取失败：` + safeMessage(error));
-          return [];
-        }
       },
       toolVisible: (agent, name) => {
         // 无 agent / 项目状态缺失时按「不可见」处理（2026-08-21 加固，避免误判为启用）。

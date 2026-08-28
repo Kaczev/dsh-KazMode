@@ -16,7 +16,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
 | `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
-| `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单在工具控制面板 `ka-whale-workflow` 插件下修改，`whale_report` / `create_goal` / `create_plan` 由「工具自动启用」临时放行 |
+| `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单在 ka-whale-workflow 配置面板的代码框中修改（与其它输入框同底色），`whale_report` / `create_goal` / `create_plan` 由「工具自动启用」临时放行 |
 | `create-plan` | 挂在 Kaz 预设 `planning` isolate 组：`create_plan` 工具，让鲸鱼自己启用 plan 模式 |
 
 **Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
