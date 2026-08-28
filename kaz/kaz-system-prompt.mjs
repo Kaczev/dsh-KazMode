@@ -8,8 +8,9 @@
  * 同时也负责把展示信息上报 round-display（best-effort）：
  *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
- *     plan 模式激活时 = persona 段 + plan:policy 段；goal 工具启用时
- *     （Kaz 白名单里任一 goal 工具可见）再追加 tool:goal 段，顺序
+ *     plan 模式激活时 = persona 段 + plan:policy 段；goal 模式开启时
+ *     （目标存在且 phase 为 active/paused、Kaz 白名单里 update_goal 工具
+ *     可见）再追加 tool:goal 段（文本为 Kaz 自定义版），顺序
  *     persona → plan:policy → tool:goal）；
  *   - agent/pre-step 扫描上报：
  *       - dsh-plan-mode 的进入/退出通知（source.plugin === "plan-mode"）；
@@ -54,20 +55,49 @@ function pluginEnabled(ctx, agent, pluginId) {
   return false
 }
 
-/** Kaz 白名单里 goal 工具名（任一可见即视为 goal 模式开启）。 */
-const GOAL_TOOLS = ['create_goal', 'get_goal', 'update_goal']
-
-/** 判断 goal 工具是否已在本会话工具面启用（经 kazMode 服务读取白名单）。 */
-function goalToolsEnabled(ctx, agent) {
+/**
+ * 判断当前会话是否处于 goal 模式（决定是否注入 tool:goal 段）：
+ *   - 当前存在目标（ctx.goals.get(agent) 非空）；
+ *   - 目标 phase 为 active 或 paused（complete/blocked 后退出 goal 模式）；
+ *   - Kaz 白名单里 update_goal 工具可见（create_goal/get_goal 不参与判定）。
+ * 任何服务缺失或异常时按“未开启”处理（安全隐藏）。
+ */
+function goalActive(ctx, agent) {
   try {
+    const goals = ctx.get('goals')
+    if (!goals || typeof goals.get !== 'function' || !agent) return false
+    const goal = goals.get(agent)
+    if (!goal || (goal.phase !== 'active' && goal.phase !== 'paused')) return false
     const svc = ctx.get('kazMode')
-    if (svc && typeof svc.toolVisible === 'function' && agent) {
-      return GOAL_TOOLS.some((name) => svc.toolVisible(agent, name) === true)
-    }
+    if (!svc || typeof svc.toolVisible !== 'function') return false
+    return svc.toolVisible(agent, 'update_goal') === true
   } catch {
     // 服务不可用时按未启用处理
   }
   return false
+}
+
+/** 从官方 tool:goal 文本提取 blocked 阈值（缺省 3，与官方配置保持一致）。 */
+function goalBlockedThreshold(originalText) {
+  const match = typeof originalText === 'string' ? /at least (\d+) consecutive goal rounds/.exec(originalText) : null
+  const value = match ? Number(match[1]) : 3
+  return Number.isSafeInteger(value) && value >= 1 ? value : 3
+}
+
+/** Kaz 自定义 tool:goal 系统提示词（仅 goal 模式开启时使用）。 */
+function customGoalSystemPrompt(originalText) {
+  const threshold = goalBlockedThreshold(originalText)
+  return `We are in goal mode. Stay in goal mode until the goal is marked complete, blocked, or the user switches mode. The goal is a long-running objective that spans multiple turns — do not create a goal for routine single-turn work.
+  ---
+  When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'.
+
+  If the session is resumed or forked, the active goal is disarmed. When the user asks to continue in any wording or language, use 'update_goal action resume' to rearm it.
+  ---
+  Mark the goal as 'complete' only when the objective is actually achieved.
+
+  Mark the goal as 'blocked' only when the same blocking condition persists for at least ${threshold} consecutive goal rounds. In 'blocked_reason', report the concrete condition. Difficulty, uncertainty, or useful remaining work does not count as blocked.
+  ---
+  If the goal is blocked, stay in goal mode and report the blocking condition to the user. If the user provides new information or direction, incorporate it and resume progress.`
 }
 
 /** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。 */
@@ -192,9 +222,11 @@ export function apply(ctx, _config) {
 
     const prompt = resolvePrompt(ctx, agent)
 
-    // 保持 plan mode 段与 tool:goal 段（仅 goal 工具启用时），其余提示段
+    // 保持 plan mode 段与 tool:goal 段（仅 goal 模式开启时），其余提示段
     // 收敛为 persona 一句。顺序：persona 绝对最前（与 dsh 原生 order 排序一致：
     // persona 0 < plan:policy 50 < tool:goal 114），plan 段、tool:goal 段随后。
+    // goal 模式 = 目标存在（active/paused）且 update_goal 工具可见；开启时
+    // 把 tool:goal 文本替换为 Kaz 自定义版本。
     const planSection = assembly.sections.find(
       (section) =>
         section !== null &&
@@ -224,14 +256,17 @@ export function apply(ctx, _config) {
       kept.push({ name: PERSONA_SECTION, order: 0, text: prompt })
     }
     if (planSection !== undefined) kept.push(planSection)
-    if (goalSection !== undefined && goalToolsEnabled(ctx, agent)) kept.push(goalSection)
+    if (goalSection !== undefined && goalActive(ctx, agent)) {
+      goalSection.text = customGoalSystemPrompt(goalSection.text)
+      kept.push(goalSection)
+    }
 
     assembly.sections = kept
     // 等后续监听器（kaz-mode 只过滤工具段；round-minimal 首轮还会按首轮工具
     // 白名单过滤 tool:* 段）跑完，
     // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
     // renderPrompt 一致：空段过滤、"\n\n" 连接）。plan 模式激活时内容 =
-    // persona 段 + plan:policy 段；goal 工具段启用时再含 tool:goal 段。
+    // persona 段 + plan:policy 段；goal 模式开启时再含 tool:goal 段（自定义文本）。
     // persona 在最前，正是模型真实看到的 system 字段。
     const nextResult = await next()
     const finalAssembly = nextResult ?? assembly
