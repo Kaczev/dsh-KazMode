@@ -65,8 +65,10 @@ window.__ModuleLoader__.load({
 .kzm-portal.kzm-closing .kzm-panel{opacity:0;transform:translateY(-6px)}
 .kzm-bubbles{display:flex;flex-direction:column;align-items:flex-end;gap:6px;pointer-events:none}
 .kzm-bubble-portal{position:fixed;z-index:1300}
-.kzm-bubble{position:relative;max-width:340px;padding:8px 12px 8px 14px;border-radius:10px;font-size:12px;line-height:1.45;font-weight:500;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border:1px solid var(--dsw-alias-border-l1);border-left:3px solid #7c3aed;box-shadow:0 4px 12px rgb(0 0 0 / .10);animation:kzm-bubble-in .2s ease-out,kzm-bubble-out .3s ease-in 2.2s forwards}
-.kzm-bubble::after{content:"";position:absolute;right:18px;bottom:-5px;width:10px;height:10px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-right:1px solid var(--dsw-alias-border-l1);border-bottom:1px solid var(--dsw-alias-border-l1);transform:rotate(45deg)}
+.kzm-bubble{position:relative;max-width:340px;padding:8px 24px 8px 14px;border-radius:10px;font-size:12px;line-height:1.45;font-weight:500;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border:1px solid var(--dsw-alias-border-l1);border-left:3px solid #7c3aed;box-shadow:0 4px 12px rgb(0 0 0 / .10);animation:kzm-bubble-in .2s ease-out,kzm-bubble-out .3s ease-in 10s forwards}
+.kzm-bubble::after{content:"";position:absolute;left:18px;bottom:-5px;width:10px;height:10px;background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-right:1px solid var(--dsw-alias-border-l1);border-bottom:1px solid var(--dsw-alias-border-l1);transform:rotate(45deg)}
+.kzm-bubble-close{position:absolute;top:4px;right:4px;width:16px;height:16px;display:flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:50%;background:transparent;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1;cursor:pointer;pointer-events:auto}
+.kzm-bubble-close:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary)}
 @keyframes kzm-bubble-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes kzm-bubble-out{from{opacity:1;transform:translateY(0)}to{opacity:0;transform:translateY(-4px)}}
 .kzm-panel-title{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary)}
@@ -431,6 +433,15 @@ window.__ModuleLoader__.load({
 				const changeCursor = useRef({ initialized: false, lastSeq: 0 });
 				const bubbleTimers = useRef(new Map());
 
+				const dismissBubble = useCallback((key) => {
+					const timer = bubbleTimers.current.get(key);
+					if (timer !== undefined) {
+						clearTimeout(timer);
+						bubbleTimers.current.delete(key);
+					}
+					setBubbles((cur) => cur.filter((item) => item.key !== key));
+				}, []);
+
 				const showBubbles = useCallback((entries) => {
 					if (!Array.isArray(entries) || entries.length === 0) return;
 					const additions = entries
@@ -442,10 +453,12 @@ window.__ModuleLoader__.load({
 					if (additions.length === 0) return;
 					setBubbles((prev) => [...prev, ...additions].slice(-3));
 					for (const bubble of additions) {
+						const oldTimer = bubbleTimers.current.get(bubble.key);
+						if (oldTimer !== undefined) clearTimeout(oldTimer);
 						const timer = setTimeout(() => {
 							setBubbles((cur) => cur.filter((item) => item.key !== bubble.key));
 							bubbleTimers.current.delete(bubble.key);
-						}, 2600);
+						}, 10300);
 						bubbleTimers.current.set(bubble.key, timer);
 					}
 				}, []);
@@ -602,7 +615,12 @@ window.__ModuleLoader__.load({
 								"div",
 								{ className: "kzm-bubbles kzm-bubble-portal", style: bubblePos },
 								bubbles.map((bubble) =>
-									createElement("div", { key: bubble.key, className: "kzm-bubble" }, bubble.text),
+									createElement(
+										"div",
+										{ key: bubble.key, className: "kzm-bubble" },
+										bubble.text,
+										createElement("button", { type: "button", className: "kzm-bubble-close", "aria-label": "关闭提示", title: "关闭", onClick: () => dismissBubble(bubble.key) }, "✕"),
+									),
 								),
 							),
 							document.body,
