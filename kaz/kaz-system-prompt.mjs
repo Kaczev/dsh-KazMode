@@ -10,11 +10,21 @@
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
  *     plan 模式激活时 = persona 段 + plan:policy 段；goal 工具段启用时再追加
  *     tool:goal 段，顺序 persona → plan:policy → tool:goal）；
- *   - agent/pre-step 与 session/event 双通道上报：
+ *   - agent/pre-step 扫描上报：
  *       - dsh-plan-mode 的进入/退出通知（source.plugin === "plan-mode"）；
  *       - dsh-goal-round-driver 的 <goal_round>（source.kind === "goal"）；
  *       - dsh-tool-goal 的 <goal_complete>/<goal_blocked>
- *         （source.plugin === "tool-goal"）。
+ *         （source.plugin === "tool-goal"）；
+ *   - agent/pre-step 另扫描 agent.session.events 里的 plan/mode 事件兜底：
+ *     dsh-plan-mode 只在“上一个请求头描述的是另一种模式”时才生成
+ *     source.plugin === "plan-mode" 的通知消息（例如首条消息前进入 plan 模式、
+ *     或经 exit_plan_mode 退出时都没有该消息），所以直接由 plan/mode 状态事件
+ *     合成进入/退出文本上报，保证 round-display 始终能看到切换；与既有通知
+ *     消息重复时由 round-display 去重。
+ *
+ * 注意：不监听 session/event——kaz-system-prompt 挂在 agent scope 下，而
+ * session/event 从 host 根 scope 派发，agent scope 监听器收不到（output-beep
+ * 能收是因为它在 host 平面）。
  *
  * 规则按顺序匹配：第一个 `test` 返回 true 的规则胜出。
  * 需要新增“某种情况下的系统提示词”时，在 PROMPT_RULES 里加一条即可。
@@ -89,26 +99,6 @@ function textOfMessage(message) {
   } catch {
     return ""
   }
-}
-
-/** 从 session 解析对应 agent（session/event 事件只给 session，没有 agent；同 output-beep 模式）。 */
-function sessionAgentOf(ctx, session) {
-  try {
-    const id =
-      session !== null && typeof session === "object" && typeof session.id === "string"
-        ? session.id
-        : session?.sessionId
-    if (typeof id === "string" && id.length > 0) {
-      const agents = ctx.get("agents")
-      if (agents !== undefined && agents !== null && typeof agents.get === "function") {
-        const agent = agents.get(id)
-        if (agent !== undefined && agent !== null) return agent
-      }
-    }
-  } catch {
-    // 服务缺失时返回 undefined
-  }
-  return undefined
 }
 
 /** 把一条带 source 的注入消息上报 round-display（goal_round / goal wrapup / plan 通知）。 */
@@ -234,11 +224,19 @@ export function apply(ctx, _config) {
   })
 
   // goal/plan 注入消息上报：
-  //   - agent/pre-step：直接扫描本次 step 的 messages（goal_round 由 followup 进
+  //   - agent/pre-step 直接扫描本次 step 的 messages（goal_round 由 followup 进
   //     inbox、tool-goal wrapup 由 deferContext 进 next-step、plan-mode 通知由
   //     瀑布追加或 inbox.claim 进 messages）；
-  //   - session/event：兜底，消息真正落盘（步骤被接受）时必然触发，
-  //     不受 pre-step 监听器顺序影响。重复上报由 round-display 按 (plugin, content) 去重。
+  //   - 同一 pre-step 再扫描 agent.session.events 里的 plan/mode 事件：
+  //     dsh-plan-mode 不保证为每次切换生成 source.plugin === "plan-mode" 消息
+  //     （首条消息前进入 / exit_plan_mode 退出都没有），由状态事件合成兜底。
+  //     不监听 session/event：kaz-system-prompt 在 agent scope，而 session/event
+  //     从 host 根 scope 派发，agent scope 监听器收不到（见文件头注释）。
+  // 重复上报由 round-display 按 (plugin, content) 去重。
+  const startedAt = Date.now()
+  /** sessionId -> 已处理过的最大 plan/mode seq（含加载前基线，避免 resume 时补报旧切换）。 */
+  const lastPlanModeSeq = new Map()
+
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision === null || typeof decision !== 'object' || decision.kind !== 'enter') return decision
@@ -259,27 +257,36 @@ export function apply(ctx, _config) {
     for (const message of messages) {
       reportInjectedMessage(ctx, agent, message)
     }
-    return decision
-  })
 
-  ctx.on('session/event', (session, event) => {
-    if (event === null || typeof event !== 'object' || event.type !== 'user/message') return
-    const source = event.data?.source
-    if (source === null || typeof source !== 'object') return
-    if (source.kind !== 'goal' && source.plugin !== 'tool-goal' && source.plugin !== 'plan-mode') return
-    const agent = sessionAgentOf(ctx, session)
-    if (agent === undefined) return
-
-    // 非 Kaz 会话不应被这个 preset 脚本干预（防御性检查）。
+    // plan/mode 状态事件兜底：本轮新增的切换（seq > 已见且发生在插件加载后）
+    // 合成进入/退出通知。轮间切换会在这里自然落到“plan 模式生效的那一轮”。
     try {
-      const svc = ctx.get('kazMode')
-      if (svc && typeof svc.kazEnabled === 'function' && agent && svc.kazEnabled(agent) !== true) {
-        return
+      const events = agent.session?.events
+      if (Array.isArray(events)) {
+        const sessionId = agent.id ?? agent.session?.id
+        if (typeof sessionId === 'string') {
+          const lastSeen = lastPlanModeSeq.get(sessionId) ?? -1
+          let maxSeen = lastSeen
+          for (const event of events) {
+            if (event === null || typeof event !== 'object' || event.type !== 'plan/mode') continue
+            const seq = typeof event.seq === 'number' ? event.seq : -1
+            if (seq > maxSeen) maxSeen = seq
+            if (seq <= lastSeen) continue
+            // resume/冷启动的旧事件不补报（插件加载时间之前的切换已经过去）。
+            if (typeof event.time === 'number' && event.time < startedAt) continue
+            if (typeof event.data?.active !== 'boolean') continue
+            const text = event.data.active
+              ? 'The user switched this session to plan mode.'
+              : 'The user switched this session back to the default mode.'
+            reportRoundDisplay(ctx, agent, text, 'plan-mode', 'plan mode notice')
+          }
+          if (maxSeen > lastSeen) lastPlanModeSeq.set(sessionId, maxSeen)
+        }
       }
     } catch {
-      // 服务缺失时不拦截，继续按 Kaz 预设处理
+      // 上报失败不影响主流程
     }
 
-    reportInjectedMessage(ctx, agent, event.data)
+    return decision
   })
 }

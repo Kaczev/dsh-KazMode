@@ -4,7 +4,8 @@
 //     （persona + plan:policy + tool:goal，"\n\n" 连接，空段过滤）；
 //   ② kaz-system-prompt.mjs：agent/pre-step 上报 plan-mode 通知、goal-round-driver
 //      <goal_round>、tool-goal <goal_complete>/<goal_blocked>；reject 的 step 不上报；
-//      session/event 兜底同样上报；
+//      plan/mode 状态事件由 pre-step 扫描 agent.session.events 合成通知
+//      （session/event 在 agent scope 收不到，故不走该通道）；
 //   ③ round-display：list / history 内条目按 at 降序（新消息排上）+ 同轮去重。
 // 运行：node KazPlugins/round-display/probe-round-display.mjs
 import { apply as kspApply } from "file:///C:/Users/Kaczev/Documents/GitHub/dsh-KazMode/kaz/kaz-system-prompt.mjs";
@@ -117,7 +118,7 @@ function makeSettings() {
 // ① kaz-system-prompt.mjs：真实系统提示词上报
 // ---------------------------------------------------------------------------
 {
-  const AGENT = { id: "s-kaz" };
+  const AGENT = { id: "s-kaz", session: { events: [] } };
   const kspReports = [];
   const mock = makeMockCtx({
     provided: {
@@ -200,19 +201,50 @@ function makeSettings() {
     check("②.b pre-step reject 不上报", kspReports.length === before);
   }
 
-  // ②.c session/event：plan-mode 通知落盘时兜底上报
+  // ②.c pre-step 扫描 plan/mode 状态事件：本轮新增进入 → 合成通知
+  //   （dsh-plan-mode 在“首条消息前进入”和 exit_plan_mode 退出时都不产生
+  //    source.plugin === "plan-mode" 的消息，必须由状态事件兜底）
   {
-    const sessionEvent = mock.listeners.get("session/event")[0];
-    const notice = {
-      role: "user",
-      content: [{ type: "text", text: "The user switched this session back to the default mode." }],
-      source: { kind: "plugin", plugin: "plan-mode", form: "notice", summary: "The user switched this session back to the default mode." },
-    };
+    const preStep = mock.listeners.get("agent/pre-step")[0];
+    const events = AGENT.session.events;
+    events.push({ type: "plan/mode", seq: 1, time: Date.now(), data: { active: true } });
+    const decision = { kind: "enter", messages: [] };
     const before = kspReports.length;
-    sessionEvent({ id: AGENT.id }, { type: "user/message", data: notice });
+    await preStep({ agent: AGENT }, async () => decision);
     const reports = kspReports.slice(before);
     const noticeReport = reports.find((r) => r.plugin === "plan-mode");
-    check("②.c session/event 兜底上报 plan-mode 退出通知", noticeReport !== undefined && noticeReport.content === "The user switched this session back to the default mode.");
+    check("②.c pre-step 扫描 plan/mode 进入事件合成通知", noticeReport !== undefined && noticeReport.content === "The user switched this session to plan mode.");
+  }
+
+  // ②.c2 pre-step：同一 plan/mode 不重复上报；新退出事件再上报
+  {
+    const preStep = mock.listeners.get("agent/pre-step")[0];
+    const events = AGENT.session.events;
+    const before = kspReports.length;
+    await preStep({ agent: AGENT }, async () => ({ kind: "enter", messages: [] }));
+    check("②.c2 同一 plan/mode 不重复上报", kspReports.length === before);
+
+    events.push({ type: "plan/mode", seq: 2, time: Date.now(), data: { active: false } });
+    const before2 = kspReports.length;
+    await preStep({ agent: AGENT }, async () => ({ kind: "enter", messages: [] }));
+    const reports = kspReports.slice(before2);
+    const noticeReport = reports.find((r) => r.plugin === "plan-mode");
+    check("②.c2 pre-step 扫描 plan/mode 退出事件合成通知", noticeReport !== undefined && noticeReport.content === "The user switched this session back to the default mode.");
+  }
+
+  // ②.c3 pre-step：插件加载前已存在的旧 plan/mode 事件不补报（resume 基线）
+  //   用全新 agent id，确保 lastPlanModeSeq 从 -1 开始，真正走 time < startedAt 分支。
+  {
+    const preStep = mock.listeners.get("agent/pre-step")[0];
+    const resumeAgent = { id: "s-kaz-resume", session: { events: [] } };
+    resumeAgent.session.events.push({ type: "plan/mode", seq: 1, time: 1, data: { active: true } });
+    const before = kspReports.length;
+    await preStep({ agent: resumeAgent }, async () => ({ kind: "enter", messages: [] }));
+    check("②.c3 插件加载前的旧 plan/mode 不补报", kspReports.length === before);
+    // 基线已推进：即使再来一次也不补报。
+    const before2 = kspReports.length;
+    await preStep({ agent: resumeAgent }, async () => ({ kind: "enter", messages: [] }));
+    check("②.c3 旧事件基线已推进，不重复补报", kspReports.length === before2);
   }
 
   // ①.c tool:goal 段保留：persona + tool:goal → 真实 system = persona + tool:goal
@@ -304,36 +336,6 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const wrapReport = reports.find((r) => r.plugin === "tool-goal");
     check("②.e pre-step 上报 tool-goal wrapup", wrapReport !== undefined && wrapReport.content.includes("<goal_complete>"));
-  }
-
-  // ②.f session/event：goal_round 兜底上报
-  {
-    const sessionEvent = mock.listeners.get("session/event")[0];
-    const roundMessage = {
-      role: "user",
-      content: [{ type: "text", text: "<goal_round>\nObjective: \"x\"\nRound: 2/3\n</goal_round>" }],
-      source: { kind: "goal", goalId: "g1", revision: 1, round: 2 },
-    };
-    const before = kspReports.length;
-    sessionEvent({ id: AGENT.id }, { type: "user/message", data: roundMessage });
-    const reports = kspReports.slice(before);
-    const goalReport = reports.find((r) => r.plugin === "goal-round-driver");
-    check("②.f session/event 兜底上报 goal_round", goalReport !== undefined && goalReport.content.includes("<goal_round>"));
-  }
-
-  // ②.g session/event：tool-goal wrapup 兜底上报
-  {
-    const sessionEvent = mock.listeners.get("session/event")[0];
-    const wrapup = {
-      role: "user",
-      content: [{ type: "text", text: "<goal_blocked>\nObjective: \"x\"\nBlocked: \"y\"\n</goal_blocked>" }],
-      source: { kind: "plugin", plugin: "tool-goal", form: "notice", summary: "blocked: x" },
-    };
-    const before = kspReports.length;
-    sessionEvent({ id: AGENT.id }, { type: "user/message", data: wrapup });
-    const reports = kspReports.slice(before);
-    const wrapReport = reports.find((r) => r.plugin === "tool-goal");
-    check("②.g session/event 兜底上报 tool-goal wrapup", wrapReport !== undefined && wrapReport.content.includes("<goal_blocked>"));
   }
 
   // ②.h pre-step：goal round 被 reject 的 step 不上报
