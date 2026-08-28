@@ -176,7 +176,7 @@ const PROMPT_RULES = [
     id: 'kaz-memory',
     test: (ctx, agent) => pluginEnabled(ctx, agent, 'kaz-memory'),
     text:
-      "You are a helpful software engineer assistant. Always reason as 'we'. Maintain a calm, declarative tone."+"\n"+
+      "You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone."+"\n"+
       "---"+"\n"+
       "Search memory at the start and whenever stuck or needing details (e.g., request format). Keep gray reasoning concise — use short, clear *ENGLISH* sentences. If stuck or circling, search memory again; if still unresolved, report to the user."+"\n"+
       "---"+"\n"+
