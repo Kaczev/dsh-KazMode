@@ -43,6 +43,7 @@ import {
   DEFAULT_DISABLED_TOOLS,
   MANAGED_PLUGINS,
   MEMORY_TOOLS,
+  MANAGED_CARRIER_TOOLS,
   computeSurface,
   normalizeExternalKey,
   normalizePluginEnableDict,
@@ -106,6 +107,8 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   },
   "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "first-round-hints": { enabled: false },
+  "ka-whale-workflow": { enabled: false, includeSubagents: false },
+  "create-plan": { enabled: false },
 };
 
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
@@ -1103,20 +1106,47 @@ export default {
     }
 
     /** 当前会话 kaz_tool_auto_on 命中的工具：按 agent 所在项目的三层生效状态，
-     *  仅当对应功能开关打开、且该会话 plan/goal 模式激活时返回配置的工具清单。 */
-    function autoOnToolsFor(agent) {
+     *  仅当对应功能开关打开、且该会话 plan/goal/鲸鱼工作流阶段命中时返回配置的工具清单。 */
+    function whaleStageOf(agent) {
+      try {
+        const svc = ctx.get("kaWhaleWorkflow");
+        if (svc !== undefined && svc !== null && typeof svc.stageOf === "function") {
+          const stage = svc.stageOf(agent);
+          if (stage === "reconstruction" || stage === "classification" || stage === "done") return stage;
+        }
+      } catch {
+        // fall through
+      }
+      return null;
+    }
+
+    function pushTool(out, tool) {
+      if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
+    }
+
+    function autoOnToolsFor(agent, states) {
       if (agent === null || agent === undefined || typeof agent !== "object") return [];
       const layers = loadAutoOnLayers(workspaceOfAgent(agent), ctx.logger);
       const effective = layers.effective;
       const out = [];
       if (effective.plan?.enabled === true && planModeActive(agent)) {
-        for (const tool of Array.isArray(effective.plan.tools) ? effective.plan.tools : []) {
-          if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
-        }
+        for (const tool of Array.isArray(effective.plan.tools) ? effective.plan.tools : []) pushTool(out, tool);
       }
       if (effective.goal?.enabled === true && goalModeActive(agent)) {
-        for (const tool of Array.isArray(effective.goal.tools) ? effective.goal.tools : []) {
-          if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
+        for (const tool of Array.isArray(effective.goal.tools) ? effective.goal.tools : []) pushTool(out, tool);
+      }
+      // 鲸鱼工作流：whale_report 在重构/分类临时放行；launch 工具仅在分类临时放行。
+      if (effective.whale?.enabled === true && states?.["ka-whale-workflow"]?.enabled === true) {
+        const stage = whaleStageOf(agent);
+        if (stage === "reconstruction" || stage === "classification") {
+          for (const tool of Array.isArray(effective.whale.tools) ? effective.whale.tools : []) pushTool(out, tool);
+        }
+        if (stage === "classification" && effective.whale.launch?.enabled === true) {
+          for (const tool of Array.isArray(effective.whale.launch.tools) ? effective.whale.launch.tools : []) {
+            // create_plan 受 create-plan 组件开关门控；create_goal 是官方工具，直接放行。
+            if (tool === "create_plan" && states?.["create-plan"]?.enabled !== true) continue;
+            pushTool(out, tool);
+          }
         }
       }
       return out;
@@ -1164,6 +1194,7 @@ export default {
         active: {
           plan: agent !== null ? planModeActive(agent) : false,
           goal: agent !== null ? goalModeActive(agent) : false,
+          whale: agent !== null ? whaleStageOf(agent) : null,
         },
         features: {
           plan: {
@@ -1189,6 +1220,30 @@ export default {
             defaultDrifted: !autoOnSettingsEqual(
               { goal: layers.defaults.goal },
               { goal: layers.original.goal },
+            ),
+          },
+          whale: {
+            enabled: layers.effective.whale.enabled,
+            tools: [...layers.effective.whale.tools],
+            launch: {
+              enabled: layers.effective.whale.launch.enabled,
+              tools: [...layers.effective.whale.launch.tools],
+              overridden: !autoOnSettingsEqual(
+                { whale: { launch: layers.effective.whale.launch } },
+                { whale: { launch: layers.defaults.whale.launch } },
+              ),
+              defaultDrifted: !autoOnSettingsEqual(
+                { whale: { launch: layers.defaults.whale.launch } },
+                { whale: { launch: layers.original.whale.launch } },
+              ),
+            },
+            overridden: !autoOnSettingsEqual(
+              { whale: layers.effective.whale },
+              { whale: layers.defaults.whale },
+            ),
+            defaultDrifted: !autoOnSettingsEqual(
+              { whale: layers.defaults.whale },
+              { whale: layers.original.whale },
             ),
           },
         },
@@ -1280,13 +1335,19 @@ export default {
         ctx.logger?.debug?.("[kaz-mode] 计算统一工具插件面失败：" + safeMessage(error));
         whitelist = new Set();
       }
-      // kaz_tool_auto_on：当前会话 plan/goal 模式激活时，按项目三层生效设置
-      // 临时放行对应工具；模式结束自动移除。
-      for (const tool of autoOnToolsFor(agent)) whitelist.add(tool);
+      // kaz_tool_auto_on：当前会话 plan/goal/鲸鱼工作流阶段命中时，按项目三层生效设置
+      // 临时放行对应工具；模式/阶段结束自动移除。
+      for (const tool of autoOnToolsFor(agent, states)) whitelist.add(tool);
       // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
       // 才保留记忆工具，避免新对话/未落盘状态被误判为启用。
       if (states["kaz-memory"]?.enabled !== true) {
         for (const tool of MEMORY_TOOLS) whitelist.delete(tool);
+      }
+      // 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，对应工具不进入工具面。
+      for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
+        if (states[pluginId]?.enabled !== true) {
+          for (const tool of tools) whitelist.delete(tool);
+        }
       }
       const minimalPhase = isMinimalAgent(agent) === true;
       let firstRoundTools = [];
@@ -1312,11 +1373,20 @@ export default {
       });
     }
 
-    /** 非 Kaz 会话：记忆工具是否可见只取决于该会话的插件开关（其余交还宿主）。
-     *  2026-08-21 加固：状态缺失（undefined）按「禁用」处理——原先 `!== false`
-     *  会把新对话/未落盘状态的会话误判为启用，导致 kaz-memory 在已关闭时仍注入指引。 */
+    /** 某工具是否属于“携带工具的 Kaz 被管理组件”且该组件当前未启用。 */
+    function carrierToolHidden(states, name) {
+      for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
+        if (tools.includes(name)) return states[pluginId]?.enabled !== true;
+      }
+      return false;
+    }
+
+    /** 非 Kaz 会话：记忆工具/携带工具组件的工具是否可见只取决于该会话的插件开关
+     *  （其余交还宿主）。2026-08-21 加固：状态缺失（undefined）按「禁用」处理——
+     *  原先 `!== false` 会把新对话/未落盘状态的会话误判为启用。 */
     function nonKazToolVisible(states, name) {
       if (MEMORY_TOOLS.includes(name)) return states["kaz-memory"]?.enabled === true;
+      if (carrierToolHidden(states, name)) return false;
       return true;
     }
 
@@ -1327,6 +1397,7 @@ export default {
      *   - pluginConfig(agent, pluginId)  该 agent 项目里某插件的【完整生效配置】
      *     = 工厂默认 + 当前模式默认(kaz-defaults.json) + 项目专属覆盖(kaz-project-states.json)。
      *     无会话/无覆盖时返回 null，调用方回落到插件自身 settings.yaml。
+     *   - pluginTools(agent, pluginId) 该 agent 项目工具控制面板中某插件当前启用的工具名列表；
      *   - toolVisible(agent, name)    该 agent 会话里某工具是否在工具面内；
      *   - surfaceOf(agent)            Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
      */
@@ -1343,6 +1414,20 @@ export default {
         const states = agentEffectiveStates(agent);
         const state = states[pluginId];
         return state !== null && state !== undefined && typeof state === "object" ? { ...state } : null;
+      },
+      pluginTools: (agent, pluginId) => {
+        // 返回工具控制面板中该插件当前启用的工具名列表（ka-whale-workflow 重构清单用）。
+        if (agent === null || agent === undefined || typeof agent !== "object") return [];
+        if (typeof pluginId !== "string" || pluginId.length === 0) return [];
+        try {
+          const layers = loadExternalToolPluginLayers(workspaceOfAgent(agent), ctx.logger);
+          if (layers.effective.P?.[pluginId] !== true) return [];
+          const tools = layers.effective.T?.[pluginId] ?? {};
+          return Object.keys(tools).filter((tool) => tools[tool] === true);
+        } catch (error) {
+          ctx.logger?.debug?.(`[kaz-mode] pluginTools(${pluginId}) 读取失败：` + safeMessage(error));
+          return [];
+        }
       },
       toolVisible: (agent, name) => {
         // 无 agent / 项目状态缺失时按「不可见」处理（2026-08-21 加固，避免误判为启用）。
@@ -1398,6 +1483,11 @@ export default {
         if (states["kaz-memory"]?.enabled !== true) {
           for (const tool of MEMORY_TOOLS) remove.add(tool);
         }
+        for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
+          if (states[pluginId]?.enabled !== true) {
+            for (const tool of tools) remove.add(tool);
+          }
+        }
         if (remove.size > 0) {
           assembly.tools = assembly.tools.filter((tool) => {
             if (tool === null || typeof tool !== "object") return true;
@@ -1431,12 +1521,20 @@ export default {
         return next();
       }
 
-      // 非 Kaz 会话：记忆工具按项目开关拒绝（常驻注册但该项目不可用）。
+      // 非 Kaz 会话：记忆工具/携带工具组件按项目开关拒绝（常驻注册但该项目不可用）。
       if (MEMORY_TOOLS.includes(name) && states["kaz-memory"]?.enabled === false) {
         ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（该项目 kaz-memory 已关闭）`);
         return {
           kind: "deny",
           reason: `工具 "${name}" 在当前项目不可用（kaz-memory 已关闭）；如需使用请在 Kaz 面板的当前项目专属设置中开启 kaz-memory。`,
+        };
+      }
+      if (carrierToolHidden(states, name)) {
+        const pluginId = Object.entries(MANAGED_CARRIER_TOOLS).find(([, tools]) => tools.includes(name))?.[0] ?? "未知组件";
+        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（组件 ${pluginId} 已关闭）`);
+        return {
+          kind: "deny",
+          reason: `工具 "${name}" 在当前项目不可用（${pluginId} 已关闭）；如需使用请在 Kaz 面板的当前项目专属设置中开启对应组件。`,
         };
       }
       return next();
@@ -1913,21 +2011,41 @@ export default {
         }
 
         if (endpoint === "setToolAutoOn") {
-          const feature = input.feature === "plan" || input.feature === "goal" ? input.feature : null;
-          if (feature === null) return rpcFail("feature 必须是 plan 或 goal");
+          const feature = input.feature === "plan" || input.feature === "goal" || input.feature === "whale" ? input.feature : null;
+          if (feature === null) return rpcFail("feature 必须是 plan、goal 或 whale");
           const layer = input.layer === "user" || input.layer === "project" ? input.layer : "project";
           const cwd = resolveAutoOnCwd();
           const file = layer === "user" ? userAutoOnPath() : projectAutoOnPath(cwd);
           const layerData = loadAutoOnLayerFile(file, ctx.logger);
+          const subLaunch = feature === "whale" && input.sub === "launch";
           if (input.reset === true) {
-            delete layerData[feature];
+            if (subLaunch) {
+              const entry = layerData[feature] ?? {};
+              delete entry.launch;
+              if (Object.keys(entry).length === 0) delete layerData[feature];
+              else layerData[feature] = entry;
+            } else {
+              delete layerData[feature];
+            }
           } else {
             const entry = layerData[feature] ?? {};
-            if (typeof input.enabled === "boolean") entry.enabled = input.enabled;
-            if (Array.isArray(input.tools)) {
-              const normalized = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature];
-              if (normalized !== undefined && Array.isArray(normalized.tools)) entry.tools = normalized.tools;
-              else delete entry.tools;
+            if (subLaunch) {
+              const launch = entry.launch ?? {};
+              if (typeof input.enabled === "boolean") launch.enabled = input.enabled;
+              if (Array.isArray(input.tools)) {
+                const normalized = normalizeAutoOnLayer({ whale: { launch: { tools: input.tools } } }).whale?.launch;
+                if (normalized !== undefined && Array.isArray(normalized.tools)) launch.tools = normalized.tools;
+                else delete launch.tools;
+              }
+              if (Object.keys(launch).length > 0) entry.launch = launch;
+              else delete entry.launch;
+            } else {
+              if (typeof input.enabled === "boolean") entry.enabled = input.enabled;
+              if (Array.isArray(input.tools)) {
+                const normalized = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature];
+                if (normalized !== undefined && Array.isArray(normalized.tools)) entry.tools = normalized.tools;
+                else delete entry.tools;
+              }
             }
             if (Object.keys(entry).length > 0) layerData[feature] = entry;
             else delete layerData[feature];

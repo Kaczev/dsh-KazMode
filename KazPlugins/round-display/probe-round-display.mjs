@@ -172,6 +172,31 @@ function makeSettings() {
     check("①.b plan 空段被过滤，只报 persona", systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.");
   }
 
+  // ①.b2 whale section：persona + ka-whale-workflow:prompt 都被保留
+  {
+    const assemble = mock.listeners.get("system-prompt/assemble")[0];
+    const assembly = {
+      sections: [
+        { name: "ka-whale-workflow:prompt", text: "WHALE_SECTION" },
+        { name: "deployment:persona", text: "ignored" },
+      ],
+      contexts: [],
+      variables: {},
+    };
+    const before = kspReports.length;
+    await assemble(assembly, { agent: AGENT }, async () => assembly);
+    const reports = kspReports.slice(before);
+    const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
+    check(
+      "①.b2 保留 ka-whale-workflow 段（persona 最前）",
+      systemReport !== undefined &&
+        systemReport.content === "You are a helpful software engineer assistant.\n\nWHALE_SECTION" &&
+        assembly.sections.length === 2 &&
+        assembly.sections[0].name === "deployment:persona" &&
+        assembly.sections[1].name === "ka-whale-workflow:prompt",
+    );
+  }
+
   // ②.a pre-step：plan-mode 进入通知上报
   {
     const preStep = mock.listeners.get("agent/pre-step")[0];

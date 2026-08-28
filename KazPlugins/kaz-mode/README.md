@@ -16,6 +16,8 @@ Kaz 模式同时具备两个入口，双向同步：
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
 | `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
+| `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单在工具控制面板 `ka-whale-workflow` 插件下修改，`whale_report` / `create_goal` / `create_plan` 由「工具自动启用」临时放行 |
+| `create-plan` | 挂在 Kaz 预设 `planning` isolate 组：`create_plan` 工具，让鲸鱼自己启用 plan 模式 |
 
 **Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
 
@@ -83,14 +85,16 @@ kaz-mode 配置区内的临时工具放行区块，位于「工具控制面板�
   - 原设置：`kaz-shared/lib/tool-auto-on.js`（`TOOL_AUTO_ON_CONFIG`，只读）
   - 默认设置：`~/.dsh/storages/ka_tool_auto_on_setting.json`
   - 专属设置：`<项目>/.dsh/storages/ka_tool_auto_on_setting.json`
-  - 形状：`{ "plan": { "enabled": true, "tools": ["exit_plan_mode"] }, "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] } }`
-  - 生效值 = 专属覆盖默认、默认覆盖原设置（enabled / tools 逐项继承）。
+  - 形状：`{ "plan": { "enabled": true, "tools": ["exit_plan_mode"] }, "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] }, "whale": { "enabled": true, "tools": ["whale_report"], "launch": { "enabled": true, "tools": ["create_goal", "create_plan"] } } }`
+  - 生效值 = 专属覆盖默认、默认覆盖原设置（enabled / tools / launch 逐项继承）。
 - **plan 模式**：当前会话激活 plan 模式时，自动临时放行生效清单里的 plan 工具；
   plan 模式结束自动移除。
 - **goal 模式**：当前会话存在 active/paused 目标时，自动临时放行生效清单里的 goal 工具；
   goal 模式结束自动移除。
-- 两个功能在面板里都有独立开关，并可编辑各自临时放行工具清单；面板中模式激活且
-  开关打开时显示紫色「启用中」，模式结束自动恢复灰色。
+- **鲸鱼工作流**：任务重构/分类时临时放行 `whale_report`；任务分类时再放行子项
+  「各模式的启动工具」（`create_goal` / `create_plan`），工作流结束自动移除。
+- 三个功能在面板里都有独立开关，并可编辑各自临时放行工具清单；面板中模式/阶段激活且
+  开关打开时显示紫色「启用中」，模式/阶段结束自动恢复灰色。
 - **编辑即写项目专属 JSON**（同一项目所有对话共享）；「设为默认设置」把当前项目
   生效设置复制到用户默认 JSON；「恢复原设置 / 恢复默认设置」分别重置用户 / 项目层。
 - **模式限定**：`plan-mode` / `goal` 插件即使被工具控制面板 JSON 启用，也不进基础
@@ -200,6 +204,6 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
 6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「项目专属设置/默认设置」——settings.yaml
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
    `kaz-defaults.json`、`kaz-project-states.json` 与工具控制面板 JSON。
-7. 进入 plan / goal 模式时，kaz-mode 配置区「Kaz 模式工具自动启用」显示紫色「启用中」，
-   对应工具临时放行；模式结束自动移除。面板编辑只写 `ka_tool_auto_on_setting.json`
-   （用户默认 / 项目专属），不写工具控制面板 JSON 与 settings.yaml。
+7. 进入 plan / goal 模式、鲸鱼工作流阶段命中时，kaz-mode 配置区「Kaz 模式工具自动启用」
+   显示紫色「启用中」，对应工具临时放行；模式/阶段结束自动移除。面板编辑只写
+   `ka_tool_auto_on_setting.json`（用户默认 / 项目专属），不写工具控制面板 JSON 与 settings.yaml。

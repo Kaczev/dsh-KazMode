@@ -27,7 +27,7 @@ window.__ModuleLoader__.load({
 		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 };
 
 		/** Kaz 模式当前版本兜底值：正常会通过 RPC 读取 package.json 的 version，这里只在 RPC 失败时使用。 */
-		const KAZ_CURRENT_VERSION = "3.1.0";
+		const KAZ_CURRENT_VERSION = "3.3.0";
 		/** Kaz 模式 GitHub 仓库地址。 */
 		const KAZ_GITHUB_REPO_URL = "https://github.com/Kaczev/dsh-KazMode";
 		/** GitHub tags API（只用来做“有没有新版本”提醒）。 */
@@ -184,6 +184,27 @@ window.__ModuleLoader__.load({
 					{ key: "message", kind: "textarea", label: "message（注入的消息内容；留空 = 内置默认 pwsh 使用要点）" },
 				],
 			},
+			{
+				id: "ka-whale-workflow",
+				namespace: "ka-whale-workflow",
+				name: "ka-whale-workflow",
+				tag: "鲸鱼工作流 · 任务重构→任务分类",
+				note: "用户消息后先任务重构，再任务分类；whale_report / create_goal / create_plan 由「工具自动启用」面板临时放行。",
+				fields: [
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不进入鲸鱼工作流）" },
+					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走鲸鱼工作流；默认关）" },
+				],
+			},
+			{
+				id: "create-plan",
+				namespace: "create-plan",
+				name: "create-plan",
+				tag: "create_plan 工具 · 启用 plan 模式",
+				note: "挂在 Kaz 预设 planning isolate 组；create_plan 仅在任务分类时经「工具自动启用」临时放行。",
+				fields: [
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后 create_plan 不进入工具面）" },
+				],
+			},
 		];
 
 		/** 常驻补丁插件：不随 Kaz/非Kaz 模式切换而关闭，专门修正 dsh 显示/体验问题。 */
@@ -216,7 +237,7 @@ window.__ModuleLoader__.load({
 			"plan-mode-controller",
 		]);
 		/** Kaz 模式自家插件，排序时位于官方之上、外置之下。 */
-		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory"]);
+		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory", "ka-whale-workflow"]);
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
 		const RPC_CHANNEL = "/kaz-mode";
@@ -1410,7 +1431,7 @@ window.__ModuleLoader__.load({
 			function ToolAutoOnSection({ sessionId, cwd, writable }) {
 				const [data, setData] = useState(null);
 				const [busy, setBusy] = useState(false);
-				const [drafts, setDrafts] = useState({ plan: null, goal: null });
+				const [drafts, setDrafts] = useState({ plan: null, goal: null, whale: null, whaleLaunch: null });
 
 				const refresh = useCallback(async () => {
 					// 轮询只刷新数据，不进入 busy 态，避免“正在同步”闪烁并锁住输入框。
@@ -1419,7 +1440,7 @@ window.__ModuleLoader__.load({
 				}, [sessionId, cwd]);
 
 				useEffect(() => {
-					setDrafts({ plan: null, goal: null });
+					setDrafts({ plan: null, goal: null, whale: null, whaleLaunch: null });
 					void refresh();
 					// 面板打开时轮询：模型调用 exit_plan_mode / goal 结束等状态变化会实时反映。
 					const timer = setInterval(() => void refresh(), 1500);
@@ -1465,7 +1486,7 @@ window.__ModuleLoader__.load({
 
 				const effective = data.effective !== null && typeof data.effective === "object" ? data.effective : {};
 				const featureFlags = data.features !== null && typeof data.features === "object" ? data.features : {};
-				const active = data.active !== null && typeof data.active === "object" ? data.active : { plan: false, goal: false };
+				const active = data.active !== null && typeof data.active === "object" ? data.active : { plan: false, goal: false, whale: null };
 
 				const hasProjectOverrides = data.hasProjectOverrides === true;
 				const effectiveEqualsFactory = data.effectiveEqualsFactory === true;
@@ -1504,6 +1525,121 @@ window.__ModuleLoader__.load({
 					{ id: "goal", label: "goal 模式", toolsLabel: "goal 临时放行工具", placeholder: "get_goal, update_goal", description: "存在 active/paused 目标时临时放行这些工具；goal 模式结束自动移除。" },
 				];
 
+				const whaleFeature = effective.whale !== null && typeof effective.whale === "object" ? effective.whale : { enabled: false, tools: [], launch: { enabled: false, tools: [] } };
+				const whaleFlags = featureFlags.whale !== null && typeof featureFlags.whale === "object" ? featureFlags.whale : {};
+				const whaleLaunchFlags = whaleFlags.launch !== null && typeof whaleFlags.launch === "object" ? whaleFlags.launch : {};
+				const whaleActive = active.whale === "reconstruction" || active.whale === "classification";
+				const whaleLaunchActive = active.whale === "classification";
+				const whaleDraft = drafts.whale;
+				const whaleText = whaleDraft !== null ? whaleDraft : Array.isArray(whaleFeature.tools) ? whaleFeature.tools.join(", ") : "";
+				const whaleLaunchDraft = drafts.whaleLaunch;
+				const whaleLaunchText = whaleLaunchDraft !== null ? whaleLaunchDraft : Array.isArray(whaleFeature.launch && whaleFeature.launch.tools) ? whaleFeature.launch.tools.join(", ") : "";
+				const renderWhaleItem = () =>
+					createElement(
+						"div",
+						{ key: "whale", className: "kzm-state-item" },
+						createElement(
+							"div",
+							{ className: "kzm-state-row" },
+							createElement("span", { className: "kzm-state-name", title: "鲸鱼工作流：whale_report 在重构/分类临时放行；各模式的启动工具仅在分类临时放行。" }, "鲸鱼工作流"),
+							createElement("span", { className: "kzm-auto-on-status", "data-on": whaleActive ? "true" : "false" }, whaleActive ? "启用中" : "未启用"),
+							whaleFlags.overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
+							whaleFlags.overridden === true &&
+								createElement(
+									"button",
+									{
+										type: "button",
+										className: "kzm-reset-btn",
+										title: "清除鲸鱼工作流的项目专属设置，恢复为用户默认设置",
+										disabled: !writable || busy,
+										onClick: () => void applyPatch({ feature: "whale", reset: true }),
+									},
+									"恢复默认",
+								),
+							createElement(Toggle, {
+								checked: whaleFeature.enabled === true,
+								disabled: !writable || busy,
+								title: "鲸鱼工作流自动启用开关",
+								onChange: (next) => void applyPatch({ feature: "whale", enabled: next }),
+							}),
+						),
+						createElement(
+							"div",
+							{ className: "kzm-field" },
+							createElement("label", null, "whale_report（重构/分类临时放行，逗号分隔）"),
+							createElement("input", {
+								className: "kzm-input",
+								type: "text",
+								value: whaleText,
+								disabled: !writable || busy,
+								placeholder: "whale_report",
+								spellCheck: false,
+								onChange: (event) => setDrafts((prev) => ({ ...prev, whale: event.target.value })),
+								onBlur: () => {
+									if (whaleDraft === null) return;
+									const parsed = whaleDraft
+										.split(",")
+										.map((part) => part.trim())
+										.filter((part) => part.length > 0);
+									setDrafts((prev) => ({ ...prev, whale: null }));
+									void applyPatch({ feature: "whale", tools: parsed });
+								},
+							}),
+						),
+						createElement(
+							"div",
+							{ className: "kzm-state-item", style: { marginLeft: "14px", borderTop: "1px dashed var(--dsw-alias-border-l2)" } },
+							createElement(
+								"div",
+								{ className: "kzm-state-row" },
+								createElement("span", { className: "kzm-state-name", title: "仅任务分类时临时放行 create_goal / create_plan。" }, "各模式的启动工具"),
+								createElement("span", { className: "kzm-auto-on-status", "data-on": whaleLaunchActive ? "true" : "false" }, whaleLaunchActive ? "启用中" : "未启用"),
+								whaleLaunchFlags.overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
+								whaleLaunchFlags.overridden === true &&
+									createElement(
+										"button",
+										{
+											type: "button",
+											className: "kzm-reset-btn",
+											title: "清除「各模式的启动工具」的项目专属设置",
+											disabled: !writable || busy,
+											onClick: () => void applyPatch({ feature: "whale", sub: "launch", reset: true }),
+										},
+										"恢复默认",
+									),
+								createElement(Toggle, {
+									checked: whaleFeature.launch && whaleFeature.launch.enabled === true,
+									disabled: !writable || busy,
+									title: "各模式的启动工具 自动启用开关",
+									onChange: (next) => void applyPatch({ feature: "whale", sub: "launch", enabled: next }),
+								}),
+							),
+							createElement(
+								"div",
+								{ className: "kzm-field" },
+								createElement("label", null, "各模式启动工具（逗号分隔，仅分类时临时放行）"),
+								createElement("input", {
+									className: "kzm-input",
+									type: "text",
+									value: whaleLaunchText,
+									disabled: !writable || busy,
+									placeholder: "create_goal, create_plan",
+									spellCheck: false,
+									onChange: (event) => setDrafts((prev) => ({ ...prev, whaleLaunch: event.target.value })),
+									onBlur: () => {
+										if (whaleLaunchDraft === null) return;
+										const parsed = whaleLaunchDraft
+											.split(",")
+											.map((part) => part.trim())
+											.filter((part) => part.length > 0);
+										setDrafts((prev) => ({ ...prev, whaleLaunch: null }));
+										void applyPatch({ feature: "whale", sub: "launch", tools: parsed });
+									},
+								}),
+							),
+						),
+					);
+
 				return createElement(
 					"div",
 					{ className: "kzm-state-section" },
@@ -1538,7 +1674,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-state-desc" },
-						"三层设置：原设置（代码出厂）→ 默认设置（用户 ka_tool_auto_on_setting.json）→ 专属设置（项目 ka_tool_auto_on_setting.json），同一项目所有对话共享；plan/goal 模式激活时把生效清单临时加入该会话工具面，模式结束自动移除。仅 Kaz 会话生效。当前项目：" + (targetCwd() || "（未知）"),
+						"三层设置：原设置（代码出厂）→ 默认设置（用户 ka_tool_auto_on_setting.json）→ 专属设置（项目 ka_tool_auto_on_setting.json），同一项目所有对话共享；plan/goal 模式激活、鲸鱼工作流阶段命中时把生效清单临时加入该会话工具面，模式/阶段结束自动移除。仅 Kaz 会话生效。当前项目：" + (targetCwd() || "（未知）"),
 					),
 					FEATURE_META.map((meta) => {
 						const feature = effective[meta.id] !== null && typeof effective[meta.id] === "object" ? effective[meta.id] : { enabled: false, tools: [] };
@@ -1600,6 +1736,7 @@ window.__ModuleLoader__.load({
 							),
 						);
 					}),
+					renderWhaleItem(),
 					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
 				);
 			}

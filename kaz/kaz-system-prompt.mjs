@@ -206,6 +206,9 @@ function resolvePrompt(ctx, agent) {
 /** persona 段名（与 kaz preset 的 persona 行一致）。 */
 const PERSONA_SECTION = 'deployment:persona'
 
+/** ka-whale-workflow 工作流提示词段前缀（保持 persona 之后、plan/goal 之前）。 */
+const WHALE_SECTION_PREFIX = 'ka-whale-workflow:'
+
 export function apply(ctx, _config) {
   ctx.on('system-prompt/assemble', async (assembly, context, next) => {
     const agent = context?.agent
@@ -255,6 +258,14 @@ export function apply(ctx, _config) {
     if (!personaKept) {
       kept.push({ name: PERSONA_SECTION, order: 0, text: prompt })
     }
+    const whaleSections = assembly.sections.filter(
+      (section) =>
+        section !== null &&
+        typeof section === 'object' &&
+        typeof section.name === 'string' &&
+        section.name.startsWith(WHALE_SECTION_PREFIX),
+    )
+    for (const section of whaleSections) kept.push(section)
     if (planSection !== undefined) kept.push(planSection)
     if (goalSection !== undefined && goalActive(ctx, agent)) {
       goalSection.text = customGoalSystemPrompt(goalSection.text)
@@ -265,9 +276,9 @@ export function apply(ctx, _config) {
     // 等后续监听器（kaz-mode 只过滤工具段；round-minimal 首轮还会按首轮工具
     // 白名单过滤 tool:* 段）跑完，
     // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
-    // renderPrompt 一致：空段过滤、"\n\n" 连接）。plan 模式激活时内容 =
-    // persona 段 + plan:policy 段；goal 模式开启时再含 tool:goal 段（自定义文本）。
-    // persona 在最前，正是模型真实看到的 system 字段。
+    // renderPrompt 一致：空段过滤、"\n\n" 连接）。persona 在最前；ka-whale-workflow
+    // 段在 persona 之后；plan 模式激活时含 plan:policy 段；goal 模式开启时再含
+    // tool:goal 段（自定义文本）。这正是模型真实看到的 system 字段。
     const nextResult = await next()
     const finalAssembly = nextResult ?? assembly
     const finalPrompt = realPromptOf(finalAssembly?.sections)

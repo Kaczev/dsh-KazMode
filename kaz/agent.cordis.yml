@@ -144,6 +144,11 @@
               ---
               When ready, call exit_plan_mode with complete plan markdown (starting with #). This must be the only and final tool call in that response. Present the plan through exit_plan_mode — not as a plain reply or prose question. If rejected, incorporate feedback and present again. If review unavailable, stay in plan mode and ask user to switch manually; do not proceed.
 
+    - id: create-plan
+      name: create-plan
+      config:
+        enabled: true
+
 # ── compaction ──────────────────────────────────────────────────────────────
 
 # `compaction-basic` reads `toolResultPrune` through `ctx.get`, so the pruner must

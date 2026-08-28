@@ -72,6 +72,13 @@ export const MEMORY_TOOLS = [
   "memory_forget",
 ];
 
+/** 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，这些工具不应出现在工具面。
+ *  （whale_report 由 ka-whale-workflow 注册；create_plan 由 create-plan 注册。） */
+export const MANAGED_CARRIER_TOOLS = {
+  "ka-whale-workflow": ["whale_report"],
+  "create-plan": ["create_plan"],
+};
+
 /** Kaz 模式默认系统提示词。 */
 export const FIXED_PERSONA = "You are a helpful software engineer assistant.";
 
@@ -85,6 +92,8 @@ export const MANAGED_PLUGINS = [
   { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 采样参数）" },
   { id: "kaz-memory", label: "kaz-memory（独立记忆组件）" },
   { id: "first-round-hints", label: "first-round-hints（首轮其它消息提示 · 对话开始注入）" },
+  { id: "ka-whale-workflow", label: "ka-whale-workflow（鲸鱼工作流：任务重构→任务分类）" },
+  { id: "create-plan", label: "create-plan（create_plan 工具：鲸鱼自己启用 plan 模式）" },
 ];
 
 /** 由 TOOL_PLUGIN_CATALOG + TOOL_PLUGINS 派生的旧版兼容白名单。 */

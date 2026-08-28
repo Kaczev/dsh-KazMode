@@ -93,9 +93,11 @@
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（10 个插件 + kaz-shared 依赖包）
+├── KazPlugins/                     # 插件全家桶（12 个插件 + kaz-shared 依赖包）
+│   ├── create-plan/
 │   ├── deepseek-default-model/
 │   ├── first-round-hints/
+│   ├── ka-whale-workflow/
 │   ├── kaz-agent-preset-display/
 │   ├── kaz-memory/
 │   ├── kaz-mode/
@@ -132,6 +134,8 @@ dsh-KazMode/
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
+| `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单可在工具控制面板修改，`whale_report` / `create_goal` / `create_plan` 由工具自动启用面板临时放行 |
+| `create-plan` | `create-plan` | 挂在 Kaz 预设 planning isolate 组：`create_plan` 工具，让鲸鱼自己启用 plan 模式 |
 
 其中几个值得知道的插件（完整清单见上表）：
 
@@ -219,7 +223,7 @@ node KazPlugins/kaz-mode/check-version.mjs
 
 ## 附录 A：`cordis.patch.yml` 完整示例
 
-完整内容（10 个 insert 块）见 **`ds安装指引.md` 第 6 步** / **`ds更新指引.md` 第 8 步**，README 不再重复维护，避免两处漂移。安装 / 更新时按指引步骤操作即可。
+完整内容（11 个 insert 块，`create-plan` 在 kaz 预设内挂载、不在 cordis.patch）见 **`ds安装指引.md` 第 6 步** / **`ds更新指引.md` 第 8 步**，README 不再重复维护，避免两处漂移。安装 / 更新时按指引步骤操作即可。
 
 ## 附录 B：`settings.yaml` 说明（纯方案 A）
 

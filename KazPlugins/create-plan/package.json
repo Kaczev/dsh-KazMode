@@ -1,0 +1,20 @@
+{
+  "name": "create-plan",
+  "version": "0.1.0",
+  "description": "create_plan 组件：只提供一个 create_plan 工具，挂在 Kaz 预设 planning isolate 组内，让鲸鱼自己把当前会话切到 plan 模式。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/index.js"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  }
+}

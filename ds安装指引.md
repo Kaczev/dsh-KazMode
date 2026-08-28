@@ -65,11 +65,13 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 
 ## 第 4 步 在 package.json 注册依赖
 
-打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中**合并**下面 11 行：
+打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中**合并**下面 13 行：
 
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "first-round-hints": "file:KazPlugins/first-round-hints",
+"ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
+"create-plan": "file:KazPlugins/create-plan",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
 "kaz-memory": "file:KazPlugins/kaz-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
@@ -83,7 +85,7 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 
 规则：
 - **保留** `dependencies` 里已有的其它依赖（如 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等），只加不删其它项。
-- 若已存在旧的 Kaz 依赖行（例如 `kaz-diag`，或上面 11 行里的旧版本写法），用上面 11 行**替换**旧行，不要重复。
+- 若已存在旧的 Kaz 依赖行（例如 `kaz-diag`，或上面 13 行里的旧版本写法），用上面 13 行**替换**旧行，不要重复。
 - `kaz-shared` 是必需依赖：kaz-mode / kaz-memory / round-minimal / plugin-filter 都 import 它，漏装会导致插件加载失败。
 - 文件用 UTF-8 **无 BOM** 保存。用你的 edit 工具改即可；若必须用 PowerShell 写文件，用下面的写法（不要用 `Set-Content -Encoding UTF8`，它会写 BOM 破坏 JSON 解析）：
 
@@ -114,7 +116,7 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
 
 打开 `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`：
 
-1. **删除**文件中已有的 Kaz 相关 insert 块。按块内 `id` 判断，以下 10 个 id 都是 Kaz 的块，全部删掉（文件不存在则跳过本小步）：
+1. **删除**文件中已有的 Kaz 相关 insert 块。按块内 `id` 判断，以下 11 个 id 都是 Kaz 的块，全部删掉（文件不存在则跳过本小步）：
    - `memory`
    - `thinking-anchor`
    - `plugin-filter`
@@ -125,6 +127,7 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
    - `round-display`
    - `deepseek-default-model`
    - `first-round-hints`
+   - `ka-whale-workflow`
 2. 文件中**非 Kaz 的自定义块保留**，不要动。
 3. 把下面**完整内容**追加到文件末尾（文件不存在则新建，直接写入）：
 
@@ -192,9 +195,17 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
       name: first-round-hints
       config:
         enabled: true
+
+- insert:
+    - id: ka-whale-workflow
+      name: ka-whale-workflow
+      config:
+        enabled: true
 ```
 
-注意：`kaz-mode` 默认 `enabled: false` 是**正常**的，它由"选择 kaz 预设"这一动作联动开启，**不要改成 true**。
+注意：
+- `create-plan` **不**进 `cordis.patch.yml`，它由 `kaz/agent.cordis.yml` 的 `planning` isolate 组挂载（随 kaz 预设复制）。
+- `kaz-mode` 默认 `enabled: false` 是**正常**的，它由"选择 kaz 预设"这一动作联动开启，**不要改成 true**。
 
 出错处理：YAML 解析失败 / 报 BOM 错误 → 用 UTF-8 无 BOM 保存（同第 4 步的写法）。
 
@@ -202,7 +213,7 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
 
 **跳过本步骤，不要动 `%USERPROFILE%\.dsh\settings.yaml`。**
 
-原因（纯方案 A）：被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / first-round-hints）的生效配置由 kazMode 服务自动从下面两个 JSON 读取，自动创建：
+原因（纯方案 A）：被管理插件（thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / first-round-hints / ka-whale-workflow / create-plan）的生效配置由 kazMode 服务自动从下面两个 JSON 读取，自动创建：
 - `~/.dsh/storages/kaz-defaults.json`
 - `<项目>/.dsh/storages/kaz-project-states.json`
 
@@ -218,7 +229,7 @@ dsh.cmd --profile web --dump-config
 
 > 用 `dsh.cmd` 而不是 `dsh`：某些机器上 PowerShell 执行策略会拦截 `dsh.ps1`（报 "running scripts is disabled"），`dsh.cmd` 不受影响。若 `dsh.cmd` 也提示找不到命令，把报错原样告诉用户。
 
-检查输出里能看到这些组合行（插件 id）：`memory`（即 kaz-memory 插件）、`thinking-anchor`、`plugin-filter`、`round-minimal`、`kaz-mode`、`kaz-agent-preset-display`、`output-beep`、`round-display`、`deepseek-default-model`、`first-round-hints`。
+检查输出里能看到这些组合行（插件 id）：`memory`（即 kaz-memory 插件）、`thinking-anchor`、`plugin-filter`、`round-minimal`、`kaz-mode`、`kaz-agent-preset-display`、`output-beep`、`round-display`、`deepseek-default-model`、`first-round-hints`、`ka-whale-workflow`。（`create-plan` 不在 web 组合里，它在 `kaz/agent.cordis.yml` 的 planning 组中，随 kaz 预设复制。）
 
 - 全部能看到 → 安装的文件部分完成，进入第 9 步。
 - 缺少某个 id → 检查第 4 步依赖是否漏行、第 6 步是否少了对应 insert 块，修正后重新执行第 5 步和第 8 步。
