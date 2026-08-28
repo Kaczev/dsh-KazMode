@@ -1,7 +1,7 @@
 {
   "name": "kaz-shared",
   "version": "0.1.0",
-  "description": "Kaz 模式工具清单单一事实源（纯模块，非 cordis 插件）：工具清单默认值常量 + 工具控制面板状态模型 + 工具面计算（computeSurface/effectiveToolWhitelist）。kaz-mode / kaz-memory / round-minimal / plugin-filter 的公共依赖，安装无需联网。",
+  "description": "Kaz 模式工具清单单一事实源（纯模块，非 cordis 插件）：工具清单默认值常量 + 工具控制面板状态模型 + 工具面计算（computeSurface/effectiveToolWhitelist）+ kaz_tool_auto_on 模式自动启用参数。kaz-mode / kaz-memory / round-minimal / plugin-filter 的公共依赖，安装无需联网。",
   "type": "module",
   "main": "lib/tool-lists.js",
   "exports": {
@@ -12,7 +12,8 @@
   },
   "files": [
     "lib/tool-lists.js",
-    "lib/tool-plugin-catalog.js"
+    "lib/tool-plugin-catalog.js",
+    "lib/tool-auto-on.js"
   ],
   "license": "MIT"
 }

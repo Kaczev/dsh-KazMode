@@ -41,11 +41,19 @@ const SESSIONS = {
   "s-kaz-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
   "s-plain": { cwd: PROJECT_B, agentPreset: "router-standard" },
   "s-plain-mem": { cwd: PROJECT_C, agentPreset: "router-standard" },
+  "s-kaz-plan": { cwd: PROJECT_A, agentPreset: "kaz" },
+  "s-kaz-goal": { cwd: PROJECT_A, agentPreset: "kaz" },
 };
+
+/** plan/mode 会话事件：s-kaz-plan 模拟“当前处于 plan 模式”。 */
+const eventsOf = (id) =>
+  id === "s-kaz-plan"
+    ? [{ type: "plan/mode", seq: 1, time: Date.now(), data: { active: true } }]
+    : [];
 
 const agentOf = (id) => ({
   id,
-  session: { header: { id, cwd: SESSIONS[id].cwd, agentPreset: SESSIONS[id].agentPreset }, events: [] },
+  session: { header: { id, cwd: SESSIONS[id].cwd, agentPreset: SESSIONS[id].agentPreset }, events: eventsOf(id) },
 });
 
 // ---- mock settings ----
@@ -100,8 +108,11 @@ const listeners = new Map();
 const provided = {};
 const agentsBySession = new Map();
 for (const [id, info] of Object.entries(SESSIONS)) {
-  agentsBySession.set(id, { id, session: { header: { id, cwd: info.cwd, agentPreset: info.agentPreset } } });
+  agentsBySession.set(id, { id, session: { header: { id, cwd: info.cwd, agentPreset: info.agentPreset }, events: eventsOf(id) } });
 }
+/** goal 模式 mock：s-kaz-goal 存在 active 目标。 */
+const goalsByAgent = new Map();
+goalsByAgent.set("s-kaz-goal", { phase: "active" });
 const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search"];
 
 const settings = makeSettings();
@@ -150,6 +161,7 @@ const ctx = {
     if (name in provided) return provided[name];
     if (name === "settings") return settings;
     if (name === "agents") return { get: (sid) => agentsBySession.get(sid) ?? undefined };
+    if (name === "goals") return { get: (agent) => goalsByAgent.get(agent?.id) ?? undefined };
     if (name === "connection") return mockConnection;
     return undefined;
   },
@@ -291,6 +303,46 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   const persona = assembly.sections.find((s) => s.name === "deployment:persona");
   check("⑥ Kaz 会话不再由 kaz-mode 改写 persona", persona !== undefined && persona.text === "other");
   check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "thinking-anchor:policy"));
+}
+
+// ⑦ kaz_tool_auto_on：按会话内存态临时放行
+{
+  const rpc = rpcHandlers.get("/kaz-mode");
+  const sKazPlan = agentOf("s-kaz-plan");
+  const sKazGoal = agentOf("s-kaz-goal");
+
+  // 未 applySession 的会话不参与（“仅当前对话生效”）。
+  check("⑦ 未 applySession 的会话不放行 plan 工具", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false);
+  check("⑦ 未 applySession 的会话不放行 goal 工具", kazMode.toolVisible(sKazGoal, "get_goal") === false);
+
+  // applySession 初始化当前会话状态。
+  const applyPlan = await rpc("applySession", { sessionId: "s-kaz-plan" });
+  const applyGoal = await rpc("applySession", { sessionId: "s-kaz-goal" });
+  check("⑦ applySession 初始化 auto-on 状态", applyPlan?.ok === true && applyGoal?.ok === true);
+
+  // 默认开关开 + 模式激活 -> 自动放行。
+  check("⑦ plan 模式自动放行 exit_plan_mode", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === true);
+  check("⑦ goal 模式自动放行 get_goal/update_goal", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === true);
+  // 未激活的模式不放行。
+  check("⑦ goal 会话不放行 plan 工具", kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
+  check("⑦ plan 会话不放行 goal 工具", kazMode.toolVisible(sKazPlan, "get_goal") === false);
+
+  // RPC 快照。
+  const snap = await rpc("getToolAutoOn", { sessionId: "s-kaz-plan" });
+  check("⑦ getToolAutoOn 返回模式激活与功能状态", snap?.ok === true && snap.value?.active?.plan === true && snap.value?.features?.plan?.enabled === true && Array.isArray(snap.value?.features?.plan?.tools) && snap.value.features.plan.tools.includes("exit_plan_mode"));
+
+  // 关闭开关 -> 立即移除。
+  const off = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: false });
+  check("⑦ setToolAutoOn 关闭 plan 开关", off?.ok === true && off.value?.features?.plan?.enabled === false);
+  check("⑦ 关闭开关后 plan 工具移除", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false);
+
+  // 调整工具清单 -> 只放行新清单。
+  const custom = await rpc("setToolAutoOn", { sessionId: "s-kaz-goal", feature: "goal", enabled: true, tools: ["get_goal"] });
+  check("⑦ setToolAutoOn 调整 goal 工具清单", custom?.ok === true && JSON.stringify(custom.value?.features?.goal?.tools) === JSON.stringify(["get_goal"]));
+  check("⑦ 调整后只放行新清单", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === false);
+
+  // 恢复默认，避免影响其它检查（仅内存态）。
+  await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: true });
 }
 
 rmSync(TMP, { recursive: true, force: true });

@@ -57,6 +57,8 @@ import {
   TOOL_PLUGINS,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
+  defaultToolAutoOnState,
+  normalizeToolList,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -691,6 +693,25 @@ export default {
     /** 当前由客户端告知的活跃会话（用于在没有 sessionId 时解析项目 cwd）。 */
     let activeSession = null;
 
+    // -----------------------------------------------------------------------
+    // kaz_tool_auto_on（模式工具自动启用）：按会话内存态，不写任何配置文件。
+    //   - key：会话 id（agentSessionIdOf，子代理归入父会话）；
+    //   - value：{ plan: { enabled, tools }, goal: { enabled, tools } }；
+    //   - 只有 client 切到该会话（applySession）后才会初始化并参与工具面，
+    //     因此“仅当前对话临时生效，其它对话不共享”。
+    // -----------------------------------------------------------------------
+    const toolAutoOnBySession = new Map();
+
+    /** 读取某会话的 auto-on 状态；不存在时用参数文件默认值初始化。 */
+    function getToolAutoOnState(sessionId) {
+      const key = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : "";
+      if (key.length === 0) return null;
+      if (!toolAutoOnBySession.has(key)) {
+        toolAutoOnBySession.set(key, defaultToolAutoOnState());
+      }
+      return toolAutoOnBySession.get(key);
+    }
+
     /**
      * settings 服务惰性获取：启动时可能尚未挂载（kaz-mode 只 inject systemPrompt），
      * 所有跨命名空间读写都在调用时解析，避免 apply 阶段一次性捕获到 undefined。
@@ -984,6 +1005,105 @@ export default {
       return "";
     }
 
+    /** 该 agent 会话是否处于 plan 模式：以 session.events 里最后一个 plan/mode
+     *  事件的 active 为准（与 kaz-system-prompt.mjs 的兜底检测同源）。 */
+    function planModeActive(agent) {
+      try {
+        const events = agent?.session?.events;
+        if (!Array.isArray(events)) return false;
+        let active = false;
+        for (const event of events) {
+          if (
+            event !== null &&
+            typeof event === "object" &&
+            event.type === "plan/mode" &&
+            event.data !== null &&
+            typeof event.data === "object" &&
+            typeof event.data.active === "boolean"
+          ) {
+            active = event.data.active;
+          }
+        }
+        return active;
+      } catch {
+        return false;
+      }
+    }
+
+    /** 该 agent 会话是否处于 goal 模式：存在 active/paused 目标。
+     *  注意：这里不依赖 update_goal 是否可见，避免“先放行工具才能判定模式”的死结。 */
+    function goalModeActive(agent) {
+      try {
+        const goals = ctx.get("goals");
+        if (goals === undefined || goals === null || typeof goals.get !== "function" || agent === null || agent === undefined) {
+          return false;
+        }
+        const goal = goals.get(agent);
+        if (goal === null || goal === undefined || typeof goal !== "object") return false;
+        return goal.phase === "active" || goal.phase === "paused";
+      } catch {
+        return false;
+      }
+    }
+
+    /** 当前会话 kaz_tool_auto_on 命中的工具：仅当该会话已被 applySession 初始化、
+     *  对应功能开关打开、且对应模式激活时返回配置的工具清单。 */
+    function autoOnToolsFor(agent) {
+      if (agent === null || agent === undefined || typeof agent !== "object") return [];
+      const sessionId = agentSessionIdOf(agent);
+      if (sessionId.length === 0 || !toolAutoOnBySession.has(sessionId)) return [];
+      const state = toolAutoOnBySession.get(sessionId);
+      const out = [];
+      if (state.plan?.enabled === true && planModeActive(agent)) {
+        for (const tool of Array.isArray(state.plan.tools) ? state.plan.tools : []) {
+          if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
+        }
+      }
+      if (state.goal?.enabled === true && goalModeActive(agent)) {
+        for (const tool of Array.isArray(state.goal.tools) ? state.goal.tools : []) {
+          if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
+        }
+      }
+      return out;
+    }
+
+    /** 按会话 id 取 agent 对象（RPC / 面板状态用）；读不到返回 null。 */
+    function agentOfSession(sessionId) {
+      try {
+        const agents = ctx.get("agents");
+        if (agents !== undefined && agents !== null && typeof agents.get === "function" && typeof sessionId === "string" && sessionId.length > 0) {
+          const agent = agents.get(sessionId);
+          return agent !== null && agent !== undefined && typeof agent === "object" ? agent : null;
+        }
+      } catch {
+        // fall through
+      }
+      return null;
+    }
+
+    /** kaz_tool_auto_on 面板快照：包含模式激活状态与每个功能的开关/工具清单。 */
+    function toolAutoOnSnapshot(sessionId) {
+      const state = getToolAutoOnState(sessionId) ?? defaultToolAutoOnState();
+      const agent = agentOfSession(sessionId);
+      return {
+        sessionId,
+        active: {
+          plan: agent !== null ? planModeActive(agent) : false,
+          goal: agent !== null ? goalModeActive(agent) : false,
+        },
+        features: {
+          plan: {
+            enabled: state.plan?.enabled === true,
+            tools: [...(Array.isArray(state.plan?.tools) ? state.plan.tools : [])],
+          },
+          goal: {
+            enabled: state.goal?.enabled === true,
+            tools: [...(Array.isArray(state.goal?.tools) ? state.goal.tools : [])],
+          },
+        },
+      };
+    }
+
     /** 从 agent 会话解析当前生效的 agent preset id（与官方 resolveSessionPreset
      *  同语义）：优先会话事件日志里最后一次 agent-preset/selected——新对话切换
      *  预设只追加事件、不改 header；回退 header（创建时值）；再回退 undefined。 */
@@ -1063,6 +1183,9 @@ export default {
         ctx.logger?.debug?.("[kaz-mode] 计算统一工具插件面失败：" + safeMessage(error));
         whitelist = new Set();
       }
+      // kaz_tool_auto_on：当前会话 plan/goal 模式激活时，临时放行参数文件里的工具
+      // （仅内存态，不修改工具控制面板 JSON / settings.yaml；未 applySession 的会话不参与）。
+      for (const tool of autoOnToolsFor(agent)) whitelist.add(tool);
       // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
       // 才保留记忆工具，避免新对话/未落盘状态被误判为启用。
       if (states["kaz-memory"]?.enabled !== true) {
@@ -1562,6 +1685,9 @@ export default {
           // 按 agent 会话实时读取生效状态，无需写任何插件 settings.yaml。
           const { cwd, data } = loadSessionData(sessionId);
           activeSession = { sessionId, cwd };
+          // kaz_tool_auto_on：切到该会话时初始化它的临时自动启用状态，
+          // 使“仅当前对话生效、其它对话不共享”成立。
+          getToolAutoOnState(sessionId);
           return { ok: true, value: { applied: true, sessionId } };
         }
 
@@ -1673,6 +1799,20 @@ export default {
           }
           if (sessionId.length > 0) activeSession = { sessionId, cwd };
           return { ok: true, value: { project: data.project ?? null } };
+        }
+
+        if (endpoint === "getToolAutoOn") {
+          return { ok: true, value: toolAutoOnSnapshot(sessionId) };
+        }
+
+        if (endpoint === "setToolAutoOn") {
+          const feature = input.feature === "plan" || input.feature === "goal" ? input.feature : null;
+          if (feature === null) return rpcFail("feature 必须是 plan 或 goal");
+          const state = getToolAutoOnState(sessionId);
+          if (state === null) return rpcFail("缺少 sessionId");
+          if (typeof input.enabled === "boolean") state[feature].enabled = input.enabled;
+          if (input.tools !== undefined) state[feature].tools = normalizeToolList(input.tools);
+          return { ok: true, value: toolAutoOnSnapshot(sessionId) };
         }
 
         return rpcFail("unknown endpoint '" + String(endpoint) + "'");

@@ -262,3 +262,15 @@ export function computeToolPluginSurface(inputs = {}) {
 
 /** 官方 / Kaz 分类目录（源码修改点，见 tool-plugin-catalog.js）。 */
 export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS, TOOL_PLUGIN_CATALOG, TOOL_PLUGINS } from "./tool-plugin-catalog.js";
+
+/** kaz_tool_auto_on（模式工具自动启用）参数单一事实源（见 tool-auto-on.js）。 */
+export {
+  TOOL_AUTO_ON_CONFIG,
+  PLAN_AUTO_ON_TOOLS,
+  GOAL_AUTO_ON_TOOLS,
+  PLAN_AUTO_ON_DEFAULT_ENABLED,
+  GOAL_AUTO_ON_DEFAULT_ENABLED,
+  defaultToolAutoOnState,
+  normalizeToolList,
+  normalizeToolAutoOnState,
+} from "./tool-auto-on.js";

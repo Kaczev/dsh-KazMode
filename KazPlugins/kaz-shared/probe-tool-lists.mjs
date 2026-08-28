@@ -21,6 +21,14 @@ import {
   computeToolPluginSurface,
   TOOL_PLUGIN_CATALOG,
   TOOL_PLUGINS,
+  TOOL_AUTO_ON_CONFIG,
+  PLAN_AUTO_ON_TOOLS,
+  GOAL_AUTO_ON_TOOLS,
+  PLAN_AUTO_ON_DEFAULT_ENABLED,
+  GOAL_AUTO_ON_DEFAULT_ENABLED,
+  defaultToolAutoOnState,
+  normalizeToolList,
+  normalizeToolAutoOnState,
 } from "./lib/tool-lists.js";
 
 let failures = 0;
@@ -85,6 +93,16 @@ const layered2 = computeEffectiveToolState({
   projectCatalog: { "tool-ralph": { ralph: false } },
 });
 check("⑤ 项目专属关闭覆盖用户默认", layered2.P["tool-ralph"] === false && layered2.T["tool-ralph"]?.ralph === false && !computeToolPluginSurfaceFromEffective(layered2).has("ralph"));
+
+// ⑥ kaz_tool_auto_on 参数文件
+check("⑥ TOOL_AUTO_ON_CONFIG 含 plan/goal", TOOL_AUTO_ON_CONFIG?.plan?.tools?.includes("exit_plan_mode") === true && TOOL_AUTO_ON_CONFIG?.goal?.tools?.includes("get_goal") === true && TOOL_AUTO_ON_CONFIG?.goal?.tools?.includes("update_goal") === true);
+check("⑥ PLAN_AUTO_ON_TOOLS / GOAL_AUTO_ON_TOOLS 默认值", JSON.stringify(PLAN_AUTO_ON_TOOLS) === JSON.stringify(["exit_plan_mode"]) && JSON.stringify(GOAL_AUTO_ON_TOOLS) === JSON.stringify(["get_goal", "update_goal"]));
+check("⑥ 默认开关为开", PLAN_AUTO_ON_DEFAULT_ENABLED === true && GOAL_AUTO_ON_DEFAULT_ENABLED === true);
+const autoDefault = defaultToolAutoOnState();
+check("⑥ defaultToolAutoOnState 返回独立副本", autoDefault.plan.tools !== PLAN_AUTO_ON_TOOLS && autoDefault.plan.enabled === true && JSON.stringify(autoDefault.goal.tools) === JSON.stringify(GOAL_AUTO_ON_TOOLS));
+check("⑥ normalizeToolList trim/去重/过滤", JSON.stringify(normalizeToolList([" exit_plan_mode ", "", "get_goal", "get_goal"])) === JSON.stringify(["exit_plan_mode", "get_goal"]));
+const normalizedAuto = normalizeToolAutoOnState({ plan: { enabled: true, tools: ["a", "a", " b "] }, goal: { enabled: false, tools: ["c"] } });
+check("⑥ normalizeToolAutoOnState 归一化", normalizedAuto.plan.enabled === true && JSON.stringify(normalizedAuto.plan.tools) === JSON.stringify(["a", "b"]) && normalizedAuto.goal.enabled === false && JSON.stringify(normalizedAuto.goal.tools) === JSON.stringify(["c"]));
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -321,6 +321,8 @@ window.__ModuleLoader__.load({
 .kzm-tp-group-title{font-size:11px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em}
 .kzm-tp-tools{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-radius:8px;padding:6px 8px;margin:4px 0 2px;display:flex;flex-direction:column;gap:4px}
 .kzm-tp-tools-title{font-size:10px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:0}
+.kzm-auto-on-status{display:inline-flex;align-items:center;font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);background:transparent;flex:none;white-space:nowrap}
+.kzm-auto-on-status[data-on="true"]{color:#a855f7;border-color:rgba(168,85,247,.55);background:rgba(168,85,247,.12)}
 `;
 			const tagId = "kaz-mode/styles";
 			if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -795,6 +797,11 @@ window.__ModuleLoader__.load({
 								key: "tool-plugins",
 								sessionId: sessionId || "",
 								cwd,
+								writable,
+							}),
+							createElement(ToolAutoOnSection, {
+								key: "tool-auto-on",
+								sessionId: sessionId || "",
 								writable,
 							}),
 						),
@@ -1395,6 +1402,100 @@ window.__ModuleLoader__.load({
 					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
 				);
 			}
+
+			/** kaz_tool_auto_on（模式工具自动启用）：kaz-mode 配置区内的临时工具放行区块，位于工具控制面板下方。 */
+			function ToolAutoOnSection({ sessionId, writable }) {
+				const [data, setData] = useState(null);
+				const [drafts, setDrafts] = useState({ plan: null, goal: null });
+
+				const refresh = useCallback(async () => {
+					const res = await rpcCall("getToolAutoOn", { sessionId: sessionId || "" });
+					if (res !== null) setData(res);
+				}, [sessionId]);
+
+				useEffect(() => {
+					setDrafts({ plan: null, goal: null });
+					void refresh();
+					// 面板打开时轮询：模型调用 exit_plan_mode / goal 结束等状态变化会实时反映。
+					const timer = setInterval(() => void refresh(), 1500);
+					return () => clearInterval(timer);
+				}, [refresh]);
+
+				const applyFeature = async (feature, patch) => {
+					if (!writable) return;
+					const res = await rpcCall("setToolAutoOn", { sessionId: sessionId || "", feature, ...patch });
+					if (res !== null) setData(res);
+				};
+
+				const features = data !== null && data.features !== null && typeof data.features === "object" ? data.features : {};
+				const active = data !== null && data.active !== null && typeof data.active === "object" ? data.active : { plan: false, goal: false };
+
+				const FEATURE_META = [
+					{ id: "plan", label: "plan 模式", toolsLabel: "plan 临时放行工具", placeholder: "exit_plan_mode", description: "进入 plan 模式时临时放行这些工具；plan 模式结束自动移除。" },
+					{ id: "goal", label: "goal 模式", toolsLabel: "goal 临时放行工具", placeholder: "get_goal, update_goal", description: "存在 active/paused 目标时临时放行这些工具；goal 模式结束自动移除。" },
+				];
+
+				return createElement(
+					"div",
+					{ className: "kzm-state-section" },
+					createElement(
+						"div",
+						{ className: "kzm-state-head" },
+						createElement("span", { className: "kzm-state-title" }, "Kaz 模式工具自动启用"),
+					),
+					createElement(
+						"p",
+						{ className: "kzm-state-desc" },
+						"仅当前对话临时生效（内存态，不写 settings.yaml / 工具控制面板 JSON）；plan/goal 模式激活时自动放行下列工具，模式结束自动移除。仅 Kaz 会话生效。",
+					),
+					FEATURE_META.map((meta) => {
+						const feature = features[meta.id] !== null && typeof features[meta.id] === "object" ? features[meta.id] : { enabled: false, tools: [] };
+						const isOn = feature.enabled === true && active[meta.id] === true;
+						const draft = drafts[meta.id];
+						const text = draft !== null ? draft : Array.isArray(feature.tools) ? feature.tools.join(", ") : "";
+						return createElement(
+							"div",
+							{ key: meta.id, className: "kzm-state-item" },
+							createElement(
+								"div",
+								{ className: "kzm-state-row" },
+								createElement("span", { className: "kzm-state-name", title: meta.description }, meta.label),
+								createElement("span", { className: "kzm-auto-on-status", "data-on": isOn ? "true" : "false" }, isOn ? "启用中" : "未启用"),
+								createElement(Toggle, {
+									checked: feature.enabled === true,
+									disabled: !writable,
+									title: meta.label + " 自动启用开关",
+									onChange: (next) => void applyFeature(meta.id, { enabled: next }),
+								}),
+							),
+							createElement(
+								"div",
+								{ className: "kzm-field" },
+								createElement("label", null, meta.toolsLabel + "（逗号分隔，仅模式激活时临时放行）"),
+								createElement("input", {
+									className: "kzm-input",
+									type: "text",
+									value: text,
+									disabled: !writable,
+									placeholder: meta.placeholder,
+									spellCheck: false,
+									onChange: (event) => setDrafts((prev) => ({ ...prev, [meta.id]: event.target.value })),
+									onBlur: () => {
+										if (draft === null) return;
+										const parsed = draft
+											.split(",")
+											.map((part) => part.trim())
+											.filter((part) => part.length > 0);
+										setDrafts((prev) => ({ ...prev, [meta.id]: null }));
+										void applyFeature(meta.id, { tools: parsed });
+									},
+								}),
+							),
+						);
+					}),
+				);
+			}
+
 			function KazPanel() {
 				const kazSnap = useScope(kazScope);
 				const presetSnap = useScope(presetScope);
