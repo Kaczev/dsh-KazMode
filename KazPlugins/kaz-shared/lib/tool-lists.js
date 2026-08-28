@@ -266,6 +266,7 @@ export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS, TOOL_PLUGIN_CATALOG, T
 /** kaz_tool_auto_on（模式工具自动启用）参数单一事实源（见 tool-auto-on.js）。 */
 export {
   TOOL_AUTO_ON_CONFIG,
+  MODE_SCOPED_TOOL_PLUGIN_KEYS,
   PLAN_AUTO_ON_TOOLS,
   GOAL_AUTO_ON_TOOLS,
   PLAN_AUTO_ON_DEFAULT_ENABLED,
@@ -273,4 +274,8 @@ export {
   defaultToolAutoOnState,
   normalizeToolList,
   normalizeToolAutoOnState,
+  normalizeAutoOnLayer,
+  mergeAutoOnLayers,
+  autoOnSettingsEqual,
+  hasAutoOnLayerFields,
 } from "./tool-auto-on.js";

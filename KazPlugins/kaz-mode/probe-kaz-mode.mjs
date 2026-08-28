@@ -7,7 +7,7 @@
 //   ⑤ 记忆/诊断工具常驻注册——工具面完全由项目状态计算，不随全局 enabled 注销。
 // 运行：node kaz-mode/probe-kaz-mode.mjs
 import plugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/kaz-mode/lib/index.js";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -305,44 +305,92 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "thinking-anchor:policy"));
 }
 
-// ⑦ kaz_tool_auto_on：按会话内存态临时放行
+// ⑦ kaz_tool_auto_on：三层单 JSON（原设置/默认设置/专属设置）+ 运行时临时放行
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const sKazPlan = agentOf("s-kaz-plan");
   const sKazGoal = agentOf("s-kaz-goal");
+  const sKazBase = agentOf("s-kaz");
 
-  // 未 applySession 的会话不参与（“仅当前对话生效”）。
-  check("⑦ 未 applySession 的会话不放行 plan 工具", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false);
-  check("⑦ 未 applySession 的会话不放行 goal 工具", kazMode.toolVisible(sKazGoal, "get_goal") === false);
+  // 预置用户默认 auto-on JSON（等同出厂值） + 工具控制 JSON 里启用 plan-mode/goal
+  // （应被模式限定逻辑从基础工具面移除）。
+  writeFileSync(
+    join(TMP, "dsh-storages", "ka_tool_auto_on_setting.json"),
+    JSON.stringify(
+      {
+        plan: { enabled: true, tools: ["exit_plan_mode"] },
+        goal: { enabled: true, tools: ["get_goal", "update_goal"] },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  writeFileSync(
+    join(TMP, "dsh-storages", "tool-plugin.json"),
+    JSON.stringify({ "plan-mode": true, goal: true }, null, 2),
+    "utf8",
+  );
+  writeFileSync(
+    join(TMP, "dsh-storages", "tool-plugin-catalog.json"),
+    JSON.stringify(
+      {
+        "plan-mode": { exit_plan_mode: true },
+        goal: { get_goal: true, update_goal: true },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
-  // applySession 初始化当前会话状态。
-  const applyPlan = await rpc("applySession", { sessionId: "s-kaz-plan" });
-  const applyGoal = await rpc("applySession", { sessionId: "s-kaz-goal" });
-  check("⑦ applySession 初始化 auto-on 状态", applyPlan?.ok === true && applyGoal?.ok === true);
+  // 模式限定：工具控制 JSON 里启用了 plan-mode/goal，但基础面仍不放行。
+  check("⑦ 基础面不放行模式限定工具", kazMode.toolVisible(sKazBase, "exit_plan_mode") === false && kazMode.toolVisible(sKazBase, "get_goal") === false && kazMode.toolVisible(sKazBase, "update_goal") === false);
 
-  // 默认开关开 + 模式激活 -> 自动放行。
+  // 按项目设置生效，无需 applySession：plan/goal 模式激活时自动放行。
   check("⑦ plan 模式自动放行 exit_plan_mode", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === true);
   check("⑦ goal 模式自动放行 get_goal/update_goal", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === true);
-  // 未激活的模式不放行。
   check("⑦ goal 会话不放行 plan 工具", kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
   check("⑦ plan 会话不放行 goal 工具", kazMode.toolVisible(sKazPlan, "get_goal") === false);
 
-  // RPC 快照。
+  // RPC 快照：返回三层与生效状态。
   const snap = await rpc("getToolAutoOn", { sessionId: "s-kaz-plan" });
-  check("⑦ getToolAutoOn 返回模式激活与功能状态", snap?.ok === true && snap.value?.active?.plan === true && snap.value?.features?.plan?.enabled === true && Array.isArray(snap.value?.features?.plan?.tools) && snap.value.features.plan.tools.includes("exit_plan_mode"));
+  check("⑦ getToolAutoOn 返回三层与生效状态", snap?.ok === true && snap.value?.effective?.plan?.enabled === true && Array.isArray(snap.value?.effective?.plan?.tools) && snap.value.effective.plan.tools.includes("exit_plan_mode") && snap.value?.projectDiffers === false && snap.value?.features?.plan?.overridden === false);
 
-  // 关闭开关 -> 立即移除。
+  // 项目 JSON 写了与默认完全相同的值 → 不算“专属”。
+  const same = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: true, tools: ["exit_plan_mode"] });
+  check("⑦ 项目设置与默认一致时不显示专属", same?.ok === true && same.value?.features?.plan?.overridden === false && same.value?.hasProjectOverrides === false);
+
+  // 写项目专属：关闭 plan 开关 → 写入项目 ka_tool_auto_on_setting.json。
   const off = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: false });
-  check("⑦ setToolAutoOn 关闭 plan 开关", off?.ok === true && off.value?.features?.plan?.enabled === false);
-  check("⑦ 关闭开关后 plan 工具移除", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false);
+  check("⑦ setToolAutoOn(project) 写入项目专属并生效", off?.ok === true && off.value?.features?.plan?.enabled === false && off.value?.features?.plan?.overridden === true && off.value?.hasProjectOverrides === true);
+  check("⑦ 关闭 plan 后 exit_plan_mode 不再放行", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false);
+  const projFile = JSON.parse(readFileSync(join(PROJECT_A, ".dsh", "storages", "ka_tool_auto_on_setting.json"), "utf8"));
+  check("⑦ 项目 JSON 已写入 plan.enabled=false", projFile?.plan?.enabled === false);
 
-  // 调整工具清单 -> 只放行新清单。
+  // 调整 goal 工具清单（项目专属）→ 只放行新清单。
   const custom = await rpc("setToolAutoOn", { sessionId: "s-kaz-goal", feature: "goal", enabled: true, tools: ["get_goal"] });
   check("⑦ setToolAutoOn 调整 goal 工具清单", custom?.ok === true && JSON.stringify(custom.value?.features?.goal?.tools) === JSON.stringify(["get_goal"]));
   check("⑦ 调整后只放行新清单", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === false);
 
-  // 恢复默认，避免影响其它检查（仅内存态）。
-  await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: true });
+  // 清除某个 feature 的项目专属覆盖 → 回落到用户默认。
+  const resetOne = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", reset: true });
+  check("⑦ reset feature 清除项目专属", resetOne?.ok === true && resetOne.value?.features?.plan?.overridden === false && resetOne.value?.features?.plan?.enabled === true);
+  check("⑦ 清除后 plan 工具恢复放行", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === true);
+
+  // 设为默认：把当前项目专属（goal 清单）复制到用户默认 JSON。
+  const asDefault = await rpc("setToolAutoOnAsDefault", { sessionId: "s-kaz-goal" });
+  check("⑦ setToolAutoOnAsDefault 复制项目专属到用户默认", asDefault?.ok === true && asDefault.value?.effective?.goal?.tools?.includes("get_goal") === true);
+  const userFile = JSON.parse(readFileSync(join(TMP, "dsh-storages", "ka_tool_auto_on_setting.json"), "utf8"));
+  check("⑦ 用户 JSON 已更新 goal.tools 为 [get_goal]", JSON.stringify(userFile?.goal?.tools) === JSON.stringify(["get_goal"]));
+
+  // 清空项目专属 → 生效回到用户默认。
+  const resetProj = await rpc("resetToolAutoOn", { sessionId: "s-kaz-goal", layer: "project" });
+  check("⑦ resetToolAutoOn(project) 清空专属", resetProj?.ok === true && resetProj.value?.hasProjectOverrides === false && resetProj.value?.effective?.goal?.tools?.includes("get_goal") === true);
+
+  // 恢复用户默认 → 回到出厂。
+  const resetUser = await rpc("resetToolAutoOn", { sessionId: "s-kaz-goal", layer: "user" });
+  check("⑦ resetToolAutoOn(user) 恢复出厂", resetUser?.ok === true && JSON.stringify(resetUser.value?.effective?.goal?.tools) === JSON.stringify(["get_goal", "update_goal"]));
 }
 
 rmSync(TMP, { recursive: true, force: true });

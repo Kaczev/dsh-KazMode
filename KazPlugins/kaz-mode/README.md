@@ -75,22 +75,27 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 
 ### Kaz 模式工具自动启用
 
-kaz-mode 配置区内的一个临时工具放行组件，位于「工具控制面板」下方、与之同级，
+kaz-mode 配置区内的临时工具放行区块，位于「工具控制面板」下方、与之同级，
 常驻展开（不做收起），用于解决“进入 plan / goal 模式时，对应控制工具
-（`exit_plan_mode` / `get_goal`、`update_goal`）默认不在工具面里”的问题：
+（`exit_plan_mode` / `get_goal`、`update_goal`）默认不在工具面里”的问题。
 
-- **plan 模式**：当前会话激活 plan 模式时，自动临时放行 `exit_plan_mode`（默认，
-  可在 `kaz-shared/lib/tool-auto-on.js` 扩展）；plan 模式结束自动移除。
-- **goal 模式**：当前会话存在 active/paused 目标时，自动临时放行
-  `get_goal`、`update_goal`（默认，可在 `kaz-shared/lib/tool-auto-on.js` 扩展）；
+- **三层设置（与工具控制面板同款体系，但一层只用一个 JSON 文件，不做插件封装）**：
+  - 原设置：`kaz-shared/lib/tool-auto-on.js`（`TOOL_AUTO_ON_CONFIG`，只读）
+  - 默认设置：`~/.dsh/storages/ka_tool_auto_on_setting.json`
+  - 专属设置：`<项目>/.dsh/storages/ka_tool_auto_on_setting.json`
+  - 形状：`{ "plan": { "enabled": true, "tools": ["exit_plan_mode"] }, "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] } }`
+  - 生效值 = 专属覆盖默认、默认覆盖原设置（enabled / tools 逐项继承）。
+- **plan 模式**：当前会话激活 plan 模式时，自动临时放行生效清单里的 plan 工具；
+  plan 模式结束自动移除。
+- **goal 模式**：当前会话存在 active/paused 目标时，自动临时放行生效清单里的 goal 工具；
   goal 模式结束自动移除。
-- 两个功能在 kaz-mode 配置区都有独立开关，并可编辑各自临时放行工具清单；
-  配置区中模式激活且开关打开时显示紫色「启用中」，模式结束自动恢复灰色。
-- **纯临时、按会话**：状态只存在 kaz-mode 进程内存里（`Map<sessionId, ...>`），
-  不写 settings.yaml、不写工具控制面板 JSON；只有 client 切到该会话（`applySession`）
-  后才会参与工具面，其它对话不共享。重启 / 热重载后回到参数文件默认值。
-- 参数文件：`kaz-shared/lib/tool-auto-on.js`（`TOOL_AUTO_ON_CONFIG` /
-  `PLAN_AUTO_ON_TOOLS` / `GOAL_AUTO_ON_TOOLS` / 默认开关）。
+- 两个功能在面板里都有独立开关，并可编辑各自临时放行工具清单；面板中模式激活且
+  开关打开时显示紫色「启用中」，模式结束自动恢复灰色。
+- **编辑即写项目专属 JSON**（同一项目所有对话共享）；「设为默认设置」把当前项目
+  生效设置复制到用户默认 JSON；「恢复原设置 / 恢复默认设置」分别重置用户 / 项目层。
+- **模式限定**：`plan-mode` / `goal` 插件即使被工具控制面板 JSON 启用，也不进基础
+  工具面，只由自动启用按会话模式临时放行。
+- 参数修改点：`kaz-shared/lib/tool-auto-on.js`（原设置）。
 
 ---
 
@@ -129,8 +134,9 @@ kaz-mode 配置区内的一个临时工具放行组件，位于「工具控制�
   - 不做自动检测；新插件/新工具只能手动添加，写入用户 `other-*` 文件（共享所有项目）；
     开关调整写项目对应文件，可经「设为默认设置」把项目四个文件复制为用户默认。
 - `kaz-memory` 关闭 → 六工具自动移出。
-- 「Kaz 模式工具自动启用」属于“临时放行叠加层”：不写四文件 JSON，只在当前会话
-  plan/goal 模式激活时额外放行参数文件里的工具，模式结束自动移除。
+- 「Kaz 模式工具自动启用」属于“临时放行叠加层”：不写工具控制面板四文件 JSON，
+  只写自己的单 JSON（用户默认 / 项目专属）；当前会话 plan/goal 模式激活时按三层
+  生效清单临时放行对应工具，模式结束自动移除。
 
 ### 5. round-minimal 信号（首阶段极简）
 
@@ -195,4 +201,5 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
    `kaz-defaults.json`、`kaz-project-states.json` 与工具控制面板 JSON。
 7. 进入 plan / goal 模式时，kaz-mode 配置区「Kaz 模式工具自动启用」显示紫色「启用中」，
-   对应工具临时放行；模式结束自动移除，且不写任何配置。
+   对应工具临时放行；模式结束自动移除。面板编辑只写 `ka_tool_auto_on_setting.json`
+   （用户默认 / 项目专属），不写工具控制面板 JSON 与 settings.yaml。

@@ -57,8 +57,11 @@ import {
   TOOL_PLUGINS,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
+  MODE_SCOPED_TOOL_PLUGIN_KEYS,
   defaultToolAutoOnState,
-  normalizeToolList,
+  normalizeAutoOnLayer,
+  mergeAutoOnLayers,
+  autoOnSettingsEqual,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -145,6 +148,9 @@ const PROJECT_ENABLE_TOOL_PLUGIN_FILE = USER_ENABLE_TOOL_PLUGIN_FILE;
 const PROJECT_TOOL_PLUGIN_CATALOG_FILE = USER_TOOL_PLUGIN_CATALOG_FILE;
 const PROJECT_OTHER_ENABLE_TOOL_PLUGIN_FILE = USER_OTHER_ENABLE_TOOL_PLUGIN_FILE;
 const PROJECT_OTHER_TOOL_PLUGIN_CATALOG_FILE = USER_OTHER_TOOL_PLUGIN_CATALOG_FILE;
+/** kaz_tool_auto_on：用户默认 / 项目专属设置的单 JSON 文件名（一层一个文件）。 */
+const AUTO_ON_SETTING_FILE = "ka_tool_auto_on_setting.json";
+
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/kaz-mode";
 
@@ -478,6 +484,66 @@ function saveProjectOtherCatalog(cwd, value, logger) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// kaz_tool_auto_on 单 JSON 三层模型（2026-08-27）
+//   原设置   = 代码 TOOL_AUTO_ON_CONFIG（kaz-shared/lib/tool-auto-on.js，只读）
+//   默认设置 = 用户 ~/.dsh/storages/ka_tool_auto_on_setting.json
+//   专属设置 = 项目 <cwd>/.dsh/storages/ka_tool_auto_on_setting.json
+//   生效值   = 专属覆盖默认、默认覆盖原设置（按 plan/goal 的 enabled/tools 逐项继承）。
+// 与工具控制面板四文件模型不同：这里一层只有一个 JSON 文件，工具保持扁平清单，
+// 不做插件封装。文件形状：
+//   { "plan": { "enabled": true, "tools": ["exit_plan_mode"] },
+//     "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] } }
+// ---------------------------------------------------------------------------
+
+function userAutoOnPath() {
+  return join(STORAGE_DIR, AUTO_ON_SETTING_FILE);
+}
+
+function projectAutoOnPath(cwd) {
+  return join(cwd, ".dsh", "storages", AUTO_ON_SETTING_FILE);
+}
+
+/** 读取一层 auto-on JSON；缺失/损坏回退 {}（即全部继承下层）。 */
+function loadAutoOnLayerFile(file, logger) {
+  return readJsonFile(file, {}, normalizeAutoOnLayer, logger);
+}
+
+/** 写回一层 auto-on JSON（自动归一化；传 {} 即清空该层覆盖）。 */
+function saveAutoOnLayerFile(file, value, logger) {
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(normalizeAutoOnLayer(value), null, 2) + "\n", "utf8");
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 写入 kaz_tool_auto_on JSON 失败（" + file + "）：" + safeMessage(error));
+  }
+}
+
+/** 读取某项目完整的 auto-on 三层状态并算好生效值。 */
+function loadAutoOnLayers(cwd, logger) {
+  const safeCwd = typeof cwd === "string" && cwd.trim().length > 0 ? cwd.trim() : process.cwd();
+  const user = loadAutoOnLayerFile(userAutoOnPath(), logger);
+  const project = loadAutoOnLayerFile(projectAutoOnPath(safeCwd), logger);
+  const original = defaultToolAutoOnState();
+  const defaults = mergeAutoOnLayers(original, user, {});
+  const effective = mergeAutoOnLayers(original, user, project);
+  const projectDiffers = !autoOnSettingsEqual(effective, defaults);
+  const userDiffersFactory = !autoOnSettingsEqual(defaults, original);
+  return {
+    cwd: safeCwd,
+    user,
+    project,
+    original,
+    defaults,
+    effective,
+    projectDiffers,
+    userDiffersFactory,
+    effectiveEqualsFactory: !projectDiffers && !userDiffersFactory,
+    effectiveEqualsUser: !projectDiffers,
+    hasProjectOverrides: projectDiffers,
+  };
+}
+
 function enableEquals(a, b) {
   return JSON.stringify(normalizePluginEnableDict(a)) === JSON.stringify(normalizePluginEnableDict(b));
 }
@@ -694,23 +760,13 @@ export default {
     let activeSession = null;
 
     // -----------------------------------------------------------------------
-    // kaz_tool_auto_on（模式工具自动启用）：按会话内存态，不写任何配置文件。
-    //   - key：会话 id（agentSessionIdOf，子代理归入父会话）；
-    //   - value：{ plan: { enabled, tools }, goal: { enabled, tools } }；
-    //   - 只有 client 切到该会话（applySession）后才会初始化并参与工具面，
-    //     因此“仅当前对话临时生效，其它对话不共享”。
+    // kaz_tool_auto_on（模式工具自动启用）：三层单 JSON 设置 + 运行时临时放行。
+    //   - 设置：原设置（代码）→ 用户默认（~/.dsh/storages/ka_tool_auto_on_setting.json）
+    //           → 项目专属（<项目>/.dsh/storages/ka_tool_auto_on_setting.json）。
+    //   - 运行时：按 agent 所在项目读取生效状态；只有该会话 plan/goal 模式激活
+    //     时才把对应工具临时加进工具面，模式结束自动移除（同一项目所有对话共享设置）。
+    //   - 不再维护按会话的内存 Map。
     // -----------------------------------------------------------------------
-    const toolAutoOnBySession = new Map();
-
-    /** 读取某会话的 auto-on 状态；不存在时用参数文件默认值初始化。 */
-    function getToolAutoOnState(sessionId) {
-      const key = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : "";
-      if (key.length === 0) return null;
-      if (!toolAutoOnBySession.has(key)) {
-        toolAutoOnBySession.set(key, defaultToolAutoOnState());
-      }
-      return toolAutoOnBySession.get(key);
-    }
 
     /**
      * settings 服务惰性获取：启动时可能尚未挂载（kaz-mode 只 inject systemPrompt），
@@ -1046,21 +1102,20 @@ export default {
       }
     }
 
-    /** 当前会话 kaz_tool_auto_on 命中的工具：仅当该会话已被 applySession 初始化、
-     *  对应功能开关打开、且对应模式激活时返回配置的工具清单。 */
+    /** 当前会话 kaz_tool_auto_on 命中的工具：按 agent 所在项目的三层生效状态，
+     *  仅当对应功能开关打开、且该会话 plan/goal 模式激活时返回配置的工具清单。 */
     function autoOnToolsFor(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return [];
-      const sessionId = agentSessionIdOf(agent);
-      if (sessionId.length === 0 || !toolAutoOnBySession.has(sessionId)) return [];
-      const state = toolAutoOnBySession.get(sessionId);
+      const layers = loadAutoOnLayers(workspaceOfAgent(agent), ctx.logger);
+      const effective = layers.effective;
       const out = [];
-      if (state.plan?.enabled === true && planModeActive(agent)) {
-        for (const tool of Array.isArray(state.plan.tools) ? state.plan.tools : []) {
+      if (effective.plan?.enabled === true && planModeActive(agent)) {
+        for (const tool of Array.isArray(effective.plan.tools) ? effective.plan.tools : []) {
           if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
         }
       }
-      if (state.goal?.enabled === true && goalModeActive(agent)) {
-        for (const tool of Array.isArray(state.goal.tools) ? state.goal.tools : []) {
+      if (effective.goal?.enabled === true && goalModeActive(agent)) {
+        for (const tool of Array.isArray(effective.goal.tools) ? effective.goal.tools : []) {
           if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
         }
       }
@@ -1081,24 +1136,60 @@ export default {
       return null;
     }
 
-    /** kaz_tool_auto_on 面板快照：包含模式激活状态与每个功能的开关/工具清单。 */
-    function toolAutoOnSnapshot(sessionId) {
-      const state = getToolAutoOnState(sessionId) ?? defaultToolAutoOnState();
+    /** kaz_tool_auto_on 面板快照：包含三层状态、生效状态、模式激活与专属标记。 */
+    function toolAutoOnSnapshot(sessionId, cwd) {
+      const safeCwd =
+        typeof cwd === "string" && cwd.trim().length > 0
+          ? cwd.trim()
+          : typeof sessionId === "string" && sessionId.length > 0
+            ? resolveSessionCwd(sessionId)
+            : activeSession !== null && activeSession !== undefined
+              ? activeSession.cwd
+              : process.cwd();
+      const layers = loadAutoOnLayers(safeCwd, ctx.logger);
       const agent = agentOfSession(sessionId);
       return {
         sessionId,
+        cwd: layers.cwd,
+        user: layers.user,
+        project: layers.project,
+        original: layers.original,
+        defaults: layers.defaults,
+        effective: layers.effective,
+        projectDiffers: layers.projectDiffers,
+        userDiffersFactory: layers.userDiffersFactory,
+        effectiveEqualsFactory: layers.effectiveEqualsFactory,
+        effectiveEqualsUser: layers.effectiveEqualsUser,
+        hasProjectOverrides: layers.hasProjectOverrides,
         active: {
           plan: agent !== null ? planModeActive(agent) : false,
           goal: agent !== null ? goalModeActive(agent) : false,
         },
         features: {
           plan: {
-            enabled: state.plan?.enabled === true,
-            tools: [...(Array.isArray(state.plan?.tools) ? state.plan.tools : [])],
+            enabled: layers.effective.plan.enabled,
+            tools: [...layers.effective.plan.tools],
+            // “专属”只看是否真的与默认设置不同；项目 JSON 里写了相同的值不算专属。
+            overridden: !autoOnSettingsEqual(
+              { plan: layers.effective.plan },
+              { plan: layers.defaults.plan },
+            ),
+            defaultDrifted: !autoOnSettingsEqual(
+              { plan: layers.defaults.plan },
+              { plan: layers.original.plan },
+            ),
           },
           goal: {
-            enabled: state.goal?.enabled === true,
-            tools: [...(Array.isArray(state.goal?.tools) ? state.goal.tools : [])],
+            enabled: layers.effective.goal.enabled,
+            tools: [...layers.effective.goal.tools],
+            overridden: !autoOnSettingsEqual(
+              { goal: layers.effective.goal },
+              { goal: layers.defaults.goal },
+            ),
+            defaultDrifted: !autoOnSettingsEqual(
+              { goal: layers.defaults.goal },
+              { goal: layers.original.goal },
+            ),
           },
         },
       };
@@ -1179,12 +1270,18 @@ export default {
       try {
         const layers = loadExternalToolPluginLayers(workspaceOfAgent(agent), ctx.logger);
         whitelist = new Set(computeToolPluginSurfaceFromEffective(layers.effective));
+        // 模式限定插件（plan-mode / goal）即使被工具控制面板 JSON 启用，也不进
+        // 基础工具面；它们只由下方的 kaz_tool_auto_on 在模式激活时临时放行。
+        for (const pluginKey of MODE_SCOPED_TOOL_PLUGIN_KEYS) {
+          const universe = layers.effective.T0?.[pluginKey] ?? {};
+          for (const tool of Object.keys(universe)) whitelist.delete(tool);
+        }
       } catch (error) {
         ctx.logger?.debug?.("[kaz-mode] 计算统一工具插件面失败：" + safeMessage(error));
         whitelist = new Set();
       }
-      // kaz_tool_auto_on：当前会话 plan/goal 模式激活时，临时放行参数文件里的工具
-      // （仅内存态，不修改工具控制面板 JSON / settings.yaml；未 applySession 的会话不参与）。
+      // kaz_tool_auto_on：当前会话 plan/goal 模式激活时，按项目三层生效设置
+      // 临时放行对应工具；模式结束自动移除。
       for (const tool of autoOnToolsFor(agent)) whitelist.add(tool);
       // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
       // 才保留记忆工具，避免新对话/未落盘状态被误判为启用。
@@ -1469,6 +1566,10 @@ export default {
           endpoint !== "setExternalToolPlugin" &&
           endpoint !== "resetExternalToolPlugins" &&
           endpoint !== "setExternalToolPluginsAsDefault" &&
+          endpoint !== "getToolAutoOn" &&
+          endpoint !== "setToolAutoOn" &&
+          endpoint !== "resetToolAutoOn" &&
+          endpoint !== "setToolAutoOnAsDefault" &&
           endpoint !== "setProjectPlugin" &&
           endpoint !== "clearProject" &&
           endpoint !== "clearProjectPlugin"
@@ -1486,6 +1587,14 @@ export default {
 
         /** 项目状态端点统一解析项目 cwd（与工具面板同规则）。 */
         const resolveStateCwd = () => {
+          if (typeof input.cwd === "string" && input.cwd.trim().length > 0) return input.cwd.trim();
+          if (sessionId.length > 0) return resolveSessionCwd(sessionId);
+          if (activeSession !== null && activeSession !== undefined) return activeSession.cwd;
+          return process.cwd();
+        };
+
+        /** kaz_tool_auto_on 端点统一解析项目 cwd（与工具面板同规则）。 */
+        const resolveAutoOnCwd = () => {
           if (typeof input.cwd === "string" && input.cwd.trim().length > 0) return input.cwd.trim();
           if (sessionId.length > 0) return resolveSessionCwd(sessionId);
           if (activeSession !== null && activeSession !== undefined) return activeSession.cwd;
@@ -1681,13 +1790,11 @@ export default {
         }
 
         if (endpoint === "applySession") {
-          // 纯方案 A：只需记录活跃会话；插件在使用时刻经 kazMode.pluginConfig
-          // 按 agent 会话实时读取生效状态，无需写任何插件 settings.yaml。
+          // 纯方案 A：只需记录活跃会话；插件与 kaz_tool_auto_on 在使用时刻经
+          // kazMode.pluginConfig / loadAutoOnLayers 按 agent 项目实时读取生效状态，
+          // 无需写任何插件 settings.yaml，也无需初始化会话内存态。
           const { cwd, data } = loadSessionData(sessionId);
           activeSession = { sessionId, cwd };
-          // kaz_tool_auto_on：切到该会话时初始化它的临时自动启用状态，
-          // 使“仅当前对话生效、其它对话不共享”成立。
-          getToolAutoOnState(sessionId);
           return { ok: true, value: { applied: true, sessionId } };
         }
 
@@ -1802,17 +1909,54 @@ export default {
         }
 
         if (endpoint === "getToolAutoOn") {
-          return { ok: true, value: toolAutoOnSnapshot(sessionId) };
+          return { ok: true, value: toolAutoOnSnapshot(sessionId, typeof input.cwd === "string" ? input.cwd : "") };
         }
 
         if (endpoint === "setToolAutoOn") {
           const feature = input.feature === "plan" || input.feature === "goal" ? input.feature : null;
           if (feature === null) return rpcFail("feature 必须是 plan 或 goal");
-          const state = getToolAutoOnState(sessionId);
-          if (state === null) return rpcFail("缺少 sessionId");
-          if (typeof input.enabled === "boolean") state[feature].enabled = input.enabled;
-          if (input.tools !== undefined) state[feature].tools = normalizeToolList(input.tools);
-          return { ok: true, value: toolAutoOnSnapshot(sessionId) };
+          const layer = input.layer === "user" || input.layer === "project" ? input.layer : "project";
+          const cwd = resolveAutoOnCwd();
+          const file = layer === "user" ? userAutoOnPath() : projectAutoOnPath(cwd);
+          const layerData = loadAutoOnLayerFile(file, ctx.logger);
+          if (input.reset === true) {
+            delete layerData[feature];
+          } else {
+            const entry = layerData[feature] ?? {};
+            if (typeof input.enabled === "boolean") entry.enabled = input.enabled;
+            if (Array.isArray(input.tools)) {
+              const normalized = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature];
+              if (normalized !== undefined && Array.isArray(normalized.tools)) entry.tools = normalized.tools;
+              else delete entry.tools;
+            }
+            if (Object.keys(entry).length > 0) layerData[feature] = entry;
+            else delete layerData[feature];
+          }
+          saveAutoOnLayerFile(file, layerData, ctx.logger);
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          return { ok: true, value: toolAutoOnSnapshot(sessionId, cwd) };
+        }
+
+        if (endpoint === "resetToolAutoOn") {
+          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
+          if (layer === null) return rpcFail("layer 必须是 user 或 project");
+          const cwd = resolveAutoOnCwd();
+          if (layer === "user") {
+            saveAutoOnLayerFile(userAutoOnPath(), defaultToolAutoOnState(), ctx.logger);
+          } else {
+            saveAutoOnLayerFile(projectAutoOnPath(cwd), {}, ctx.logger);
+          }
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          return { ok: true, value: toolAutoOnSnapshot(sessionId, cwd) };
+        }
+
+        if (endpoint === "setToolAutoOnAsDefault") {
+          const cwd = resolveAutoOnCwd();
+          const layers = loadAutoOnLayers(cwd, ctx.logger);
+          if (!layers.hasProjectOverrides) return rpcFail("当前没有项目专属设置可设为默认");
+          saveAutoOnLayerFile(userAutoOnPath(), layers.effective, ctx.logger);
+          if (sessionId.length > 0) activeSession = { sessionId, cwd };
+          return { ok: true, value: toolAutoOnSnapshot(sessionId, cwd) };
         }
 
         return rpcFail("unknown endpoint '" + String(endpoint) + "'");

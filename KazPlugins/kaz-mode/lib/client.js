@@ -802,6 +802,7 @@ window.__ModuleLoader__.load({
 							createElement(ToolAutoOnSection, {
 								key: "tool-auto-on",
 								sessionId: sessionId || "",
+								cwd,
 								writable,
 							}),
 						),
@@ -1403,15 +1404,19 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			/** kaz_tool_auto_on（模式工具自动启用）：kaz-mode 配置区内的临时工具放行区块，位于工具控制面板下方。 */
-			function ToolAutoOnSection({ sessionId, writable }) {
+			/** kaz_tool_auto_on（模式工具自动启用）：kaz-mode 配置区内的临时工具放行区块，
+			 *  位于工具控制面板下方；三层设置（原设置/默认设置/专属设置）与工具控制面板同款，
+			 *  但工具保持扁平清单、一层只用一个 JSON 文件。 */
+			function ToolAutoOnSection({ sessionId, cwd, writable }) {
 				const [data, setData] = useState(null);
+				const [busy, setBusy] = useState(false);
 				const [drafts, setDrafts] = useState({ plan: null, goal: null });
 
 				const refresh = useCallback(async () => {
-					const res = await rpcCall("getToolAutoOn", { sessionId: sessionId || "" });
+					// 轮询只刷新数据，不进入 busy 态，避免“正在同步”闪烁并锁住输入框。
+					const res = await rpcCall("getToolAutoOn", { sessionId: sessionId || "", cwd: cwd || "" });
 					if (res !== null) setData(res);
-				}, [sessionId]);
+				}, [sessionId, cwd]);
 
 				useEffect(() => {
 					setDrafts({ plan: null, goal: null });
@@ -1421,14 +1426,78 @@ window.__ModuleLoader__.load({
 					return () => clearInterval(timer);
 				}, [refresh]);
 
-				const applyFeature = async (feature, patch) => {
-					if (!writable) return;
-					const res = await rpcCall("setToolAutoOn", { sessionId: sessionId || "", feature, ...patch });
-					if (res !== null) setData(res);
+				const targetCwd = () => (data !== null && typeof data.cwd === "string" && data.cwd.length > 0 ? data.cwd : cwd || "");
+
+				const withBusy = async (task) => {
+					setBusy(true);
+					try {
+						await task();
+					} finally {
+						setBusy(false);
+					}
 				};
 
-				const features = data !== null && data.features !== null && typeof data.features === "object" ? data.features : {};
-				const active = data !== null && data.active !== null && typeof data.active === "object" ? data.active : { plan: false, goal: false };
+				const applyPatch = (patch) =>
+					withBusy(async () => {
+						if (!writable) return;
+						const res = await rpcCall("setToolAutoOn", { sessionId: sessionId || "", cwd: targetCwd(), layer: "project", ...patch });
+						if (res !== null) setData(res);
+					});
+
+				const applyResetLayer = (target) =>
+					withBusy(async () => {
+						if (!writable) return;
+						const res = await rpcCall("resetToolAutoOn", { sessionId: sessionId || "", cwd: targetCwd(), layer: target });
+						if (res !== null) setData(res);
+					});
+
+				const applySetAsDefault = () =>
+					withBusy(async () => {
+						if (!writable) return;
+						if (typeof window !== "undefined" && !window.confirm("确定把当前项目专属设置覆盖到用户默认设置吗？")) return;
+						const res = await rpcCall("setToolAutoOnAsDefault", { sessionId: sessionId || "", cwd: targetCwd() });
+						if (res !== null) setData(res);
+					});
+
+				if (data === null) {
+					return createElement("div", { className: "kzm-state-section" }, createElement("p", { className: "kzm-note" }, "Kaz 模式工具自动启用（当前项目）加载中…"));
+				}
+
+				const effective = data.effective !== null && typeof data.effective === "object" ? data.effective : {};
+				const featureFlags = data.features !== null && typeof data.features === "object" ? data.features : {};
+				const active = data.active !== null && typeof data.active === "object" ? data.active : { plan: false, goal: false };
+
+				const hasProjectOverrides = data.hasProjectOverrides === true;
+				const effectiveEqualsFactory = data.effectiveEqualsFactory === true;
+				const effectiveEqualsUser = data.effectiveEqualsUser === true;
+
+				let restoreLabel = null;
+				let restoreOrange = false;
+				let restoreAction = null;
+				if (effectiveEqualsFactory) {
+					restoreLabel = "恢复原设置";
+					restoreOrange = false;
+					restoreAction = async () => {
+						if (typeof window !== "undefined" && !window.confirm("确定恢复为代码内出厂设置吗？")) return;
+						await applyResetLayer("user");
+						await applyResetLayer("project");
+					};
+				} else if (effectiveEqualsUser) {
+					restoreLabel = "恢复原设置";
+					restoreOrange = true;
+					restoreAction = async () => {
+						if (typeof window !== "undefined" && !window.confirm("确定把用户默认设置恢复为原设置吗？")) return;
+						await applyResetLayer("project");
+						await applyResetLayer("user");
+					};
+				} else {
+					restoreLabel = "恢复默认设置";
+					restoreOrange = false;
+					restoreAction = async () => {
+						if (typeof window !== "undefined" && !window.confirm("确定清除当前项目专属设置，恢复为用户默认设置吗？")) return;
+						await applyResetLayer("project");
+					};
+				}
 
 				const FEATURE_META = [
 					{ id: "plan", label: "plan 模式", toolsLabel: "plan 临时放行工具", placeholder: "exit_plan_mode", description: "进入 plan 模式时临时放行这些工具；plan 模式结束自动移除。" },
@@ -1442,15 +1511,40 @@ window.__ModuleLoader__.load({
 						"div",
 						{ className: "kzm-state-head" },
 						createElement("span", { className: "kzm-state-title" }, "Kaz 模式工具自动启用"),
+						restoreLabel !== null &&
+							createElement(
+								"button",
+								{
+									type: "button",
+									className: "kzm-reset-btn",
+									"data-drifted": restoreOrange ? "true" : "false",
+									disabled: !writable || busy,
+									onClick: restoreAction,
+								},
+								restoreLabel,
+							),
+						hasProjectOverrides &&
+							createElement(
+								"button",
+								{
+									type: "button",
+									className: "kzm-set-default-btn",
+									disabled: !writable || busy,
+									onClick: () => void applySetAsDefault(),
+								},
+								"设为默认设置",
+							),
 					),
 					createElement(
 						"p",
 						{ className: "kzm-state-desc" },
-						"仅当前对话临时生效（内存态，不写 settings.yaml / 工具控制面板 JSON）；plan/goal 模式激活时自动放行下列工具，模式结束自动移除。仅 Kaz 会话生效。",
+						"三层设置：原设置（代码出厂）→ 默认设置（用户 ka_tool_auto_on_setting.json）→ 专属设置（项目 ka_tool_auto_on_setting.json），同一项目所有对话共享；plan/goal 模式激活时把生效清单临时加入该会话工具面，模式结束自动移除。仅 Kaz 会话生效。当前项目：" + (targetCwd() || "（未知）"),
 					),
 					FEATURE_META.map((meta) => {
-						const feature = features[meta.id] !== null && typeof features[meta.id] === "object" ? features[meta.id] : { enabled: false, tools: [] };
+						const feature = effective[meta.id] !== null && typeof effective[meta.id] === "object" ? effective[meta.id] : { enabled: false, tools: [] };
+						const flags = featureFlags[meta.id] !== null && typeof featureFlags[meta.id] === "object" ? featureFlags[meta.id] : {};
 						const isOn = feature.enabled === true && active[meta.id] === true;
+						const overridden = flags.overridden === true;
 						const draft = drafts[meta.id];
 						const text = draft !== null ? draft : Array.isArray(feature.tools) ? feature.tools.join(", ") : "";
 						return createElement(
@@ -1461,11 +1555,24 @@ window.__ModuleLoader__.load({
 								{ className: "kzm-state-row" },
 								createElement("span", { className: "kzm-state-name", title: meta.description }, meta.label),
 								createElement("span", { className: "kzm-auto-on-status", "data-on": isOn ? "true" : "false" }, isOn ? "启用中" : "未启用"),
+								overridden && createElement("span", { className: "kzm-override-badge" }, "专属"),
+								overridden &&
+									createElement(
+										"button",
+										{
+											type: "button",
+											className: "kzm-reset-btn",
+											title: "清除该功能的项目专属设置，恢复为用户默认设置",
+											disabled: !writable || busy,
+											onClick: () => void applyPatch({ feature: meta.id, reset: true }),
+										},
+										"恢复默认",
+									),
 								createElement(Toggle, {
 									checked: feature.enabled === true,
-									disabled: !writable,
+									disabled: !writable || busy,
 									title: meta.label + " 自动启用开关",
-									onChange: (next) => void applyFeature(meta.id, { enabled: next }),
+									onChange: (next) => void applyPatch({ feature: meta.id, enabled: next }),
 								}),
 							),
 							createElement(
@@ -1476,7 +1583,7 @@ window.__ModuleLoader__.load({
 									className: "kzm-input",
 									type: "text",
 									value: text,
-									disabled: !writable,
+									disabled: !writable || busy,
 									placeholder: meta.placeholder,
 									spellCheck: false,
 									onChange: (event) => setDrafts((prev) => ({ ...prev, [meta.id]: event.target.value })),
@@ -1487,12 +1594,13 @@ window.__ModuleLoader__.load({
 											.map((part) => part.trim())
 											.filter((part) => part.length > 0);
 										setDrafts((prev) => ({ ...prev, [meta.id]: null }));
-										void applyFeature(meta.id, { tools: parsed });
+										void applyPatch({ feature: meta.id, tools: parsed });
 									},
 								}),
 							),
 						);
 					}),
+					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
 				);
 			}
 

@@ -22,6 +22,7 @@ import {
   TOOL_PLUGIN_CATALOG,
   TOOL_PLUGINS,
   TOOL_AUTO_ON_CONFIG,
+  MODE_SCOPED_TOOL_PLUGIN_KEYS,
   PLAN_AUTO_ON_TOOLS,
   GOAL_AUTO_ON_TOOLS,
   PLAN_AUTO_ON_DEFAULT_ENABLED,
@@ -29,6 +30,10 @@ import {
   defaultToolAutoOnState,
   normalizeToolList,
   normalizeToolAutoOnState,
+  normalizeAutoOnLayer,
+  mergeAutoOnLayers,
+  autoOnSettingsEqual,
+  hasAutoOnLayerFields,
 } from "./lib/tool-lists.js";
 
 let failures = 0;
@@ -103,6 +108,16 @@ check("⑥ defaultToolAutoOnState 返回独立副本", autoDefault.plan.tools !=
 check("⑥ normalizeToolList trim/去重/过滤", JSON.stringify(normalizeToolList([" exit_plan_mode ", "", "get_goal", "get_goal"])) === JSON.stringify(["exit_plan_mode", "get_goal"]));
 const normalizedAuto = normalizeToolAutoOnState({ plan: { enabled: true, tools: ["a", "a", " b "] }, goal: { enabled: false, tools: ["c"] } });
 check("⑥ normalizeToolAutoOnState 归一化", normalizedAuto.plan.enabled === true && JSON.stringify(normalizedAuto.plan.tools) === JSON.stringify(["a", "b"]) && normalizedAuto.goal.enabled === false && JSON.stringify(normalizedAuto.goal.tools) === JSON.stringify(["c"]));
+check("⑥ MODE_SCOPED_TOOL_PLUGIN_KEYS 含 plan-mode/goal", MODE_SCOPED_TOOL_PLUGIN_KEYS.includes("plan-mode") && MODE_SCOPED_TOOL_PLUGIN_KEYS.includes("goal") && MODE_SCOPED_TOOL_PLUGIN_KEYS.length === 2);
+const layer = normalizeAutoOnLayer({ plan: { enabled: false, tools: [" a ", "a", ""] }, goal: {} });
+check("⑥ normalizeAutoOnLayer 只保留显式字段并去重", layer.plan?.enabled === false && JSON.stringify(layer.plan?.tools) === JSON.stringify(["a"]) && layer.goal === undefined);
+const emptyTools = normalizeAutoOnLayer({ plan: { tools: [] } });
+check("⑥ normalizeAutoOnLayer 保留空数组覆盖", Array.isArray(emptyTools.plan?.tools) && emptyTools.plan.tools.length === 0 && emptyTools.plan.enabled === undefined);
+const merged = mergeAutoOnLayers(defaultToolAutoOnState(), { plan: { enabled: false } }, { plan: { tools: ["get_goal"] } });
+check("⑥ mergeAutoOnLayers 专属覆盖默认/原设置", merged.plan.enabled === false && JSON.stringify(merged.plan.tools) === JSON.stringify(["get_goal"]) && JSON.stringify(merged.goal.tools) === JSON.stringify(GOAL_AUTO_ON_TOOLS));
+const mergedDefault = mergeAutoOnLayers(defaultToolAutoOnState(), { goal: { tools: ["get_goal"] } }, {});
+check("⑥ mergeAutoOnLayers 默认覆盖原设置", mergedDefault.goal.tools.includes("get_goal") && mergedDefault.goal.enabled === true);
+check("⑥ autoOnSettingsEqual / hasAutoOnLayerFields", autoOnSettingsEqual({ a: 1 }, { a: 1 }) === true && hasAutoOnLayerFields({ plan: { enabled: true } }, "plan") === true && hasAutoOnLayerFields({ plan: {} }, "plan") === false);
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);
 process.exit(failures === 0 ? 0 : 1);

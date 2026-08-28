@@ -20,11 +20,16 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `resolveFirstRoundTools({ kazMemoryEnabled })` | round-minimal / kaz-mode / computeSurface | 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点） |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode 面板 | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
-| `TOOL_AUTO_ON_CONFIG` / `PLAN_AUTO_ON_TOOLS` / `GOAL_AUTO_ON_TOOLS` / `defaultToolAutoOnState` / `normalizeToolList` | kaz-mode（kaz_tool_auto_on） | 模式工具自动启用参数单一事实源：plan/goal 模式激活时临时放行的默认工具与开关 |
+| `TOOL_AUTO_ON_CONFIG` / `MODE_SCOPED_TOOL_PLUGIN_KEYS` / `PLAN_AUTO_ON_TOOLS` / `GOAL_AUTO_ON_TOOLS` / `defaultToolAutoOnState` / `normalizeToolList` / `normalizeAutoOnLayer` / `mergeAutoOnLayers` / `autoOnSettingsEqual` / `hasAutoOnLayerFields` | kaz-mode（kaz_tool_auto_on） | 模式工具自动启用参数单一事实源 + 三层单 JSON 设置模型：原设置（代码）→ 默认设置（用户 JSON）→ 专属设置（项目 JSON）的归一化 / 合并 / 生效计算 |
 
 > **官方/Kaz 分类修改点**：`lib/tool-plugin-catalog.js`。外置插件数据（手动添加）保存在用户目录 storages 的 `other-*.json`；项目专属开关调整：官方/Kaz 写项目 `tool-plugin.json` / `tool-plugin-catalog.json`，外置写项目 `other-*.json`，**不写在源码里**。
 >
-> **kaz_tool_auto_on 参数修改点**：`lib/tool-auto-on.js`（plan/goal 模式临时放行工具的默认清单与默认开关）。
+> **kaz_tool_auto_on 原设置修改点**：`lib/tool-auto-on.js`（plan/goal 模式临时放行工具的默认清单与默认开关）。
+> 默认设置 / 专属设置存 JSON（一层一个文件，不做插件封装）：
+> - 默认设置：`~/.dsh/storages/ka_tool_auto_on_setting.json`
+> - 专属设置：`<项目>/.dsh/storages/ka_tool_auto_on_setting.json`
+> - 形状：`{ "plan": { "enabled": true, "tools": ["exit_plan_mode"] }, "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] } }`
+> 生效值 = 专属覆盖默认、默认覆盖原设置（enabled / tools 逐项继承）。
 
 ## 工具面语义（2026-08 统一）
 
