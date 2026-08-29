@@ -44,8 +44,7 @@ export const CLASSIFICATION_LAUNCH_TOOLS = ["create_goal", "create_plan"];
 export const WHALE_REPORT_TOOL = "whale_report";
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
-const RECONSTRUCTION_PROMPT =
-  "We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, and also incorporating any relevant system-level instructions, tool constraints, and contextual requirements that apply to this session. The reconstruction is for internal use only; we proceed by calling whale_report. We may only use <工具列表> tools. When done, call whale_report to proceed.";
+const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, and also incorporating any relevant system-level instructions, tool constraints, and contextual requirements that apply to this session. The reconstruction is for internal use only. Reconstruction is for understanding. Classification and execution follow. We may only use <工具列表> tools. When done, call whale_report to proceed.`;
 
 /** 任务分类 prompt（草案原文）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
@@ -615,7 +614,7 @@ export default {
       const form = stage === "reconstruction" ? "reconstruction" : stage === "classification" ? "classification" : null;
       if (form === null) return decision;
       if (hasInjectedBefore(agent, form)) return decision;
-      const title = stage === "reconstruction" ? "ka-whale-workflow 任务重构" : "ka-whale-workflow 任务分类";
+      const title = stage === "reconstruction" ? "ka-whale-workflow TaskReconstruction" : "ka-whale-workflow TaskClassification";
       const text = ["[" + title + "]", ">", renderPrompt(agent, stage), "<"].join("\n");
       let message;
       try {
