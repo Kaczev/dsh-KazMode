@@ -40,8 +40,7 @@ check("重构八工具默认清单", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 
 check("初始阶段 idle", stageOf(agent, store) === "idle");
-check("n+1 轮在重构/分类 → 回重构", nextStageOnUserMessage("reconstruction", 2) === "reconstruction" && nextStageOnUserMessage("classification", 3) === "reconstruction");
-check("n+1 轮在 done/assessment → 评估", nextStageOnUserMessage("done", 2) === "assessment" && nextStageOnUserMessage("assessment", 4) === "assessment");
+check("第 2+ 轮直接回重构", nextStageOnUserMessage("reconstruction", 2) === "reconstruction" && nextStageOnUserMessage("classification", 3) === "reconstruction" && nextStageOnUserMessage("done", 2) === "reconstruction" && nextStageOnUserMessage("assessment", 4) === "reconstruction");
 check("首轮 → 重构", nextStageOnUserMessage("idle", 1) === "reconstruction");
 check("setStage 进入重构", setStage(agent, "reconstruction", store) === true && stageOf(agent, store) === "reconstruction");
 check("setStage 重复同阶段不追加", setStage(agent, "reconstruction", store) === false);

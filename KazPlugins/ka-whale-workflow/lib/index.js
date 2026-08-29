@@ -14,7 +14,8 @@
 //      plan 模式由 whale_report 内部经 create_plan 工具（planning isolate 组内）切换，
 //      因为 whale_report 自身在 host 层解析不到 planMode 服务。
 //   4) 插话（模型运行中，同一轮中途追加消息）不改变当前工作流阶段。
-//      正式新一轮（turn>=2、模型不在运行）：重构/分类 → 回重构；其它 → 信息评估。
+//      第 2、3、4……轮（turn>=2、模型不在运行）直接重新进入「任务重构」；
+//      「信息评估」阶段已取消。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
 //      不进入任务重构；round-minimal 极简过滤仍照常生效。
 //
@@ -383,15 +384,9 @@ export function hasInjectedInTurn(agent, form, turn) {
   }
 }
 
-/** 正式新一轮（turn>=2，模型不在运行）应进入的阶段：
- *   - 当前仍在任务重构/任务分类 → 回到任务重构（补充信息继续完善任务描述）；
- *   - 其它（done/idle/assessment）→ 信息评估。
- *  turn < 2（首轮）→ 任务重构。 */
-export function nextStageOnUserMessage(current, turn) {
-  if (typeof turn === "number" && turn >= 2) {
-    if (current === "reconstruction" || current === "classification") return "reconstruction";
-    return "assessment";
-  }
+/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）直接重新进入「任务重构」。
+ *  已取消「信息评估」阶段。 */
+export function nextStageOnUserMessage(_current, _turn) {
   return "reconstruction";
 }
 
@@ -616,18 +611,13 @@ export default {
     }
 
     // -----------------------------------------------------------------------
-    // whale_report 工具：重构/分类/评估各调用一次，向插件汇报阶段完成。
+    // whale_report 工具：重构/分类各调用一次，向插件汇报阶段完成。
     // -----------------------------------------------------------------------
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call during task reconstruction, task classification, or information assessment. In task classification, pass mode ('normal' | 'plan' | 'goal') to choose the execution mode; whale_report launches plan/goal mode itself, so create_plan/create_goal are not needed. For goal mode, also pass objective. In the information assessment stage, pass restart: true to exit the current mode and restart reconstruction → classification; omit restart or pass false to keep the current mode.",
+        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call during task reconstruction or task classification. In task classification, pass mode ('normal' | 'plan' | 'goal') to choose the execution mode; whale_report launches plan/goal mode itself, so create_plan/create_goal are not needed. For goal mode, also pass objective.",
       parameters: {
-        restart: {
-          type: "boolean",
-          description:
-            "Only for the information assessment stage: true = exit current mode and restart the workflow; false/omitted = keep the current mode.",
-        },
         mode: {
           type: "string",
           description:
@@ -723,7 +713,7 @@ export default {
           return Promise.resolve({ ok: true, stage: "done", restarted: false });
         }
         return Promise.reject(
-          new Error("whale_report can only be called during task reconstruction, task classification, or information assessment"),
+          new Error("whale_report can only be called during task reconstruction or task classification"),
         );
       },
       presentCall: () => ({ card: "generic", title: "鲸鱼工作流汇报", kind: "other" }),
@@ -812,15 +802,11 @@ export default {
       }
       manualBypassSessions.delete(sessionId);
       const current = stageOfAgent(agent);
-      // 正式新一轮（turn>=2，模型不在运行）：重构/分类 → 回重构；其它 → 信息评估。
+      // 第 2、3、4……轮（turn>=2，模型不在运行）：直接重新进入任务重构。
       if (typeof turn === "number" && turn >= 2) {
         const next = nextStageOnUserMessage(current, turn);
         if (setStageAgent(agent, next)) {
-          reportRoundDisplay(
-            agent,
-            next === "reconstruction" ? "收到补充信息，重新进入任务重构。" : "收到新一轮消息，进入信息评估。",
-            "阶段切换",
-          );
+          reportRoundDisplay(agent, "收到新一轮消息，重新进入任务重构。", "阶段切换");
         }
         return;
       }
@@ -893,7 +879,7 @@ export default {
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
                   agent,
-                  next === "reconstruction" ? "收到补充信息，重新进入任务重构（pre-step 兜底）。" : "收到新一轮消息，进入信息评估（pre-step 兜底）。",
+                  "收到新一轮消息，重新进入任务重构（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
@@ -998,7 +984,7 @@ export default {
       // assemble 兜底：round-minimal 解除后、首次 tool/call 的下一步组装时，
       // 阶段可能还没被 session/event 路径推进（assemble 先于 agent/pre-step 执行）。
       // 在这里补一次阶段切换，使【紧跟在首次工具调用后的那次请求】就拿到对应工具面
-      // 和系统提示词段，而不是再等一个 step。turn>=2 且阶段丢失时进评估而非重构。
+      // 和系统提示词段，而不是再等一个 step。阶段丢失时一律进入任务重构。
       if (
         enabled &&
         stage === "idle" &&
@@ -1007,14 +993,13 @@ export default {
         !isMinimal(agent) &&
         hasToolCall(agent)
       ) {
-        const nextStage = currentTurnOf(agent) >= 2 ? "assessment" : "reconstruction";
-        if (setStageAgent(agent, nextStage)) {
+        if (setStageAgent(agent, "reconstruction")) {
           reportRoundDisplay(
             agent,
-            `round-minimal 已解除，进入${nextStage === "assessment" ? "信息评估" : "任务重构"}（assemble 兜底）。`,
+            "round-minimal 已解除，进入任务重构（assemble 兜底）。",
             "阶段切换",
           );
-          stage = nextStage;
+          stage = "reconstruction";
         }
       }
       let allowed = null;
