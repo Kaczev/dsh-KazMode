@@ -73,15 +73,13 @@ The following modes are available:
 
 - **Plan mode**:
     Use this when the task involves significant unknowns — for example, when the user asks for a design, a migration plan, or a solution architecture. It allows us to explore the codebase, propose a concrete plan, and wait for user approval before taking action. 
-    Choose mode: "plan".
 
 - **Goal mode**:
     Use this when the objective is clear and can be broken into measurable steps, and the work is expected to span multiple turns. It provides persistent goal tracking, progress verification, and automatic recovery after session interruptions. 
-    Choose mode: "goal" and provide the objective.
 
 - **Normal mode**:
     Use this for single-turn tasks that do not require exploration or sustained tracking — such as answering a question, generating a code snippet, or performing a quick edit. 
-    Choose mode: "normal".
+    
 ---
 The classification should be based solely on the reconstructed task. Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage.`;
 
