@@ -11,6 +11,8 @@
 //        - 上下文注入 [ka-whale-workflow TaskClassification]；
 //        - 工具面收敛为 whale_report（与信息评估一致）。
 //   3) whale_report({mode}) 自动启动 plan/goal 后进入 done：不再过滤，放行 Kaz 白名单。
+//      plan 模式由 whale_report 内部经 create_plan 工具（planning isolate 组内）切换，
+//      因为 whale_report 自身在 host 层解析不到 planMode 服务。
 //   4) 第 n+1 轮（turn>=2）真实用户消息进入「信息评估」：
 //        - 系统提示词段显示评估 prompt；
 //        - 上下文注入 [ka-whale-workflow InformationAssessment]；
@@ -47,6 +49,9 @@ const NAMESPACE = settingsNamespace("ka-whale-workflow");
 
 /** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类 + 评估）。 */
 export const WHALE_REPORT_TOOL = "whale_report";
+
+/** create_plan：planning isolate 组内的 realm 桥。whale_report 通过它进入/退出 plan 模式。 */
+const CREATE_PLAN_TOOL = "create_plan";
 
 /** 用户手动指令开启模式的命令名（/plan、/goal）。 */
 const MANUAL_COMMAND_NAMES = ["plan", "goal"];
@@ -595,13 +600,32 @@ export default {
       }
     }
 
+    /**
+     * 通过 create_plan 工具（planning isolate 组内）执行 plan 模式切换。
+     * whale_report 自身在 host 层解析不到 planMode 服务，必须借 create_plan
+     * 的 realm 执行上下文来调用 planMode.set。
+     */
+    function runPlanBridge(agent, exec, active) {
+      const tools = ctx.get("tools");
+      const tool =
+        tools !== undefined &&
+        tools !== null &&
+        typeof tools.get === "function"
+          ? tools.get(CREATE_PLAN_TOOL, agent)
+          : undefined;
+      if (tool === undefined || tool === null || typeof tool.execute !== "function") {
+        throw new Error(`create_plan bridge is unavailable; cannot ${active ? "enter" : "exit"} plan mode`);
+      }
+      return tool.execute({ active }, exec);
+    }
+
     /** 自动退出当前模式：plan 关闭、goal 清除（失败仅告警，不阻断流程）。 */
-    function exitCurrentModes(agent) {
+    async function exitCurrentModes(agent, exec) {
       const out = [];
       try {
-        const planMode = ctx.get("planMode");
-        if (planMode !== undefined && planMode !== null && typeof planMode.set === "function" && planModeActive(agent)) {
-          out.push("plan:" + String(planMode.set(agent, false)));
+        if (planModeActive(agent)) {
+          const result = await runPlanBridge(agent, exec, false);
+          out.push("plan:" + String(result?.outcome ?? "done"));
         }
       } catch (error) {
         ctx.logger?.warn?.(`[ka-whale-workflow] 退出 plan 模式失败：${error instanceof Error ? error.message : String(error)}`);
@@ -660,7 +684,7 @@ export default {
         },
         render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
       },
-      execute(args, exec) {
+      async execute(args, exec) {
         const agent = exec?.agent;
         if (agent === null || agent === undefined || typeof agent !== "object") {
           return Promise.reject(new Error("whale_report requires a calling agent"));
@@ -668,7 +692,7 @@ export default {
         const current = stageOfAgent(agent);
         if (current === "assessment") {
           if (args?.restart === true) {
-            const exits = exitCurrentModes(agent);
+            const exits = await exitCurrentModes(agent, exec);
             setStageAgent(agent, "reconstruction");
             reportRoundDisplay(
               agent,
@@ -690,12 +714,11 @@ export default {
           const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
           const launches = [];
           if (mode === "plan") {
-            const planMode = ctx.get("planMode");
-            if (planMode === undefined || planMode === null || typeof planMode.set !== "function") {
-              return Promise.reject(new Error("planMode service is unavailable; cannot enter plan mode"));
-            }
             try {
-              planMode.set(agent, true);
+              const result = await runPlanBridge(agent, exec, true);
+              if (result === null || typeof result !== "object" || result.ok !== true) {
+                throw new Error("unexpected create_plan result: " + JSON.stringify(result));
+              }
               launches.push("plan");
             } catch (error) {
               return Promise.reject(new Error("failed to enter plan mode: " + (error instanceof Error ? error.message : String(error))));

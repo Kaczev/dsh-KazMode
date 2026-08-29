@@ -201,7 +201,7 @@ window.__ModuleLoader__.load({
 				namespace: "create-plan",
 				name: "create-plan",
 				tag: "create_plan 工具 · 启用 plan 模式",
-				note: "挂在 Kaz 预设 planning isolate 组；create_plan 不再由鲸鱼工作流自动放行（分类改由 whale_report 统一启动 plan 模式），如需直接使用可在工具控制面板手动启用。",
+				note: "挂在 Kaz 预设 planning isolate 组，作为 whale_report 启动/退出 plan 模式的 realm 桥（create_plan 支持 active 进入/退出）；create_plan 不再由鲸鱼工作流自动放行，如需直接使用可在工具控制面板手动启用。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后 create_plan 不进入工具面）" },
 				],
