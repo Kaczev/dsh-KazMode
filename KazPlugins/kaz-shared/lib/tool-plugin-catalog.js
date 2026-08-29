@@ -81,6 +81,9 @@ export const TOOL_PLUGIN_CATALOG = {
     "create_goal" : false,
     "get_goal" : false,
     "update_goal" : false
+  },
+  "create_plan": {
+    "create_plan" : false
   }
 };
 
@@ -103,7 +106,8 @@ export const TOOL_PLUGINS = {
   "tool-subagent-report" : false,
   "tool-workflow" : false,
   "plan-mode" : false,
-  "goal" : false
+  "goal" : false,
+  "create_plan" : false
 }
 
 /** DSH 官方插件（fiber.name 归一化后的 key）。 */
@@ -133,4 +137,5 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
 /** Kaz 模式自家插件（用于 UI 面板分栏）。 */
 export const KAZ_TOOL_PLUGIN_KEYS = [
   "kaz-memory",
+  "create_plan"
 ];
