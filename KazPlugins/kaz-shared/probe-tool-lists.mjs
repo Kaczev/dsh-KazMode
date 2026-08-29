@@ -105,19 +105,18 @@ check("⑤ 项目专属关闭覆盖用户默认", layered2.P["tool-ralph"] === f
 // ⑥ kaz_tool_auto_on 参数文件
 check("⑥ TOOL_AUTO_ON_CONFIG 含 plan/goal", TOOL_AUTO_ON_CONFIG?.plan?.tools?.includes("exit_plan_mode") === true && TOOL_AUTO_ON_CONFIG?.goal?.tools?.includes("get_goal") === true && TOOL_AUTO_ON_CONFIG?.goal?.tools?.includes("update_goal") === true);
 check("⑥ PLAN_AUTO_ON_TOOLS / GOAL_AUTO_ON_TOOLS 默认值", JSON.stringify(PLAN_AUTO_ON_TOOLS) === JSON.stringify(["exit_plan_mode"]) && JSON.stringify(GOAL_AUTO_ON_TOOLS) === JSON.stringify(["get_goal", "update_goal"]));
-check("⑥ whale auto-on 默认含 whale_report 与 launch 工具", TOOL_AUTO_ON_CONFIG?.whale?.tools?.includes("whale_report") === true && TOOL_AUTO_ON_CONFIG?.whale?.launch?.tools?.includes("create_goal") === true && TOOL_AUTO_ON_CONFIG?.whale?.launch?.tools?.includes("create_plan") === true);
+check("⑥ whale auto-on 默认仅 whale_report", TOOL_AUTO_ON_CONFIG?.whale?.tools?.includes("whale_report") === true && TOOL_AUTO_ON_CONFIG?.whale?.launch === undefined);
 check("⑥ 默认开关为开", PLAN_AUTO_ON_DEFAULT_ENABLED === true && GOAL_AUTO_ON_DEFAULT_ENABLED === true);
 const autoDefault = defaultToolAutoOnState();
-check("⑥ defaultToolAutoOnState 返回独立副本", autoDefault.plan.tools !== PLAN_AUTO_ON_TOOLS && autoDefault.plan.enabled === true && JSON.stringify(autoDefault.goal.tools) === JSON.stringify(GOAL_AUTO_ON_TOOLS) && JSON.stringify(autoDefault.whale.tools) === JSON.stringify(["whale_report"]) && JSON.stringify(autoDefault.whale.launch.tools) === JSON.stringify(["create_goal", "create_plan"]));
+check("⑥ defaultToolAutoOnState 返回独立副本", autoDefault.plan.tools !== PLAN_AUTO_ON_TOOLS && autoDefault.plan.enabled === true && JSON.stringify(autoDefault.goal.tools) === JSON.stringify(GOAL_AUTO_ON_TOOLS) && JSON.stringify(autoDefault.whale.tools) === JSON.stringify(["whale_report"]) && autoDefault.whale.launch === undefined);
 check("⑥ normalizeToolList trim/去重/过滤", JSON.stringify(normalizeToolList([" exit_plan_mode ", "", "get_goal", "get_goal"])) === JSON.stringify(["exit_plan_mode", "get_goal"]));
 const normalizedAuto = normalizeToolAutoOnState({ plan: { enabled: true, tools: ["a", "a", " b "] }, goal: { enabled: false, tools: ["c"] } });
 check("⑥ normalizeToolAutoOnState 归一化", normalizedAuto.plan.enabled === true && JSON.stringify(normalizedAuto.plan.tools) === JSON.stringify(["a", "b"]) && normalizedAuto.goal.enabled === false && JSON.stringify(normalizedAuto.goal.tools) === JSON.stringify(["c"]));
 const normalizedWhale = normalizeToolAutoOnState({ whale: { enabled: true, tools: ["whale_report"], launch: { enabled: false, tools: ["create_goal", " create_plan "] } } });
-check("⑥ normalizeToolAutoOnState 支持 whale/launch", normalizedWhale.whale.enabled === true && JSON.stringify(normalizedWhale.whale.tools) === JSON.stringify(["whale_report"]) && normalizedWhale.whale.launch.enabled === false && JSON.stringify(normalizedWhale.whale.launch.tools) === JSON.stringify(["create_goal", "create_plan"]));
+check("⑥ normalizeToolAutoOnState 忽略旧 launch 字段", normalizedWhale.whale.enabled === true && JSON.stringify(normalizedWhale.whale.tools) === JSON.stringify(["whale_report"]) && normalizedWhale.whale.launch === undefined);
 check("⑥ MODE_SCOPED_TOOL_PLUGIN_KEYS 含 plan-mode/goal", MODE_SCOPED_TOOL_PLUGIN_KEYS.includes("plan-mode") && MODE_SCOPED_TOOL_PLUGIN_KEYS.includes("goal") && MODE_SCOPED_TOOL_PLUGIN_KEYS.length === 2);
 const layer = normalizeAutoOnLayer({ plan: { enabled: false, tools: [" a ", "a", ""] }, goal: {}, whale: { launch: { enabled: false, tools: ["create_goal", " create_plan "] } } });
-check("⑥ normalizeAutoOnLayer 只保留显式字段并去重", layer.plan?.enabled === false && JSON.stringify(layer.plan?.tools) === JSON.stringify(["a"]) && layer.goal === undefined);
-check("⑥ normalizeAutoOnLayer 支持 whale.launch", layer.whale?.launch?.enabled === false && JSON.stringify(layer.whale?.launch?.tools) === JSON.stringify(["create_goal", "create_plan"]) && layer.whale?.enabled === undefined);
+check("⑥ normalizeAutoOnLayer 只保留显式字段并去重", layer.plan?.enabled === false && JSON.stringify(layer.plan?.tools) === JSON.stringify(["a"]) && layer.goal === undefined && layer.whale === undefined);
 const emptyTools = normalizeAutoOnLayer({ plan: { tools: [] } });
 check("⑥ normalizeAutoOnLayer 保留空数组覆盖", Array.isArray(emptyTools.plan?.tools) && emptyTools.plan.tools.length === 0 && emptyTools.plan.enabled === undefined);
 const merged = mergeAutoOnLayers(defaultToolAutoOnState(), { plan: { enabled: false } }, { plan: { tools: ["get_goal"] } });
@@ -125,7 +124,7 @@ check("⑥ mergeAutoOnLayers 专属覆盖默认/原设置", merged.plan.enabled 
 const mergedDefault = mergeAutoOnLayers(defaultToolAutoOnState(), { goal: { tools: ["get_goal"] } }, {});
 check("⑥ mergeAutoOnLayers 默认覆盖原设置", mergedDefault.goal.tools.includes("get_goal") && mergedDefault.goal.enabled === true);
 const mergedWhale = mergeAutoOnLayers(defaultToolAutoOnState(), { whale: { tools: [] } }, { whale: { launch: { tools: ["create_goal"] } } });
-check("⑥ mergeAutoOnLayers 支持 whale/launch 逐项覆盖", mergedWhale.whale.tools.length === 0 && JSON.stringify(mergedWhale.whale.launch.tools) === JSON.stringify(["create_goal"]) && mergedWhale.whale.launch.enabled === true);
+check("⑥ mergeAutoOnLayers 忽略旧 launch 字段", mergedWhale.whale.tools.length === 0 && mergedWhale.whale.launch === undefined);
 check("⑥ autoOnSettingsEqual / hasAutoOnLayerFields", autoOnSettingsEqual({ a: 1 }, { a: 1 }) === true && hasAutoOnLayerFields({ plan: { enabled: true } }, "plan") === true && hasAutoOnLayerFields({ plan: {} }, "plan") === false);
 
 console.log(failures === 0 ? "\nKAZ-SHARED PROBE OK" : `\nKAZ-SHARED PROBE FAILED (${failures} 项失败)`);

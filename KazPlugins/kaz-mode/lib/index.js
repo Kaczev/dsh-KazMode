@@ -1136,18 +1136,11 @@ export default {
       if (effective.goal?.enabled === true && goalModeActive(agent)) {
         for (const tool of Array.isArray(effective.goal.tools) ? effective.goal.tools : []) pushTool(out, tool);
       }
-      // 鲸鱼工作流：whale_report 在重构/分类临时放行；launch 工具仅在分类临时放行。
+      // 鲸鱼工作流：whale_report 在重构/分类/评估临时放行；模式启动由 whale_report 统一完成。
       if (effective.whale?.enabled === true && states?.["ka-whale-workflow"]?.enabled === true) {
         const stage = whaleStageOf(agent);
         if (stage === "reconstruction" || stage === "classification" || stage === "assessment") {
           for (const tool of Array.isArray(effective.whale.tools) ? effective.whale.tools : []) pushTool(out, tool);
-        }
-        if (stage === "classification" && effective.whale.launch?.enabled === true) {
-          for (const tool of Array.isArray(effective.whale.launch.tools) ? effective.whale.launch.tools : []) {
-            // create_plan 受 create-plan 组件开关门控；create_goal 是官方工具，直接放行。
-            if (tool === "create_plan" && states?.["create-plan"]?.enabled !== true) continue;
-            pushTool(out, tool);
-          }
         }
       }
       return out;
@@ -1226,18 +1219,6 @@ export default {
           whale: {
             enabled: layers.effective.whale.enabled,
             tools: [...layers.effective.whale.tools],
-            launch: {
-              enabled: layers.effective.whale.launch.enabled,
-              tools: [...layers.effective.whale.launch.tools],
-              overridden: !autoOnSettingsEqual(
-                { whale: { launch: layers.effective.whale.launch } },
-                { whale: { launch: layers.defaults.whale.launch } },
-              ),
-              defaultDrifted: !autoOnSettingsEqual(
-                { whale: { launch: layers.defaults.whale.launch } },
-                { whale: { launch: layers.original.whale.launch } },
-              ),
-            },
             overridden: !autoOnSettingsEqual(
               { whale: layers.effective.whale },
               { whale: layers.defaults.whale },
@@ -2003,35 +1984,15 @@ export default {
           const cwd = resolveAutoOnCwd();
           const file = layer === "user" ? userAutoOnPath() : projectAutoOnPath(cwd);
           const layerData = loadAutoOnLayerFile(file, ctx.logger);
-          const subLaunch = feature === "whale" && input.sub === "launch";
           if (input.reset === true) {
-            if (subLaunch) {
-              const entry = layerData[feature] ?? {};
-              delete entry.launch;
-              if (Object.keys(entry).length === 0) delete layerData[feature];
-              else layerData[feature] = entry;
-            } else {
-              delete layerData[feature];
-            }
+            delete layerData[feature];
           } else {
             const entry = layerData[feature] ?? {};
-            if (subLaunch) {
-              const launch = entry.launch ?? {};
-              if (typeof input.enabled === "boolean") launch.enabled = input.enabled;
-              if (Array.isArray(input.tools)) {
-                const normalized = normalizeAutoOnLayer({ whale: { launch: { tools: input.tools } } }).whale?.launch;
-                if (normalized !== undefined && Array.isArray(normalized.tools)) launch.tools = normalized.tools;
-                else delete launch.tools;
-              }
-              if (Object.keys(launch).length > 0) entry.launch = launch;
-              else delete entry.launch;
-            } else {
-              if (typeof input.enabled === "boolean") entry.enabled = input.enabled;
-              if (Array.isArray(input.tools)) {
-                const normalized = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature];
-                if (normalized !== undefined && Array.isArray(normalized.tools)) entry.tools = normalized.tools;
-                else delete entry.tools;
-              }
+            if (typeof input.enabled === "boolean") entry.enabled = input.enabled;
+            if (Array.isArray(input.tools)) {
+              const normalized = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature];
+              if (normalized !== undefined && Array.isArray(normalized.tools)) entry.tools = normalized.tools;
+              else delete entry.tools;
             }
             if (Object.keys(entry).length > 0) layerData[feature] = entry;
             else delete layerData[feature];

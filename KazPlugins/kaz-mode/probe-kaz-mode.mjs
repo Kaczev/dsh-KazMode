@@ -364,17 +364,17 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑦ goal 会话不放行 plan 工具", kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
   check("⑦ plan 会话不放行 goal 工具", kazMode.toolVisible(sKazPlan, "get_goal") === false);
 
-  // 鲸鱼工作流：重构/分类阶段临时放行 whale_report；分类再放行 create_goal/create_plan。
+  // 鲸鱼工作流：重构/分类/评估阶段临时放行 whale_report；分类不再单独放行 create_goal/create_plan。
   const sKazWhaleRec = agentOf("s-kaz-whale-rec");
   const sKazWhaleCls = agentOf("s-kaz-whale-cls");
   check("⑦ 重构阶段放行 whale_report", kazMode.toolVisible(sKazWhaleRec, "whale_report") === true);
-  check("⑦ 分类阶段放行 whale_report + 启动工具", kazMode.toolVisible(sKazWhaleCls, "whale_report") === true && kazMode.toolVisible(sKazWhaleCls, "create_goal") === true && kazMode.toolVisible(sKazWhaleCls, "create_plan") === true);
+  check("⑦ 分类阶段仅放行 whale_report", kazMode.toolVisible(sKazWhaleCls, "whale_report") === true && kazMode.toolVisible(sKazWhaleCls, "create_goal") === false && kazMode.toolVisible(sKazWhaleCls, "create_plan") === false);
   check("⑦ 非工作流会话不放行 whale_report/启动工具", kazMode.toolVisible(sKazBase, "whale_report") === false && kazMode.toolVisible(sKazBase, "create_goal") === false && kazMode.toolVisible(sKazBase, "create_plan") === false);
 
   // RPC 快照：返回三层与生效状态。
   const snap = await rpc("getToolAutoOn", { sessionId: "s-kaz-plan" });
   check("⑦ getToolAutoOn 返回三层与生效状态", snap?.ok === true && snap.value?.effective?.plan?.enabled === true && Array.isArray(snap.value?.effective?.plan?.tools) && snap.value.effective.plan.tools.includes("exit_plan_mode") && snap.value?.projectDiffers === false && snap.value?.features?.plan?.overridden === false);
-  check("⑦ getToolAutoOn 返回 whale/launch 生效状态", snap?.ok === true && snap.value?.effective?.whale?.tools?.includes("whale_report") === true && snap.value?.effective?.whale?.launch?.tools?.includes("create_goal") === true && snap.value?.effective?.whale?.launch?.tools?.includes("create_plan") === true);
+  check("⑦ getToolAutoOn 返回 whale 生效状态（无 launch）", snap?.ok === true && snap.value?.effective?.whale?.tools?.includes("whale_report") === true && snap.value?.effective?.whale?.launch === undefined);
 
   // 项目 JSON 写了与默认完全相同的值 → 不算“专属”。
   const same = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: true, tools: ["exit_plan_mode"] });
@@ -392,12 +392,11 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑦ setToolAutoOn 调整 goal 工具清单", custom?.ok === true && JSON.stringify(custom.value?.features?.goal?.tools) === JSON.stringify(["get_goal"]));
   check("⑦ 调整后只放行新清单", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === false);
 
-  // 调整鲸鱼工作流「各模式的启动工具」：只放行 create_goal。
-  const whaleCustom = await rpc("setToolAutoOn", { sessionId: "s-kaz-whale-cls", feature: "whale", sub: "launch", enabled: true, tools: ["create_goal"] });
-  check("⑦ setToolAutoOn 支持 whale.launch 子项", whaleCustom?.ok === true && JSON.stringify(whaleCustom.value?.features?.whale?.launch?.tools) === JSON.stringify(["create_goal"]));
-  check("⑦ 调整后分类只放行新启动清单", kazMode.toolVisible(sKazWhaleCls, "create_goal") === true && kazMode.toolVisible(sKazWhaleCls, "create_plan") === false);
-  const whaleReset = await rpc("setToolAutoOn", { sessionId: "s-kaz-whale-cls", feature: "whale", sub: "launch", reset: true });
-  check("⑦ reset whale.launch 清除项目专属", whaleReset?.ok === true && whaleReset.value?.features?.whale?.launch?.overridden === false && JSON.stringify(whaleReset.value?.features?.whale?.launch?.tools) === JSON.stringify(["create_goal", "create_plan"]));
+  // 调整鲸鱼工作流工具清单（项目专属）→ 只放行新清单（launch 子项已移除）。
+  const whaleCustom = await rpc("setToolAutoOn", { sessionId: "s-kaz-whale-cls", feature: "whale", enabled: true, tools: ["whale_report"] });
+  check("⑦ setToolAutoOn 调整 whale 工具清单", whaleCustom?.ok === true && JSON.stringify(whaleCustom.value?.features?.whale?.tools) === JSON.stringify(["whale_report"]) && whaleCustom.value?.features?.whale?.launch === undefined);
+  const whaleReset = await rpc("setToolAutoOn", { sessionId: "s-kaz-whale-cls", feature: "whale", reset: true });
+  check("⑦ reset whale 清除项目专属", whaleReset?.ok === true && whaleReset.value?.features?.whale?.launch === undefined && whaleReset.value?.features?.whale?.overridden === false);
 
   // 清除某个 feature 的项目专属覆盖 → 回落到用户默认。
   const resetOne = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", reset: true });

@@ -189,7 +189,7 @@ window.__ModuleLoader__.load({
 				namespace: "ka-whale-workflow",
 				name: "ka-whale-workflow",
 				tag: "鲸鱼工作流 · 任务重构→任务分类 · 信息评估",
-				note: "首轮消息先任务重构→任务分类；后续轮次进入信息评估（whale_report 可带 restart 参数决定是否重启工作流）；/plan /goal 指令消息跳过鲸鱼工作流；whale_report / create_goal / create_plan 由「工具自动启用」面板临时放行；任务重构工具清单在下方代码框中编辑（白名单之上的过滤器）。",
+				note: "首轮消息先任务重构→任务分类；后续轮次进入信息评估（whale_report 可带 restart 参数决定是否重启工作流）；/plan /goal 指令消息跳过鲸鱼工作流；whale_report 由「工具自动启用」面板临时放行，分类时由 whale_report 统一启动 plan/goal；任务重构工具清单在下方代码框中编辑（白名单之上的过滤器）。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不进入鲸鱼工作流）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走鲸鱼工作流；默认关）" },
@@ -201,7 +201,7 @@ window.__ModuleLoader__.load({
 				namespace: "create-plan",
 				name: "create-plan",
 				tag: "create_plan 工具 · 启用 plan 模式",
-				note: "挂在 Kaz 预设 planning isolate 组；create_plan 仅在任务分类时经「工具自动启用」临时放行。",
+				note: "挂在 Kaz 预设 planning isolate 组；create_plan 不再由鲸鱼工作流自动放行（分类改由 whale_report 统一启动 plan 模式），如需直接使用可在工具控制面板手动启用。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后 create_plan 不进入工具面）" },
 				],
@@ -1488,7 +1488,7 @@ window.__ModuleLoader__.load({
 			function ToolAutoOnSection({ sessionId, cwd, writable }) {
 				const [data, setData] = useState(null);
 				const [busy, setBusy] = useState(false);
-				const [drafts, setDrafts] = useState({ plan: null, goal: null, whale: null, whaleLaunch: null });
+				const [drafts, setDrafts] = useState({ plan: null, goal: null, whale: null });
 
 				const refresh = useCallback(async () => {
 					// 轮询只刷新数据，不进入 busy 态，避免“正在同步”闪烁并锁住输入框。
@@ -1497,7 +1497,7 @@ window.__ModuleLoader__.load({
 				}, [sessionId, cwd]);
 
 				useEffect(() => {
-					setDrafts({ plan: null, goal: null, whale: null, whaleLaunch: null });
+					setDrafts({ plan: null, goal: null, whale: null });
 					void refresh();
 					// 面板打开时轮询：模型调用 exit_plan_mode / goal 结束等状态变化会实时反映。
 					const timer = setInterval(() => void refresh(), 1500);
@@ -1582,15 +1582,11 @@ window.__ModuleLoader__.load({
 					{ id: "goal", label: "goal 模式", toolsLabel: "goal 临时放行工具", placeholder: "get_goal, update_goal", description: "存在 active/paused 目标时临时放行这些工具；goal 模式结束自动移除。" },
 				];
 
-				const whaleFeature = effective.whale !== null && typeof effective.whale === "object" ? effective.whale : { enabled: false, tools: [], launch: { enabled: false, tools: [] } };
+				const whaleFeature = effective.whale !== null && typeof effective.whale === "object" ? effective.whale : { enabled: false, tools: [] };
 				const whaleFlags = featureFlags.whale !== null && typeof featureFlags.whale === "object" ? featureFlags.whale : {};
-				const whaleLaunchFlags = whaleFlags.launch !== null && typeof whaleFlags.launch === "object" ? whaleFlags.launch : {};
 				const whaleActive = active.whale === "reconstruction" || active.whale === "classification" || active.whale === "assessment";
-				const whaleLaunchActive = active.whale === "classification";
 				const whaleDraft = drafts.whale;
 				const whaleText = whaleDraft !== null ? whaleDraft : Array.isArray(whaleFeature.tools) ? whaleFeature.tools.join(", ") : "";
-				const whaleLaunchDraft = drafts.whaleLaunch;
-				const whaleLaunchText = whaleLaunchDraft !== null ? whaleLaunchDraft : Array.isArray(whaleFeature.launch && whaleFeature.launch.tools) ? whaleFeature.launch.tools.join(", ") : "";
 				const renderWhaleItem = () =>
 					createElement(
 						"div",
@@ -1598,7 +1594,7 @@ window.__ModuleLoader__.load({
 						createElement(
 							"div",
 							{ className: "kzm-state-row" },
-							createElement("span", { className: "kzm-state-name", title: "鲸鱼工作流：whale_report 在重构/分类/评估临时放行；各模式的启动工具仅在分类临时放行。" }, "鲸鱼工作流"),
+							createElement("span", { className: "kzm-state-name", title: "鲸鱼工作流：whale_report 在重构/分类/评估临时放行；模式启动由 whale_report 统一完成。" }, "鲸鱼工作流"),
 							createElement("span", { className: "kzm-auto-on-status", "data-on": whaleActive ? "true" : "false" }, whaleActive ? "启用中" : "未启用"),
 							whaleFlags.overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							whaleFlags.overridden === true &&
@@ -1640,54 +1636,6 @@ window.__ModuleLoader__.load({
 										.filter((part) => part.length > 0);
 									setDrafts((prev) => ({ ...prev, whale: null }));
 									void applyPatch({ feature: "whale", tools: parsed });
-								},
-							}),
-						),
-						createElement(
-							"div",
-							{ className: "kzm-sub-item" },
-							createElement(
-								"div",
-								{ className: "kzm-state-row" },
-								createElement("span", { className: "kzm-state-name", title: "各模式的启动工具：仅在任务分类阶段临时放行这些工具" }, "各模式的启动工具"),
-								createElement("span", { className: "kzm-auto-on-status", "data-on": whaleLaunchActive ? "true" : "false" }, whaleLaunchActive ? "启用中" : "未启用"),
-								whaleLaunchFlags.overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
-								whaleLaunchFlags.overridden === true &&
-									createElement(
-										"button",
-										{
-											type: "button",
-											className: "kzm-reset-btn",
-											title: "清除「各模式的启动工具」的项目专属设置",
-											disabled: !writable || busy,
-											onClick: () => void applyPatch({ feature: "whale", sub: "launch", reset: true }),
-										},
-										"恢复默认",
-									),
-								createElement(Toggle, {
-									checked: whaleFeature.launch && whaleFeature.launch.enabled === true,
-									disabled: !writable || busy,
-									title: "各模式的启动工具 自动启用开关",
-									onChange: (next) => void applyPatch({ feature: "whale", sub: "launch", enabled: next }),
-								}),
-							),
-							createElement("p", { className: "kzm-note" }, "仅任务分类时临时放行（逗号分隔）"),
-							createElement("input", {
-								className: "kzm-input",
-								type: "text",
-								value: whaleLaunchText,
-								disabled: !writable || busy,
-								placeholder: "create_goal, create_plan",
-								spellCheck: false,
-								onChange: (event) => setDrafts((prev) => ({ ...prev, whaleLaunch: event.target.value })),
-								onBlur: () => {
-									if (whaleLaunchDraft === null) return;
-									const parsed = whaleLaunchDraft
-										.split(",")
-										.map((part) => part.trim())
-										.filter((part) => part.length > 0);
-									setDrafts((prev) => ({ ...prev, whaleLaunch: null }));
-									void applyPatch({ feature: "whale", sub: "launch", tools: parsed });
 								},
 							}),
 						),

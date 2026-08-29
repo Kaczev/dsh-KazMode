@@ -9,8 +9,8 @@
 //   2) whale_report 后进入「任务分类」：
 //        - 系统提示词段切为分类 prompt；
 //        - 上下文注入 [ka-whale-workflow TaskClassification]；
-//        - 工具面收敛为自动启用面板临时放行的 whale_report + create_goal + create_plan。
-//   3) whale_report 后进入 done：不再过滤，放行 Kaz 白名单。
+//        - 工具面收敛为 whale_report（与信息评估一致）。
+//   3) whale_report({mode}) 自动启动 plan/goal 后进入 done：不再过滤，放行 Kaz 白名单。
 //   4) 第 n+1 轮（turn>=2）真实用户消息进入「信息评估」：
 //        - 系统提示词段显示评估 prompt；
 //        - 上下文注入 [ka-whale-workflow InformationAssessment]；
@@ -45,9 +45,6 @@ export { DEFAULT_RECONSTRUCTION_TOOLS };
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
 
-/** 任务分类阶段：由 kaz_tool_auto_on「各模式的启动工具」临时放行。 */
-export const CLASSIFICATION_LAUNCH_TOOLS = ["create_goal", "create_plan"];
-
 /** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类 + 评估）。 */
 export const WHALE_REPORT_TOOL = "whale_report";
 
@@ -60,24 +57,24 @@ const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Our g
 /** 信息评估 prompt（用户提供原文）。 */
 const ASSESSMENT_PROMPT = `We are now in the information assessment stage: the user has added new information. We need to check whether this changes the core goal, scope, or key constraints of the task. If the current mode no longer fits, we exit the mode and restart the workflow. When done, call whale_report to proceed.`;
 
-/** 任务分类 prompt（草案原文）。 */
+/** 任务分类 prompt（草案原文；模式由 whale_report 统一启动）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
 ---
 The following modes are available:
 
 - **Plan mode**:
     Use this when the task involves significant unknowns — for example, when the user asks for a design, a migration plan, or a solution architecture. It allows us to explore the codebase, propose a concrete plan, and wait for user approval before taking action. 
-    To launch, call create_plan (or the equivalent tool if available).
+    Choose mode: "plan".
 
 - **Goal mode**:
     Use this when the objective is clear and can be broken into measurable steps, and the work is expected to span multiple turns. It provides persistent goal tracking, progress verification, and automatic recovery after session interruptions. 
-    To launch, call create_goal.
+    Choose mode: "goal" and provide the objective.
 
 - **Normal mode**:
     Use this for single-turn tasks that do not require exploration or sustained tracking — such as answering a question, generating a code snippet, or performing a quick edit. 
-    No special tool is needed to call; we proceed directly.
+    Choose mode: "normal".
 ---
-The classification should be based solely on the reconstructed task. After lauching the appropriate mode, call whale_report to quit task classification stage.`;
+The classification should be based solely on the reconstructed task. Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage.`;
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -352,7 +349,7 @@ function currentTurnOf(agent) {
 }
 
 /** 指定 turn 内是否已注入过 ka-whale-workflow 的指定 form 消息。 */
-function hasInjectedInTurn(agent, form, turn) {
+export function hasInjectedInTurn(agent, form, turn) {
   try {
     const events = agent?.session?.events;
     if (!Array.isArray(events)) return false;
@@ -552,7 +549,7 @@ export default {
         stage === "reconstruction"
           ? [...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]
           : stage === "classification"
-            ? [WHALE_REPORT_TOOL, ...CLASSIFICATION_LAUNCH_TOOLS]
+            ? [WHALE_REPORT_TOOL]
             : stage === "assessment"
               ? [WHALE_REPORT_TOOL]
               : [];
@@ -630,12 +627,25 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call during task reconstruction, task classification, or information assessment. In the information assessment stage, pass restart: true to exit the current mode and restart reconstruction → classification; omit restart or pass false to keep the current mode.",
+        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call during task reconstruction, task classification, or information assessment. In task classification, pass mode ('normal' | 'plan' | 'goal') to choose the execution mode; whale_report launches plan/goal mode itself, so create_plan/create_goal are not needed. For goal mode, also pass objective. In the information assessment stage, pass restart: true to exit the current mode and restart reconstruction → classification; omit restart or pass false to keep the current mode.",
       parameters: {
         restart: {
           type: "boolean",
           description:
             "Only for the information assessment stage: true = exit current mode and restart the workflow; false/omitted = keep the current mode.",
+        },
+        mode: {
+          type: "string",
+          description:
+            "Only for the task classification stage: 'normal' (no mode, default), 'plan' (enter plan mode), or 'goal' (create a goal; objective required).",
+        },
+        objective: {
+          type: "string",
+          description: "Required when mode='goal': the concrete completion objective for the goal.",
+        },
+        max_goal_rounds: {
+          type: "number",
+          description: "Optional positive integer for mode='goal': automatic continuation round cap.",
         },
       },
       output: {
@@ -677,8 +687,46 @@ export default {
           return Promise.resolve({ ok: true, stage: "classification", restarted: false });
         }
         if (current === "classification") {
+          const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
+          const launches = [];
+          if (mode === "plan") {
+            const planMode = ctx.get("planMode");
+            if (planMode === undefined || planMode === null || typeof planMode.set !== "function") {
+              return Promise.reject(new Error("planMode service is unavailable; cannot enter plan mode"));
+            }
+            try {
+              planMode.set(agent, true);
+              launches.push("plan");
+            } catch (error) {
+              return Promise.reject(new Error("failed to enter plan mode: " + (error instanceof Error ? error.message : String(error))));
+            }
+          } else if (mode === "goal") {
+            const objective = typeof args?.objective === "string" ? args.objective.trim() : "";
+            if (objective.length === 0) {
+              return Promise.reject(new Error("whale_report mode=goal requires an objective"));
+            }
+            const goals = ctx.get("goals");
+            if (goals === undefined || goals === null || typeof goals.create !== "function") {
+              return Promise.reject(new Error("goals service is unavailable; cannot create goal"));
+            }
+            try {
+              goals.create(agent, {
+                objective,
+                ...(typeof args?.max_goal_rounds === "number" && Number.isInteger(args.max_goal_rounds) && args.max_goal_rounds > 0
+                  ? { maxGoalRounds: args.max_goal_rounds }
+                  : {}),
+              });
+              launches.push("goal");
+            } catch (error) {
+              return Promise.reject(new Error("failed to create goal: " + (error instanceof Error ? error.message : String(error))));
+            }
+          }
           setStageAgent(agent, "done");
-          reportRoundDisplay(agent, "任务分类完成，鲸鱼工作流结束，放行 Kaz 白名单工具。", "阶段切换");
+          reportRoundDisplay(
+            agent,
+            "任务分类完成（模式：" + mode + (launches.length > 0 ? "，已启动 " + launches.join("、") : "") + "），鲸鱼工作流结束，放行 Kaz 白名单工具。",
+            "阶段切换",
+          );
           return Promise.resolve({ ok: true, stage: "done", restarted: false });
         }
         return Promise.reject(
@@ -883,7 +931,7 @@ export default {
               ? "assessment"
               : null;
       if (form === null) return decision;
-      const turn = currentTurnOf(agent);
+      const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
       if (hasInjectedInTurn(agent, form, turn)) return decision;
       const title =
         stage === "reconstruction"
@@ -980,7 +1028,7 @@ export default {
       if (stage === "reconstruction") {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
       } else if (stage === "classification") {
-        allowed = new Set([WHALE_REPORT_TOOL, ...CLASSIFICATION_LAUNCH_TOOLS]);
+        allowed = new Set([WHALE_REPORT_TOOL]);
       } else if (stage === "assessment") {
         allowed = new Set([WHALE_REPORT_TOOL]);
       }
@@ -1028,7 +1076,7 @@ export default {
       if (stage === "reconstruction") {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
       } else if (stage === "classification") {
-        allowed = new Set([WHALE_REPORT_TOOL, ...CLASSIFICATION_LAUNCH_TOOLS]);
+        allowed = new Set([WHALE_REPORT_TOOL]);
       } else if (stage === "assessment") {
         allowed = new Set([WHALE_REPORT_TOOL]);
       }

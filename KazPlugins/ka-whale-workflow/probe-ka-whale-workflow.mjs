@@ -2,7 +2,6 @@
 // 运行：node KazPlugins/ka-whale-workflow/probe-ka-whale-workflow.mjs
 import plugin, {
   DEFAULT_RECONSTRUCTION_TOOLS,
-  CLASSIFICATION_LAUNCH_TOOLS,
   WHALE_REPORT_TOOL,
   stageOf,
   setStage,
@@ -10,6 +9,7 @@ import plugin, {
   isUserMessage,
   manualCommandIdOf,
   nextStageOnUserMessage,
+  hasInjectedInTurn,
 } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +37,6 @@ const store = createStageStore(STORE_FILE);
 
 check("插件默认导出存在", plugin !== null && typeof plugin === "object" && plugin.name === "ka-whale-workflow");
 check("重构八工具默认清单", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS) === JSON.stringify(["ask_user_question", "read", "glob", "grep", "web_search", "memory_search", "memory_list", "memory_detail"]));
-check("分类启动工具清单", JSON.stringify(CLASSIFICATION_LAUNCH_TOOLS) === JSON.stringify(["create_goal", "create_plan"]));
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 
 check("初始阶段 idle", stageOf(agent, store) === "idle");
@@ -85,6 +84,18 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
 check("真实用户消息判定", isUserMessage({ content: [], source: { kind: "user" } }) === true && isUserMessage({ content: [] }) === true);
 check("插件消息判定为假", isUserMessage({ content: [], source: { kind: "plugin", plugin: "ka-whale-workflow", form: "reconstruction" } }) === false);
 check("goal/tool 消息判定为假", isUserMessage({ content: [], source: { kind: "goal" } }) === false && isUserMessage({ content: [], source: { kind: "tool" } }) === false);
+
+{
+  // 重构重入：turn 1 注入过 TaskReconstruction，turn 2 仍应允许重新注入。
+  const reentryEvents = [
+    { type: "turn/start", data: { turn: 1 } },
+    { type: "user/message", data: { source: { kind: "plugin", plugin: "ka-whale-workflow", form: "reconstruction" } } },
+    { type: "turn/start", data: { turn: 2 } },
+    { type: "turn/end", data: { turn: 2 } },
+  ];
+  const reentryAgent = { id: "s-reentry", session: { id: "s-reentry", events: reentryEvents } };
+  check("重构重入：turn2 未注入过 → 可再次注入", hasInjectedInTurn(reentryAgent, "reconstruction", 2) === false && hasInjectedInTurn(reentryAgent, "reconstruction", 1) === true);
+}
 
 {
   // /plan 命令：最后一个 turn/end 之后有 command/run + 成功 command/done。

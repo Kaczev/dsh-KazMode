@@ -44,11 +44,7 @@ export const TOOL_AUTO_ON_CONFIG = {
     label: "鲸鱼工作流",
     defaultEnabled: true,
     tools: ["whale_report"],
-    launch: {
-      defaultEnabled: true,
-      tools: ["create_goal", "create_plan"],
-    },
-    description: "鲸鱼工作流：whale_report 在任务重构/任务分类/信息评估时临时放行；各模式的启动工具（create_goal/create_plan）仅在任务分类时临时放行。",
+    description: "鲸鱼工作流：whale_report 在任务重构/任务分类/信息评估时临时放行；任务分类的模式启动由 whale_report 统一完成，不再单独放行 create_goal/create_plan。",
   },
 };
 
@@ -94,10 +90,6 @@ export function defaultToolAutoOnState() {
     whale: {
       enabled: TOOL_AUTO_ON_CONFIG.whale.defaultEnabled,
       tools: [...TOOL_AUTO_ON_CONFIG.whale.tools],
-      launch: {
-        enabled: TOOL_AUTO_ON_CONFIG.whale.launch.defaultEnabled,
-        tools: [...TOOL_AUTO_ON_CONFIG.whale.launch.tools],
-      },
     },
   };
 }
@@ -108,7 +100,6 @@ export function normalizeToolAutoOnState(raw) {
   const plan = value.plan !== null && typeof value.plan === "object" ? value.plan : {};
   const goal = value.goal !== null && typeof value.goal === "object" ? value.goal : {};
   const whale = value.whale !== null && typeof value.whale === "object" ? value.whale : {};
-  const whaleLaunch = whale.launch !== null && typeof whale.launch === "object" ? whale.launch : {};
   return {
     plan: {
       enabled: plan.enabled === true,
@@ -121,10 +112,6 @@ export function normalizeToolAutoOnState(raw) {
     whale: {
       enabled: whale.enabled === true,
       tools: normalizeToolList(whale.tools),
-      launch: {
-        enabled: whaleLaunch.enabled === true,
-        tools: normalizeToolList(whaleLaunch.tools),
-      },
     },
   };
 }
@@ -142,12 +129,6 @@ export function normalizeAutoOnLayer(raw) {
     const normalized = {};
     if (typeof entry.enabled === "boolean") normalized.enabled = entry.enabled;
     if (Array.isArray(entry.tools)) normalized.tools = normalizeToolList(entry.tools);
-    if (feature === "whale" && entry.launch !== null && typeof entry.launch === "object") {
-      const launch = {};
-      if (typeof entry.launch.enabled === "boolean") launch.enabled = entry.launch.enabled;
-      if (Array.isArray(entry.launch.tools)) launch.tools = normalizeToolList(entry.launch.tools);
-      if (Object.keys(launch).length > 0) normalized.launch = launch;
-    }
     if (Object.keys(normalized).length > 0) out[feature] = normalized;
   }
   return out;
@@ -177,24 +158,6 @@ export function mergeAutoOnLayers(original, user = {}, project = {}) {
           ? [...u.tools]
           : [...(Array.isArray(base.tools) ? base.tools : [])],
     };
-    if (feature === "whale") {
-      const baseLaunch = base.launch ?? {};
-      const uLaunch = u.launch ?? {};
-      const pLaunch = p.launch ?? {};
-      result[feature].launch = {
-        enabled:
-          typeof pLaunch.enabled === "boolean"
-            ? pLaunch.enabled
-            : typeof uLaunch.enabled === "boolean"
-              ? uLaunch.enabled
-              : baseLaunch.enabled === true,
-        tools: Array.isArray(pLaunch.tools)
-          ? [...pLaunch.tools]
-          : Array.isArray(uLaunch.tools)
-            ? [...uLaunch.tools]
-            : [...(Array.isArray(baseLaunch.tools) ? baseLaunch.tools : [])],
-      };
-    }
   }
   return result;
 }
