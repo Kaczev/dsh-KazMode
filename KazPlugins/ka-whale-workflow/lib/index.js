@@ -77,7 +77,7 @@ The following modes are available:
     Use this for single-turn tasks that do not require exploration or sustained tracking — such as answering a question, generating a code snippet, or performing a quick edit. 
     No special tool is needed to call; we proceed directly.
 ---
-The classification should be based solely on the reconstructed task. When done, call whale_report to proceed.`;
+The classification should be based solely on the reconstructed task. After lauching the appropriate mode, call whale_report to quit task classification stage.`;
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
