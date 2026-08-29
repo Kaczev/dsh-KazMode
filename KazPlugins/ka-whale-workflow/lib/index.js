@@ -1,20 +1,28 @@
-// ka-whale-workflow —— 鲸鱼工作流（任务重构 → 任务分类）
+// ka-whale-workflow —— 鲸鱼工作流（任务重构 → 任务分类 → 信息评估）
 // ===========================================================================
 // 流程：
-//   1) 用户发出任意一条消息后进入「任务重构」：
+//   1) 首轮真实用户消息（turn=1）进入「任务重构」：
 //        - 系统提示词段 ka-whale-workflow:prompt 显示重构 prompt；
-//        - 上下文注入 [ka-whale-workflow 任务重构]；
+//        - 上下文注入 [ka-whale-workflow TaskReconstruction]；
 //        - 工具面收敛为「ka-whale-workflow 配置面板重构清单 ∩ Kaz 白名单」
 //          + 自动启用面板临时放行的 whale_report。
 //   2) whale_report 后进入「任务分类」：
 //        - 系统提示词段切为分类 prompt；
-//        - 上下文注入 [ka-whale-workflow 任务分类]；
+//        - 上下文注入 [ka-whale-workflow TaskClassification]；
 //        - 工具面收敛为自动启用面板临时放行的 whale_report + create_goal + create_plan。
 //   3) whale_report 后进入 done：不再过滤，放行 Kaz 白名单。
+//   4) 第 n+1 轮（turn>=2）真实用户消息进入「信息评估」：
+//        - 系统提示词段显示评估 prompt；
+//        - 上下文注入 [ka-whale-workflow InformationAssessment]；
+//        - 工具面仅 whale_report。
+//        - whale_report({restart:true}) 自动退出当前模式并重新走 1) → 2)；
+//          restart:false/缺省 回到 done。
+//   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
+//      直接放行白名单工具（round-minimal 极简同时旁路）。
 //
 // 与 round-minimal：
 //   round-minimal 优先。极简阶段（首次工具调用前）不进入重构；第一次 tool/call
-//   解除极简后立刻进入重构。
+//   解除极简后立刻进入重构。命令旁路时 round-minimal 也临时放行。
 //
 // 阶段状态：
 //   写入插件自己的 JSON 存储（~/.dsh/storages/ka-whale-workflow-stage.json，
@@ -40,11 +48,17 @@ const NAMESPACE = settingsNamespace("ka-whale-workflow");
 /** 任务分类阶段：由 kaz_tool_auto_on「各模式的启动工具」临时放行。 */
 export const CLASSIFICATION_LAUNCH_TOOLS = ["create_goal", "create_plan"];
 
-/** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类）。 */
+/** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类 + 评估）。 */
 export const WHALE_REPORT_TOOL = "whale_report";
+
+/** 用户手动指令开启模式的命令名（/plan、/goal）。 */
+const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
 const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, and also incorporating any relevant system-level instructions, tool constraints, and contextual requirements that apply to this session. The reconstruction is for internal use only. Reconstruction is for understanding. Classification and execution follow. We may only use <工具列表> tools. When done, call whale_report to proceed.`;
+
+/** 信息评估 prompt（用户提供原文）。 */
+const ASSESSMENT_PROMPT = `We are now in the information assessment stage: the user has added new information. We need to check whether this changes the core goal, scope, or key constraints of the task. If the current mode no longer fits, we exit the mode and restart the workflow. When done, call whale_report to proceed.`;
 
 /** 任务分类 prompt（草案原文）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
@@ -204,7 +218,7 @@ export function createStageStore(file) {
       const data = parsed !== null && typeof parsed === "object" ? parsed.sessions : undefined;
       if (data !== null && typeof data === "object") {
         for (const [id, stage] of Object.entries(data)) {
-          if (id.length > 0 && (stage === "reconstruction" || stage === "classification" || stage === "done")) {
+          if (id.length > 0 && (stage === "reconstruction" || stage === "classification" || stage === "done" || stage === "assessment")) {
             sessions[id] = stage;
           }
         }
@@ -266,7 +280,7 @@ export function stageOf(agent, store = null) {
   const sessionId = sessionIdOf(agent);
   if (store !== null && store !== undefined && typeof store.get === "function") {
     const stored = store.get(sessionId);
-    if (stored === "reconstruction" || stored === "classification" || stored === "done") return stored;
+    if (stored === "reconstruction" || stored === "classification" || stored === "done" || stored === "assessment") return stored;
   }
   return legacyStageOf(agent);
 }
@@ -309,6 +323,129 @@ function hasInjectedBefore(agent, form) {
     });
   } catch {
     return false;
+  }
+}
+
+/** 会话日志里当前轮次（最后一个 turn/start 的 turn；无则 0）。 */
+function currentTurnOf(agent) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return 0;
+    let turn = 0;
+    for (const event of events) {
+      if (
+        event !== null &&
+        typeof event === "object" &&
+        event.type === "turn/start" &&
+        event.data !== null &&
+        typeof event.data === "object" &&
+        typeof event.data.turn === "number" &&
+        event.data.turn > turn
+      ) {
+        turn = event.data.turn;
+      }
+    }
+    return turn;
+  } catch {
+    return 0;
+  }
+}
+
+/** 指定 turn 内是否已注入过 ka-whale-workflow 的指定 form 消息。 */
+function hasInjectedInTurn(agent, form, turn) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return false;
+    let turnStartIndex = -1;
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index];
+      if (
+        event !== null &&
+        typeof event === "object" &&
+        event.type === "turn/start" &&
+        event.data !== null &&
+        typeof event.data === "object" &&
+        event.data.turn === turn
+      ) {
+        turnStartIndex = index;
+      }
+    }
+    if (turnStartIndex === -1) return false;
+    for (let index = turnStartIndex + 1; index < events.length; index += 1) {
+      const event = events[index];
+      if (event === null || typeof event !== "object" || event.type !== "user/message") continue;
+      const data = event.data;
+      if (data === null || typeof data !== "object") continue;
+      const source = data.source;
+      if (source === null || typeof source !== "object") continue;
+      if (source.kind !== "plugin" || source.plugin !== "ka-whale-workflow") continue;
+      if (form === undefined || source.form === form) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** 该 agent 会话是否处于 plan 模式（会话事件最后一个 plan/mode 的 active）。 */
+function planModeActive(agent) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return false;
+    let active = false;
+    for (const event of events) {
+      if (
+        event !== null &&
+        typeof event === "object" &&
+        event.type === "plan/mode" &&
+        event.data !== null &&
+        typeof event.data === "object" &&
+        typeof event.data.active === "boolean"
+      ) {
+        active = event.data.active;
+      }
+    }
+    return active;
+  } catch {
+    return false;
+  }
+}
+
+/** 检测 /plan 或 /goal 命令触发的消息：最后一个 turn/end 之后有成功的 command/run。
+ *  返回 { commandId, name }；调用方负责消费（每个 commandId 只旁路一次）。 */
+export function manualCommandIdOf(agent) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return null;
+    let start = 0;
+    for (let index = 0; index < events.length; index += 1) {
+      if (events[index]?.type === "turn/end") start = index + 1;
+    }
+    let found = null;
+    for (let index = start; index < events.length; index += 1) {
+      const event = events[index];
+      if (event === null || typeof event !== "object" || event.type !== "command/run") continue;
+      const data = event.data;
+      if (data === null || typeof data !== "object") continue;
+      const name = data.name;
+      if (typeof name !== "string" || !MANUAL_COMMAND_NAMES.includes(name)) continue;
+      if (name === "plan" && typeof data.args === "string" && data.args.trim() === "off") continue;
+      found = { commandId: data.commandId, name };
+    }
+    if (found === null) return null;
+    const done = events.slice(start).some(
+      (event) =>
+        event !== null &&
+        typeof event === "object" &&
+        event.type === "command/done" &&
+        event.data !== null &&
+        typeof event.data === "object" &&
+        event.data.commandId === found.commandId &&
+        event.data.kind === "success",
+    );
+    return done ? found : null;
+  } catch {
+    return null;
   }
 }
 
@@ -404,7 +541,9 @@ export default {
           ? [...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]
           : stage === "classification"
             ? [WHALE_REPORT_TOOL, ...CLASSIFICATION_LAUNCH_TOOLS]
-            : [];
+            : stage === "assessment"
+              ? [WHALE_REPORT_TOOL]
+              : [];
       const out = [];
       for (const tool of candidates) {
         if (out.includes(tool)) continue;
@@ -422,7 +561,14 @@ export default {
     }
 
     function renderPrompt(agent, stage) {
-      const prompt = stage === "reconstruction" ? RECONSTRUCTION_PROMPT : stage === "classification" ? CLASSIFICATION_PROMPT : "";
+      const prompt =
+        stage === "reconstruction"
+          ? RECONSTRUCTION_PROMPT
+          : stage === "classification"
+            ? CLASSIFICATION_PROMPT
+            : stage === "assessment"
+              ? ASSESSMENT_PROMPT
+              : "";
       const tools = availableStageTools(agent, stage);
       const list = tools.length > 0 ? tools.join(", ") : "the currently available tools";
       return prompt.replace(/<工具列表>/g, list);
@@ -440,14 +586,46 @@ export default {
       }
     }
 
+    /** 自动退出当前模式：plan 关闭、goal 清除（失败仅告警，不阻断流程）。 */
+    function exitCurrentModes(agent) {
+      const out = [];
+      try {
+        const planMode = ctx.get("planMode");
+        if (planMode !== undefined && planMode !== null && typeof planMode.set === "function" && planModeActive(agent)) {
+          out.push("plan:" + String(planMode.set(agent, false)));
+        }
+      } catch (error) {
+        ctx.logger?.warn?.(`[ka-whale-workflow] 退出 plan 模式失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+      try {
+        const goals = ctx.get("goals");
+        if (goals !== undefined && goals !== null && typeof goals.get === "function" && typeof goals.clear === "function") {
+          const goal = goals.get(agent);
+          if (goal !== undefined && goal !== null && goal.phase !== "complete" && typeof goal.id === "string" && typeof goal.revision === "number") {
+            goals.clear(agent, { id: goal.id, revision: goal.revision });
+            out.push("goal:cleared");
+          }
+        }
+      } catch (error) {
+        ctx.logger?.warn?.(`[ka-whale-workflow] 清除 goal 模式失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+      return out;
+    }
+
     // -----------------------------------------------------------------------
-    // whale_report 工具：重构/分类各调用一次，向插件汇报阶段完成。
+    // whale_report 工具：重构/分类/评估各调用一次，向插件汇报阶段完成。
     // -----------------------------------------------------------------------
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call only during task reconstruction or task classification. No arguments.",
-      parameters: {},
+        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call during task reconstruction, task classification, or information assessment. In the information assessment stage, pass restart: true to exit the current mode and restart reconstruction → classification; omit restart or pass false to keep the current mode.",
+      parameters: {
+        restart: {
+          type: "boolean",
+          description:
+            "Only for the information assessment stage: true = exit current mode and restart the workflow; false/omitted = keep the current mode.",
+        },
+      },
       output: {
         schema: {
           type: "object",
@@ -455,27 +633,45 @@ export default {
           properties: {
             ok: { type: "boolean", required: true },
             stage: { type: "string", required: true },
+            restarted: { type: "boolean", required: false },
           },
         },
         render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
       },
-      execute(_args, exec) {
+      execute(args, exec) {
         const agent = exec?.agent;
         if (agent === null || agent === undefined || typeof agent !== "object") {
           return Promise.reject(new Error("whale_report requires a calling agent"));
         }
         const current = stageOfAgent(agent);
+        if (current === "assessment") {
+          if (args?.restart === true) {
+            const exits = exitCurrentModes(agent);
+            setStageAgent(agent, "reconstruction");
+            reportRoundDisplay(
+              agent,
+              "信息评估判定任务性质改变：已退出模式（" + (exits.length > 0 ? exits.join("、") : "无") + "），重新进入任务重构。",
+              "阶段切换",
+            );
+            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
+          }
+          setStageAgent(agent, "done");
+          reportRoundDisplay(agent, "信息评估完成：保持当前模式，继续执行。", "阶段切换");
+          return Promise.resolve({ ok: true, stage: "done", restarted: false });
+        }
         if (current === "reconstruction") {
           setStageAgent(agent, "classification");
           reportRoundDisplay(agent, "任务重构完成，进入任务分类。", "阶段切换");
-          return Promise.resolve({ ok: true, stage: "classification" });
+          return Promise.resolve({ ok: true, stage: "classification", restarted: false });
         }
         if (current === "classification") {
           setStageAgent(agent, "done");
           reportRoundDisplay(agent, "任务分类完成，鲸鱼工作流结束，放行 Kaz 白名单工具。", "阶段切换");
-          return Promise.resolve({ ok: true, stage: "done" });
+          return Promise.resolve({ ok: true, stage: "done", restarted: false });
         }
-        return Promise.reject(new Error("whale_report can only be called during task reconstruction or task classification"));
+        return Promise.reject(
+          new Error("whale_report can only be called during task reconstruction, task classification, or information assessment"),
+        );
       },
       presentCall: () => ({ card: "generic", title: "鲸鱼工作流汇报", kind: "other" }),
     });
@@ -521,21 +717,72 @@ export default {
     }, "ka-whale-workflow: 发布 kaWhaleWorkflow 阶段服务");
 
     // -----------------------------------------------------------------------
-    // 启动：真实用户消息被 inbox claim 后、assembly 之前进入重构。
-    // round-minimal 极简阶段只记 pending，等首次 tool/call 后再进入。
+    // 启动：真实用户消息被 inbox claim 后、assembly 之前进入对应阶段。
+    //   - /plan /goal 命令触发的消息：旁路鲸鱼工作流，直接放行白名单。
+    //   - turn>=2：信息评估。
+    //   - turn=1：任务重构（round-minimal 极简阶段只记 pending）。
     // -----------------------------------------------------------------------
     const pendingStart = new Set();
+    /** 进程内已消费的 /plan /goal 命令 id（每个命令只旁路下一次 claim）。 */
+    const consumedManualCommands = new Set();
+    /** 当前处于命令旁路的 session id 集合（assemble / pre-step 读取）。 */
+    const manualBypassSessions = new Set();
 
-    ctx.on("agent/inbox/claimed", ({ agent, message }) => {
+    /** 当前会话是否处于命令旁路。 */
+    function isBypassed(agent) {
+      const sessionId = sessionIdOf(agent);
+      return typeof sessionId === "string" && sessionId.length > 0 && manualBypassSessions.has(sessionId);
+    }
+
+    /** 查询并消费一次命令旁路：命中返回命令信息，未命中返回 null。 */
+    function consumeManualCommand(agent) {
+      const found = manualCommandIdOf(agent);
+      if (found === null || found.commandId === undefined || found.commandId === null) return null;
+      if (consumedManualCommands.has(found.commandId)) return null;
+      consumedManualCommands.add(found.commandId);
+      return found;
+    }
+
+    /** 设置/清除 round-minimal 的命令旁路（服务缺失时忽略）。 */
+    function setRoundMinimalBypass(agent, active) {
+      try {
+        const rm = ctx.get("roundMinimal");
+        if (rm !== undefined && rm !== null && typeof rm.setManualBypass === "function") {
+          rm.setManualBypass(agent, active === true);
+        }
+      } catch {
+        // 服务缺失/异常时忽略
+      }
+    }
+
+    ctx.on("agent/inbox/claimed", ({ agent, message, turn }) => {
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
       if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
       if (!isUserMessage(message)) return;
-      const current = stageOfAgent(agent);
-      if (current === "reconstruction" || current === "classification") return;
       const sessionId = agent?.session?.id || agent?.id;
+      if (typeof sessionId !== "string" || sessionId.length === 0) return;
+      // /plan /goal 命令触发的消息：跳过鲸鱼工作流，直接放行白名单工具。
+      const manual = consumeManualCommand(agent);
+      if (manual !== null) {
+        manualBypassSessions.add(sessionId);
+        setRoundMinimalBypass(agent, true);
+        reportRoundDisplay(agent, `检测到 /${manual.name} 指令：本消息跳过鲸鱼工作流，直接放行白名单工具。`, "工作流旁路");
+        return;
+      }
+      manualBypassSessions.delete(sessionId);
+      setRoundMinimalBypass(agent, false);
+      // 第 n+1 轮（turn>=2）无条件进入信息评估。
+      if (typeof turn === "number" && turn >= 2) {
+        if (setStageAgent(agent, "assessment")) {
+          reportRoundDisplay(agent, "收到新一轮消息，进入信息评估。", "阶段切换");
+        }
+        return;
+      }
+      const current = stageOfAgent(agent);
+      if (current === "reconstruction" || current === "classification" || current === "assessment") return;
       if (isMinimal(agent)) {
-        if (typeof sessionId === "string" && sessionId.length > 0) pendingStart.add(sessionId);
+        pendingStart.add(sessionId);
         return;
       }
       if (setStageAgent(agent, "reconstruction")) {
@@ -575,34 +822,40 @@ export default {
       if (liveFor(agent).enabled !== true) return;
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
-      if (current === "reconstruction" || current === "classification") return;
+      if (current === "reconstruction" || current === "classification" || current === "assessment") return;
       if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
       }
     });
 
     // -----------------------------------------------------------------------
-    // 上下文注入：重构/分类各注入一次，跨重启由会话事件去重。
+    // 上下文注入：重构/分类/评估按 turn 去重注入一次。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
       const agent = payload?.agent;
       if (agent !== null && agent !== undefined && typeof agent === "object") {
         const live = liveFor(agent);
         const skipSubagent = live.includeSubagents !== true && isSubagent(agent);
-        const stage = stageOfAgent(agent);
         const messages = Array.isArray(payload?.messages) ? payload.messages : [];
         const hasRealUserMessage = messages.some((message) => isUserMessage(message));
-        // 兜底：session/event 路径（pendingStart）万一没触发时，在 pre-step 补一次。
-        // round-minimal 极简阶段不进入；解除极简后（或 round-minimal 关闭时）进入重构。
-        if (
-          live.enabled === true &&
-          !skipSubagent &&
-          stage === "idle" &&
-          !isMinimal(agent) &&
-          (hasToolCall(agent) || hasRealUserMessage)
-        ) {
-          if (setStageAgent(agent, "reconstruction")) {
-            reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（pre-step 兜底）。", "阶段切换");
+        const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
+        const bypassed = isBypassed(agent);
+        if (live.enabled === true && !skipSubagent && !bypassed) {
+          const stage = stageOfAgent(agent);
+          if (hasRealUserMessage) {
+            if (turn >= 2) {
+              if (setStageAgent(agent, "assessment")) {
+                reportRoundDisplay(agent, "收到新一轮消息，进入信息评估（pre-step 兜底）。", "阶段切换");
+              }
+            } else if (stage === "idle" && !isMinimal(agent)) {
+              if (setStageAgent(agent, "reconstruction")) {
+                reportRoundDisplay(agent, "进入任务重构（pre-step 兜底）。", "阶段切换");
+              }
+            }
+          } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent)) {
+            if (setStageAgent(agent, "reconstruction")) {
+              reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（pre-step 兜底）。", "阶段切换");
+            }
           }
         }
       }
@@ -610,11 +863,25 @@ export default {
       if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
       if (agent === null || agent === undefined || typeof agent !== "object") return decision;
       if (liveFor(agent).enabled !== true) return decision;
+      if (isBypassed(agent)) return decision;
       const stage = stageOfAgent(agent);
-      const form = stage === "reconstruction" ? "reconstruction" : stage === "classification" ? "classification" : null;
+      const form =
+        stage === "reconstruction"
+          ? "reconstruction"
+          : stage === "classification"
+            ? "classification"
+            : stage === "assessment"
+              ? "assessment"
+              : null;
       if (form === null) return decision;
-      if (hasInjectedBefore(agent, form)) return decision;
-      const title = stage === "reconstruction" ? "ka-whale-workflow TaskReconstruction" : "ka-whale-workflow TaskClassification";
+      const turn = currentTurnOf(agent);
+      if (hasInjectedInTurn(agent, form, turn)) return decision;
+      const title =
+        stage === "reconstruction"
+          ? "ka-whale-workflow TaskReconstruction"
+          : stage === "classification"
+            ? "ka-whale-workflow TaskClassification"
+            : "ka-whale-workflow InformationAssessment";
       const text = ["[" + title + "]", ">", renderPrompt(agent, stage), "<"].join("\n");
       let message;
       try {
@@ -626,7 +893,11 @@ export default {
         ctx.logger.warn(`[ka-whale-workflow] 构造上下文消息失败：${error instanceof Error ? error.message : String(error)}`);
         return decision;
       }
-      reportRoundDisplay(agent, text, stage === "reconstruction" ? "任务重构" : "任务分类");
+      reportRoundDisplay(
+        agent,
+        text,
+        stage === "reconstruction" ? "任务重构" : stage === "classification" ? "任务分类" : "信息评估",
+      );
       return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
     });
 
@@ -641,23 +912,43 @@ export default {
         if (agent === null || agent === undefined || typeof agent !== "object") return "";
         if (liveFor(agent).enabled !== true) return "";
         const stage = stageOfAgent(agent);
-        if (stage !== "reconstruction" && stage !== "classification") return "";
+        if (stage !== "reconstruction" && stage !== "classification" && stage !== "assessment") return "";
+        if (isBypassed(agent)) return "";
         return renderPrompt(agent, stage);
       },
     });
 
     // -----------------------------------------------------------------------
-    // 工具面过滤：重构/分类阶段按阶段清单过滤；done/idle 放行 Kaz 白名单。
+    // 工具面过滤：重构/分类/评估按阶段清单过滤；命令旁路/done/idle 放行白名单。
     // -----------------------------------------------------------------------
     ctx.on("system-prompt/assemble", async function (assembly, context, next) {
       const agent = context?.agent;
       const before = toolNamesOf(assembly?.tools);
       const enabled = agent !== null && agent !== undefined && typeof agent === "object" && liveFor(agent).enabled === true;
+      const bypassed = enabled && isBypassed(agent);
+      // /plan /goal 命令消息：跳过鲸鱼工作流过滤与提示词段，直接放行白名单工具。
+      if (bypassed) {
+        const whaleSection = assembly.sections.find(
+          (section) => typeof section?.name === "string" && section.name === "ka-whale-workflow:prompt",
+        );
+        if (whaleSection !== null && whaleSection !== undefined) whaleSection.text = "";
+        const nextResult = await next();
+        const finalAssembly = nextResult ?? assembly;
+        const after = toolNamesOf(finalAssembly?.tools);
+        if (before.join(",") !== after.join(",")) {
+          reportRoundDisplay(
+            agent,
+            "工具面变化（命令旁路）\n- 阶段：manual-command\n- 当前工具（" + after.length + "）：" + (after.length > 0 ? after.join(", ") : "（无）"),
+            "工作流工具面",
+          );
+        }
+        return nextResult;
+      }
       let stage = enabled ? stageOfAgent(agent) : "idle";
       // assemble 兜底：round-minimal 解除后、首次 tool/call 的下一步组装时，
       // 阶段可能还没被 session/event 路径推进（assemble 先于 agent/pre-step 执行）。
-      // 在这里补一次阶段切换，使【紧跟在首次工具调用后的那次请求】就拿到重构工具面
-      // 和重构系统提示词段，而不是再等一个 step。
+      // 在这里补一次阶段切换，使【紧跟在首次工具调用后的那次请求】就拿到对应工具面
+      // 和系统提示词段，而不是再等一个 step。turn>=2 且阶段丢失时进评估而非重构。
       if (
         enabled &&
         stage === "idle" &&
@@ -666,9 +957,14 @@ export default {
         !isMinimal(agent) &&
         hasToolCall(agent)
       ) {
-        if (setStageAgent(agent, "reconstruction")) {
-          reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（assemble 兜底）。", "阶段切换");
-          stage = "reconstruction";
+        const nextStage = currentTurnOf(agent) >= 2 ? "assessment" : "reconstruction";
+        if (setStageAgent(agent, nextStage)) {
+          reportRoundDisplay(
+            agent,
+            `round-minimal 已解除，进入${nextStage === "assessment" ? "信息评估" : "任务重构"}（assemble 兜底）。`,
+            "阶段切换",
+          );
+          stage = nextStage;
         }
       }
       let allowed = null;
@@ -676,6 +972,8 @@ export default {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
       } else if (stage === "classification") {
         allowed = new Set([WHALE_REPORT_TOOL, ...CLASSIFICATION_LAUNCH_TOOLS]);
+      } else if (stage === "assessment") {
+        allowed = new Set([WHALE_REPORT_TOOL]);
       }
       if (allowed !== null) {
         assembly.tools = assembly.tools.filter(
@@ -686,7 +984,7 @@ export default {
           return allowed.has(section.name.slice("tool:".length));
         });
         // 本插件自己的提示词段在 assemble 开始时已按旧阶段渲染成空串；
-        // 阶段刚被推进时在这里补写，让同一请求的 system 里就带重构/分类提示。
+        // 阶段刚被推进时在这里补写，让同一请求的 system 里就带对应阶段提示。
         const whaleSection = assembly.sections.find(
           (section) => typeof section?.name === "string" && section.name === "ka-whale-workflow:prompt",
         );

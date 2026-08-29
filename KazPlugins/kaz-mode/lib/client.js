@@ -188,8 +188,8 @@ window.__ModuleLoader__.load({
 				id: "ka-whale-workflow",
 				namespace: "ka-whale-workflow",
 				name: "ka-whale-workflow",
-				tag: "鲸鱼工作流 · 任务重构→任务分类",
-				note: "用户消息后先任务重构，再任务分类；whale_report / create_goal / create_plan 由「工具自动启用」面板临时放行；任务重构工具清单在下方代码框中编辑（白名单之上的过滤器）。",
+				tag: "鲸鱼工作流 · 任务重构→任务分类 · 信息评估",
+				note: "首轮消息先任务重构→任务分类；后续轮次进入信息评估（whale_report 可带 restart 参数决定是否重启工作流）；/plan /goal 指令消息跳过鲸鱼工作流；whale_report / create_goal / create_plan 由「工具自动启用」面板临时放行；任务重构工具清单在下方代码框中编辑（白名单之上的过滤器）。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不进入鲸鱼工作流）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走鲸鱼工作流；默认关）" },
@@ -1585,7 +1585,7 @@ window.__ModuleLoader__.load({
 				const whaleFeature = effective.whale !== null && typeof effective.whale === "object" ? effective.whale : { enabled: false, tools: [], launch: { enabled: false, tools: [] } };
 				const whaleFlags = featureFlags.whale !== null && typeof featureFlags.whale === "object" ? featureFlags.whale : {};
 				const whaleLaunchFlags = whaleFlags.launch !== null && typeof whaleFlags.launch === "object" ? whaleFlags.launch : {};
-				const whaleActive = active.whale === "reconstruction" || active.whale === "classification";
+				const whaleActive = active.whale === "reconstruction" || active.whale === "classification" || active.whale === "assessment";
 				const whaleLaunchActive = active.whale === "classification";
 				const whaleDraft = drafts.whale;
 				const whaleText = whaleDraft !== null ? whaleDraft : Array.isArray(whaleFeature.tools) ? whaleFeature.tools.join(", ") : "";
@@ -1598,7 +1598,7 @@ window.__ModuleLoader__.load({
 						createElement(
 							"div",
 							{ className: "kzm-state-row" },
-							createElement("span", { className: "kzm-state-name", title: "鲸鱼工作流：whale_report 在重构/分类临时放行；各模式的启动工具仅在分类临时放行。" }, "鲸鱼工作流"),
+							createElement("span", { className: "kzm-state-name", title: "鲸鱼工作流：whale_report 在重构/分类/评估临时放行；各模式的启动工具仅在分类临时放行。" }, "鲸鱼工作流"),
 							createElement("span", { className: "kzm-auto-on-status", "data-on": whaleActive ? "true" : "false" }, whaleActive ? "启用中" : "未启用"),
 							whaleFlags.overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
 							whaleFlags.overridden === true &&
@@ -1623,7 +1623,7 @@ window.__ModuleLoader__.load({
 						createElement(
 							"div",
 							{ className: "kzm-field" },
-							createElement("label", null, "whale_report（重构/分类临时放行，逗号分隔）"),
+							createElement("label", null, "whale_report（重构/分类/评估临时放行，逗号分隔）"),
 							createElement("input", {
 								className: "kzm-input",
 								type: "text",

@@ -1113,7 +1113,7 @@ export default {
         const svc = ctx.get("kaWhaleWorkflow");
         if (svc !== undefined && svc !== null && typeof svc.stageOf === "function") {
           const stage = svc.stageOf(agent);
-          if (stage === "reconstruction" || stage === "classification" || stage === "done") return stage;
+          if (stage === "reconstruction" || stage === "classification" || stage === "assessment" || stage === "done") return stage;
         }
       } catch {
         // fall through
@@ -1139,7 +1139,7 @@ export default {
       // 鲸鱼工作流：whale_report 在重构/分类临时放行；launch 工具仅在分类临时放行。
       if (effective.whale?.enabled === true && states?.["ka-whale-workflow"]?.enabled === true) {
         const stage = whaleStageOf(agent);
-        if (stage === "reconstruction" || stage === "classification") {
+        if (stage === "reconstruction" || stage === "classification" || stage === "assessment") {
           for (const tool of Array.isArray(effective.whale.tools) ? effective.whale.tools : []) pushTool(out, tool);
         }
         if (stage === "classification" && effective.whale.launch?.enabled === true) {

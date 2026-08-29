@@ -48,7 +48,7 @@ export const TOOL_AUTO_ON_CONFIG = {
       defaultEnabled: true,
       tools: ["create_goal", "create_plan"],
     },
-    description: "鲸鱼工作流：whale_report 在任务重构/任务分类时临时放行；各模式的启动工具（create_goal/create_plan）仅在任务分类时临时放行。",
+    description: "鲸鱼工作流：whale_report 在任务重构/任务分类/信息评估时临时放行；各模式的启动工具（create_goal/create_plan）仅在任务分类时临时放行。",
   },
 };
 

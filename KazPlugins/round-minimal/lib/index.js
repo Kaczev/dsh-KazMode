@@ -327,6 +327,7 @@ export default {
       const current = liveFor(agent);
       if (current.enabled !== true) return false;
       if (agent === null || typeof agent !== "object") return false;
+      if (manualBypass.get(agent) === true) return false;
       if (current.includeSubagents !== true && isSubagent(agent)) return false;
       return !hasToolCall(agent);
     }
@@ -379,6 +380,16 @@ export default {
       },
       isMinimal: (agent) => isFirstRound(agent),
       turnOf: (agent) => currentTurnOf(agent),
+      /** 命令旁路：ka-whale-workflow 检测到 /plan /goal 指令消息时临时解除极简。 */
+      setManualBypass: (agent, active) => {
+        try {
+          if (agent === null || agent === undefined || typeof agent !== "object") return;
+          if (active === true) manualBypass.set(agent, true);
+          else manualBypass.delete(agent);
+        } catch {
+          // 忽略异常
+        }
+      },
     };
     ctx.effect(() => {
       const disposeService = ctx.provide("roundMinimal", roundMinimalService);
@@ -388,6 +399,8 @@ export default {
     }, "round-minimal: 发布 roundMinimal 首阶段状态服务");
 
     const lastMinimalState = new WeakMap();
+    /** 命令旁路（/plan /goal 指令消息）：按 agent 临时解除极简。 */
+    const manualBypass = new WeakMap();
     /** 状态变化时推送一次 round-minimal/state 信号；失败不影响主流程。 */
     function signalState(agent) {
       try {

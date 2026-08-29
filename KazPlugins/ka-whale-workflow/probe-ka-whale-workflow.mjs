@@ -8,6 +8,7 @@ import plugin, {
   setStage,
   createStageStore,
   isUserMessage,
+  manualCommandIdOf,
 } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,6 +44,16 @@ check("setStage 进入重构", setStage(agent, "reconstruction", store) === true
 check("setStage 重复同阶段不追加", setStage(agent, "reconstruction", store) === false);
 check("setStage 进入分类", setStage(agent, "classification", store) === true && stageOf(agent, store) === "classification");
 check("setStage 进入 done", setStage(agent, "done", store) === true && stageOf(agent, store) === "done");
+check("setStage 进入信息评估", setStage(agent, "assessment", store) === true && stageOf(agent, store) === "assessment");
+check("评估 restart:false 回 done", setStage(agent, "done", store) === true && stageOf(agent, store) === "done");
+check(
+  "done→评估→重构→分类→done（restart:true 链路）",
+  setStage(agent, "assessment", store) === true &&
+    setStage(agent, "reconstruction", store) === true &&
+    setStage(agent, "classification", store) === true &&
+    setStage(agent, "done", store) === true &&
+    stageOf(agent, store) === "done",
+);
 check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-whale-workflow/stage").length === 0);
 
 {
@@ -70,6 +81,41 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
 check("真实用户消息判定", isUserMessage({ content: [], source: { kind: "user" } }) === true && isUserMessage({ content: [] }) === true);
 check("插件消息判定为假", isUserMessage({ content: [], source: { kind: "plugin", plugin: "ka-whale-workflow", form: "reconstruction" } }) === false);
 check("goal/tool 消息判定为假", isUserMessage({ content: [], source: { kind: "goal" } }) === false && isUserMessage({ content: [], source: { kind: "tool" } }) === false);
+
+{
+  // /plan 命令：最后一个 turn/end 之后有 command/run + 成功 command/done。
+  const cmdEvents = [
+    { type: "turn/start", data: { turn: 1 } },
+    { type: "step/start", data: { turn: 1, step: 1 } },
+    { type: "step/end", data: { turn: 1, step: 1 } },
+    { type: "turn/end", data: { turn: 1 } },
+    { type: "command/run", data: { name: "plan", args: "设计一个方案", commandId: "cmd-1" } },
+    { type: "command/done", data: { commandId: "cmd-1", kind: "success" } },
+  ];
+  const cmdAgent = { id: "s-cmd", session: { id: "s-cmd", events: cmdEvents } };
+  const hit = manualCommandIdOf(cmdAgent);
+  check("manualCommandIdOf 命中 /plan", hit !== null && hit.name === "plan" && hit.commandId === "cmd-1");
+}
+
+{
+  // /plan off 不旁路。
+  const offEvents = [
+    { type: "turn/start", data: { turn: 1 } },
+    { type: "step/start", data: { turn: 1, step: 1 } },
+    { type: "step/end", data: { turn: 1, step: 1 } },
+    { type: "turn/end", data: { turn: 1 } },
+    { type: "command/run", data: { name: "plan", args: "off", commandId: "cmd-off" } },
+    { type: "command/done", data: { commandId: "cmd-off", kind: "success" } },
+  ];
+  const offAgent = { id: "s-off", session: { id: "s-off", events: offEvents } };
+  check("manualCommandIdOf 忽略 /plan off", manualCommandIdOf(offAgent) === null);
+}
+
+{
+  // 没有命令事件 → null。
+  const plainAgent = { id: "s-plain", session: { id: "s-plain", events: [{ type: "turn/start", data: { turn: 1 } }] } };
+  check("manualCommandIdOf 无命令为 null", manualCommandIdOf(plainAgent) === null);
+}
 
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures === 0 ? "\nKA-WHALE-WORKFLOW PROBE OK" : `\nKA-WHALE-WORKFLOW PROBE FAILED (${failures} 项失败)`);
