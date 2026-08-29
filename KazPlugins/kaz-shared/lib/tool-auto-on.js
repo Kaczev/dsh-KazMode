@@ -44,7 +44,7 @@ export const TOOL_AUTO_ON_CONFIG = {
     label: "鲸鱼工作流",
     defaultEnabled: true,
     tools: ["whale_report"],
-    description: "鲸鱼工作流：whale_report 在任务重构/任务分类/信息评估时临时放行；任务分类的模式启动由 whale_report 统一完成，不再单独放行 create_goal/create_plan。",
+    description: "鲸鱼工作流：whale_report 在任务重构/任务分类时临时放行；任务分类的模式启动由 whale_report 统一完成，不再单独放行 create_goal/create_plan。",
   },
 };
 

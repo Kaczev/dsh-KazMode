@@ -364,7 +364,7 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑦ goal 会话不放行 plan 工具", kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
   check("⑦ plan 会话不放行 goal 工具", kazMode.toolVisible(sKazPlan, "get_goal") === false);
 
-  // 鲸鱼工作流：重构/分类/评估阶段临时放行 whale_report；分类不再单独放行 create_goal/create_plan。
+  // 鲸鱼工作流：重构/分类阶段临时放行 whale_report；分类不再单独放行 create_goal/create_plan。
   const sKazWhaleRec = agentOf("s-kaz-whale-rec");
   const sKazWhaleCls = agentOf("s-kaz-whale-cls");
   check("⑦ 重构阶段放行 whale_report", kazMode.toolVisible(sKazWhaleRec, "whale_report") === true);

@@ -14,8 +14,7 @@
 //      plan 模式由 whale_report 内部经 create_plan 工具（planning isolate 组内）切换，
 //      因为 whale_report 自身在 host 层解析不到 planMode 服务。
 //   4) 插话（模型运行中，同一轮中途追加消息）不改变当前工作流阶段。
-//      第 2、3、4……轮（turn>=2、模型不在运行）直接重新进入「任务重构」；
-//      「信息评估」阶段已取消。
+//      第 2、3、4……轮（turn>=2、模型不在运行）直接重新进入「任务重构」。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
 //      不进入任务重构；round-minimal 极简过滤仍照常生效。
 //
@@ -44,7 +43,7 @@ export { DEFAULT_RECONSTRUCTION_TOOLS };
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
 
-/** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类 + 评估）。 */
+/** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类）。 */
 export const WHALE_REPORT_TOOL = "whale_report";
 
 /** create_plan：planning isolate 组内的 realm 桥。whale_report 通过它进入/退出 plan 模式。 */
@@ -55,9 +54,6 @@ const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
 const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, and also incorporating any relevant system-level instructions, tool constraints, and contextual requirements that apply to this session. The reconstruction is for internal use only. Reconstruction is for understanding. Classification and execution follow. We may only use <工具列表> tools. When done, call whale_report to proceed.`;
-
-/** 信息评估 prompt（用户提供原文）。 */
-const ASSESSMENT_PROMPT = `We are now in the information assessment stage: the user has added new information. We need to check whether this changes the core goal, scope, or key constraints of the task. If the current mode no longer fits, we exit the mode and restart the workflow. When done, call whale_report to proceed.`;
 
 /** 任务分类 prompt（草案原文；模式由 whale_report 统一启动）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
@@ -215,7 +211,7 @@ export function createStageStore(file) {
       const data = parsed !== null && typeof parsed === "object" ? parsed.sessions : undefined;
       if (data !== null && typeof data === "object") {
         for (const [id, stage] of Object.entries(data)) {
-          if (id.length > 0 && (stage === "reconstruction" || stage === "classification" || stage === "done" || stage === "assessment")) {
+          if (id.length > 0 && (stage === "reconstruction" || stage === "classification" || stage === "done")) {
             sessions[id] = stage;
           }
         }
@@ -277,7 +273,7 @@ export function stageOf(agent, store = null) {
   const sessionId = sessionIdOf(agent);
   if (store !== null && store !== undefined && typeof store.get === "function") {
     const stored = store.get(sessionId);
-    if (stored === "reconstruction" || stored === "classification" || stored === "done" || stored === "assessment") return stored;
+    if (stored === "reconstruction" || stored === "classification" || stored === "done") return stored;
   }
   return legacyStageOf(agent);
 }
@@ -384,8 +380,7 @@ export function hasInjectedInTurn(agent, form, turn) {
   }
 }
 
-/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）直接重新进入「任务重构」。
- *  已取消「信息评估」阶段。 */
+/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）直接重新进入「任务重构」。 */
 export function nextStageOnUserMessage(_current, _turn) {
   return "reconstruction";
 }
@@ -520,9 +515,7 @@ export default {
           ? [...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]
           : stage === "classification"
             ? [WHALE_REPORT_TOOL]
-            : stage === "assessment"
-              ? [WHALE_REPORT_TOOL]
-              : [];
+            : [];
       const out = [];
       for (const tool of candidates) {
         if (out.includes(tool)) continue;
@@ -545,9 +538,7 @@ export default {
           ? RECONSTRUCTION_PROMPT
           : stage === "classification"
             ? CLASSIFICATION_PROMPT
-            : stage === "assessment"
-              ? ASSESSMENT_PROMPT
-              : "";
+            : "";
       const tools = availableStageTools(agent, stage);
       const list = tools.length > 0 ? tools.join(", ") : "the currently available tools";
       return prompt.replace(/<工具列表>/g, list);
@@ -582,32 +573,6 @@ export default {
         throw new Error(`create_plan bridge is unavailable; cannot ${active ? "enter" : "exit"} plan mode`);
       }
       return tool.execute({ active }, exec);
-    }
-
-    /** 自动退出当前模式：plan 关闭、goal 清除（失败仅告警，不阻断流程）。
-     *  plan 关闭无条件执行：create_plan({active:false}) 对未激活状态返回 noop，
-     *  同时也能取消同一轮内刚排队（pending）的进入 intent。 */
-    async function exitCurrentModes(agent, exec) {
-      const out = [];
-      try {
-        const result = await runPlanBridge(agent, exec, false);
-        out.push("plan:" + String(result?.outcome ?? "done"));
-      } catch (error) {
-        ctx.logger?.warn?.(`[ka-whale-workflow] 退出 plan 模式失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-      try {
-        const goals = ctx.get("goals");
-        if (goals !== undefined && goals !== null && typeof goals.get === "function" && typeof goals.clear === "function") {
-          const goal = goals.get(agent);
-          if (goal !== undefined && goal !== null && goal.phase !== "complete" && typeof goal.id === "string" && typeof goal.revision === "number") {
-            goals.clear(agent, { id: goal.id, revision: goal.revision });
-            out.push("goal:cleared");
-          }
-        }
-      } catch (error) {
-        ctx.logger?.warn?.(`[ka-whale-workflow] 清除 goal 模式失败：${error instanceof Error ? error.message : String(error)}`);
-      }
-      return out;
     }
 
     // -----------------------------------------------------------------------
@@ -650,21 +615,6 @@ export default {
           return Promise.reject(new Error("whale_report requires a calling agent"));
         }
         const current = stageOfAgent(agent);
-        if (current === "assessment") {
-          if (args?.restart === true) {
-            const exits = await exitCurrentModes(agent, exec);
-            setStageAgent(agent, "reconstruction");
-            reportRoundDisplay(
-              agent,
-              "信息评估判定任务性质改变：已退出模式（" + (exits.length > 0 ? exits.join("、") : "无") + "），重新进入任务重构。",
-              "阶段切换",
-            );
-            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
-          }
-          setStageAgent(agent, "done");
-          reportRoundDisplay(agent, "信息评估完成：保持当前模式，继续执行。", "阶段切换");
-          return Promise.resolve({ ok: true, stage: "done", restarted: false });
-        }
         if (current === "reconstruction") {
           setStageAgent(agent, "classification");
           reportRoundDisplay(agent, "任务重构完成，进入任务分类。", "阶段切换");
@@ -860,7 +810,7 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 上下文注入：重构/分类/评估按 turn 去重注入一次。
+    // 上下文注入：重构/分类按 turn 去重注入一次。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
       const agent = payload?.agent;
@@ -906,18 +856,14 @@ export default {
           ? "reconstruction"
           : stage === "classification"
             ? "classification"
-            : stage === "assessment"
-              ? "assessment"
-              : null;
+            : null;
       if (form === null) return decision;
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
       if (hasInjectedInTurn(agent, form, turn)) return decision;
       const title =
         stage === "reconstruction"
           ? "ka-whale-workflow TaskReconstruction"
-          : stage === "classification"
-            ? "ka-whale-workflow TaskClassification"
-            : "ka-whale-workflow InformationAssessment";
+          : "ka-whale-workflow TaskClassification";
       const text = ["[" + title + "]", ">", renderPrompt(agent, stage), "<"].join("\n");
       let message;
       try {
@@ -932,7 +878,7 @@ export default {
       reportRoundDisplay(
         agent,
         text,
-        stage === "reconstruction" ? "任务重构" : stage === "classification" ? "任务分类" : "信息评估",
+        stage === "reconstruction" ? "任务重构" : "任务分类",
       );
       return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
     });
@@ -948,14 +894,14 @@ export default {
         if (agent === null || agent === undefined || typeof agent !== "object") return "";
         if (liveFor(agent).enabled !== true) return "";
         const stage = stageOfAgent(agent);
-        if (stage !== "reconstruction" && stage !== "classification" && stage !== "assessment") return "";
+        if (stage !== "reconstruction" && stage !== "classification") return "";
         if (isBypassed(agent)) return "";
         return renderPrompt(agent, stage);
       },
     });
 
     // -----------------------------------------------------------------------
-    // 工具面过滤：重构/分类/评估按阶段清单过滤；命令旁路/done/idle 放行白名单。
+    // 工具面过滤：重构/分类按阶段清单过滤；命令旁路/done/idle 放行白名单。
     // -----------------------------------------------------------------------
     ctx.on("system-prompt/assemble", async function (assembly, context, next) {
       const agent = context?.agent;
@@ -1007,8 +953,6 @@ export default {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
       } else if (stage === "classification") {
         allowed = new Set([WHALE_REPORT_TOOL]);
-      } else if (stage === "assessment") {
-        allowed = new Set([WHALE_REPORT_TOOL]);
       }
       if (allowed !== null) {
         assembly.tools = assembly.tools.filter(
@@ -1041,7 +985,7 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 执行层闸门：重构/分类/评估阶段只允许阶段工具（纵深防御，组装层已隐藏）。
+    // 执行层闸门：重构/分类阶段只允许阶段工具（纵深防御，组装层已隐藏）。
     // -----------------------------------------------------------------------
     ctx.on("tools/pre-execute", (exec, next) => {
       const agent = exec?.agent;
@@ -1054,8 +998,6 @@ export default {
       if (stage === "reconstruction") {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
       } else if (stage === "classification") {
-        allowed = new Set([WHALE_REPORT_TOOL]);
-      } else if (stage === "assessment") {
         allowed = new Set([WHALE_REPORT_TOOL]);
       }
       if (allowed !== null && typeof exec?.name === "string" && !allowed.has(exec.name)) {
