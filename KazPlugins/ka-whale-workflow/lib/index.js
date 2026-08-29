@@ -45,7 +45,7 @@ export const WHALE_REPORT_TOOL = "whale_report";
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
 const RECONSTRUCTION_PROMPT =
-  "We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, without expanding beyond the original message. The reconstruction is for internal use only; we proceed by calling whale_report. We may only use <工具列表> tools. When done, call whale_report to proceed.";
+  "We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, and also incorporating any relevant system-level instructions, tool constraints, and contextual requirements that apply to this session. The reconstruction is for internal use only; we proceed by calling whale_report. We may only use <工具列表> tools. When done, call whale_report to proceed.";
 
 /** 任务分类 prompt（草案原文）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
