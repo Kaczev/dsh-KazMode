@@ -17,8 +17,10 @@
 //   解除极简后立刻进入重构。
 //
 // 阶段状态：
-//   写入会话事件 ka-whale-workflow/stage（reconstruction / classification / done），
-//   从事件折叠读取，重启/续接会话自然恢复。
+//   写入插件自己的 JSON 存储（~/.dsh/storages/ka-whale-workflow-stage.json，
+//   按 session id 索引），重启/续接会话自然恢复。
+//   不再写入会话事件 ka-whale-workflow/stage——DSH 会把未知自定义事件视为
+//   "not marked ignorable"，导致重载会话日志时拒绝读取整条日志。
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
@@ -26,6 +28,9 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { DEFAULT_RECONSTRUCTION_TOOLS } from "kaz-shared";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 
 export { DEFAULT_RECONSTRUCTION_TOOLS };
 
@@ -165,8 +170,83 @@ function hasToolCall(agent) {
   }
 }
 
-/** 从会话事件折叠鲸鱼工作流阶段；无记录返回 "idle"。 */
-export function stageOf(agent) {
+/** 插件自己的阶段状态文件名（DSH_HOME/storages 下，按 session id 索引）。
+ *  注意：不能再用 agent.session.append("ka-whale-workflow/stage", ...) 持久化——
+ *  DSH 的会话日志会把未注册的自定义事件视为未知且不可忽略，重载时直接拒绝读取
+ *  整个 session（SessionFormatUnsupportedError）。改用插件自己的 JSON 存储。 */
+const STAGE_FILE_NAME = "ka-whale-workflow-stage.json";
+
+/** 默认阶段状态文件：~/.dsh/storages/ka-whale-workflow-stage.json。 */
+function defaultStageFile() {
+  return join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", STAGE_FILE_NAME);
+}
+
+/** 会话 id：session.id 优先，回退 agent.id。 */
+export function sessionIdOf(agent) {
+  try {
+    const id = agent?.session?.id || agent?.id;
+    return typeof id === "string" && id.length > 0 ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 创建阶段状态存储（可注入文件路径，便于探针用临时文件）。
+ * 结构：{ version: 1, sessions: { "<sessionId>": "reconstruction"|"classification"|"done" } }
+ */
+export function createStageStore(file) {
+  const sessions = {};
+  try {
+    if (file !== undefined && file !== null && existsSync(file)) {
+      let raw = readFileSync(file, "utf8");
+      if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+      const parsed = JSON.parse(raw);
+      const data = parsed !== null && typeof parsed === "object" ? parsed.sessions : undefined;
+      if (data !== null && typeof data === "object") {
+        for (const [id, stage] of Object.entries(data)) {
+          if (id.length > 0 && (stage === "reconstruction" || stage === "classification" || stage === "done")) {
+            sessions[id] = stage;
+          }
+        }
+      }
+    }
+  } catch {
+    // 存储损坏时从空状态开始，不影响主流程
+  }
+  return {
+    file,
+    get(sessionId) {
+      return typeof sessionId === "string" && sessionId.length > 0 ? sessions[sessionId] ?? null : null;
+    },
+    set(sessionId, stage) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      sessions[sessionId] = stage;
+      if (typeof file !== "string" || file.length === 0) return true;
+      try {
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, JSON.stringify({ version: 1, sessions }, null, 2) + String.fromCharCode(10), "utf8");
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    remove(sessionId) {
+      if (typeof sessionId === "string") delete sessions[sessionId];
+      if (typeof file === "string" && file.length > 0) {
+        try {
+          mkdirSync(dirname(file), { recursive: true });
+          writeFileSync(file, JSON.stringify({ version: 1, sessions }, null, 2) + String.fromCharCode(10), "utf8");
+        } catch {
+          // 忽略清理失败
+        }
+      }
+    },
+  };
+}
+
+/** 从会话事件折叠旧版鲸鱼工作流阶段（兼容旧日志；只读，不再追加）。 */
+function legacyStageOf(agent) {
   try {
     const events = agent?.session?.events;
     if (!Array.isArray(events)) return "idle";
@@ -182,16 +262,26 @@ export function stageOf(agent) {
   }
 }
 
-/** 追加一条阶段事件（仅当与当前阶段不同，避免刷事件）。 */
-export function setStage(agent, stage) {
-  const current = stageOf(agent);
-  if (current === stage) return false;
-  try {
-    agent?.session?.append("ka-whale-workflow/stage", { stage });
-    return true;
-  } catch {
-    return false;
+/** 读取当前阶段：插件 JSON 存储优先，旧会话事件兜底；无记录返回 "idle"。 */
+export function stageOf(agent, store = null) {
+  const sessionId = sessionIdOf(agent);
+  if (store !== null && store !== undefined && typeof store.get === "function") {
+    const stored = store.get(sessionId);
+    if (stored === "reconstruction" || stored === "classification" || stored === "done") return stored;
   }
+  return legacyStageOf(agent);
+}
+
+/** 设置阶段（仅当与当前阶段不同）：写入插件自己的 JSON 存储，不再 append 会话事件。 */
+export function setStage(agent, stage, store = null) {
+  const current = stageOf(agent, store);
+  if (current === stage) return false;
+  const sessionId = sessionIdOf(agent);
+  if (sessionId === null) return false;
+  if (store !== null && store !== undefined && typeof store.set === "function") {
+    return store.set(sessionId, stage);
+  }
+  return false;
 }
 
 /** 是否真实用户消息（跳过 plugin / goal / tool 注入消息）。 */
@@ -255,6 +345,22 @@ export default {
         handleChange();
       },
     });
+
+    /** 阶段状态存储：插件自己的 JSON（config.stageStore 可覆盖，探针用临时文件）。
+     *  绝不写会话事件——自定义事件会让 dsh 重载会话日志时拒绝整条日志。 */
+    const stageStore = createStageStore(
+      typeof config.stageStore === "string" && config.stageStore.trim().length > 0
+        ? config.stageStore.trim()
+        : defaultStageFile(),
+    );
+    /** 当前会话的鲸鱼工作流阶段（JSON 存储优先，旧会话事件只读兜底）。 */
+    function stageOfAgent(agent) {
+      return stageOf(agent, stageStore);
+    }
+    /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。 */
+    function setStageAgent(agent, stage) {
+      return setStage(agent, stage, stageStore);
+    }
 
     /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
     function liveFor(agent) {
@@ -359,14 +465,14 @@ export default {
         if (agent === null || agent === undefined || typeof agent !== "object") {
           return Promise.reject(new Error("whale_report requires a calling agent"));
         }
-        const current = stageOf(agent);
+        const current = stageOfAgent(agent);
         if (current === "reconstruction") {
-          setStage(agent, "classification");
+          setStageAgent(agent, "classification");
           reportRoundDisplay(agent, "任务重构完成，进入任务分类。", "阶段切换");
           return Promise.resolve({ ok: true, stage: "classification" });
         }
         if (current === "classification") {
-          setStage(agent, "done");
+          setStageAgent(agent, "done");
           reportRoundDisplay(agent, "任务分类完成，鲸鱼工作流结束，放行 Kaz 白名单工具。", "阶段切换");
           return Promise.resolve({ ok: true, stage: "done" });
         }
@@ -405,7 +511,7 @@ export default {
     // -----------------------------------------------------------------------
     const kaWhaleWorkflowService = {
       version: 1,
-      stageOf: (agent) => stageOf(agent),
+      stageOf: (agent) => stageOfAgent(agent),
       enabledFor: (agent) => liveFor(agent).enabled === true,
     };
     ctx.effect(() => {
@@ -426,14 +532,14 @@ export default {
       if (liveFor(agent).enabled !== true) return;
       if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
       if (!isUserMessage(message)) return;
-      const current = stageOf(agent);
+      const current = stageOfAgent(agent);
       if (current === "reconstruction" || current === "classification") return;
       const sessionId = agent?.session?.id || agent?.id;
       if (isMinimal(agent)) {
         if (typeof sessionId === "string" && sessionId.length > 0) pendingStart.add(sessionId);
         return;
       }
-      if (setStage(agent, "reconstruction")) {
+      if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "进入任务重构。", "阶段切换");
       }
     });
@@ -469,9 +575,9 @@ export default {
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
-      const current = stageOf(agent);
+      const current = stageOfAgent(agent);
       if (current === "reconstruction" || current === "classification") return;
-      if (setStage(agent, "reconstruction")) {
+      if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
       }
     });
@@ -484,7 +590,7 @@ export default {
       if (agent !== null && agent !== undefined && typeof agent === "object") {
         const live = liveFor(agent);
         const skipSubagent = live.includeSubagents !== true && isSubagent(agent);
-        const stage = stageOf(agent);
+        const stage = stageOfAgent(agent);
         const messages = Array.isArray(payload?.messages) ? payload.messages : [];
         const hasRealUserMessage = messages.some((message) => isUserMessage(message));
         // 兜底：session/event 路径（pendingStart）万一没触发时，在 pre-step 补一次。
@@ -496,7 +602,7 @@ export default {
           !isMinimal(agent) &&
           (hasToolCall(agent) || hasRealUserMessage)
         ) {
-          if (setStage(agent, "reconstruction")) {
+          if (setStageAgent(agent, "reconstruction")) {
             reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（pre-step 兜底）。", "阶段切换");
           }
         }
@@ -505,7 +611,7 @@ export default {
       if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
       if (agent === null || agent === undefined || typeof agent !== "object") return decision;
       if (liveFor(agent).enabled !== true) return decision;
-      const stage = stageOf(agent);
+      const stage = stageOfAgent(agent);
       const form = stage === "reconstruction" ? "reconstruction" : stage === "classification" ? "classification" : null;
       if (form === null) return decision;
       if (hasInjectedBefore(agent, form)) return decision;
@@ -535,7 +641,7 @@ export default {
         const agent = context?.agent;
         if (agent === null || agent === undefined || typeof agent !== "object") return "";
         if (liveFor(agent).enabled !== true) return "";
-        const stage = stageOf(agent);
+        const stage = stageOfAgent(agent);
         if (stage !== "reconstruction" && stage !== "classification") return "";
         return renderPrompt(agent, stage);
       },
@@ -548,7 +654,7 @@ export default {
       const agent = context?.agent;
       const before = toolNamesOf(assembly?.tools);
       const enabled = agent !== null && agent !== undefined && typeof agent === "object" && liveFor(agent).enabled === true;
-      let stage = enabled ? stageOf(agent) : "idle";
+      let stage = enabled ? stageOfAgent(agent) : "idle";
       // assemble 兜底：round-minimal 解除后、首次 tool/call 的下一步组装时，
       // 阶段可能还没被 session/event 路径推进（assemble 先于 agent/pre-step 执行）。
       // 在这里补一次阶段切换，使【紧跟在首次工具调用后的那次请求】就拿到重构工具面
@@ -561,7 +667,7 @@ export default {
         !isMinimal(agent) &&
         hasToolCall(agent)
       ) {
-        if (setStage(agent, "reconstruction")) {
+        if (setStageAgent(agent, "reconstruction")) {
           reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（assemble 兜底）。", "阶段切换");
           stage = "reconstruction";
         }

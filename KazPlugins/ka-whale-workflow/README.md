@@ -6,7 +6,7 @@
 - 任务分类：工具面 = 自动启用面板临时放行的 `whale_report` + `create_goal` + `create_plan`。
 - `whale_report`：重构/分类各调用一次，向插件汇报阶段完成。
 - round-minimal 优先：首次工具调用前不进入重构，第一次工具调用后立刻进入。
-- 阶段状态写入会话事件 `ka-whale-workflow/stage`，重启/续接会话自动恢复。
+- 阶段状态写入插件自己的 JSON 存储（`~/.dsh/storages/ka-whale-workflow-stage.json`，按 session id 索引），重启/续接会话自动恢复；**不再写会话事件**（自定义会话事件会让 dsh 重载日志时拒绝整条会话）。
 
 ## 设置
 

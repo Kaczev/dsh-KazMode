@@ -648,7 +648,7 @@ function makeSettings() {
 }
 
 // ---------------------------------------------------------------------------
-// ④ round-display：同轮系统提示词只保留最终一条
+// ④ round-display：同一轮保留所有不同内容的系统提示词快照（重复去重）
 // ---------------------------------------------------------------------------
 {
   const AGENT_SYS = { id: "s-rd-sys", session: { events: [{ type: "turn/start", data: { turn: 1 } }] } };
@@ -667,18 +667,22 @@ function makeSettings() {
   let nowTick = 2000000;
   Date.now = () => nowTick++;
   try {
-    // 同一轮先出现“不全”的中间态，再出现最终系统提示词。
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "partial persona" });
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "final persona + plan + goal" });
+    // 同一轮内系统提示词发生变化（例如 ka-whale-workflow 重构 → 分类）：
+    // 两个不同内容的快照都应保留；完全相同的重复上报只保留一条。
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "reconstruction prompt" });
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "classification prompt" });
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "classification prompt" });
   } finally {
     Date.now = realNow;
   }
 
   const listRes = await rpc("list", { sessionId: AGENT_SYS.id });
   const listEntries = Array.isArray(listRes?.value?.entries) ? listRes.value.entries : [];
+  const listContents = listEntries.map((e) => e.content);
   check(
-    "④ 同轮系统提示词只保留最终一条",
-    listEntries.length === 1 && listEntries[0].content === "final persona + plan + goal",
+    "④ 同轮保留所有不同系统提示词快照（新在上、重复去重）",
+    listEntries.length === 2 &&
+      JSON.stringify(listContents) === JSON.stringify(["classification prompt", "reconstruction prompt"]),
   );
 }
 
