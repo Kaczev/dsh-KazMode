@@ -130,7 +130,7 @@ dsh-KazMode/
 | `thinking-anchor` | `thinking-anchor` | 思考锚点：新对话注入完整思考协议，之后每轮短提醒 |
 | `first-round-hints` | `first-round-hints` | 首轮注入 pwsh 使用要点等提示 |
 | `kaz-agent-preset-display` | `kaz-agent-preset-display` | 修正新对话 hero 上 agent preset 按钮显示；默认常驻开启，不受 Kaz 模式开关影响 |
-| `output-beep` | `output-beep` | 模型输出完毕 / 提问时播放提示音 |
+| `output-beep` | `output-beep` | 模型输出完毕 / 提问 / 提交 plan 方案时播放提示音 |
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
@@ -143,7 +143,7 @@ dsh-KazMode/
   - `thinking-anchor`：用提示词提醒模型遵循 "We need…" 思维链、用英语思考（多数情况下不开效果也一样）。
   - `round-display`：显示每轮 Kaz 联动/附属插件给模型注入了什么信息。
 - **`kaz-agent-preset-display`**：显示补丁。官方新对话预设按钮在「先选模式 A、设置里默认 B、刷新页面」后会错显成 B；本插件让按钮优先显示该对话自己的预设。
-- **`output-beep`**：模型输出完毕 / 提问时“滴”一声，提醒你可以继续打字（作者摸鱼专用 🐳）。
+- **`output-beep`**：模型输出完毕 / 提问 / 提交 plan 方案时“滴”一声，提醒你可以继续打字（作者摸鱼专用 🐳）。
 
 ---
 

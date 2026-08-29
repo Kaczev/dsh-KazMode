@@ -1,8 +1,9 @@
 // output-beep 宿主半探针：在 mock ctx 上运行插件，验证：
 //   ① 插件可加载、导出 apply；
-//   ② apply 注册 agent/status 监听；
+//   ② apply 注册 agent/status 与 session/event 监听；
 //   ③ 主会话 idle（非子代理）触发播放提示音（会真响一次 880Hz/250ms）；
-//   ④ 子代理 idle（默认 includeSubagents=false）不触发播放（不抛错）。
+//   ④ 子代理 idle（默认 includeSubagents=false）不触发播放（不抛错）；
+//   ⑤ ask_user_question / exit_plan_mode 事件触发不抛错（防抖合并，最多再响一次）。
 // 运行：node output-beep/probe-output-beep.mjs
 import { apply, name } from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/output-beep/lib/index.js";
 
@@ -81,6 +82,7 @@ try {
   process.exit(1);
 }
 check("已注册 agent/status 监听", (listeners.get("agent/status") ?? []).length > 0);
+check("已注册 session/event 监听", (listeners.get("session/event") ?? []).length > 0);
 
 const statusListeners = listeners.get("agent/status") ?? [];
 
@@ -104,6 +106,21 @@ for (const fn of statusListeners) {
   }
 }
 check("子代理 idle 触发不抛错", true);
+
+const eventListeners = listeners.get("session/event") ?? [];
+
+console.log("  → 触发 ask_user_question 与 exit_plan_mode 事件（防抖合并，最多再响一次）…");
+for (const toolName of ["ask_user_question", "exit_plan_mode"]) {
+  for (const fn of eventListeners) {
+    try {
+      fn({ id: "main-1", header: {} }, { type: "tool/call", data: { name: toolName } });
+    } catch (error) {
+      check(`${toolName} 事件触发不抛错`, false);
+      console.log("    error:", error);
+    }
+  }
+}
+check("ask_user_question / exit_plan_mode 事件触发不抛错", true);
 
 // settings 联动：enabled=false 后主会话 idle 应静默（不抛错即可）。
 try {

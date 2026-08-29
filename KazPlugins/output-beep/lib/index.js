@@ -2,7 +2,8 @@
 // ===========================================================================
 // 宿主侧插件：监听 agent/status，任意 agent 输出完毕（回到 idle）时播放一次
 // Windows 系统提示音（PowerShell [console]::beep，频率/时长可配）；同时监听
-// session/event 的 ask_user_question 工具调用，模型提问弹窗出现时也响一次。
+// session/event 的 ask_user_question / exit_plan_mode 工具调用，模型提问弹窗
+// 或 plan 模式提交方案（Plan review 弹窗）出现时也响一次。
 // 默认只对主会话提示（includeSubagents=false 时忽略子代理会话——它们完成时
 // 同样会发 agent/status，避免子代理批量完成时提示音连响）。
 //
@@ -245,8 +246,8 @@ export function apply(ctx, config = {}) {
     handleBeep(liveFor(agent), isSubagent(agent));
   }
 
-  /** 模型调用 ask_user_question 提问时立即响一声（不等整轮结束 idle）。 */
-  function handleAsk(session) {
+  /** 模型提问或提交 plan 方案（ask_user_question / exit_plan_mode）时立即响一声（不等整轮结束 idle）。 */
+  function handlePrompt(session) {
     handleBeep(liveFor(sessionAgentOf(session)), isSubagentSession(session));
   }
 
@@ -256,12 +257,14 @@ export function apply(ctx, config = {}) {
     handleIdle(agent);
   });
 
-  // 模型调用 ask_user_question 时，UI 出现提问弹窗，立即响一声提醒用户。
+  // 模型调用 ask_user_question 提问、或 exit_plan_mode 提交 plan 方案时，
+  // UI 出现提问 / Plan review 弹窗，立即响一声提醒用户。
   ctx.on("session/event", (session, event) => {
     if (event === null || typeof event !== "object" || event.type !== "tool/call") return;
     const data = event.data;
-    if (data === null || typeof data !== "object" || data.name !== "ask_user_question") return;
-    handleAsk(session);
+    if (data === null || typeof data !== "object") return;
+    if (data.name !== "ask_user_question" && data.name !== "exit_plan_mode") return;
+    handlePrompt(session);
   });
 
   installSettingsWithDefaults(ctx, NAMESPACE, SETTINGS_SCHEMA, entry, DEFAULT_SECTION, {

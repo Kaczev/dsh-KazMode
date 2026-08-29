@@ -40,7 +40,7 @@ export const WHALE_REPORT_TOOL = "whale_report";
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
 const RECONSTRUCTION_PROMPT =
-  "We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, without expanding beyond the original message. We may only use <工具列表> tools. When done, call whale_report to proceed.";
+  "We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, without expanding beyond the original message. The reconstruction is for internal use only; we proceed by calling whale_report. We may only use <工具列表> tools. When done, call whale_report to proceed.";
 
 /** 任务分类 prompt（草案原文）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
@@ -548,7 +548,24 @@ export default {
       const agent = context?.agent;
       const before = toolNamesOf(assembly?.tools);
       const enabled = agent !== null && agent !== undefined && typeof agent === "object" && liveFor(agent).enabled === true;
-      const stage = enabled ? stageOf(agent) : "idle";
+      let stage = enabled ? stageOf(agent) : "idle";
+      // assemble 兜底：round-minimal 解除后、首次 tool/call 的下一步组装时，
+      // 阶段可能还没被 session/event 路径推进（assemble 先于 agent/pre-step 执行）。
+      // 在这里补一次阶段切换，使【紧跟在首次工具调用后的那次请求】就拿到重构工具面
+      // 和重构系统提示词段，而不是再等一个 step。
+      if (
+        enabled &&
+        stage === "idle" &&
+        liveFor(agent).includeSubagents !== true &&
+        !isSubagent(agent) &&
+        !isMinimal(agent) &&
+        hasToolCall(agent)
+      ) {
+        if (setStage(agent, "reconstruction")) {
+          reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（assemble 兜底）。", "阶段切换");
+          stage = "reconstruction";
+        }
+      }
       let allowed = null;
       if (stage === "reconstruction") {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
@@ -563,6 +580,14 @@ export default {
           if (typeof section?.name !== "string" || !section.name.startsWith("tool:")) return true;
           return allowed.has(section.name.slice("tool:".length));
         });
+        // 本插件自己的提示词段在 assemble 开始时已按旧阶段渲染成空串；
+        // 阶段刚被推进时在这里补写，让同一请求的 system 里就带重构/分类提示。
+        const whaleSection = assembly.sections.find(
+          (section) => typeof section?.name === "string" && section.name === "ka-whale-workflow:prompt",
+        );
+        if (whaleSection !== null && whaleSection !== undefined) {
+          whaleSection.text = renderPrompt(agent, stage);
+        }
       }
       const nextResult = await next();
       const finalAssembly = nextResult ?? assembly;
