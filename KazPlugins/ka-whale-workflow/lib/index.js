@@ -53,7 +53,7 @@ const CREATE_PLAN_TOOL = "create_plan";
 const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
-const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, and also incorporating any relevant system-level instructions, tool constraints, and contextual requirements that apply to this session. The reconstruction is for internal use only. Reconstruction is for understanding. Classification and execution follow. We may only use <工具列表> tools. When done, call whale_report to proceed.`;
+const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Our goal is to gather the necessary information and rewrite the user's request into a clear, structured task description — preserving all key points and intent, and also incorporating any relevant system-level instructions, tool constraints, and contextual requirements that apply to this session. The reconstruction is for internal use only. Reconstruction is for understanding. Classification and execution follow. We may only use <工具列表> tools. When done, call whale_report to enter task classification (this call only advances to classification; the second whale_report call from classification will finish the workflow).`;
 
 /** 任务分类 prompt（草案原文；模式由 whale_report 统一启动）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
@@ -581,7 +581,7 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call during task reconstruction or task classification. In task classification, pass mode ('normal' | 'plan' | 'goal') to choose the execution mode; whale_report launches plan/goal mode itself, so create_plan/create_goal are not needed. For goal mode, also pass objective.",
+        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call once per stage: during task reconstruction, calling without mode only advances to task classification (stage='classification'); during task classification, pass mode ('normal' | 'plan' | 'goal') to finish the workflow (stage='done') and launch plan/goal mode if needed, so create_plan/create_goal are not needed. For goal mode, also pass objective.",
       parameters: {
         mode: {
           type: "string",
