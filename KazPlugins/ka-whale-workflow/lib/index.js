@@ -387,6 +387,18 @@ function hasInjectedInTurn(agent, form, turn) {
   }
 }
 
+/** 第 n+1 轮真实用户消息应进入的阶段：
+ *   - 当前仍在任务重构/任务分类 → 回到任务重构（用户补充信息继续完善任务描述）；
+ *   - 其它（done/idle/assessment）→ 信息评估。
+ *  turn < 2（首轮）→ 任务重构。 */
+export function nextStageOnUserMessage(current, turn) {
+  if (typeof turn === "number" && turn >= 2) {
+    if (current === "reconstruction" || current === "classification") return "reconstruction";
+    return "assessment";
+  }
+  return "reconstruction";
+}
+
 /** 该 agent 会话是否处于 plan 模式（会话事件最后一个 plan/mode 的 active）。 */
 function planModeActive(agent) {
   try {
@@ -759,14 +771,19 @@ export default {
         return;
       }
       manualBypassSessions.delete(sessionId);
-      // 第 n+1 轮（turn>=2）无条件进入信息评估。
+      const current = stageOfAgent(agent);
+      // 第 n+1 轮（turn>=2）：重构/分类中补充信息 → 回重构；否则 → 信息评估。
       if (typeof turn === "number" && turn >= 2) {
-        if (setStageAgent(agent, "assessment")) {
-          reportRoundDisplay(agent, "收到新一轮消息，进入信息评估。", "阶段切换");
+        const next = nextStageOnUserMessage(current, turn);
+        if (setStageAgent(agent, next)) {
+          reportRoundDisplay(
+            agent,
+            next === "reconstruction" ? "收到补充信息，重新进入任务重构。" : "收到新一轮消息，进入信息评估。",
+            "阶段切换",
+          );
         }
         return;
       }
-      const current = stageOfAgent(agent);
       if (current === "reconstruction" || current === "classification" || current === "assessment") return;
       if (isMinimal(agent)) {
         pendingStart.add(sessionId);
@@ -831,8 +848,13 @@ export default {
           const stage = stageOfAgent(agent);
           if (hasRealUserMessage) {
             if (turn >= 2) {
-              if (setStageAgent(agent, "assessment")) {
-                reportRoundDisplay(agent, "收到新一轮消息，进入信息评估（pre-step 兜底）。", "阶段切换");
+              const next = nextStageOnUserMessage(stage, turn);
+              if (setStageAgent(agent, next)) {
+                reportRoundDisplay(
+                  agent,
+                  next === "reconstruction" ? "收到补充信息，重新进入任务重构（pre-step 兜底）。" : "收到新一轮消息，进入信息评估（pre-step 兜底）。",
+                  "阶段切换",
+                );
               }
             } else if (stage === "idle" && !isMinimal(agent)) {
               if (setStageAgent(agent, "reconstruction")) {
@@ -990,6 +1012,38 @@ export default {
         );
       }
       return nextResult;
+    });
+
+    // -----------------------------------------------------------------------
+    // 执行层闸门：重构/分类/评估阶段只允许阶段工具（纵深防御，组装层已隐藏）。
+    // -----------------------------------------------------------------------
+    ctx.on("tools/pre-execute", (exec, next) => {
+      const agent = exec?.agent;
+      if (agent === null || agent === undefined || typeof agent !== "object") return next();
+      if (liveFor(agent).enabled !== true) return next();
+      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return next();
+      if (isBypassed(agent)) return next();
+      const stage = stageOfAgent(agent);
+      let allowed = null;
+      if (stage === "reconstruction") {
+        allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
+      } else if (stage === "classification") {
+        allowed = new Set([WHALE_REPORT_TOOL, ...CLASSIFICATION_LAUNCH_TOOLS]);
+      } else if (stage === "assessment") {
+        allowed = new Set([WHALE_REPORT_TOOL]);
+      }
+      if (allowed !== null && typeof exec?.name === "string" && !allowed.has(exec.name)) {
+        ctx.logger.info(
+          `[ka-whale-workflow] ${stage} 阶段拒绝调用工具 "${exec.name}"（仅允许：${[...allowed].join(", ")}）`,
+        );
+        return {
+          kind: "deny",
+          reason:
+            `工具 "${exec.name}" 在鲸鱼工作流「${stage}」阶段不可用，当前仅允许：` +
+            `${[...allowed].join(", ")}。完成本阶段（调用 whale_report）后即可恢复白名单工具。`,
+        };
+      }
+      return next();
     });
 
     ctx.effect(() => () => {
