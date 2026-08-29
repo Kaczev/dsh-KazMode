@@ -18,11 +18,11 @@
 //        - whale_report({restart:true}) 自动退出当前模式并重新走 1) → 2)；
 //          restart:false/缺省 回到 done。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
-//      直接放行白名单工具（round-minimal 极简同时旁路）。
+//      不进入任务重构/信息评估；round-minimal 极简过滤仍照常生效。
 //
 // 与 round-minimal：
 //   round-minimal 优先。极简阶段（首次工具调用前）不进入重构；第一次 tool/call
-//   解除极简后立刻进入重构。命令旁路时 round-minimal 也临时放行。
+//   解除极简后立刻进入重构。命令旁路不影响 round-minimal。
 //
 // 阶段状态：
 //   写入插件自己的 JSON 存储（~/.dsh/storages/ka-whale-workflow-stage.json，
@@ -718,7 +718,8 @@ export default {
 
     // -----------------------------------------------------------------------
     // 启动：真实用户消息被 inbox claim 后、assembly 之前进入对应阶段。
-    //   - /plan /goal 命令触发的消息：旁路鲸鱼工作流，直接放行白名单。
+    //   - /plan /goal 命令触发的消息：旁路鲸鱼工作流（不进入重构/评估），
+    //     round-minimal 极简过滤仍照常生效。
     //   - turn>=2：信息评估。
     //   - turn=1：任务重构（round-minimal 极简阶段只记 pending）。
     // -----------------------------------------------------------------------
@@ -743,18 +744,6 @@ export default {
       return found;
     }
 
-    /** 设置/清除 round-minimal 的命令旁路（服务缺失时忽略）。 */
-    function setRoundMinimalBypass(agent, active) {
-      try {
-        const rm = ctx.get("roundMinimal");
-        if (rm !== undefined && rm !== null && typeof rm.setManualBypass === "function") {
-          rm.setManualBypass(agent, active === true);
-        }
-      } catch {
-        // 服务缺失/异常时忽略
-      }
-    }
-
     ctx.on("agent/inbox/claimed", ({ agent, message, turn }) => {
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
@@ -762,16 +751,14 @@ export default {
       if (!isUserMessage(message)) return;
       const sessionId = agent?.session?.id || agent?.id;
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      // /plan /goal 命令触发的消息：跳过鲸鱼工作流，直接放行白名单工具。
+      // /plan /goal 命令触发的消息：只跳过鲸鱼工作流，round-minimal 极简仍生效。
       const manual = consumeManualCommand(agent);
       if (manual !== null) {
         manualBypassSessions.add(sessionId);
-        setRoundMinimalBypass(agent, true);
         reportRoundDisplay(agent, `检测到 /${manual.name} 指令：本消息跳过鲸鱼工作流，直接放行白名单工具。`, "工作流旁路");
         return;
       }
       manualBypassSessions.delete(sessionId);
-      setRoundMinimalBypass(agent, false);
       // 第 n+1 轮（turn>=2）无条件进入信息评估。
       if (typeof turn === "number" && turn >= 2) {
         if (setStageAgent(agent, "assessment")) {
