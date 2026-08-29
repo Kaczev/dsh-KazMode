@@ -1,4 +1,4 @@
-// ka-whale-workflow —— 鲸鱼工作流（任务重构 → 任务分类 → 信息评估）
+// ka-whale-workflow —— 鲸鱼工作流（任务重构 → 任务分类 → done）
 // ===========================================================================
 // 流程：
 //   1) 首轮真实用户消息（turn=1）进入「任务重构」：
@@ -9,22 +9,14 @@
 //   2) whale_report 后进入「任务分类」：
 //        - 系统提示词段切为分类 prompt；
 //        - 上下文注入 [ka-whale-workflow TaskClassification]；
-//        - 工具面收敛为 whale_report（与信息评估一致）。
+//        - 工具面收敛为 whale_report。
 //   3) whale_report({mode}) 自动启动 plan/goal 后进入 done：不再过滤，放行 Kaz 白名单。
 //      plan 模式由 whale_report 内部经 create_plan 工具（planning isolate 组内）切换，
 //      因为 whale_report 自身在 host 层解析不到 planMode 服务。
-//   4) 第 n+1 轮（turn>=2）真实用户消息进入「信息评估」：
-//        - 系统提示词段显示评估 prompt；
-//        - 上下文注入 [ka-whale-workflow InformationAssessment]；
-//        - 工具面仅 whale_report。
-//        - whale_report({restart:true}) 自动退出当前模式并重新走 1) → 2)；
-//          restart:false/缺省 回到 done。
-//      同一轮中途（turn/end 之前）追加真实用户消息同样处理：重构/分类 → 回重构并
-//      强制补一次 TaskReconstruction 注入；其它阶段 → 信息评估。
-//      若用户消息在 whale_report 执行期间注入，whale_report 会中断推进（不进入
-//      分类/不启动模式），保持/回到重构，等下一次 pre-step 重新注入重构提示。
+//   4) 插话（模型运行中，同一轮中途追加消息）不改变当前工作流阶段。
+//      正式新一轮（turn>=2、模型不在运行）：重构/分类 → 回重构；其它 → 信息评估。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
-//      不进入任务重构/信息评估；round-minimal 极简过滤仍照常生效。
+//      不进入任务重构；round-minimal 极简过滤仍照常生效。
 //
 // 与 round-minimal：
 //   round-minimal 优先。极简阶段（首次工具调用前）不进入重构；第一次 tool/call
@@ -311,40 +303,6 @@ export function isUserMessage(message) {
   return true;
 }
 
-/** 当前打开的一轮（最后一个 turn/start 之后、turn/end 之前）是否已有真实用户消息。
- *  用于识别「同一轮中途追加」的补充消息（首条消息由 agent/inbox/claimed 负责）。 */
-export function hasPriorUserMessageInOpenTurn(agent, currentEvent) {
-  try {
-    const events = agent?.session?.events;
-    if (!Array.isArray(events)) return false;
-    let open = false;
-    let count = 0;
-    for (const ev of events) {
-      if (ev === null || typeof ev !== "object") continue;
-      if (ev.type === "turn/start") {
-        open = true;
-        count = 0;
-      } else if (ev.type === "turn/end") open = false;
-      else if (open && ev.type === "user/message" && isUserMessage(ev.data)) {
-        if (ev === currentEvent) return count > 0;
-        if (
-          currentEvent !== null &&
-          currentEvent !== undefined &&
-          typeof currentEvent === "object" &&
-          typeof currentEvent.seq === "number" &&
-          ev.seq === currentEvent.seq
-        ) {
-          return count > 0;
-        }
-        count += 1;
-      }
-    }
-    return count > 0;
-  } catch {
-    return false;
-  }
-}
-
 /** 会话日志里是否已注入过 ka-whale-workflow 的指定 form 消息。 */
 function hasInjectedBefore(agent, form) {
   try {
@@ -425,8 +383,8 @@ export function hasInjectedInTurn(agent, form, turn) {
   }
 }
 
-/** 第 n+1 轮真实用户消息应进入的阶段：
- *   - 当前仍在任务重构/任务分类 → 回到任务重构（用户补充信息继续完善任务描述）；
+/** 正式新一轮（turn>=2，模型不在运行）应进入的阶段：
+ *   - 当前仍在任务重构/任务分类 → 回到任务重构（补充信息继续完善任务描述）；
  *   - 其它（done/idle/assessment）→ 信息评估。
  *  turn < 2（首轮）→ 任务重构。 */
 export function nextStageOnUserMessage(current, turn) {
@@ -612,12 +570,6 @@ export default {
       }
     }
 
-    /** 当前是否处于「同一轮中途补充消息 → 回重构」的待处理标记中。 */
-    function supplementInterruptPending(agent) {
-      const sid = sessionIdOf(agent);
-      return typeof sid === "string" && supplementReinjectSessions.has(sid);
-    }
-
     /**
      * 通过 create_plan 工具（planning isolate 组内）执行 plan 模式切换。
      * whale_report 自身在 host 层解析不到 planMode 服务，必须借 create_plan
@@ -708,19 +660,6 @@ export default {
           return Promise.reject(new Error("whale_report requires a calling agent"));
         }
         const current = stageOfAgent(agent);
-        // 补充消息竞态保护：用户消息可能在 whale_report 执行期间注入（session/event
-        // 已把「回重构」标记写进 supplementReinjectSessions）。此时不能让 whale_report
-        // 继续把阶段推进到 classification——中断推进，保持/回到重构，等 pre-step 重新
-        // 注入 TaskReconstruction 后再由模型决定是否重新 whale_report。
-        if (supplementInterruptPending(agent) && (current === "reconstruction" || current === "classification")) {
-          setStageAgent(agent, "reconstruction");
-          reportRoundDisplay(
-            agent,
-            "检测到补充消息注入：中断当前 whale_report 推进，重新进入任务重构。",
-            "阶段切换",
-          );
-          return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
-        }
         if (current === "assessment") {
           if (args?.restart === true) {
             const exits = await exitCurrentModes(agent, exec);
@@ -737,23 +676,11 @@ export default {
           return Promise.resolve({ ok: true, stage: "done", restarted: false });
         }
         if (current === "reconstruction") {
-          // 执行期间用户消息注入：中断，不进入分类。
-          if (supplementInterruptPending(agent)) {
-            setStageAgent(agent, "reconstruction");
-            reportRoundDisplay(agent, "检测到补充消息注入：中断 whale_report 进入分类，重新进入任务重构。", "阶段切换");
-            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
-          }
           setStageAgent(agent, "classification");
           reportRoundDisplay(agent, "任务重构完成，进入任务分类。", "阶段切换");
           return Promise.resolve({ ok: true, stage: "classification", restarted: false });
         }
         if (current === "classification") {
-          // 执行期间用户消息注入：中断，不启动任何模式，直接回重构。
-          if (supplementInterruptPending(agent)) {
-            setStageAgent(agent, "reconstruction");
-            reportRoundDisplay(agent, "检测到补充消息注入：中断 whale_report 模式启动，重新进入任务重构。", "阶段切换");
-            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
-          }
           const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
           const launches = [];
           if (mode === "plan") {
@@ -786,17 +713,6 @@ export default {
             } catch (error) {
               return Promise.reject(new Error("failed to create goal: " + (error instanceof Error ? error.message : String(error))));
             }
-          }
-          // 模式启动期间（尤其 await create_plan 时）用户消息注入：中断完成，退出已启动的模式，回重构。
-          if (supplementInterruptPending(agent)) {
-            const exits = await exitCurrentModes(agent, exec);
-            setStageAgent(agent, "reconstruction");
-            reportRoundDisplay(
-              agent,
-              "检测到补充消息注入：中断 whale_report 完成分类（已退出 " + (exits.length > 0 ? exits.join("、") : "无") + "），重新进入任务重构。",
-              "阶段切换",
-            );
-            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
           }
           setStageAgent(agent, "done");
           reportRoundDisplay(
@@ -855,18 +771,15 @@ export default {
 
     // -----------------------------------------------------------------------
     // 启动：真实用户消息被 inbox claim 后、assembly 之前进入对应阶段。
-    //   - /plan /goal 命令触发的消息：旁路鲸鱼工作流（不进入重构/评估），
+    //   - /plan /goal 命令触发的消息：旁路鲸鱼工作流（不进入重构），
     //     round-minimal 极简过滤仍照常生效。
-    //   - turn>=2：信息评估。
-    //   - turn=1：任务重构（round-minimal 极简阶段只记 pending）。
+    //   - 用户插话不改变当前阶段；仅首轮/未开始且已解除极简时进入任务重构。
     // -----------------------------------------------------------------------
     const pendingStart = new Set();
     /** 进程内已消费的 /plan /goal 命令 id（每个命令只旁路下一次 claim）。 */
     const consumedManualCommands = new Set();
     /** 当前处于命令旁路的 session id 集合（assemble / pre-step 读取）。 */
     const manualBypassSessions = new Set();
-    /** 同一轮中途补充消息后，需要强制重新注入 TaskReconstruction 的 session id 集合。 */
-    const supplementReinjectSessions = new Set();
 
     /** 当前会话是否处于命令旁路。 */
     function isBypassed(agent) {
@@ -899,7 +812,7 @@ export default {
       }
       manualBypassSessions.delete(sessionId);
       const current = stageOfAgent(agent);
-      // 第 n+1 轮（turn>=2）：重构/分类中补充信息 → 回重构；否则 → 信息评估。
+      // 正式新一轮（turn>=2，模型不在运行）：重构/分类 → 回重构；其它 → 信息评估。
       if (typeof turn === "number" && turn >= 2) {
         const next = nextStageOnUserMessage(current, turn);
         if (setStageAgent(agent, next)) {
@@ -911,7 +824,8 @@ export default {
         }
         return;
       }
-      if (current === "reconstruction" || current === "classification" || current === "assessment") return;
+      // 插话（模型运行中）不改变当前工作流阶段；仅尚未开始（idle）时进入任务重构。
+      if (current !== "idle") return;
       if (isMinimal(agent)) {
         pendingStart.add(sessionId);
         return;
@@ -942,54 +856,18 @@ export default {
     }
 
     ctx.on("session/event", (session, event) => {
-      if (event === null || typeof event !== "object") return;
+      if (event === null || typeof event !== "object" || event.type !== "tool/call") return;
       const sessionId = session !== null && typeof session === "object" && typeof session.id === "string"
         ? session.id
         : session?.sessionId;
-      if (typeof sessionId !== "string" || sessionId.length === 0) return;
-
-      // 同一轮中途补充真实用户消息：任务重构/分类 → 回重构；其它 → 信息评估。
-      // agent/inbox/claimed 只在每轮 claim 时触发，覆盖不到同一轮内的追加消息。
-      if (event.type === "user/message" && isUserMessage(event.data)) {
-        const agent = sessionAgentOf(session);
-        if (agent === null || agent === undefined || typeof agent !== "object") return;
-        if (liveFor(agent).enabled !== true) return;
-        if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
-        if (isBypassed(agent)) return;
-        // round-minimal 优先：极简阶段（首次工具调用前）不进入任何鲸鱼阶段。
-        if (isMinimal(agent)) return;
-        // 该打开轮内第一条第真实用户消息由 agent/inbox/claimed 负责，这里只处理追加消息。
-        if (!hasPriorUserMessageInOpenTurn(agent, event)) return;
-        const current = stageOfAgent(agent);
-        const next =
-          current === "reconstruction" || current === "classification"
-            ? "reconstruction"
-            : "assessment";
-        const changed = setStageAgent(agent, next);
-        if (next === "reconstruction") {
-          supplementReinjectSessions.add(sessionId);
-        }
-        if (changed || next === "reconstruction") {
-          reportRoundDisplay(
-            agent,
-            next === "reconstruction"
-              ? "收到补充信息（同一轮中途），重新进入任务重构。"
-              : "收到补充信息（同一轮中途），进入信息评估。",
-            "阶段切换",
-          );
-        }
-        return;
-      }
-
-      if (event.type !== "tool/call") return;
-      if (!pendingStart.has(sessionId)) return;
+      if (typeof sessionId !== "string" || sessionId.length === 0 || !pendingStart.has(sessionId)) return;
       pendingStart.delete(sessionId);
       const agent = sessionAgentOf(session);
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
-      if (current === "reconstruction" || current === "classification" || current === "assessment") return;
+      if (current !== "idle") return;
       if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
       }
@@ -1047,17 +925,7 @@ export default {
               : null;
       if (form === null) return decision;
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
-      const sessionId = sessionIdOf(agent);
-      const forceReinject =
-        form === "reconstruction" &&
-        typeof sessionId === "string" &&
-        supplementReinjectSessions.has(sessionId);
-      if (forceReinject) {
-        // 同一轮中途补充信息：即使本 turn 已注入过 TaskReconstruction 也补一次。
-        supplementReinjectSessions.delete(sessionId);
-      } else if (hasInjectedInTurn(agent, form, turn)) {
-        return decision;
-      }
+      if (hasInjectedInTurn(agent, form, turn)) return decision;
       const title =
         stage === "reconstruction"
           ? "ka-whale-workflow TaskReconstruction"

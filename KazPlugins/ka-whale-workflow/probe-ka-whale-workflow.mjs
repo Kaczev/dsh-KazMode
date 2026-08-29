@@ -10,7 +10,6 @@ import plugin, {
   manualCommandIdOf,
   nextStageOnUserMessage,
   hasInjectedInTurn,
-  hasPriorUserMessageInOpenTurn,
 } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -96,36 +95,6 @@ check("goal/tool 消息判定为假", isUserMessage({ content: [], source: { kin
   ];
   const reentryAgent = { id: "s-reentry", session: { id: "s-reentry", events: reentryEvents } };
   check("重构重入：turn2 未注入过 → 可再次注入", hasInjectedInTurn(reentryAgent, "reconstruction", 2) === false && hasInjectedInTurn(reentryAgent, "reconstruction", 1) === true);
-}
-
-{
-  // 同一轮中途补充消息识别：首条真实用户消息不算补充；打开轮内第二条才算。
-  const firstMsg = { content: [], source: { kind: "user" } };
-  const secondMsg = { content: [], source: { kind: "user" } };
-  const firstEv = { type: "user/message", data: firstMsg, seq: 10 };
-  const secondEv = { type: "user/message", data: secondMsg, seq: 20 };
-  const openEvents = [
-    { type: "turn/start", data: { turn: 1 }, seq: 1 },
-    firstEv,
-    { type: "tool/call", data: { name: "whale_report" }, seq: 15 },
-    secondEv,
-  ];
-  const openAgent = { id: "s-open", session: { id: "s-open", events: openEvents } };
-  check(
-    "同一轮中途补充消息识别：首条不算、第二条算",
-    hasPriorUserMessageInOpenTurn(openAgent, firstEv) === false &&
-      hasPriorUserMessageInOpenTurn(openAgent, secondEv) === true,
-  );
-  const closedEvents = [
-    { type: "turn/start", data: { turn: 1 }, seq: 1 },
-    firstEv,
-    { type: "turn/end", data: { turn: 1 }, seq: 30 },
-    { type: "turn/start", data: { turn: 2 }, seq: 31 },
-    { type: "user/message", data: secondMsg, seq: 40 },
-  ];
-  const closedAgent = { id: "s-closed", session: { id: "s-closed", events: closedEvents } };
-  const closedSecondEv = closedEvents[4];
-  check("新一轮首条消息不算中途补充", hasPriorUserMessageInOpenTurn(closedAgent, closedSecondEv) === false);
 }
 
 {
