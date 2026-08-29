@@ -19,6 +19,8 @@
 //        - 工具面仅 whale_report。
 //        - whale_report({restart:true}) 自动退出当前模式并重新走 1) → 2)；
 //          restart:false/缺省 回到 done。
+//      同一轮中途（turn/end 之前）追加真实用户消息同样处理：重构/分类 → 回重构并
+//      强制补一次 TaskReconstruction 注入；其它阶段 → 信息评估。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
 //      不进入任务重构/信息评估；round-minimal 极简过滤仍照常生效。
 //
@@ -307,6 +309,40 @@ export function isUserMessage(message) {
   if (source.kind === "plugin" || source.kind === "goal" || source.kind === "tool") return false;
   if (typeof source.plugin === "string" && source.plugin.length > 0) return false;
   return true;
+}
+
+/** 当前打开的一轮（最后一个 turn/start 之后、turn/end 之前）是否已有真实用户消息。
+ *  用于识别「同一轮中途追加」的补充消息（首条消息由 agent/inbox/claimed 负责）。 */
+export function hasPriorUserMessageInOpenTurn(agent, currentEvent) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return false;
+    let open = false;
+    let count = 0;
+    for (const ev of events) {
+      if (ev === null || typeof ev !== "object") continue;
+      if (ev.type === "turn/start") {
+        open = true;
+        count = 0;
+      } else if (ev.type === "turn/end") open = false;
+      else if (open && ev.type === "user/message" && isUserMessage(ev.data)) {
+        if (ev === currentEvent) return count > 0;
+        if (
+          currentEvent !== null &&
+          currentEvent !== undefined &&
+          typeof currentEvent === "object" &&
+          typeof currentEvent.seq === "number" &&
+          ev.seq === currentEvent.seq
+        ) {
+          return count > 0;
+        }
+        count += 1;
+      }
+    }
+    return count > 0;
+  } catch {
+    return false;
+  }
 }
 
 /** 会话日志里是否已注入过 ka-whale-workflow 的指定 form 消息。 */
@@ -811,6 +847,8 @@ export default {
     const consumedManualCommands = new Set();
     /** 当前处于命令旁路的 session id 集合（assemble / pre-step 读取）。 */
     const manualBypassSessions = new Set();
+    /** 同一轮中途补充消息后，需要强制重新注入 TaskReconstruction 的 session id 集合。 */
+    const supplementReinjectSessions = new Set();
 
     /** 当前会话是否处于命令旁路。 */
     function isBypassed(agent) {
@@ -886,11 +924,47 @@ export default {
     }
 
     ctx.on("session/event", (session, event) => {
-      if (event === null || typeof event !== "object" || event.type !== "tool/call") return;
+      if (event === null || typeof event !== "object") return;
       const sessionId = session !== null && typeof session === "object" && typeof session.id === "string"
         ? session.id
         : session?.sessionId;
-      if (typeof sessionId !== "string" || sessionId.length === 0 || !pendingStart.has(sessionId)) return;
+      if (typeof sessionId !== "string" || sessionId.length === 0) return;
+
+      // 同一轮中途补充真实用户消息：任务重构/分类 → 回重构；其它 → 信息评估。
+      // agent/inbox/claimed 只在每轮 claim 时触发，覆盖不到同一轮内的追加消息。
+      if (event.type === "user/message" && isUserMessage(event.data)) {
+        const agent = sessionAgentOf(session);
+        if (agent === null || agent === undefined || typeof agent !== "object") return;
+        if (liveFor(agent).enabled !== true) return;
+        if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
+        if (isBypassed(agent)) return;
+        // round-minimal 优先：极简阶段（首次工具调用前）不进入任何鲸鱼阶段。
+        if (isMinimal(agent)) return;
+        // 该打开轮内第一条第真实用户消息由 agent/inbox/claimed 负责，这里只处理追加消息。
+        if (!hasPriorUserMessageInOpenTurn(agent, event)) return;
+        const current = stageOfAgent(agent);
+        const next =
+          current === "reconstruction" || current === "classification"
+            ? "reconstruction"
+            : "assessment";
+        const changed = setStageAgent(agent, next);
+        if (next === "reconstruction") {
+          supplementReinjectSessions.add(sessionId);
+        }
+        if (changed || next === "reconstruction") {
+          reportRoundDisplay(
+            agent,
+            next === "reconstruction"
+              ? "收到补充信息（同一轮中途），重新进入任务重构。"
+              : "收到补充信息（同一轮中途），进入信息评估。",
+            "阶段切换",
+          );
+        }
+        return;
+      }
+
+      if (event.type !== "tool/call") return;
+      if (!pendingStart.has(sessionId)) return;
       pendingStart.delete(sessionId);
       const agent = sessionAgentOf(session);
       if (agent === null || agent === undefined || typeof agent !== "object") return;
@@ -955,7 +1029,17 @@ export default {
               : null;
       if (form === null) return decision;
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
-      if (hasInjectedInTurn(agent, form, turn)) return decision;
+      const sessionId = sessionIdOf(agent);
+      const forceReinject =
+        form === "reconstruction" &&
+        typeof sessionId === "string" &&
+        supplementReinjectSessions.has(sessionId);
+      if (forceReinject) {
+        // 同一轮中途补充信息：即使本 turn 已注入过 TaskReconstruction 也补一次。
+        supplementReinjectSessions.delete(sessionId);
+      } else if (hasInjectedInTurn(agent, form, turn)) {
+        return decision;
+      }
       const title =
         stage === "reconstruction"
           ? "ka-whale-workflow TaskReconstruction"

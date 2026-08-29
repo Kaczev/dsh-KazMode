@@ -40,7 +40,7 @@ export default {
         },
         render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
       },
-      execute(_args, exec) {
+      execute(args, exec) {
         const agent = exec?.agent;
         if (agent === null || agent === undefined || typeof agent !== "object") {
           return Promise.reject(new Error("create_plan requires a calling agent"));
