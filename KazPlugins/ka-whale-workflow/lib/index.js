@@ -633,7 +633,7 @@ export default {
           properties: {
             ok: { type: "boolean", required: true },
             stage: { type: "string", required: true },
-            restarted: { type: "boolean", required: false },
+            restarted: { type: "boolean", required: true },
           },
         },
         render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
