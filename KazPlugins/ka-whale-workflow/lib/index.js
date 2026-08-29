@@ -21,6 +21,8 @@
 //          restart:false/缺省 回到 done。
 //      同一轮中途（turn/end 之前）追加真实用户消息同样处理：重构/分类 → 回重构并
 //      强制补一次 TaskReconstruction 注入；其它阶段 → 信息评估。
+//      若用户消息在 whale_report 执行期间注入，whale_report 会中断推进（不进入
+//      分类/不启动模式），保持/回到重构，等下一次 pre-step 重新注入重构提示。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
 //      不进入任务重构/信息评估；round-minimal 极简过滤仍照常生效。
 //
@@ -437,30 +439,6 @@ export function nextStageOnUserMessage(current, turn) {
   return "reconstruction";
 }
 
-/** 该 agent 会话是否处于 plan 模式（会话事件最后一个 plan/mode 的 active）。 */
-function planModeActive(agent) {
-  try {
-    const events = agent?.session?.events;
-    if (!Array.isArray(events)) return false;
-    let active = false;
-    for (const event of events) {
-      if (
-        event !== null &&
-        typeof event === "object" &&
-        event.type === "plan/mode" &&
-        event.data !== null &&
-        typeof event.data === "object" &&
-        typeof event.data.active === "boolean"
-      ) {
-        active = event.data.active;
-      }
-    }
-    return active;
-  } catch {
-    return false;
-  }
-}
-
 /** 检测 /plan 或 /goal 命令触发的消息：最后一个 turn/end 之后有成功的 command/run。
  *  返回 { commandId, name }；调用方负责消费（每个 commandId 只旁路一次）。 */
 export function manualCommandIdOf(agent) {
@@ -636,6 +614,12 @@ export default {
       }
     }
 
+    /** 当前是否处于「同一轮中途补充消息 → 回重构」的待处理标记中。 */
+    function supplementInterruptPending(agent) {
+      const sid = sessionIdOf(agent);
+      return typeof sid === "string" && supplementReinjectSessions.has(sid);
+    }
+
     /**
      * 通过 create_plan 工具（planning isolate 组内）执行 plan 模式切换。
      * whale_report 自身在 host 层解析不到 planMode 服务，必须借 create_plan
@@ -655,14 +639,14 @@ export default {
       return tool.execute({ active }, exec);
     }
 
-    /** 自动退出当前模式：plan 关闭、goal 清除（失败仅告警，不阻断流程）。 */
+    /** 自动退出当前模式：plan 关闭、goal 清除（失败仅告警，不阻断流程）。
+     *  plan 关闭无条件执行：create_plan({active:false}) 对未激活状态返回 noop，
+     *  同时也能取消同一轮内刚排队（pending）的进入 intent。 */
     async function exitCurrentModes(agent, exec) {
       const out = [];
       try {
-        if (planModeActive(agent)) {
-          const result = await runPlanBridge(agent, exec, false);
-          out.push("plan:" + String(result?.outcome ?? "done"));
-        }
+        const result = await runPlanBridge(agent, exec, false);
+        out.push("plan:" + String(result?.outcome ?? "done"));
       } catch (error) {
         ctx.logger?.warn?.(`[ka-whale-workflow] 退出 plan 模式失败：${error instanceof Error ? error.message : String(error)}`);
       }
@@ -726,6 +710,19 @@ export default {
           return Promise.reject(new Error("whale_report requires a calling agent"));
         }
         const current = stageOfAgent(agent);
+        // 补充消息竞态保护：用户消息可能在 whale_report 执行期间注入（session/event
+        // 已把「回重构」标记写进 supplementReinjectSessions）。此时不能让 whale_report
+        // 继续把阶段推进到 classification——中断推进，保持/回到重构，等 pre-step 重新
+        // 注入 TaskReconstruction 后再由模型决定是否重新 whale_report。
+        if (supplementInterruptPending(agent) && (current === "reconstruction" || current === "classification")) {
+          setStageAgent(agent, "reconstruction");
+          reportRoundDisplay(
+            agent,
+            "检测到补充消息注入：中断当前 whale_report 推进，重新进入任务重构。",
+            "阶段切换",
+          );
+          return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
+        }
         if (current === "assessment") {
           if (args?.restart === true) {
             const exits = await exitCurrentModes(agent, exec);
@@ -742,11 +739,23 @@ export default {
           return Promise.resolve({ ok: true, stage: "done", restarted: false });
         }
         if (current === "reconstruction") {
+          // 执行期间用户消息注入：中断，不进入分类。
+          if (supplementInterruptPending(agent)) {
+            setStageAgent(agent, "reconstruction");
+            reportRoundDisplay(agent, "检测到补充消息注入：中断 whale_report 进入分类，重新进入任务重构。", "阶段切换");
+            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
+          }
           setStageAgent(agent, "classification");
           reportRoundDisplay(agent, "任务重构完成，进入任务分类。", "阶段切换");
           return Promise.resolve({ ok: true, stage: "classification", restarted: false });
         }
         if (current === "classification") {
+          // 执行期间用户消息注入：中断，不启动任何模式，直接回重构。
+          if (supplementInterruptPending(agent)) {
+            setStageAgent(agent, "reconstruction");
+            reportRoundDisplay(agent, "检测到补充消息注入：中断 whale_report 模式启动，重新进入任务重构。", "阶段切换");
+            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
+          }
           const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
           const launches = [];
           if (mode === "plan") {
@@ -779,6 +788,17 @@ export default {
             } catch (error) {
               return Promise.reject(new Error("failed to create goal: " + (error instanceof Error ? error.message : String(error))));
             }
+          }
+          // 模式启动期间（尤其 await create_plan 时）用户消息注入：中断完成，退出已启动的模式，回重构。
+          if (supplementInterruptPending(agent)) {
+            const exits = await exitCurrentModes(agent, exec);
+            setStageAgent(agent, "reconstruction");
+            reportRoundDisplay(
+              agent,
+              "检测到补充消息注入：中断 whale_report 完成分类（已退出 " + (exits.length > 0 ? exits.join("、") : "无") + "），重新进入任务重构。",
+              "阶段切换",
+            );
+            return Promise.resolve({ ok: true, stage: "reconstruction", restarted: true });
           }
           setStageAgent(agent, "done");
           reportRoundDisplay(
