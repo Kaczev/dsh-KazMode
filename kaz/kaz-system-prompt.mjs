@@ -88,17 +88,17 @@ function goalBlockedThreshold(originalText) {
 function customGoalSystemPrompt(originalText) {
   const threshold = goalBlockedThreshold(originalText)
   return `We are in goal mode. Stay in goal mode until the goal is marked complete, blocked, or the user switches mode. The goal is a long-running objective that spans multiple turns — do not try to complete it in a single turn.
----
+
 Work on the goal one step at a time across turns. Use todo_write to break the goal into subtasks and track what has been done and what remains. Do not rush to mark the goal complete — gather evidence that the entire objective is achieved.
----
+
 When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'.
 
 If the session is resumed or forked, the active goal is disarmed. When the user asks to continue in any wording or language, use 'update_goal action resume' to rearm it.
----
+
 Mark the goal as 'complete' only when the objective is actually achieved.
 
 Mark the goal as 'blocked' only when the same blocking condition persists for at least ${threshold} consecutive goal rounds. In 'blocked_reason', report the concrete condition. Difficulty, uncertainty, or useful remaining work does not count as blocked.
----
+
 If the goal is blocked, stay in goal mode and report the blocking condition to the user. If the user provides new information or direction, incorporate it and resume progress.`
 }
 
@@ -177,14 +177,13 @@ const PROMPT_RULES = [
   {
     id: 'kaz-memory',
     test: (ctx, agent) => pluginEnabled(ctx, agent, 'kaz-memory'),
-    text:
-      "You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone."+"\n"+
-      "---"+"\n"+
-      "Search memory at the start and whenever stuck or needing details (e.g., request format). Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, search memory again; if still unresolved, report to the user."+"\n"+
-      "---"+"\n"+
-      "After reasoning, save concise insights — including workarounds, useful tools, and dead ends avoided, even if not used in the final answer."+"\n"+
-      "---"+"\n"+
-      "The final white response should be crisp and to the point, and only appear after reasoning and saving are complete."
+    text:`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
+    
+    Search memory at the start and whenever stuck or needing details (e.g., request format). Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, search memory again; if still unresolved, report to the user.
+    
+    After reasoning, save concise insights — including workarounds, useful tools, and dead ends avoided, even if not used in the final answer.
+    
+    The final white response should be crisp and to the point, and only appear after reasoning and saving are complete.`
   },
   {
     id: 'default',

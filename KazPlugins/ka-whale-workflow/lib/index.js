@@ -53,24 +53,33 @@ const CREATE_PLAN_TOOL = "create_plan";
 const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
-const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. We only need to gather information and rewrite the user's request into a structured task description — preserving all key points, intent, and system-level constraints. Do not analyze, diagnose, or propose solutions here. That comes later. We may only use <工具列表> tools. When done, call whale_report to proceed to classification.`;
+const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Rewrite the user's request into a structured task description that preserves all key points, intent, and system-level constraints. Do NOT analyze, diagnose, or propose solutions here — that comes later.
+
+When reconstructing, explicitly record the following metadata:
+- Clarity: fully specified / partially specified / open-ended
+- Open design decisions: choices the user left unspecified but that the task requires
+- Deliverable shape: text / code / page / plan / analysis / other
+- Exploration or design needed: would doing this well require exploring the codebase, comparing options, or designing an approach before acting?
+- Expected shape: single-turn answer / multi-round iterative work / plan-then-approval
+
+Preserve the original ambiguity. Do NOT silently turn a vague request into a concrete specification. Quote or summarize what the user left open. If the user asks for a design, a proposal, a reason ("why"), or how something should be improved, record the task as design-type.
+
+You may only use <工具列表> tools. When done, call whale_report to proceed to classification.`;
 
 /** 任务分类 prompt（草案原文；模式由 whale_report 统一启动）。 */
-const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description, we need to decide which execution mode best fits the user's request.
----
-The following modes are available:
+const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description — including its clarity and open-design metadata — decide which execution mode best fits.
 
-- **Plan mode**:
-    Use this when the task involves significant unknowns — for example, when the user asks for a design, a migration plan, or a solution architecture. It allows us to explore the codebase, propose a concrete plan, and wait for user approval before taking action. 
+Use this decision order:
+1. Normal — only if the task is fully specified, requires no exploration or design decisions, and can be completed in one turn.
+2. Plan — if the task involves significant unknowns, open design choices, requires exploring the codebase, or asks for a design, a proposal, a migration plan, an analysis, or an explanation of why/how something should change.
+3. Goal — if the objective is clear but the work naturally spans multiple turns (iterative build-and-refine, progress tracking, recovery after interruptions).
 
-- **Goal mode**:
-    Use this when the objective is clear and can be broken into measurable steps, and the work is expected to span multiple turns. It provides persistent goal tracking, progress verification, and automatic recovery after session interruptions. 
+Tie-breakers:
+- If unsure between Normal and Plan, prefer Plan when the user asked for design, a proposal, or "why / how to improve".
+- Generating a code snippet is Normal only when the request is concrete and single-turn. Building/designing a page or feature with unspecified details is Plan (or Goal when the user gave a clear objective to iterate on).
+- Do not rely only on the cleaned reconstruction: preserve signals from the original request's ambiguity.
 
-- **Normal mode**:
-    Use this for single-turn tasks that do not require exploration or sustained tracking — such as answering a question, generating a code snippet, or performing a quick edit. 
-    
----
-The classification should be based solely on the reconstructed task. Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage.`;
+Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage.`;
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({

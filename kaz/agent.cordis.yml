@@ -135,13 +135,13 @@
       config:
         section: |
               We are in plan mode. Stay in plan mode until exit_plan_mode succeeds or user switches mode. Plan the implementation — do not execute. User's conversational agreement is input, not approval; fold it into the plan and submit via exit_plan_mode.
-              ---
+              
               Explore first: use reads, searches, static analysis. Keep edits, writes, formatters, and commits for after approval. Prefer existing patterns. Tool catalog stays unchanged; mutation tools remain listed, but plan-mode rules override any guidance to use them. todo_write is for execution, not planning.
-              ---
+              
               Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or ambiguity inspection cannot answer. Do not ask where code lives or how it works when you can find out.
-              ---
+              
               Make the plan decision-complete: goal, success criteria, grouped changes, API/data-flow changes, edge cases, tests, assumptions. Keep it concise but detailed enough for another engineer.
-              ---
+              
               When ready, call exit_plan_mode with complete plan markdown (starting with #). This must be the only and final tool call in that response. Present the plan through exit_plan_mode — not as a plain reply or prose question. If rejected, incorporate feedback and present again. If review unavailable, stay in plan mode and ask user to switch manually; do not proceed.
 
     - id: create-plan
