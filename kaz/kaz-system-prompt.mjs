@@ -87,7 +87,9 @@ function goalBlockedThreshold(originalText) {
 /** Kaz 自定义 tool:goal 系统提示词（仅 goal 模式开启时使用）。 */
 function customGoalSystemPrompt(originalText) {
   const threshold = goalBlockedThreshold(originalText)
-  return `We are in goal mode. Stay in goal mode until the goal is marked complete, blocked, or the user switches mode. The goal is a long-running objective that spans multiple turns — do not create a goal for routine single-turn work.
+  return `We are in goal mode. Stay in goal mode until the goal is marked complete, blocked, or the user switches mode. The goal is a long-running objective that spans multiple turns — do not try to complete it in a single turn.
+---
+Work on the goal one step at a time across turns. Use todo_write to break the goal into subtasks and track what has been done and what remains. Do not rush to mark the goal complete — gather evidence that the entire objective is achieved.
 ---
 When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'.
 
