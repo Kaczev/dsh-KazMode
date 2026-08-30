@@ -87,19 +87,13 @@ function goalBlockedThreshold(originalText) {
 /** Kaz 自定义 tool:goal 系统提示词（仅 goal 模式开启时使用）。 */
 function customGoalSystemPrompt(originalText) {
   const threshold = goalBlockedThreshold(originalText)
-  return `We are in goal mode. Stay in goal mode until the goal is marked complete, blocked, or the user switches mode. The goal is a long-running objective that spans multiple turns — do not try to complete it in a single turn.
+  return `We are in goal mode until the goal is complete, blocked, or the user switches mode.
 
-Work on the goal one step at a time across turns. Use todo_write to break the goal into subtasks and track what has been done and what remains. Do not rush to mark the goal complete — gather evidence that the entire objective is achieved.
+The goal spans multiple turns: never try to finish it in one turn. Use todo_write to split it into small subtasks; do one todo item per round, then end your turn — the goal-round driver starts the next round automatically, so the user does not need to wait. "Don't wait" / "keep going" only means don't pause for permission, not that you should collapse all rounds into one turn. Only an explicit "do everything in this one reply" overrides this pacing.
 
-When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'.
+When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'. If the session is resumed or forked, rearm the goal with 'update_goal action resume'.
 
-If the session is resumed or forked, the active goal is disarmed. When the user asks to continue in any wording or language, use 'update_goal action resume' to rearm it.
-
-Mark the goal as 'complete' only when the objective is actually achieved.
-
-Mark the goal as 'blocked' only when the same blocking condition persists for at least ${threshold} consecutive goal rounds. In 'blocked_reason', report the concrete condition. Difficulty, uncertainty, or useful remaining work does not count as blocked.
-
-If the goal is blocked, stay in goal mode and report the blocking condition to the user. If the user provides new information or direction, incorporate it and resume progress.`
+Complete only when the whole objective is actually achieved. Block only after the same blocker persists for at least ${threshold} consecutive goal rounds; report the concrete condition in 'blocked_reason'. Difficulty or remaining work does not count as blocked. If blocked, stay in goal mode, report it, and resume when the user provides new direction.`
 }
 
 /** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。 */

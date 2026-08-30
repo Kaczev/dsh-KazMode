@@ -72,7 +72,7 @@ const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Base
 Use this decision order:
 1. Normal — only if the task is fully specified, requires no exploration or design decisions, and can be completed in one turn.
 2. Plan — if the task involves significant unknowns, open design choices, requires exploring the codebase, or asks for a design, a proposal, a migration plan, an analysis, or an explanation of why/how something should change.
-3. Goal — if the objective is clear but the work naturally spans multiple turns (iterative build-and-refine, progress tracking, recovery after interruptions).
+3. Goal — clear objective, naturally multi-turn (iterative build-and-refine, progress tracking, recovery). When chosen: split into small todos, do one per round, never finish the whole goal in one turn.
 
 Tie-breakers:
 - If unsure between Normal and Plan, prefer Plan when the user asked for design, a proposal, or "why / how to improve".
