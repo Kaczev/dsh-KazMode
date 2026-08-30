@@ -179,11 +179,11 @@ const PROMPT_RULES = [
     test: (ctx, agent) => pluginEnabled(ctx, agent, 'kaz-memory'),
     text:`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
     
-    Search memory at the start and whenever stuck or needing details (e.g., request format). Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, search memory again; if still unresolved, report to the user.
+Search memory at the start and whenever stuck or needing details (e.g., request format). Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, search memory again; if still unresolved, report to the user.
     
-    After reasoning, save concise insights — including workarounds, useful tools, and dead ends avoided, even if not used in the final answer.
+After reasoning, save concise insights — including workarounds, useful tools, and dead ends avoided, even if not used in the final answer.
     
-    The final white response should be crisp and to the point, and only appear after reasoning and saving are complete.`
+The final white response should be crisp and to the point, and only appear after reasoning and saving are complete.`
   },
   {
     id: 'default',
