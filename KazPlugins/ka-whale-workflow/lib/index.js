@@ -56,6 +56,8 @@ const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
 const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Rewrite the user's request into a structured task description that preserves all key points, intent, and system-level constraints. Do NOT analyze, diagnose, or propose solutions here — that comes later.
 
+Write the reconstructed task description in English, even if the user writes in Chinese. This reconstruction is consumed as conversation context by the next stage (task classification), not shown to the user as a deliverable; English is more token-efficient.
+
 When reconstructing, explicitly record the following metadata:
 - Clarity: fully specified / partially specified / open-ended
 - Open design decisions: choices the user left unspecified but that the task requires
