@@ -116,10 +116,11 @@ const FACTORY_NON_KAZ_DEFAULTS = {
 /** 默认不开启thinking-anchor */
 /** 默认不开启kaz-memory的guidanceHeadEnabled，因为有系统提示词 */
 /** 20260831默认不开启round-minimal，因为发现现在关闭也可以WeNeed */
+/** 20260831发现关闭round-minimal之后，模型表现不稳定，出现Let me思维链，所以重新开启 */
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
-  if (id === "thinking-anchor" || id === "round-display" || id === "round-minimal") {
+  if (id === "thinking-anchor" || id === "round-display") {
     FACTORY_KAZ_DEFAULTS[id].enabled = false;
   }
   if (id === "kaz-memory") {
