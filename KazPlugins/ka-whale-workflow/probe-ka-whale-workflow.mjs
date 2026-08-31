@@ -10,6 +10,7 @@ import plugin, {
   manualCommandIdOf,
   nextStageOnUserMessage,
   hasInjectedInTurn,
+  planModeActiveOf,
 } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,6 +43,17 @@ check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 check("初始阶段 idle", stageOf(agent, store) === "idle");
 check("第 2+ 轮直接回重构", nextStageOnUserMessage("reconstruction", 2) === "reconstruction" && nextStageOnUserMessage("classification", 3) === "reconstruction" && nextStageOnUserMessage("done", 2) === "reconstruction");
 check("首轮 → 重构", nextStageOnUserMessage("idle", 1) === "reconstruction");
+check("plan 激活时保持 idle/done", nextStageOnUserMessage("done", 2, { modeActive: true }) === "done" && nextStageOnUserMessage("idle", 1, { modeActive: true }) === "idle" && nextStageOnUserMessage("reconstruction", 2, { modeActive: true }) === "reconstruction");
+check("plan 未激活仍回重构", nextStageOnUserMessage("done", 2, { modeActive: false }) === "reconstruction");
+check("planModeActiveOf 折叠 plan/mode（最后一条生效）", (() => {
+  const planEvents = [
+    { type: "plan/mode", data: { active: true } },
+    { type: "plan/mode", data: { active: false } },
+    { type: "plan/mode", data: { active: true } },
+  ];
+  return planModeActiveOf({ session: { events: planEvents } }) === true;
+})() && planModeActiveOf({ session: { events: [{ type: "plan/mode", data: { active: false } }] } }) === false);
+check("planModeActiveOf 无 plan/mode 事件为 false", planModeActiveOf({ session: { events: [] } }) === false && planModeActiveOf({ session: { events: [{ type: "turn/start", data: { turn: 1 } }] } }) === false);
 check("setStage 进入重构", setStage(agent, "reconstruction", store) === true && stageOf(agent, store) === "reconstruction");
 check("setStage 重复同阶段不追加", setStage(agent, "reconstruction", store) === false);
 check("setStage 进入分类", setStage(agent, "classification", store) === true && stageOf(agent, store) === "classification");

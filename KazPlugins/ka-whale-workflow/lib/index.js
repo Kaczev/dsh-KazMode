@@ -14,7 +14,8 @@
 //      plan 模式由 whale_report 内部经 create_plan 工具（planning isolate 组内）切换，
 //      因为 whale_report 自身在 host 层解析不到 planMode 服务。
 //   4) 插话（模型运行中，同一轮中途追加消息）不改变当前工作流阶段。
-//      第 2、3、4……轮（turn>=2、模型不在运行）直接重新进入「任务重构」。
+//      第 2、3、4……轮（turn>=2、模型不在运行）直接重新进入「任务重构」；
+//      Plan 模式激活时除外——用户回复不进入任务重构，保持在 plan 模式。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
 //      不进入任务重构；round-minimal 极简过滤仍照常生效。
 //
@@ -180,6 +181,31 @@ function hasToolCall(agent) {
     const events = agent?.session?.events;
     if (!Array.isArray(events)) return false;
     return events.some((event) => event !== null && typeof event === "object" && event.type === "tool/call");
+  } catch {
+    return false;
+  }
+}
+
+/** 该 agent 会话是否处于 plan 模式：以 session.events 里最后一个 plan/mode
+ *  事件的 active 为准（与 kaz-mode 的 planModeActive 同源；不依赖隔离服务）。 */
+export function planModeActiveOf(agent) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return false;
+    let active = false;
+    for (const event of events) {
+      if (
+        event !== null &&
+        typeof event === "object" &&
+        event.type === "plan/mode" &&
+        event.data !== null &&
+        typeof event.data === "object" &&
+        typeof event.data.active === "boolean"
+      ) {
+        active = event.data.active;
+      }
+    }
+    return active;
   } catch {
     return false;
   }
@@ -389,8 +415,10 @@ export function hasInjectedInTurn(agent, form, turn) {
   }
 }
 
-/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）直接重新进入「任务重构」。 */
-export function nextStageOnUserMessage(_current, _turn) {
+/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）直接重新进入「任务重构」。
+ *  Plan 模式激活时（context.modeActive=true）保持 idle/done，不进入任务重构。 */
+export function nextStageOnUserMessage(current, _turn, context = {}) {
+  if (context?.modeActive === true && (current === "idle" || current === "done")) return current;
   return "reconstruction";
 }
 
@@ -761,9 +789,11 @@ export default {
       }
       manualBypassSessions.delete(sessionId);
       const current = stageOfAgent(agent);
-      // 第 2、3、4……轮（turn>=2，模型不在运行）：直接重新进入任务重构。
+      const planActive = planModeActiveOf(agent);
+      // 第 2、3、4……轮（turn>=2，模型不在运行）：直接重新进入任务重构；
+      // Plan 模式激活时保持 idle/done，不进入任务重构。
       if (typeof turn === "number" && turn >= 2) {
-        const next = nextStageOnUserMessage(current, turn);
+        const next = nextStageOnUserMessage(current, turn, { modeActive: planActive });
         if (setStageAgent(agent, next)) {
           reportRoundDisplay(agent, "收到新一轮消息，重新进入任务重构。", "阶段切换");
         }
@@ -771,6 +801,8 @@ export default {
       }
       // 插话（模型运行中）不改变当前工作流阶段；仅尚未开始（idle）时进入任务重构。
       if (current !== "idle") return;
+      // Plan 模式激活时不开启任务重构，保持在 plan 模式。
+      if (planActive) return;
       if (isMinimal(agent)) {
         pendingStart.add(sessionId);
         return;
@@ -813,6 +845,8 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
       if (current !== "idle") return;
+      // Plan 模式激活时不开启任务重构，保持在 plan 模式。
+      if (planModeActiveOf(agent)) return;
       if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
       }
@@ -832,9 +866,10 @@ export default {
         const bypassed = isBypassed(agent);
         if (live.enabled === true && !skipSubagent && !bypassed) {
           const stage = stageOfAgent(agent);
+          const planActive = planModeActiveOf(agent);
           if (hasRealUserMessage) {
             if (turn >= 2) {
-              const next = nextStageOnUserMessage(stage, turn);
+              const next = nextStageOnUserMessage(stage, turn, { modeActive: planActive });
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
                   agent,
@@ -842,12 +877,12 @@ export default {
                   "阶段切换",
                 );
               }
-            } else if (stage === "idle" && !isMinimal(agent)) {
+            } else if (stage === "idle" && !isMinimal(agent) && !planActive) {
               if (setStageAgent(agent, "reconstruction")) {
                 reportRoundDisplay(agent, "进入任务重构（pre-step 兜底）。", "阶段切换");
               }
             }
-          } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent)) {
+          } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !planActive) {
             if (setStageAgent(agent, "reconstruction")) {
               reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（pre-step 兜底）。", "阶段切换");
             }
@@ -946,7 +981,8 @@ export default {
         liveFor(agent).includeSubagents !== true &&
         !isSubagent(agent) &&
         !isMinimal(agent) &&
-        hasToolCall(agent)
+        hasToolCall(agent) &&
+        !planModeActiveOf(agent)
       ) {
         if (setStageAgent(agent, "reconstruction")) {
           reportRoundDisplay(
