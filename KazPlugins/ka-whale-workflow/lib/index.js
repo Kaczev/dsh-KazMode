@@ -54,20 +54,20 @@ const CREATE_PLAN_TOOL = "create_plan";
 const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
-const RECONSTRUCTION_PROMPT =`We are now in the task reconstruction stage. Rewrite the user's request into a structured task description that preserves all key points, intent, and system-level constraints. Do NOT analyze, diagnose, or propose solutions here — that comes later.
+const RECONSTRUCTION_PROMPT =`Task reconstruction stage: rewrite the user's request into a structured task description preserving all key points, intent, and system-level constraints. No analysis, diagnosis, or solutions — later.
 
-Write the reconstructed task description in English, even if the user writes in Chinese. This reconstruction is consumed as conversation context by the next stage (task classification), not shown to the user as a deliverable; English is more token-efficient.
+Write it in English even for Chinese input; it's context for classification (next stage), not a user deliverable; English saves tokens.
 
-When reconstructing, explicitly record the following metadata:
+Record:
 - Clarity: fully specified / partially specified / open-ended
-- Open design decisions: choices the user left unspecified but that the task requires
+- Open design decisions: unspecified choices the task requires
 - Deliverable shape: text / code / page / plan / analysis / other
-- Exploration or design needed: would doing this well require exploring the codebase, comparing options, or designing an approach before acting?
-- Expected shape: single-turn answer / multi-round iterative work / plan-then-approval
+- Exploration or design needed: codebase exploration, option comparison, or approach design?
+- Expected shape: single-turn answer / multi-round iterative / plan-then-approval
 
-Preserve the original ambiguity. Do NOT silently turn a vague request into a concrete specification. Quote or summarize what the user left open. If the user asks for a design, a proposal, a reason ("why"), or how something should be improved, record the task as design-type.
+Keep original ambiguity; don't silently concretize vague requests; quote/summarize what's open. Mark design-type: design, proposal, "why", or how-to-improve requests.
 
-You may only use <工具列表> tools. When done, call whale_report to proceed to classification.`;
+Only use <工具列表> tools. When done, call whale_report to proceed to classification.`;
 
 /** 任务分类 prompt（草案原文；模式由 whale_report 统一启动）。 */
 const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description — including its clarity and open-design metadata — decide which execution mode best fits.
