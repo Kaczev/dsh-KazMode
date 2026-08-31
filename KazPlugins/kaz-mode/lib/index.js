@@ -115,6 +115,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
 /** 默认不开启thinking-anchor */
 /** 默认不开启kaz-memory的guidanceHeadEnabled，因为有系统提示词 */
+/** 20260831默认不开启round-minimal，因为发现现在关闭也可以WeNeed */
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
@@ -123,10 +124,6 @@ for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   }
   if (id === "kaz-memory") {
     FACTORY_KAZ_DEFAULTS[id].guidanceHeadEnabled = false;
-  }
-  if (id === "round-minimal") {
-    // Kaz 模式默认开首轮工具解锁提示；非 Kaz 默认关。
-    FACTORY_KAZ_DEFAULTS[id].guidanceHeadEnabled = true;
   }
 }
 
