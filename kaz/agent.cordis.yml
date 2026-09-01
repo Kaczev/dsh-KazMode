@@ -97,6 +97,14 @@
 - id: tool-str-replace-editor
   name: '@deepseek-ai/dsh-tool-str-replace-editor'
 
+# ── skill: safe-json-write（种子技能，只挂 Kaz 预设）────────────────────────
+#
+# 只允许挂载在 kaz/agent.cordis.yml；禁止写入 web-level cordis.patch.yml。
+# 相对路径从 ~/.dsh/.agent-presets/kaz/ 解析到 profile KazPlugins 副本。
+- id: kaz-skill-safe-json
+  name: ../../profiles/web/KazPlugins/kaz-skill-safe-json/lib/index.js
+  config: {}
+
 # ── background jobs ────────────────────────────────────────────────────────
 
 # Only the model-facing controls. The task REGISTRY stays on the host plane:

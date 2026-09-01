@@ -1,0 +1,19 @@
+{
+  "name": "safe-json-write",
+  "version": "0.1.0",
+  "status": "active",
+  "trigger": "safe_json_write | write json safely | safe json write",
+  "entry": {
+    "tool": "safe_json_write",
+    "cli": "cli.mjs"
+  },
+  "dependencies": {
+    "node": ">=18",
+    "plugins": [
+      "@deepseek-ai/cordis",
+      "@deepseek-ai/dsh-tools"
+    ]
+  },
+  "switch": "switch.json",
+  "description": "Safely write JSON: UTF-8 without BOM, out-of-bounds rejection, backup before write, rollback on failure."
+}

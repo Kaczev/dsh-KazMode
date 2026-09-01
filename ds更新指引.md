@@ -91,13 +91,14 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中：
 
 1. **删除**所有旧的 Kaz 依赖行（包括 `kaz-diag`、旧版 `kaz-*` 行）。
-2. **合并**下面 13 行（保留 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等其它依赖，只加不删其它项）：
+2. **合并**下面 14 行（保留 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等其它依赖，只加不删其它项）：
 
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "first-round-hints": "file:KazPlugins/first-round-hints",
 "ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
 "create-plan": "file:KazPlugins/create-plan",
+"kaz-skill-safe-json": "file:KazPlugins/kaz-skill-safe-json",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
 "kaz-memory": "file:KazPlugins/kaz-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
@@ -123,7 +124,6 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 cd "$env:USERPROFILE\.dsh\profiles\web"
 Remove-Item Env:npm_config_allow_scripts   # npm 11 兼容坑，先清掉
 npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
-npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 ```
 
 > 用 `npm.cmd` 而不是 `npm`：`npm` 在 PowerShell 里是 `npm.ps1`，同样可能被执行策略拦截。
@@ -145,6 +145,27 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 - 报 scripts / npm 11 相关错误 → 上面的 `Remove-Item Env:npm_config_allow_scripts` 已处理；若仍报，再执行一次后重试。
 - 网络超时 / 下载很慢（超过 60 秒）→ `npm config set registry https://registry.npmmirror.com` 后重试同一条 install 命令。
 - 报 `npm ERR! code EPERM` / 文件占用 → 让用户关闭正在运行的 dsh web 窗口后重试，不要强行杀进程。
+
+### 第 7.1 步 若 npm 把 `@deepseek-ai` 运行时依赖剪掉了（修复）
+
+`npm.cmd install --legacy-peer-deps` 不会自动安装 peer；如果本机 `package.json`
+缺少 dsh 运行时依赖，npm 可能输出 `removed N packages` 并把
+`node_modules\@deepseek-ai` 清掉/改成悬空 junction。修复步骤：
+
+1. 把 `%APPDATA%\npm\node_modules\@deepseek-ai\dsh\package.json` 的
+   `dependencies` **合并**进 `%USERPROFILE%\.dsh\profiles\web\package.json`
+   （只加不删）。
+2. 再补这些 peer（若上面合并后仍缺）：
+   `@deepseek-ai/dsh-tools`、`@deepseek-ai/schemastery`、
+   `@deepseek-ai/dsh-invariants`、`@deepseek-ai/dsh-shell-env`、
+   `@deepseek-ai/dsh-system-prompt`、`@deepseek-ai/cordis-plugin-loader`
+   （版本取本机已安装包的 `peerDependencies` 范围）。
+3. 重新执行第 7 步的 `npm.cmd install`（**不要**再跑 `npm prune`）。
+4. 验证：
+   `Test-Path "$env:USERPROFILE\.dsh\profiles\web\node_modules\@deepseek-ai\cordis"`
+   为 `True`，且
+   `node --input-type=module -e "import('@deepseek-ai/dsh-tools').then(m=>console.log(typeof m.defineTool))"`
+   能输出 `function`。
 
 ## 第 8 步 更新 cordis.patch.yml
 

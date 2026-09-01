@@ -1,0 +1,21 @@
+{
+  "name": "kaz-skill-safe-json",
+  "version": "0.1.0",
+  "description": "safe-json-write seed skill: registers safe_json_write tool (no BOM, out-of-bounds rejection, backup, rollback).",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "skills/safe-json-write"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  }
+}
