@@ -99,6 +99,19 @@ Task classification is complete, but the turn ended before calling whale_report.
 Task reconstruction is complete, but the turn ended before calling whale_report. Call whale_report now with no arguments to advance to task classification. Do not end the turn without calling whale_report.`;
 }
 
+/** 任务完成 / plan-goal 结束时的紧凑复盘指引（方向1）。 */
+export function reviewGuidanceText(kind = "normal") {
+  const taskLabel =
+    kind === "plan"
+      ? "Plan 模式已结束"
+      : kind === "goal"
+        ? "Goal 已结束"
+        : "任务已完成";
+  return `[kaz-memory Review]
+>
+${taskLabel}。如果这次有实质变化或新结论（不是重复已知内容），用 memory_save 写 1–2 条记忆：type 用 success_pattern/error_pattern/insight 等，evidence 写具体来源（探针/文件/代码/用户反馈），confidence 按证据强度填 unknown/low/medium/high（无证据不得 high），新记忆默认 lifecycle_status=CANDIDATE。没有实质结论就不要写，避免噪音。`;
+}
+
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
@@ -553,6 +566,43 @@ export default {
       return false;
     }
 
+    /** 该 agent 会话是否处于 goal 模式（active/paused；与 kaz-mode 同源）。 */
+    function goalModeActive(agent) {
+      try {
+        const goals = ctx.get("goals");
+        if (goals === undefined || goals === null || typeof goals.get !== "function" || agent === null || agent === undefined) {
+          return false;
+        }
+        const goal = goals.get(agent);
+        if (goal === null || goal === undefined || typeof goal !== "object") return false;
+        return goal.phase === "active" || goal.phase === "paused";
+      } catch {
+        return false;
+      }
+    }
+
+    /** memory_save 当前环境是否可调用（kazMode 工具面优先；服务缺失回退 schemas）。 */
+    function memorySaveCallable(agent) {
+      try {
+        const svc = ctx.get("kazMode");
+        if (svc !== undefined && svc !== null && typeof svc.toolVisible === "function") {
+          return svc.toolVisible(agent, "memory_save") === true;
+        }
+      } catch {
+        // fall through
+      }
+      try {
+        const tools = ctx.get("tools");
+        if (tools !== undefined && tools !== null && typeof tools.schemas === "function") {
+          const schemas = tools.schemas(agent);
+          return Array.isArray(schemas) && schemas.some((schema) => schema !== null && typeof schema === "object" && schema.name === "memory_save");
+        }
+      } catch {
+        // fall through
+      }
+      return false;
+    }
+
     /** ka-whale-workflow 配置面板里的重构工具清单（白名单之上的过滤器）。 */
     function reconstructionToolsFor(agent) {
       const current = liveFor(agent);
@@ -776,6 +826,11 @@ export default {
     const manualBypassSessions = new Set();
     /** 每个 session 在当前 turn/stage 已自动提醒过的次数（防止 steer 死循环）。 */
     const turnReminderCounts = new Map();
+    /** 每 session 已注入过的复盘类型（normal/plan/goal），避免重复注入。 */
+    const reviewInjected = new Map();
+    /** 每 session 上一次观察到的 plan/goal 激活状态（用于检测结束节点）。 */
+    const lastPlanActive = new Map();
+    const lastGoalActive = new Map();
 
     /** 当前会话是否处于命令旁路。 */
     function isBypassed(agent) {
@@ -909,6 +964,67 @@ export default {
       state.count += 1;
       turnReminderCounts.set(sessionId, state);
       reportRoundDisplay(agent, whaleReportReminderText(stage), "工作流提醒");
+    });
+
+    // -----------------------------------------------------------------------
+    // 任务完成 / plan-goal 结束节点：注入紧凑复盘指引（方向1）。
+    //   只在 ka-whale-workflow 进入 done 后（任务被执行）且检测到结束节点时触发；
+    //   每 session 每种类型最多注入一次；没有实质结论时模型应不写记忆。
+    // -----------------------------------------------------------------------
+    ctx.on("agent/turn-stopping", ({ agent, signal }) => {
+      if (agent === null || agent === undefined || typeof agent !== "object") return;
+      if (signal?.aborted === true) return;
+      if (liveFor(agent).enabled !== true) return;
+      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
+      if (isBypassed(agent)) return;
+      const stage = stageOfAgent(agent);
+      if (stage !== "done") return;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return;
+      const planActive = planModeActiveOf(agent);
+      const goalActive = goalModeActive(agent);
+      const prevPlan = lastPlanActive.get(sessionId);
+      const prevGoal = lastGoalActive.get(sessionId);
+      lastPlanActive.set(sessionId, planActive);
+      lastGoalActive.set(sessionId, goalActive);
+
+      const inject = (kind) => {
+        if (memorySaveCallable(agent) !== true) return false;
+        const injected = reviewInjected.get(sessionId);
+        const set = injected instanceof Set ? injected : new Set();
+        if (set.has(kind)) return false;
+        const text = reviewGuidanceText(kind);
+        let message;
+        try {
+          message = createUserMessage({
+            content: [{ type: "text", text }],
+            source: { kind: "plugin", plugin: "ka-whale-workflow", form: "review" },
+          });
+        } catch (error) {
+          ctx.logger.warn(`[ka-whale-workflow] 构造复盘指引消息失败：${error instanceof Error ? error.message : String(error)}`);
+          return false;
+        }
+        agent.steer(message);
+        set.add(kind);
+        reviewInjected.set(sessionId, set);
+        reportRoundDisplay(agent, text, "复盘指引");
+        return true;
+      };
+
+      // Plan 结束：上一次 active=true，当前 false。
+      if (prevPlan === true && planActive === false) {
+        inject("plan");
+        return;
+      }
+      // Goal 结束：上一次 active，当前不再 active。
+      if (prevGoal === true && goalActive === false) {
+        inject("goal");
+        return;
+      }
+      // Normal 任务完成：done 且当前无 plan/goal 激活（每个 session 只注入一次 normal）。
+      if (!planActive && !goalActive) {
+        inject("normal");
+      }
     });
 
     // -----------------------------------------------------------------------

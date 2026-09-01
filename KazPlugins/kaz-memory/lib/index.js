@@ -392,6 +392,15 @@ const SETTINGS_SCHEMA = z.object({
       b: z.number().default(0.75),
     })
     .default({ k1: 1.2, b: 0.75 }),
+  /** 方向1 巩固/淘汰参数（可由 Kaczev 调整）：C=每命名空间容量，Nmin=最低使用次数，tau=升级阈值，idle_window=闲置天数。 */
+  lifecycle: z
+    .object({
+      C: z.number().min(1).default(64),
+      Nmin: z.number().min(1).default(2),
+      tau: z.number().min(0).max(1).default(0.15),
+      idleWindowDays: z.number().min(1).default(30),
+    })
+    .default({ C: 64, Nmin: 2, tau: 0.15, idleWindowDays: 30 }),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
@@ -403,6 +412,7 @@ export const DEFAULT_SECTION = {
   guidanceForgetEnabled: true,
   guidanceForget: "",
   bm25: { k1: 1.2, b: 0.75 },
+  lifecycle: { C: 64, Nmin: 2, tau: 0.15, idleWindowDays: 30 },
 };
 // ---------------------------------------------------------------------------
 // settings 自愈：settings.yaml 中本插件段缺失时自动补齐默认值。
@@ -637,8 +647,11 @@ export async function apply(ctx, config = {}) {
       return undefined;
     }
     if (!Array.isArray(records) || records.length === 0) return undefined;
+    // 方向1：DEPRECATED 不自动载入。
+    const activeRecords = records.filter(record => record.lifecycle_status !== 'DEPRECATED');
+    if (activeRecords.length === 0) return undefined;
     const lines = ["[kaz-memory Auto-Load]", ">", "We know:"];
-    for (const record of records) {
+    for (const record of activeRecords) {
       // 自动载入只注入 content 正文，不再额外带标题/namespace，减小上下文占用。
       const body = String(record.content ?? "").replace(/\r?\n/g, "\n  ");
       lines.push(`- ${body}`);
@@ -1198,12 +1211,15 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_save",
       description:
-        'Save one cross-session memory. It takes effect immediately (status is "applied") — no manual confirmation is needed. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
+        'Save one cross-session memory. It takes effect immediately (status is "applied") — no manual confirmation is needed. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). You may optionally add structured metadata: type (e.g. success_pattern/error_pattern/insight), evidence (concrete source/probe/file/code/user feedback; required to set confidence high), confidence (unknown/low/medium/high; default unknown unless evidence is concrete). New memories start lifecycle_status=CANDIDATE. These metadata fields are independent of BM25 — search documents remain content + summary + keywords. namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
       parameters: {
         name: { type: "string", required: true, description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
         keywords: { type: "array", items: { type: "string" }, required: true, description: "Anchor keywords used by memory_search (BM25)." },
         content: { type: "string", required: true, description: "Full memory content (plain text)." },
         summary: { type: "string", required: true, description: "One-sentence summary (~100 chars), written by you when saving; it is the only summary text shown in memory_search results." },
+        type: { type: "string", description: "Structured memory type (e.g. success_pattern, error_pattern, insight, design, reference); optional." },
+        evidence: { type: "string", description: "Concrete evidence supporting this memory (probe/file/code/user feedback); optional, but must be non-empty to set confidence=high." },
+        confidence: { type: "string", enum: ["unknown", "low", "medium", "high"], description: "Confidence level (default unknown); never set high without concrete evidence." },
         namespace: { type: "string", enum: ["global", "project"], description: "Scope: global (harness home) / project (current project folder); default global." },
       },
       output: {
@@ -1224,6 +1240,9 @@ export async function apply(ctx, config = {}) {
             keywords: args.keywords,
             content,
             summary,
+            ...(args.type === undefined ? {} : { type: args.type }),
+            ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
+            ...(args.confidence === undefined ? {} : { confidence: args.confidence }),
             ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
             projectRoot: projectRootOf(exec),
           }),
@@ -1235,7 +1254,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_update",
       description:
-        'Update an existing memory by id. You can change name, summary, keywords, and content. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content keeps the memory applied (no re-confirmation). On success returns { updated: true } only (no memory content).',
+        'Update an existing memory by id. You can change name, summary, keywords, content, and the optional structured metadata type/evidence/confidence. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content keeps the memory applied (no re-confirmation). These metadata fields are independent of BM25 — search documents remain content + summary + keywords. On success returns { updated: true } only (no memory content).',
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         name: { type: "string", description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
@@ -1243,6 +1262,9 @@ export async function apply(ctx, config = {}) {
         keywordsAdd: { type: "array", items: { type: "string" }, description: "Add anchor keywords (case-insensitive, deduplicated; missing/duplicate items are no-ops)." },
         keywordsRemove: { type: "array", items: { type: "string" }, description: "Remove anchor keywords (case-insensitive; missing keywords are no-ops)." },
         summary: { type: "string", description: "One-sentence summary (~100 chars), written by you when saving; it is the only summary text shown in memory_search results." },
+        type: { type: "string", description: "Structured memory type (e.g. success_pattern, error_pattern, insight, design, reference); optional." },
+        evidence: { type: "string", description: "Concrete evidence supporting this memory (probe/file/code/user feedback); optional, but must be non-empty to set confidence=high." },
+        confidence: { type: "string", enum: ["unknown", "low", "medium", "high"], description: "Confidence level (default unknown); never set high without concrete evidence." },
         content: { type: "string", description: "Full memory content (plain text)." },
         edits: { type: "array", items: EDIT_SCHEMA, description: "Precise literal content edits; applied sequentially and atomically." },
       },
@@ -1254,6 +1276,9 @@ export async function apply(ctx, config = {}) {
         const patch = {
           ...(args.name === undefined ? {} : { name: args.name }),
           ...(args.summary === undefined ? {} : { summary: args.summary }),
+          ...(args.type === undefined ? {} : { type: args.type }),
+          ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
+          ...(args.confidence === undefined ? {} : { confidence: args.confidence }),
           ...(args.keywords === undefined ? {} : { keywords: args.keywords }),
           ...(args.keywordsAdd === undefined ? {} : { keywordsAdd: args.keywordsAdd }),
           ...(args.keywordsRemove === undefined ? {} : { keywordsRemove: args.keywordsRemove }),
@@ -1305,7 +1330,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_search",
       description:
-        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score — content is NOT included; use memory_detail to read the full content of a hit. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the kaz-memory.bm25 settings section. Returns an empty array when nothing matches; errors when the query is empty.",
+        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score — content is NOT included; use memory_detail to read the full content of a hit. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the kaz-memory.bm25 settings section. DEPRECATED memories are excluded by default. Returns an empty array when nothing matches; errors when the query is empty.",
       parameters: {
         query: { type: "string", required: true, description: "Search query (BM25 over content + summary + keywords)." },
         limit: { type: "number", description: "Max hits to return (default 10, max 100)." },
@@ -1454,6 +1479,7 @@ export async function apply(ctx, config = {}) {
       guidanceSave: "",
       guidanceList: "",
       bm25: { k1: 1.2, b: 0.75 },
+      lifecycle: { C: 64, Nmin: 2, tau: 0.15, idleWindowDays: 30 },
     },
     DEFAULT_SECTION,
     {

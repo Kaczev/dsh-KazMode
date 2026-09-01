@@ -25,8 +25,21 @@
 | `content` | string | 完整的记忆正文 |
 | `created_at` | string | 创建时间戳（ISO 字符串） |
 | `updated_at` | string | 最后更新时间戳（ISO 字符串，更新时刷新） |
+| `type` | string | 方向1结构化类型（可选；如 `success_pattern` / `error_pattern` / `insight` / `design` / `reference`）；旧记录缺省 `unknown` |
+| `evidence` | string | 具体证据（可选；探针/文件/代码/用户反馈）；无证据不得标 `high` |
+| `confidence` | string | 置信度 `unknown` / `low` / `medium` / `high`（可选；默认 `unknown`） |
+| `usage_count` | number | 使用次数（可选；默认 `0`，由 consolidate/检索侧维护） |
+| `last_used_at` | string | 最后使用时间（ISO 字符串，可选） |
+| `lifecycle_status` | string | 生命周期 `UNKNOWN` / `CANDIDATE` / `ACTIVE` / `DEPRECATED`（独立于 storage `status`；新记忆默认 `CANDIDATE`，旧记忆缺省 `UNKNOWN`） |
 
-**兼容性**：旧 JSON 里的 `createdAt` / `updatedAt`（毫秒数字）读取时自动迁移为 ISO 字符串对外暴露；写回时落新格式（旧数字键不再保留）。无 `summary` 的旧记录按空串读取，`memory_update` 可补写摘要。
+**兼容性**：旧 JSON 里的 `createdAt` / `updatedAt`（毫秒数字）读取时自动迁移为 ISO 字符串对外暴露；写回时落新格式（旧数字键不再保留）。无 `summary` 的旧记录按空串读取，`memory_update` 可补写摘要。方向1字段全部可选，**独立于 BM25**——search 文档仍只由 `content + summary + keywords` 组成。
+
+## 方向1 巩固/淘汰（2026-09）
+
+- `memory_save` / `memory_update` 支持可选 `type` / `evidence` / `confidence`；新记忆默认 `lifecycle_status=CANDIDATE`，旧记忆缺省 `UNKNOWN`。
+- `memory_search` **默认排除 `DEPRECATED`**（内部 `includeDeprecated` 可显式包含）；自动载入也不注入 `DEPRECATED`。
+- 巩固/淘汰纯逻辑在 `lib/consolidate.js`（`computeValue` / `lifecycleAction` / `buildDeprecateCandidates`），默认参数 `C=64`、`Nmin=2`、`τ=0.15`、`idleWindowDays=30`，由 `kaz-memory.lifecycle` settings 段可调。
+- 运行 `node consolidate.mjs` 生成 `memory_consolidate_report.json` 并打印待淘汰清单；默认**不改文件**。确认后可用 `--mark-deprecated` 标记 `DEPRECATED`、`--archive` 快照到 `memory_archive.json`、`--forget` 才会真正删除。
 
 ## 设计要点
 
@@ -71,6 +84,11 @@ kaz-memory:
   bm25:                  # BM25 检索参数（memory_search 评分用；Kaz 面板的 kaz-memory 行也提供 k1/b 输入）
     k1: 1.2              # 词频饱和参数（默认 1.2，一般取值 1.2 ~ 2.0）
     b: 0.75              # 长度归一化参数（默认 0.75，0 = 不做长度归一化）
+  lifecycle:             # 方向1 巩固/淘汰参数（可由 Kaczev 调整）
+    C: 64                # 每命名空间记忆容量（global/project 各 64）
+    Nmin: 2              # 最低使用次数
+    tau: 0.15            # 升级阈值
+    idleWindowDays: 30   # 闲置天数（30 天）
 ```
 
 > 纯方案 A：Kaz 会话下这些配置的生效值由 kazMode 服务按会话读取（kaz-defaults.json

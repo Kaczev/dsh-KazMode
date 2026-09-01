@@ -42,6 +42,37 @@ const STATUS_ALIASES = {
 export function normalizeStatus(status) {
     return STATUS_ALIASES[status] ?? status;
 }
+/** 方向1 生命周期状态（独立于 storage status：applied/ignored）。 */
+export const LIFECYCLE_STATUSES = ['UNKNOWN', 'CANDIDATE', 'ACTIVE', 'DEPRECATED'];
+export const CONFIDENCE_LEVELS = ['unknown', 'low', 'medium', 'high'];
+/** 规整方向1结构化字段：旧记录缺省 type=unknown、confidence=unknown、usage_count=0、lifecycle_status=UNKNOWN。 */
+function normalizeType(value) {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : 'unknown';
+}
+function normalizeEvidence(value) {
+    return typeof value === 'string' ? value : '';
+}
+function normalizeConfidence(value) {
+    return CONFIDENCE_LEVELS.includes(value) ? value : 'unknown';
+}
+function normalizeUsageCount(value) {
+    const n = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : 0;
+}
+function normalizeLifecycleStatus(value) {
+    return LIFECYCLE_STATUSES.includes(value) ? value : 'UNKNOWN';
+}
+/** 方向1字段默认值（写盘时保持/归一化；不改 BM25 文档）。 */
+function lifecycleDefaultsOf(block) {
+    return {
+        type: normalizeType(block.type),
+        evidence: normalizeEvidence(block.evidence),
+        confidence: normalizeConfidence(block.confidence),
+        usage_count: normalizeUsageCount(block.usage_count),
+        last_used_at: typeof block.last_used_at === 'string' ? block.last_used_at : undefined,
+        lifecycle_status: normalizeLifecycleStatus(block.lifecycle_status),
+    };
+}
 const blockSchema = z.object({
     namespace: z.enum(['global', 'project']),
     // 同时接受旧值，保证旧 JSON 可读；对外统一返回 applied/ignored（pending/suggested 归一为 applied）。
@@ -51,6 +82,13 @@ const blockSchema = z.object({
     summary: z.string().default(''),
     content: z.string(),
     keywords: z.array(z.string()),
+    // 方向1结构化字段（全部可选；独立于 BM25，不进检索文档）。
+    type: z.string().optional(),
+    evidence: z.string().optional(),
+    confidence: z.enum(['unknown', 'low', 'medium', 'high']).optional(),
+    usage_count: z.number().int().min(0).optional(),
+    last_used_at: z.string().optional(),
+    lifecycle_status: z.enum(['UNKNOWN', 'CANDIDATE', 'ACTIVE', 'DEPRECATED']).optional(),
     // 新时间戳格式（2026-08 升级）：ISO 字符串（created_at / updated_at）。
     created_at: z.string().optional(),
     updated_at: z.string().optional(),
@@ -242,6 +280,8 @@ function toRecord(id, block, projectRoot) {
         // 旧记录可能没有 summary/name（绕过 zod 默认值的原始块）：规整为字符串。
         summary: typeof rest.summary === 'string' ? rest.summary : '',
         name: typeof rest.name === 'string' ? rest.name : '',
+        // 方向1字段：缺省规整（type=unknown / confidence=unknown / usage=0 / lifecycle_status=UNKNOWN）。
+        ...lifecycleDefaultsOf(rest),
         created_at,
         updated_at,
         ...(projectRoot === undefined ? {} : { projectRoot }),
@@ -368,6 +408,15 @@ export class MemoryEngine extends Service {
             summary: typeof input.summary === 'string' ? input.summary : '',
             content: input.content,
             keywords: (input.keywords ?? []).map(keyword => keyword.toLowerCase()),
+            // 方向1结构化字段：新记忆默认 CANDIDATE（review/consolidate 后可升级 ACTIVE）。
+            ...lifecycleDefaultsOf({
+                type: input.type,
+                evidence: input.evidence,
+                confidence: input.confidence,
+                usage_count: input.usage_count,
+                last_used_at: input.last_used_at,
+                lifecycle_status: input.lifecycle_status ?? 'CANDIDATE',
+            }),
         }, false);
         if (namespace === 'project') {
             const root = resolve(input.projectRoot ?? this.defaultProjectRoot());
@@ -394,7 +443,10 @@ export class MemoryEngine extends Service {
      *  (content is the primary field); k1 / b come from the caller (usually
      *  the `kaz-memory.bm25` settings section). */
     async search(query, filter = {}, bm25 = {}) {
-        const records = await this.list(filter);
+        // 方向1：memory_search 默认不返回 DEPRECATED（可用 filter.includeDeprecated 显式包含）。
+        const includeDeprecated = filter?.includeDeprecated === true;
+        const allRecords = await this.list(filter);
+        const records = includeDeprecated ? allRecords : allRecords.filter(record => record.lifecycle_status !== 'DEPRECATED');
         if (records.length === 0) return [];
         const docs = records.map((record) =>
             [record.content, typeof record.summary === 'string' ? record.summary : '', record.keywords.join(' ')]
@@ -490,7 +542,21 @@ export class MemoryEngine extends Service {
             const keywords = applyKeywordPatch(block.keywords, patch);
             const currentStatus = normalizeStatus(block.status);
             const status = currentStatus === 'ignored' ? 'ignored' : 'applied';
-            return writtenBlock({ ...block, content, name, summary, keywords, status });
+            // 方向1结构化字段：update 可显式改 type/evidence/confidence（工具暂不暴露
+            // usage_count/last_used_at/lifecycle_status 给模型，仍可经引擎层维护）。
+            const type = typeof patch.type === 'string' ? patch.type : block.type;
+            const evidence = typeof patch.evidence === 'string' ? patch.evidence : block.evidence;
+            const confidence = typeof patch.confidence === 'string' ? patch.confidence : block.confidence;
+            const usage_count = patch.usage_count === undefined ? block.usage_count : patch.usage_count;
+            const last_used_at = patch.last_used_at === undefined ? block.last_used_at : patch.last_used_at;
+            const lifecycle_status = patch.lifecycle_status === undefined ? block.lifecycle_status : patch.lifecycle_status;
+            return writtenBlock({
+                ...block,
+                content, name, summary, keywords, status,
+                ...lifecycleDefaultsOf({
+                    type, evidence, confidence, usage_count, last_used_at, lifecycle_status,
+                }),
+            });
         };
         const global = this.requireTable('global').get(id);
         if (global !== undefined) {
