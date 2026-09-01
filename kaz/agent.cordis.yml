@@ -142,7 +142,7 @@
               
               Make the plan decision-complete: goal, success criteria, grouped changes, API/data-flow changes, edge cases, tests, assumptions. Keep it concise but detailed enough for another engineer.
               
-              When ready, call exit_plan_mode with complete plan markdown (starting with #). This must be the only and final tool call in that response. Present the plan through exit_plan_mode — not as a plain reply or prose question. If rejected, incorporate feedback and present again. If review unavailable, stay in plan mode and ask user to switch manually; do not proceed.
+              When ready, submit the plan via exit_plan_mode with full markdown (starting with #). This must be the only and final tool call in the response. Do not output the plan as plain text or ask "should I proceed?" in prose. If rejected, incorporate feedback and resubmit. If review is unavailable, stay in plan mode and ask the user to switch manually — do not proceed without approval.
 
     - id: create-plan
       name: create-plan
