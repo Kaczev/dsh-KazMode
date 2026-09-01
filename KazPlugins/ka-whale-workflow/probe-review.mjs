@@ -116,6 +116,7 @@ const reviewText = steered.map((m) => {
 check("任务完成时注入复盘指引", reviewText.includes("[kaz-memory Review]"));
 check("复盘指引包含 memory_save", reviewText.includes("memory_save"));
 check("复盘指引包含 lifecycle_status=CANDIDATE", reviewText.includes("lifecycle_status=CANDIDATE"));
+check("复盘指引为英文且保留完整语义", reviewText.includes("1–2") && reviewText.includes("never high without evidence") && reviewText.includes("no substantive conclusion") && !/[\u4e00-\u9fff]/.test(reviewText));
 
 // 第二次触发不重复注入（normal 每 session 一次）。
 const before = steered.length;
@@ -145,7 +146,7 @@ planAgent.session.events = [{ type: "plan/mode", data: { active: false } }];
 for (const handler of turnStoppingHandlers) {
   await handler({ agent: planAgent, turn: 2, signal: undefined });
 }
-check("plan 结束注入 plan 复盘", planSteered.some((m) => messageText(m).includes("[kaz-memory Review]") && messageText(m).includes("Plan 模式已结束")));
+check("plan 结束注入 plan 复盘", planSteered.some((m) => messageText(m).includes("[kaz-memory Review]") && messageText(m).includes("The Plan has ended.")));
 
 // Goal 结束：先 active，再 inactive → 注入 goal 复盘。
 const goalSteered = [];
@@ -162,7 +163,7 @@ goalActiveFlag = false;
 for (const handler of turnStoppingHandlers) {
   await handler({ agent: goalAgent, turn: 2, signal: undefined });
 }
-check("goal 结束注入 goal 复盘", goalSteered.some((m) => messageText(m).includes("[kaz-memory Review]") && messageText(m).includes("Goal 已结束")));
+check("goal 结束注入 goal 复盘", goalSteered.some((m) => messageText(m).includes("[kaz-memory Review]") && messageText(m).includes("The Goal has ended.")));
 
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures === 0 ? "\nREVIEW PROBE OK" : `\nREVIEW PROBE FAILED (${failures} 项失败)`);

@@ -300,3 +300,12 @@ export {
   autoOnSettingsEqual,
   hasAutoOnLayerFields,
 } from "./tool-auto-on.js";
+
+/** 方向1 复盘指引：语义 + 文本 + 工具可用性判断（见 review-guidance.js）。 */
+export {
+  MEMORY_REVIEW_MAX_ITEMS,
+  MEMORY_REVIEW_DEFAULT_LIFECYCLE_STATUS,
+  MEMORY_REVIEW_FIELDS,
+  reviewGuidanceText,
+  toolCallable,
+} from "./review-guidance.js";

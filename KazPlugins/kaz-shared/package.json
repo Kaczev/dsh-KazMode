@@ -13,7 +13,8 @@
   "files": [
     "lib/tool-lists.js",
     "lib/tool-plugin-catalog.js",
-    "lib/tool-auto-on.js"
+    "lib/tool-auto-on.js",
+    "lib/review-guidance.js"
   ],
   "license": "MIT"
 }

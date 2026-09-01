@@ -34,7 +34,7 @@ import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
-import { DEFAULT_RECONSTRUCTION_TOOLS } from "kaz-shared";
+import { DEFAULT_RECONSTRUCTION_TOOLS, reviewGuidanceText, toolCallable } from "kaz-shared";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -99,18 +99,8 @@ Task classification is complete, but the turn ended before calling whale_report.
 Task reconstruction is complete, but the turn ended before calling whale_report. Call whale_report now with no arguments to advance to task classification. Do not end the turn without calling whale_report.`;
 }
 
-/** 任务完成 / plan-goal 结束时的紧凑复盘指引（方向1）。 */
-export function reviewGuidanceText(kind = "normal") {
-  const taskLabel =
-    kind === "plan"
-      ? "Plan 模式已结束"
-      : kind === "goal"
-        ? "Goal 已结束"
-        : "任务已完成";
-  return `[kaz-memory Review]
->
-${taskLabel}。如果这次有实质变化或新结论（不是重复已知内容），用 memory_save 写 1–2 条记忆：type 用 success_pattern/error_pattern/insight 等，evidence 写具体来源（探针/文件/代码/用户反馈），confidence 按证据强度填 unknown/low/medium/high（无证据不得 high），新记忆默认 lifecycle_status=CANDIDATE。没有实质结论就不要写，避免噪音。`;
-}
+/** 任务完成 / plan-goal 结束时的紧凑复盘指引（方向1）：语义/文本已解耦到 kaz-shared。 */
+export { reviewGuidanceText };
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -581,26 +571,9 @@ export default {
       }
     }
 
-    /** memory_save 当前环境是否可调用（kazMode 工具面优先；服务缺失回退 schemas）。 */
+    /** memory_save 当前环境是否可调用（可用性判断已抽到 kaz-shared）。 */
     function memorySaveCallable(agent) {
-      try {
-        const svc = ctx.get("kazMode");
-        if (svc !== undefined && svc !== null && typeof svc.toolVisible === "function") {
-          return svc.toolVisible(agent, "memory_save") === true;
-        }
-      } catch {
-        // fall through
-      }
-      try {
-        const tools = ctx.get("tools");
-        if (tools !== undefined && tools !== null && typeof tools.schemas === "function") {
-          const schemas = tools.schemas(agent);
-          return Array.isArray(schemas) && schemas.some((schema) => schema !== null && typeof schema === "object" && schema.name === "memory_save");
-        }
-      } catch {
-        // fall through
-      }
-      return false;
+      return toolCallable({ kazMode: ctx.get("kazMode"), tools: ctx.get("tools") }, agent, "memory_save");
     }
 
     /** ka-whale-workflow 配置面板里的重构工具清单（白名单之上的过滤器）。 */
