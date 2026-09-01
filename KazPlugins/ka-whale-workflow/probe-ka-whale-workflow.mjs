@@ -3,6 +3,10 @@
 import plugin, {
   DEFAULT_RECONSTRUCTION_TOOLS,
   WHALE_REPORT_TOOL,
+  MAX_WHALE_REMINDERS,
+  RECONSTRUCTION_PROMPT,
+  CLASSIFICATION_PROMPT,
+  whaleReportReminderText,
   stageOf,
   setStage,
   createStageStore,
@@ -39,6 +43,11 @@ const store = createStageStore(STORE_FILE);
 check("插件默认导出存在", plugin !== null && typeof plugin === "object" && plugin.name === "ka-whale-workflow");
 check("重构八工具默认清单", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS) === JSON.stringify(["ask_user_question", "read", "glob", "grep", "web_search", "memory_search", "memory_list", "memory_detail"]));
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
+check("重构 prompt 含终态句", RECONSTRUCTION_PROMPT.includes("Call whale_report before ending your turn"));
+check("分类 prompt 含终态句", CLASSIFICATION_PROMPT.includes("Call whale_report before ending your turn"));
+check("提醒上限为正", MAX_WHALE_REMINDERS >= 1);
+check("重构提醒文本含 whale_report", typeof whaleReportReminderText("reconstruction") === "string" && whaleReportReminderText("reconstruction").includes("whale_report"));
+check("分类提醒文本含 whale_report", typeof whaleReportReminderText("classification") === "string" && whaleReportReminderText("classification").includes("whale_report"));
 
 check("初始阶段 idle", stageOf(agent, store) === "idle");
 check("第 2+ 轮直接回重构", nextStageOnUserMessage("reconstruction", 2) === "reconstruction" && nextStageOnUserMessage("classification", 3) === "reconstruction" && nextStageOnUserMessage("done", 2) === "reconstruction");

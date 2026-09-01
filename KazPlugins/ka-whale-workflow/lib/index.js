@@ -54,7 +54,7 @@ const CREATE_PLAN_TOOL = "create_plan";
 const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 
 /** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
-const RECONSTRUCTION_PROMPT =`Task reconstruction stage: rewrite the user's request into a structured task description preserving all key points, intent, and system-level constraints. No analysis, diagnosis, or solutions — later.
+export const RECONSTRUCTION_PROMPT =`Task reconstruction stage: rewrite the user's request into a structured task description preserving all key points, intent, and system-level constraints. No analysis, diagnosis, or solutions — later.
 
 Write it in English even for Chinese input; it's context for classification (next stage), not a user deliverable; English saves tokens.
 
@@ -67,10 +67,10 @@ Record:
 
 Keep original ambiguity; don't silently concretize vague requests; quote/summarize what's open. Mark design-type: design, proposal, "why", or how-to-improve requests.
 
-Only use <工具列表> tools. When done, call whale_report to proceed to classification.`;
+Only use <工具列表> tools. When done, call whale_report to proceed to classification. Call whale_report before ending your turn; never end this stage with only the stage text.`;
 
 /** 任务分类 prompt（草案原文；模式由 whale_report 统一启动）。 */
-const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description — including its clarity and open-design metadata — decide which execution mode best fits.
+export const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description — including its clarity and open-design metadata — decide which execution mode best fits.
 
 Use this decision order:
 1. Normal — only if the task is fully specified, requires no exploration or design decisions, and can be completed in one turn.
@@ -82,7 +82,22 @@ Tie-breakers:
 - Generating a code snippet is Normal only when the request is concrete and single-turn. Building/designing a page or feature with unspecified details is Plan (or Goal when the user gave a clear objective to iterate on).
 - Do not rely only on the cleaned reconstruction: preserve signals from the original request's ambiguity.
 
-Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage.`;
+Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage. Call whale_report before ending your turn; never end this stage with only the stage text.`;
+
+/** 同一 turn/stage 内最多自动提醒次数（防止模型反复漏调 whale_report 导致死循环）。 */
+export const MAX_WHALE_REMINDERS = 2;
+
+/** 任务重构/分类阶段漏调 whale_report 时的提醒消息文本。 */
+export function whaleReportReminderText(stage) {
+  if (stage === "classification") {
+    return `[ka-whale-workflow Reminder]
+>
+Task classification is complete, but the turn ended before calling whale_report. Call whale_report now with the chosen mode ('normal', 'plan', or 'goal') to finish the workflow and launch that mode if needed. Do not end the turn without calling whale_report.`;
+  }
+  return `[ka-whale-workflow Reminder]
+>
+Task reconstruction is complete, but the turn ended before calling whale_report. Call whale_report now with no arguments to advance to task classification. Do not end the turn without calling whale_report.`;
+}
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -759,6 +774,8 @@ export default {
     const consumedManualCommands = new Set();
     /** 当前处于命令旁路的 session id 集合（assemble / pre-step 读取）。 */
     const manualBypassSessions = new Set();
+    /** 每个 session 在当前 turn/stage 已自动提醒过的次数（防止 steer 死循环）。 */
+    const turnReminderCounts = new Map();
 
     /** 当前会话是否处于命令旁路。 */
     function isBypassed(agent) {
@@ -852,6 +869,46 @@ export default {
       if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
       }
+    });
+
+    // -----------------------------------------------------------------------
+    // 回合关闭兜底：重构/分类阶段模型漏掉 whale_report 时，steer 一条提醒，
+    // 让回合继续而不是“停止对话”。同一 turn/stage 最多提醒 MAX_WHALE_REMINDERS 次。
+    // -----------------------------------------------------------------------
+    ctx.on("agent/turn-stopping", ({ agent, turn, signal }) => {
+      if (agent === null || agent === undefined || typeof agent !== "object") return;
+      if (signal?.aborted === true) return;
+      if (liveFor(agent).enabled !== true) return;
+      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
+      if (isBypassed(agent)) return;
+      const stage = stageOfAgent(agent);
+      if (stage !== "reconstruction" && stage !== "classification") return;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return;
+      let state = turnReminderCounts.get(sessionId);
+      if (state === undefined || state.turn !== turn || state.stage !== stage) {
+        state = { turn, stage, count: 0 };
+      }
+      if (state.count >= MAX_WHALE_REMINDERS) {
+        turnReminderCounts.set(sessionId, state);
+        return;
+      }
+      let message;
+      try {
+        message = createUserMessage({
+          content: [{ type: "text", text: whaleReportReminderText(stage) }],
+          source: { kind: "plugin", plugin: "ka-whale-workflow", form: "reminder" },
+        });
+      } catch (error) {
+        ctx.logger.warn(
+          `[ka-whale-workflow] 构造 whale_report 提醒消息失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
+      agent.steer(message);
+      state.count += 1;
+      turnReminderCounts.set(sessionId, state);
+      reportRoundDisplay(agent, whaleReportReminderText(stage), "工作流提醒");
     });
 
     // -----------------------------------------------------------------------
