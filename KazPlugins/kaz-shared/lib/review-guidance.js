@@ -42,7 +42,8 @@ ${label} If there was a substantive change or new conclusion (not repeating know
 - evidence: concrete source (probe / file / code / user feedback).
 - confidence: unknown / low / medium / high; never high without evidence.
 - New memories default to lifecycle_status=${MEMORY_REVIEW_DEFAULT_LIFECYCLE_STATUS}.
-If there is no substantive conclusion, do not write anything (avoid noise).`;
+If there is no substantive conclusion, do not write anything (avoid noise).
+<`;
 }
 
 /**

@@ -92,11 +92,13 @@ export function whaleReportReminderText(stage) {
   if (stage === "classification") {
     return `[ka-whale-workflow Reminder]
 >
-Task classification is complete, but the turn ended before calling whale_report. Call whale_report now with the chosen mode ('normal', 'plan', or 'goal') to finish the workflow and launch that mode if needed. Do not end the turn without calling whale_report.`;
+Task classification is complete, but the turn ended before calling whale_report. Call whale_report now with the chosen mode ('normal', 'plan', or 'goal') to finish the workflow and launch that mode if needed. Do not end the turn without calling whale_report.
+<`;
   }
   return `[ka-whale-workflow Reminder]
 >
-Task reconstruction is complete, but the turn ended before calling whale_report. Call whale_report now with no arguments to advance to task classification. Do not end the turn without calling whale_report.`;
+Task reconstruction is complete, but the turn ended before calling whale_report. Call whale_report now with no arguments to advance to task classification. Do not end the turn without calling whale_report.
+<`;
 }
 
 /** 任务完成 / plan-goal 结束时的紧凑复盘指引（方向1）：语义/文本已解耦到 kaz-shared。 */
