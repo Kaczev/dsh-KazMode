@@ -11,6 +11,34 @@ and recorded here with probe results and rollback commands.
 | 2026-09-02 06:2x | 3 | Created active manifest/switch/`versions/v0.1.0/`, `SKILL.md`, `CHANGELOG.md`, plugin `lib/index.js` + `package.json`, `probe-registration.mjs` | `.dsh/backups/skill-v0.1.0-20260902-060150/` | `node --check` clean; JSON valid; skill probe ALL PASS (14) | Delete `KazPlugins/kaz-skill-safe-json/` + profile copy if rollback needed |
 | 2026-09-02 06:3x | 3 | Added mount row to `kaz/agent.cordis.yml`, copied plugin to profile KazPlugins, added profile dependency; ran allowed `npm.cmd install` | `.dsh/backups/skill-v0.1.0-20260902-060150/` | Install #1 pruned `@deepseek-ai` runtime tree (194 pkgs) → dsh broken; repair merged dsh runtime deps + peers; install #2/#3 restored tree; `probe-safe-json-write ALL PASS (14)`, `probe-registration ALL PASS (11)`, preflight True | Restore profile `package.json` from `.dsh/backups/skill-v0.1.0-20260902-060709/`, restore `kaz-agent.cordis.yml` from backup, remove profile skill copy + node_modules entry |
 | 2026-09-02 06:4x | 3 | Updated `ds安装指引.md` / `ds更新指引.md` (14 dependency lines, no `npm prune`, `@deepseek-ai` repair section) | no file backup needed (docs) | Docs review only | `git checkout -- ds安装指引.md ds更新指引.md` |
+| 2026-09-02 07:0x | 3 | Post-restart smoke after Kaczev repaired dsh (web HTTP 200; plugin mock-register; CLI no-BOM; both probes) | none (read-only smoke) | `probe-safe-json-write ALL PASS (14)`, `probe-registration ALL PASS (11)`, `POST_RESTART_SMOKE ALL PASS` — Gate 3→done PASS | n/a |
+
+## Stage 4 — Retirement / rollback procedure (documented, not executed)
+
+No trigger condition currently exists; nothing is retired now.
+
+### Disable (soft)
+- `KazPlugins/kaz-skill-safe-json/skills/safe-json-write/switch.json` → `{"enabled": false}` (tool refuses to run).
+- Or remove `safe_json_write` from `ka_tool_auto_on_setting.json` and set
+  `kaz-skill-safe-json` to `false` in `other-tool-plugin.json`.
+
+### Rollback (remove deployment)
+1. Restore `kaz/agent.cordis.yml` from
+   `.dsh/backups/skill-v0.1.0-20260902-060150/kaz-agent.cordis.yml` (removes mount row).
+2. Remove `"kaz-skill-safe-json": "file:KazPlugins/kaz-skill-safe-json"` from
+   `~/.dsh/profiles/web/package.json`.
+3. Remove the profile copy `~/.dsh/profiles/web/KazPlugins/kaz-skill-safe-json`
+   and the node_modules junction `~/.dsh/profiles/web/node_modules/kaz-skill-safe-json`
+   (use `cmd /c rmdir` on the junction only — do NOT touch other node_modules).
+4. Restore project storages from baseline backup if desired.
+5. Do NOT run pnpm / dsh plugin; do NOT delete profile `KazPlugins` or
+   `node_modules` wholesale; do NOT damage `~/.dsh/profiles/node_modules`
+   junctions (Kaczev 2026-09-02 warning).
+
+### Retirement trigger conditions (future)
+- Skill superseded by another version → write retirement note in CHANGELOG/AUDIT,
+  run probe, then remove per above.
+- Any gate failure after a change → roll back per above, record, stop, report.
 
 ## Notes
 
@@ -30,5 +58,9 @@ and recorded here with probe results and rollback commands.
 - `ds安装指引.md` / `ds更新指引.md` were updated: `kaz-skill-safe-json` added to
   the dependency list, `npm prune` removed from the update guide, and a repair
   section documents the `@deepseek-ai` prune case.
-- Web root returned HTTP 400 before the required dsh web restart; post-restart
-  smoke is the remaining Gate 3 check.
+- Web root returned HTTP 400 before the required dsh web restart; after Kaczev's
+  repair/restart (2026-09-02) web health is HTTP 200 and the post-restart smoke
+  passed — Gate 3→done PASS.
+- Kaczev warning (2026-09-02): junctions under `~/.dsh/profiles/node_modules`
+  (and nested junctions inside folders there) must never be damaged; do not
+  delete/empty them, do not run pnpm/dsh plugin, do not run `npm prune`.

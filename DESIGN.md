@@ -94,3 +94,10 @@ stable state, record in AUDIT.md, stop, and report.
   profile copy, profile dependency, `kaz/agent.cordis.yml` mount row, guides,
   AUDIT entries, post-restart smoke.
 - Baseline backup: `.dsh/backups/skill-v0.1.0-20260902-055744/`.
+- Post-deployment (2026-09-02): Gate 2→3 and Gate 3→done both PASS after
+  Kaczev repaired dsh; `probe-safe-json-write ALL PASS (14)`,
+  `probe-registration ALL PASS (11)`, `POST_RESTART_SMOKE ALL PASS`.
+- Repair note: the allowed `npm.cmd install` pruned `@deepseek-ai` runtime deps;
+  profile `package.json` was made self-contained (runtime deps + peers) and the
+  same allowed install restored the tree. Never damage
+  `~/.dsh/profiles/node_modules` junctions.
