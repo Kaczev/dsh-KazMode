@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+const repoRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
 const profile = path.join(
   process.env.DSH_HOME || "C:\\Users\\Kaczev\\.dsh",
   "profiles",
@@ -108,22 +108,13 @@ check("web cordis.patch.yml does NOT contain kaz-skill-safe-json", () => {
   }
 });
 
-{
-  try {
-    const entry = path.join(profile, "node_modules", "kaz-skill-safe-json", "lib", "index.js");
-    const mod = await import(pathToFileURL(entry).href);
-    if (mod.default?.name !== "kaz-skill-safe-json") {
-      throw new Error(`unexpected default name: ${mod.default?.name}`);
-    }
-    passed++;
-    console.log("[PASS] plugin package imports from profile node_modules");
-  } catch (error) {
-    failed++;
-    console.log(
-      `[FAIL] plugin package imports from profile node_modules: ${error instanceof Error ? error.message : String(error)}`,
-    );
+check("plugin package imports from profile node_modules", async () => {
+  const entry = path.join(profile, "node_modules", "kaz-skill-safe-json", "lib", "index.js");
+  const mod = await import(pathToFileURL(entry).href);
+  if (mod.default?.name !== "kaz-skill-safe-json") {
+    throw new Error(`unexpected default name: ${mod.default?.name}`);
   }
-}
+});
 
 if (failed > 0) {
   console.error(`probe-registration.mjs FAILED (${failed})`);
