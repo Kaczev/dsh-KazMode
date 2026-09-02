@@ -64,6 +64,10 @@ import {
   normalizeAutoOnLayer,
   mergeAutoOnLayers,
   autoOnSettingsEqual,
+  ENABLE_TOOL,
+  baseToolNames,
+  normalizeOptionalTools,
+  optionalToolPoolNames,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -108,7 +112,12 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   },
   "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "first-round-hints": { enabled: false },
-  "ka-whale-workflow": { enabled: false, includeSubagents: false, reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS] },
+  "ka-whale-workflow": {
+    enabled: false,
+    includeSubagents: false,
+    reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
+    taskToolSelectionEnabled: true,
+  },
   "create-plan": { enabled: false },
 };
 
@@ -1299,7 +1308,7 @@ export default {
      * 原设置（代码 + 用户 other-*）→ 用户默认 → 项目设置 合并后加入；
      * round-minimal 首阶段信号由本插件读取并传入。
      */
-    function kazSurfaceFor(agent, current, states) {
+    function kazSurfaceFor(agent, current, states, options = {}) {
       // 统一工具插件数据源：代码原设置 + 用户 other-* + 默认 + 项目专属。
       let whitelist;
       try {
@@ -1316,8 +1325,42 @@ export default {
         whitelist = new Set();
       }
       // kaz_tool_auto_on：当前会话 plan/goal/鲸鱼工作流阶段命中时，按项目三层生效设置
-      // 临时放行对应工具；模式/阶段结束自动移除。
-      for (const tool of autoOnToolsFor(agent, states)) whitelist.add(tool);
+      // 临时放行对应工具；模式/阶段结束自动移除。autoOn 同时参与任务过滤的“放行并集”，
+      // 保证 exit_plan_mode / get_goal / update_goal / whale_report 永不被任务过滤移除。
+      const autoOn = autoOnToolsFor(agent, states);
+      for (const tool of autoOn) whitelist.add(tool);
+      // 第三次升级：任务分类工具选择（task-classification decides the tool surface）。
+      // 任务过滤必须在 auto-on 之后做交集：最终面 =
+      //   (基础 ∪ 分类初始 optional ∪ enable_tool 已点亮 ∪ auto-on) ∩ 当前 Kaz 白名单。
+      // 状态缺失 / 特性关闭 / manual bypass 由 kaWhaleWorkflow.taskToolStateOf 返回 null，
+      // 此处跳过任务过滤，回到“放行全量 Kaz 白名单”的旧行为。
+      let taskState = null;
+      if (options.taskFilter !== false) {
+        try {
+          const svc = ctx.get("kaWhaleWorkflow");
+          if (svc !== undefined && svc !== null && typeof svc.taskToolStateOf === "function") {
+            const raw = svc.taskToolStateOf(agent);
+            if (raw !== null && raw !== undefined && typeof raw === "object") taskState = raw;
+          }
+        } catch {
+          // 服务异常按无任务状态处理，不阻断
+        }
+      }
+      if (taskState !== null) {
+        whitelist.add(ENABLE_TOOL);
+        const memoryEnabled = states["kaz-memory"]?.enabled === true;
+        const allowed = new Set([
+          ...baseToolNames({ memoryEnabled }),
+          ...normalizeOptionalTools(taskState.initialOptionalTools),
+          ...(Array.isArray(taskState.jitEnabledTools)
+            ? taskState.jitEnabledTools
+                .map((entry) => (entry !== null && typeof entry === "object" ? entry.tool : undefined))
+                .filter((tool) => typeof tool === "string" && tool.length > 0)
+            : []),
+          ...autoOn,
+        ]);
+        whitelist = new Set([...whitelist].filter((tool) => allowed.has(tool)));
+      }
       // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
       // 才保留记忆工具，避免新对话/未落盘状态被误判为启用。
       if (states["kaz-memory"]?.enabled !== true) {
@@ -1379,6 +1422,10 @@ export default {
      *     无会话/无覆盖时返回 null，调用方回落到插件自身 settings.yaml。
      *   - toolVisible(agent, name)    该 agent 会话里某工具是否在工具面内；
      *   - surfaceOf(agent)            Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
+     *   - unfilteredSurfaceOf(agent)  未应用任务过滤的完整当前 Kaz 面（Set）；供分类
+     *                                 目录与 enable_tool 判定“可点亮池”；非 Kaz 返回 null。
+     *   - taskToolPoolOf(agent)       可选池 = unfilteredSurfaceOf 中非基础、非模式限定的
+     *                                 工具名数组（排序去重）；非 Kaz 返回 []。
      */
     const kazModeService = {
       kazEnabled: (agent) => agentKazEnabled(agent),
@@ -1408,6 +1455,18 @@ export default {
         if (agent === null || agent === undefined || typeof agent !== "object") return null;
         if (!agentKazEnabled(agent)) return null;
         return kazSurfaceFor(agent, source(), agentEffectiveStates(agent));
+      },
+      unfilteredSurfaceOf: (agent) => {
+        if (agent === null || agent === undefined || typeof agent !== "object") return null;
+        if (!agentKazEnabled(agent)) return null;
+        return kazSurfaceFor(agent, source(), agentEffectiveStates(agent), { taskFilter: false });
+      },
+      taskToolPoolOf: (agent) => {
+        if (agent === null || agent === undefined || typeof agent !== "object") return [];
+        if (!agentKazEnabled(agent)) return [];
+        const states = agentEffectiveStates(agent);
+        const surface = kazSurfaceFor(agent, source(), states, { taskFilter: false });
+        return optionalToolPoolNames(surface, { memoryEnabled: states["kaz-memory"]?.enabled === true });
       },
     };
     ctx.effect(() => {

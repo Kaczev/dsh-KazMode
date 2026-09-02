@@ -41,6 +41,9 @@ import {
   skillLifecycleCallable,
   skillReviewGuidanceText,
   SKILL_BOUNDARY_MAX_CHANGES,
+  ENABLE_TOOL,
+  normalizeOptionalTools,
+  compactOptionalToolDirectory,
 } from "kaz-shared";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -76,8 +79,8 @@ Keep original ambiguity; don't silently concretize vague requests; quote/summari
 
 Only use <工具列表> tools. When done, call whale_report to proceed to classification. Call whale_report before ending your turn; never end this stage with only the stage text.`;
 
-/** 任务分类 prompt（草案原文；模式由 whale_report 统一启动）。 */
-export const CLASSIFICATION_PROMPT = `We are now in the task classification stage. Based on the reconstructed task description — including its clarity and open-design metadata — decide which execution mode best fits.
+/** 任务分类 prompt：无任务工具选择段的基础版（特性关闭 / 服务不可用时的 back-compat）。 */
+export const CLASSIFICATION_PROMPT_BODY = `We are now in the task classification stage. Based on the reconstructed task description — including its clarity and open-design metadata — decide which execution mode best fits.
 
 Use this decision order:
 1. Normal — only if the task is fully specified, requires no exploration or design decisions, and can be completed in one turn.
@@ -90,6 +93,14 @@ Tie-breakers:
 - Do not rely only on the cleaned reconstruction: preserve signals from the original request's ambiguity.
 
 Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage. Call whale_report before ending your turn; never end this stage with only the stage text.`;
+
+/** 任务分类 prompt（完整版）：任务工具选择开启时渲染 <可选工具目录> 并强制 optional_tools。 */
+export const CLASSIFICATION_PROMPT = `${CLASSIFICATION_PROMPT_BODY}
+
+Optional tools for this task (non-base, currently enabled in Kaz; empty list = deliberately use none):
+<可选工具目录>
+
+Call whale_report with the chosen mode and \`optional_tools\`: an array of optional tool names to pre-enable for this task. Do not list base tools or mode auto-on tools. If you deliberately want no optional tools, pass \`optional_tools: []\`. \`enable_tool\` remains available during execution, so nothing is locked.`;
 
 /** 同一 turn/stage 内最多自动提醒次数（防止模型反复漏调 whale_report 导致死循环）。 */
 export const MAX_WHALE_REMINDERS = 2;
@@ -118,6 +129,8 @@ const SETTINGS_SCHEMA = z.object({
   includeSubagents: z.boolean().default(false),
   /** 任务重构工具清单（配置面板代码框；白名单之上的过滤器）。 */
   reconstructionTools: z.array(z.string()).default([...DEFAULT_RECONSTRUCTION_TOOLS]),
+  /** 第三次升级：任务分类工具选择总开关；关闭后回到旧“放行全量 Kaz 白名单”。 */
+  taskToolSelectionEnabled: z.boolean().default(true),
   /** 自主 skill 管理总开关；关闭后回到一阶段“按需自升级”。 */
   skillAutonomyEnabled: z.boolean().default(true),
   /** 每个安全边界允许的技能变更数上限（v2.0 硬上限为 1，设置值会被钳制到 1）。 */
@@ -129,6 +142,7 @@ export const DEFAULT_SECTION = {
   enabled: true,
   includeSubagents: false,
   reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
+  taskToolSelectionEnabled: true,
   skillAutonomyEnabled: true,
   skillAutonomyMaxChangesPerBoundary: 1,
 };
@@ -184,6 +198,7 @@ function normalizeConfig(raw) {
     enabled: value.enabled !== false,
     includeSubagents: value.includeSubagents === true,
     reconstructionTools: tools.length > 0 ? tools : [...DEFAULT_RECONSTRUCTION_TOOLS],
+    taskToolSelectionEnabled: value.taskToolSelectionEnabled !== false,
     skillAutonomyEnabled: value.skillAutonomyEnabled !== false,
     skillAutonomyMaxChangesPerBoundary: maxChanges,
   };
@@ -295,12 +310,44 @@ export function sessionIdOf(agent) {
   }
 }
 
+/** 任务工具状态允许的 mode。 */
+const TASK_TOOL_STATE_MODES = new Set(["normal", "plan", "goal"]);
+
+/** 归一化一条任务工具状态；损坏/字段形状错误返回 null（调用方按“feature off”处理）。 */
+export function normalizeTaskToolStateValue(raw) {
+  if (raw === null || raw === undefined || typeof raw !== "object") return null;
+  if (Object.prototype.hasOwnProperty.call(raw, "initialOptionalTools") && !Array.isArray(raw.initialOptionalTools)) return null;
+  if (Object.prototype.hasOwnProperty.call(raw, "jitEnabledTools") && !Array.isArray(raw.jitEnabledTools)) return null;
+  if (raw.taskRunId !== undefined && !(Number.isInteger(raw.taskRunId) && raw.taskRunId > 0)) return null;
+  if (raw.mode !== undefined && !TASK_TOOL_STATE_MODES.has(raw.mode)) return null;
+  const initialOptionalTools = normalizeToolList(raw.initialOptionalTools);
+  const jitEnabledTools = [];
+  for (const entry of Array.isArray(raw.jitEnabledTools) ? raw.jitEnabledTools : []) {
+    if (entry === null || typeof entry !== "object") continue;
+    if (typeof entry.tool !== "string" || entry.tool.trim().length === 0) continue;
+    jitEnabledTools.push({
+      tool: entry.tool.trim(),
+      reason: typeof entry.reason === "string" ? entry.reason : "",
+      at: typeof entry.at === "string" ? entry.at : "",
+    });
+  }
+  return {
+    taskRunId: Number.isInteger(raw.taskRunId) && raw.taskRunId > 0 ? raw.taskRunId : 0,
+    mode: TASK_TOOL_STATE_MODES.has(raw.mode) ? raw.mode : "normal",
+    initialOptionalTools,
+    jitEnabledTools,
+  };
+}
+
 /**
  * 创建阶段状态存储（可注入文件路径，便于探针用临时文件）。
- * 结构：{ version: 1, sessions: { "<sessionId>": "reconstruction"|"classification"|"done" } }
+ * 结构：{ version: 2, sessions: { "<sessionId>": "reconstruction"|"classification"|"done" },
+ *        taskToolState: { "<sessionId>": { taskRunId, mode, initialOptionalTools, jitEnabledTools } } }
+ * 旧文件缺少 taskToolState 时仍按 v1 读取；损坏 JSON / 损坏状态一律丢弃。
  */
 export function createStageStore(file) {
   const sessions = {};
+  const taskToolState = {};
   try {
     if (file !== undefined && file !== null && existsSync(file)) {
       let raw = readFileSync(file, "utf8");
@@ -314,9 +361,27 @@ export function createStageStore(file) {
           }
         }
       }
+      const rawStates = parsed !== null && typeof parsed === "object" ? parsed.taskToolState : undefined;
+      if (rawStates !== null && typeof rawStates === "object") {
+        for (const [id, rawState] of Object.entries(rawStates)) {
+          if (id.length === 0) continue;
+          const normalized = normalizeTaskToolStateValue(rawState);
+          if (normalized !== null) taskToolState[id] = normalized;
+        }
+      }
     }
   } catch {
     // 存储损坏时从空状态开始，不影响主流程
+  }
+  function persist() {
+    if (typeof file !== "string" || file.length === 0) return true;
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, JSON.stringify({ version: 2, sessions, taskToolState }, null, 2) + String.fromCharCode(10), "utf8");
+      return true;
+    } catch {
+      return false;
+    }
   }
   return {
     file,
@@ -326,25 +391,30 @@ export function createStageStore(file) {
     set(sessionId, stage) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       sessions[sessionId] = stage;
-      if (typeof file !== "string" || file.length === 0) return true;
-      try {
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, JSON.stringify({ version: 1, sessions }, null, 2) + String.fromCharCode(10), "utf8");
-        return true;
-      } catch {
-        return false;
-      }
+      return persist();
     },
     remove(sessionId) {
       if (typeof sessionId === "string") delete sessions[sessionId];
-      if (typeof file === "string" && file.length > 0) {
-        try {
-          mkdirSync(dirname(file), { recursive: true });
-          writeFileSync(file, JSON.stringify({ version: 1, sessions }, null, 2) + String.fromCharCode(10), "utf8");
-        } catch {
-          // 忽略清理失败
-        }
-      }
+      persist();
+    },
+    getTaskToolState(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const value = taskToolState[sessionId];
+      return value === undefined ? null : JSON.parse(JSON.stringify(value));
+    },
+    setTaskToolState(sessionId, value) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const normalized = normalizeTaskToolStateValue(value);
+      if (normalized === null) return false;
+      taskToolState[sessionId] = normalized;
+      return persist();
+    },
+    removeTaskToolState(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (!Object.prototype.hasOwnProperty.call(taskToolState, sessionId)) return false;
+      delete taskToolState[sessionId];
+      persist();
+      return true;
     },
   };
 }
@@ -568,12 +638,16 @@ export default {
       return stageOf(agent, stageStore);
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
-     *  进入 reconstruction = 新逻辑任务运行开始，递增 [kaz-memory Review] 的 taskRunId。 */
+     *  进入 reconstruction = 新逻辑任务运行开始，递增 [kaz-memory Review] 的 taskRunId，
+     *  并清除该 session 的旧任务工具状态（第三次升级：新一轮任务重新分类选择）。 */
     function setStageAgent(agent, stage) {
       const changed = setStage(agent, stage, stageStore);
       if (changed === true && stage === "reconstruction") {
         const sessionId = sessionIdOf(agent);
-        if (typeof sessionId === "string" && sessionId.length > 0) beginReviewTaskRun(sessionId);
+        if (typeof sessionId === "string" && sessionId.length > 0) {
+          beginReviewTaskRun(sessionId);
+          stageStore.removeTaskToolState(sessionId);
+        }
       }
       return changed;
     }
@@ -590,6 +664,66 @@ export default {
         // fall through
       }
       return source();
+    }
+
+    /** 第三次升级：任务工具选择是否开启（插件 enabled 且字段缺失按默认 true）。 */
+    function taskToolSelectionEnabledFor(agent) {
+      const current = liveFor(agent);
+      return current?.enabled !== false && current?.taskToolSelectionEnabled !== false;
+    }
+
+    /** 从 kazMode 服务读取当前可选工具池；服务缺失/异常返回 null（视为特性不可用）。 */
+    function kazModeTaskToolPoolFor(agent) {
+      try {
+        const svc = ctx.get("kazMode");
+        if (svc !== undefined && svc !== null && typeof svc.taskToolPoolOf === "function") {
+          const pool = svc.taskToolPoolOf(agent);
+          return Array.isArray(pool) ? pool : null;
+        }
+      } catch {
+        // fall through
+      }
+      return null;
+    }
+
+    /** 任务工具状态：特性未开 / 插件关 / manual bypass / 非 done / 无状态 → null。 */
+    function taskToolStateOfAgent(agent) {
+      if (agent === null || agent === undefined || typeof agent !== "object") return null;
+      if (liveFor(agent).enabled !== true) return null;
+      if (taskToolSelectionEnabledFor(agent) !== true) return null;
+      if (isBypassed(agent)) return null;
+      const sessionId = sessionIdOf(agent);
+      if (sessionId === null) return null;
+      if (stageOfAgent(agent) !== "done") return null;
+      try {
+        return stageStore.getTaskToolState(sessionId);
+      } catch {
+        return null;
+      }
+    }
+
+    /** 分类阶段 compact optional-tool 目录：名字来自 kazMode 池，描述来自注册工具 schema。 */
+    function optionalToolDirectoryFor(agent) {
+      try {
+        if (taskToolSelectionEnabledFor(agent) !== true) return "";
+        const pool = kazModeTaskToolPoolFor(agent);
+        if (!Array.isArray(pool)) return "";
+        if (pool.length === 0) return "(no optional tools available)";
+        const tools = ctx.get("tools");
+        if (tools === undefined || tools === null || typeof tools.schemas !== "function") return "";
+        const schemas = tools.schemas(agent);
+        const byName = new Map();
+        for (const schema of Array.isArray(schemas) ? schemas : []) {
+          if (schema !== null && typeof schema === "object" && typeof schema.name === "string" && schema.name.length > 0) {
+            byName.set(schema.name, typeof schema.description === "string" ? schema.description : "");
+          }
+        }
+        return compactOptionalToolDirectory(
+          pool.map((name) => ({ name, description: byName.get(name) ?? "" })),
+        );
+      } catch {
+        return "";
+      }
     }
 
     /** 是否处于 round-minimal 极简阶段（服务缺失按 false 处理）。 */
@@ -665,15 +799,25 @@ export default {
     }
 
     function renderPrompt(agent, stage) {
+      const toolSelectionUsable =
+        stage === "classification" &&
+        taskToolSelectionEnabledFor(agent) === true &&
+        kazModeTaskToolPoolFor(agent) !== null;
       const prompt =
         stage === "reconstruction"
           ? RECONSTRUCTION_PROMPT
           : stage === "classification"
-            ? CLASSIFICATION_PROMPT
+            ? toolSelectionUsable
+              ? CLASSIFICATION_PROMPT
+              : CLASSIFICATION_PROMPT_BODY
             : "";
       const tools = availableStageTools(agent, stage);
       const list = tools.length > 0 ? tools.join(", ") : "the currently available tools";
-      return prompt.replace(/<工具列表>/g, list);
+      let rendered = prompt.replace(/<工具列表>/g, list);
+      if (stage === "classification" && toolSelectionUsable) {
+        rendered = rendered.replace(/<可选工具目录>/g, optionalToolDirectoryFor(agent) || "(no optional tools available)");
+      }
+      return rendered;
     }
 
     /** 尝试把本插件给模型发送的信息上报给 round-display（best-effort）。 */
@@ -728,6 +872,12 @@ export default {
           type: "number",
           description: "Optional positive integer for mode='goal': automatic continuation round cap.",
         },
+        optional_tools: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Only for the task classification stage when task tool selection is enabled: initial optional (non-base) tools to pre-enable for this task. Empty or omitted means deliberately use none.",
+        },
       },
       output: {
         schema: {
@@ -754,6 +904,27 @@ export default {
         }
         if (current === "classification") {
           const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
+          const sessionId = sessionIdOf(agent);
+          // 第三次升级：分类阶段必须输出 initial optional_tools；先纯校验，避免半启动。
+          const toolSelectionUsable =
+            taskToolSelectionEnabledFor(agent) === true && kazModeTaskToolPoolFor(agent) !== null;
+          let selectedOptionalTools = [];
+          if (toolSelectionUsable) {
+            const pool = kazModeTaskToolPoolFor(agent);
+            selectedOptionalTools = normalizeOptionalTools(args?.optional_tools);
+            const invalid = selectedOptionalTools.find((tool) => !pool.includes(tool));
+            if (invalid !== undefined) {
+              const allowed = pool.length > 0 ? pool.join(", ") : "(no optional tools available)";
+              ctx.logger.info(
+                `[ka-whale-workflow] whale_report 拒绝 optional_tools 含未知/越权工具 "${invalid}"（可选池：${allowed}）`,
+              );
+              return Promise.reject(
+                new Error(
+                  `whale_report rejected: optional_tools contains "${invalid}", which is not in the current optional tool pool (base/mode-scoped/unknown/not in Kaz surface). Allowed: ${allowed}`,
+                ),
+              );
+            }
+          }
           const launches = [];
           if (mode === "plan") {
             try {
@@ -786,10 +957,20 @@ export default {
               return Promise.reject(new Error("failed to create goal: " + (error instanceof Error ? error.message : String(error))));
             }
           }
+          // 全部成功后才写任务工具状态（plan/goal bridge 失败时不写状态、保持 classification）。
+          if (toolSelectionUsable && typeof sessionId === "string" && sessionId.length > 0) {
+            const taskRunId = reviewRunStateOf(sessionId).taskRunId;
+            stageStore.setTaskToolState(sessionId, {
+              taskRunId,
+              mode,
+              initialOptionalTools: selectedOptionalTools,
+              jitEnabledTools: [],
+            });
+          }
           setStageAgent(agent, "done");
           reportRoundDisplay(
             agent,
-            "任务分类完成（模式：" + mode + (launches.length > 0 ? "，已启动 " + launches.join("、") : "") + "），鲸鱼工作流结束，放行 Kaz 白名单工具。",
+            "任务分类完成（模式：" + mode + (launches.length > 0 ? "，已启动 " + launches.join("、") : "") + "），鲸鱼工作流结束" + (toolSelectionUsable ? "，任务工具面已按 optional_tools 收敛" : "，放行 Kaz 白名单工具") + "。",
             "阶段切换",
           );
           return Promise.resolve({ ok: true, stage: "done", restarted: false });
@@ -801,13 +982,115 @@ export default {
       presentCall: () => ({ card: "generic", title: "鲸鱼工作流汇报", kind: "other" }),
     });
 
+    // -----------------------------------------------------------------------
+    // enable_tool：任务内按需点亮 optional 工具（第三次升级 · 方案四 JIT escalation）。
+    // 只允许点亮“当前 Kaz 生效面内、非基础、非模式限定、且本任务尚未启用”的 optional
+    // 工具；reason 必填并持久化到 stage store 的 jitEnabledTools（审计即状态本身）。
+    // -----------------------------------------------------------------------
+    const enableToolDef = defineTool({
+      name: ENABLE_TOOL,
+      description:
+        "Enable an optional tool for the current task. Only tools in the current Kaz optional pool (non-base, non-mode-scoped, currently enabled in Kaz) can be enabled, and only if they are not already enabled for this task. The reason is recorded in the task audit trail.",
+      parameters: {
+        tool: {
+          type: "string",
+          required: true,
+          description: "Optional tool name to enable for this task.",
+        },
+        reason: {
+          type: "string",
+          required: true,
+          description: "Required reason; recorded in the task audit trail.",
+        },
+      },
+      output: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            ok: { type: "boolean", required: true },
+            tool: { type: "string", required: true },
+            reason: { type: "string", required: true },
+          },
+        },
+        render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
+      },
+      async execute(args, exec) {
+        const agent = exec?.agent;
+        if (agent === null || agent === undefined || typeof agent !== "object") {
+          return Promise.reject(new Error("enable_tool requires a calling agent"));
+        }
+        const sessionId = sessionIdOf(agent);
+        if (sessionId === null) {
+          return Promise.reject(new Error("enable_tool requires a session id"));
+        }
+        const state = taskToolStateOfAgent(agent);
+        if (state === null) {
+          const msg = "enable_tool denied: task tool filtering is inactive (feature disabled, no task tool state, or manual bypass)";
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        const tool = typeof args?.tool === "string" ? args.tool.trim() : "";
+        const reason = typeof args?.reason === "string" ? args.reason.trim() : "";
+        if (tool.length === 0) {
+          const msg = "enable_tool denied: missing tool";
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        if (reason.length === 0) {
+          const msg = "enable_tool denied: missing reason (reason is required and recorded)";
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        if (reason.length > 300) {
+          const msg = "enable_tool denied: reason exceeds 300 characters";
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        const pool = kazModeTaskToolPoolFor(agent);
+        if (!Array.isArray(pool) || pool.length === 0 || !pool.includes(tool)) {
+          const allowed = Array.isArray(pool) && pool.length > 0 ? pool.join(", ") : "(no optional tools available)";
+          const msg = `enable_tool denied: "${tool}" is not in the current optional tool pool (base/mode-scoped/unknown/not in Kaz surface). Allowed: ${allowed}`;
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        const initial = Array.isArray(state.initialOptionalTools) ? state.initialOptionalTools : [];
+        const jit = Array.isArray(state.jitEnabledTools) ? state.jitEnabledTools : [];
+        if (initial.includes(tool)) {
+          const msg = `enable_tool denied: "${tool}" is already enabled as an initial optional tool for this task`;
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        if (jit.some((entry) => entry !== null && typeof entry === "object" && entry.tool === tool)) {
+          const msg = `enable_tool denied: "${tool}" is already enabled for this task`;
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        const entry = { tool, reason, at: new Date().toISOString() };
+        const saved = stageStore.setTaskToolState(sessionId, {
+          ...state,
+          jitEnabledTools: [...jit, entry],
+        });
+        if (saved !== true) {
+          const msg = "enable_tool failed: could not persist task tool state";
+          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+          return Promise.reject(new Error(msg));
+        }
+        reportRoundDisplay(agent, `enable_tool: ${tool} (${reason})`, "任务工具面");
+        ctx.logger.info(`[ka-whale-workflow] enable_tool ok: ${tool} (${reason}) session=${sessionId}`);
+        return Promise.resolve({ ok: true, tool, reason });
+      },
+      presentCall: () => ({ card: "generic", title: "点亮任务工具", kind: "other" }),
+    });
+
     let toolDisposers = [];
     function installTools() {
       if (toolDisposers.length > 0) return;
       try {
         toolDisposers.push(ctx.tools.register(whaleReportDef));
+        toolDisposers.push(ctx.tools.register(enableToolDef));
       } catch (error) {
-        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL} 失败：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL}/${ENABLE_TOOL} 失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
     function uninstallTools() {
@@ -833,6 +1116,7 @@ export default {
       version: 1,
       stageOf: (agent) => stageOfAgent(agent),
       enabledFor: (agent) => liveFor(agent).enabled === true,
+      taskToolStateOf: (agent) => taskToolStateOfAgent(agent),
     };
     ctx.effect(() => {
       const disposeService = ctx.provide("kaWhaleWorkflow", kaWhaleWorkflowService);
@@ -913,6 +1197,9 @@ export default {
       const manual = consumeManualCommand(agent);
       if (manual !== null) {
         manualBypassSessions.add(sessionId);
+        // 直接 /plan /goal 旁路 = 新逻辑任务运行且没有分类选择：清除旧任务工具状态，
+        // 本轮 taskToolStateOf 因 manualBypassSessions 命中而返回 null（任务过滤关闭）。
+        stageStore.removeTaskToolState(sessionId);
         reportRoundDisplay(agent, `检测到 /${manual.name} 指令：本消息跳过鲸鱼工作流，直接放行白名单工具。`, "工作流旁路");
         return;
       }

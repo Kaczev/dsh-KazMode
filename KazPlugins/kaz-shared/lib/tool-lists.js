@@ -318,3 +318,14 @@ export {
   skillReviewGuidanceText,
   skillLifecycleCallable,
 } from "./skill-guidance.js";
+
+/** 第三次升级 任务分类工具选择：基础面 / optional 池 / enable_tool（见 task-tool-selection.js）。 */
+export {
+  ENABLE_TOOL,
+  BASE_TOOLS,
+  MODE_SCOPED_TOOLS,
+  baseToolNames,
+  normalizeOptionalTools,
+  optionalToolPoolNames,
+  compactOptionalToolDirectory,
+} from "./task-tool-selection.js";
