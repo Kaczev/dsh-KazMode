@@ -15,7 +15,7 @@
 //      因为 whale_report 自身在 host 层解析不到 planMode 服务。
 //   4) 插话（模型运行中，同一轮中途追加消息）不改变当前工作流阶段。
 //      第 2、3、4……轮（turn>=2、模型不在运行）直接重新进入「任务重构」；
-//      Plan 模式激活时除外——用户回复不进入任务重构，保持在 plan 模式。
+//      Plan/Goal 模式激活时除外——用户回复不进入任务重构，保持在当前模式。
 //   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
 //      不进入任务重构；round-minimal 极简过滤仍照常生效。
 //
@@ -233,6 +233,27 @@ export function planModeActiveOf(agent) {
   }
 }
 
+/** 该 agent 会话是否处于 goal 模式：经 goals 服务查询，phase 为 active/paused
+ *  即为激活（与 kaz-mode 的 goalActive 同源；服务缺失按未开启处理）。 */
+export function goalModeActiveOf(agent, goals) {
+  try {
+    if (
+      goals === undefined ||
+      goals === null ||
+      typeof goals.get !== "function" ||
+      agent === null ||
+      agent === undefined
+    ) {
+      return false;
+    }
+    const goal = goals.get(agent);
+    if (goal === null || goal === undefined || typeof goal !== "object") return false;
+    return goal.phase === "active" || goal.phase === "paused";
+  } catch {
+    return false;
+  }
+}
+
 /** 插件自己的阶段状态文件名（DSH_HOME/storages 下，按 session id 索引）。
  *  注意：不能再用 agent.session.append("ka-whale-workflow/stage", ...) 持久化——
  *  DSH 的会话日志会把未注册的自定义事件视为未知且不可忽略，重载时直接拒绝读取
@@ -438,7 +459,7 @@ export function hasInjectedInTurn(agent, form, turn) {
 }
 
 /** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）直接重新进入「任务重构」。
- *  Plan 模式激活时（context.modeActive=true）保持 idle/done，不进入任务重构。 */
+ *  Plan/Goal 模式激活时（context.modeActive=true）保持 idle/done，不进入任务重构。 */
 export function nextStageOnUserMessage(current, _turn, context = {}) {
   if (context?.modeActive === true && (current === "idle" || current === "done")) return current;
   return "reconstruction";
@@ -561,13 +582,7 @@ export default {
     /** 该 agent 会话是否处于 goal 模式（active/paused；与 kaz-mode 同源）。 */
     function goalModeActive(agent) {
       try {
-        const goals = ctx.get("goals");
-        if (goals === undefined || goals === null || typeof goals.get !== "function" || agent === null || agent === undefined) {
-          return false;
-        }
-        const goal = goals.get(agent);
-        if (goal === null || goal === undefined || typeof goal !== "object") return false;
-        return goal.phase === "active" || goal.phase === "paused";
+        return goalModeActiveOf(agent, ctx.get("goals"));
       } catch {
         return false;
       }
@@ -839,10 +854,12 @@ export default {
       manualBypassSessions.delete(sessionId);
       const current = stageOfAgent(agent);
       const planActive = planModeActiveOf(agent);
+      const goalActive = goalModeActive(agent);
+      const modeActive = planActive || goalActive;
       // 第 2、3、4……轮（turn>=2，模型不在运行）：直接重新进入任务重构；
-      // Plan 模式激活时保持 idle/done，不进入任务重构。
+      // Plan/Goal 模式激活时保持 idle/done，不进入任务重构。
       if (typeof turn === "number" && turn >= 2) {
-        const next = nextStageOnUserMessage(current, turn, { modeActive: planActive });
+        const next = nextStageOnUserMessage(current, turn, { modeActive });
         if (setStageAgent(agent, next)) {
           reportRoundDisplay(agent, "收到新一轮消息，重新进入任务重构。", "阶段切换");
         }
@@ -850,8 +867,8 @@ export default {
       }
       // 插话（模型运行中）不改变当前工作流阶段；仅尚未开始（idle）时进入任务重构。
       if (current !== "idle") return;
-      // Plan 模式激活时不开启任务重构，保持在 plan 模式。
-      if (planActive) return;
+      // Plan/Goal 模式激活时不开启任务重构，保持在当前模式。
+      if (modeActive) return;
       if (isMinimal(agent)) {
         pendingStart.add(sessionId);
         return;
@@ -894,8 +911,8 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
       if (current !== "idle") return;
-      // Plan 模式激活时不开启任务重构，保持在 plan 模式。
-      if (planModeActiveOf(agent)) return;
+      // Plan/Goal 模式激活时不开启任务重构，保持在当前模式。
+      if (planModeActiveOf(agent) || goalModeActive(agent)) return;
       if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
       }
@@ -1017,9 +1034,11 @@ export default {
         if (live.enabled === true && !skipSubagent && !bypassed) {
           const stage = stageOfAgent(agent);
           const planActive = planModeActiveOf(agent);
+          const goalActive = goalModeActive(agent);
+          const modeActive = planActive || goalActive;
           if (hasRealUserMessage) {
             if (turn >= 2) {
-              const next = nextStageOnUserMessage(stage, turn, { modeActive: planActive });
+              const next = nextStageOnUserMessage(stage, turn, { modeActive });
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
                   agent,
@@ -1027,12 +1046,12 @@ export default {
                   "阶段切换",
                 );
               }
-            } else if (stage === "idle" && !isMinimal(agent) && !planActive) {
+            } else if (stage === "idle" && !isMinimal(agent) && !modeActive) {
               if (setStageAgent(agent, "reconstruction")) {
                 reportRoundDisplay(agent, "进入任务重构（pre-step 兜底）。", "阶段切换");
               }
             }
-          } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !planActive) {
+          } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !modeActive) {
             if (setStageAgent(agent, "reconstruction")) {
               reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（pre-step 兜底）。", "阶段切换");
             }
@@ -1124,7 +1143,8 @@ export default {
       // assemble 兜底：round-minimal 解除后、首次 tool/call 的下一步组装时，
       // 阶段可能还没被 session/event 路径推进（assemble 先于 agent/pre-step 执行）。
       // 在这里补一次阶段切换，使【紧跟在首次工具调用后的那次请求】就拿到对应工具面
-      // 和系统提示词段，而不是再等一个 step。阶段丢失时一律进入任务重构。
+      // 和系统提示词段，而不是再等一个 step。阶段丢失时一律进入任务重构；
+      // Plan/Goal 模式激活时除外。
       if (
         enabled &&
         stage === "idle" &&
@@ -1132,7 +1152,8 @@ export default {
         !isSubagent(agent) &&
         !isMinimal(agent) &&
         hasToolCall(agent) &&
-        !planModeActiveOf(agent)
+        !planModeActiveOf(agent) &&
+        !goalModeActive(agent)
       ) {
         if (setStageAgent(agent, "reconstruction")) {
           reportRoundDisplay(
