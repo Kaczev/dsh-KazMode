@@ -128,6 +128,17 @@ Optional tools for this task (non-base, currently enabled in Kaz; empty list = d
 
 Call whale_report with the chosen mode and \`optional_tools\`: an array of optional tool names to pre-enable for this task. Do not list base tools or mode auto-on tools. If you deliberately want no optional tools, pass \`optional_tools: []\`. \`enable_tool\` remains available during execution, so nothing is locked.`;
 
+/** 首轮全流程介绍：仅新对话第一轮注入一次，位置早于 TaskReconstruction 块。 */
+export const FIRST_ROUND_OVERVIEW = `[ka-whale-workflow overview]
+>
+This conversation uses ka-whale-workflow. The workflow activates after the first tool call, and guides every task through three phases:
+1. Task reconstruction — tool surface narrows; rewrite the request into a structured task description, then call whale_report (without mode) to advance.
+2. Task classification — only whale_report is visible; choose normal, plan, or goal, and call whale_report({mode}) to finish the workflow and launch that mode.
+3. Execution — full Kaz tools are restored. For subsequent user turns, the workflow normally re-enters reconstruction, unless a plan/goal mode is still active.
+  
+When the conversation ends, ka-whale-workflow will remind us to save insights and distill skills from this session.
+<`;
+
 /** 同一 turn/stage 内最多自动提醒次数（防止模型反复漏调 whale_report 导致死循环）。 */
 export const MAX_WHALE_REMINDERS = 2;
 
@@ -2164,11 +2175,53 @@ export default {
           }
         }
       }
-      const decision = await next();
+      let decision = await next();
       if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
       if (agent === null || agent === undefined || typeof agent !== "object") return decision;
       if (liveFor(agent).enabled !== true) return decision;
       if (isBypassed(agent)) return decision;
+      // 首轮全流程介绍：仅新对话第一轮注入一次，且早于 TaskReconstruction 块。
+      const liveNow = liveFor(agent);
+      const skipSubagentNow = liveNow.includeSubagents !== true && isSubagent(agent);
+      const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
+      const hasRealUserMessageNow = Array.isArray(payload?.messages)
+        ? payload.messages.some((message) => isUserMessage(message))
+        : false;
+      const hasPriorUserMessage =
+        agent.session !== undefined &&
+        agent.session !== null &&
+        Array.isArray(agent.session.events) &&
+        agent.session.events.some(
+          (event) => event !== null && typeof event === "object" && event.type === "user/message",
+        );
+      const isNewConversation = !hasPriorUserMessage && turn === 1 && hasRealUserMessageNow;
+      if (
+        isNewConversation &&
+        liveNow.enabled === true &&
+        !skipSubagentNow &&
+        !hasInjectedBefore(agent, "overview")
+      ) {
+        let overviewMessage;
+        try {
+          overviewMessage = createUserMessage({
+            content: [{ type: "text", text: FIRST_ROUND_OVERVIEW }],
+            source: { kind: "plugin", plugin: "ka-whale-workflow", form: "overview" },
+          });
+        } catch (error) {
+          ctx.logger.warn(
+            `[ka-whale-workflow] 构造首轮介绍消息失败：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        if (overviewMessage !== undefined) {
+          reportRoundDisplay(agent, FIRST_ROUND_OVERVIEW, "首轮介绍");
+          decision = {
+            ...decision,
+            messages: Array.isArray(decision.messages)
+              ? [...decision.messages, overviewMessage]
+              : decision.messages,
+          };
+        }
+      }
       const stage = stageOfAgent(agent);
       const form =
         stage === "reconstruction"
@@ -2177,7 +2230,6 @@ export default {
             ? "classification"
             : null;
       if (form === null) return decision;
-      const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
       if (hasInjectedInTurn(agent, form, turn)) return decision;
       const title =
         stage === "reconstruction"

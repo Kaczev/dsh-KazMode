@@ -6,6 +6,7 @@ import plugin, {
   MAX_WHALE_REMINDERS,
   RECONSTRUCTION_PROMPT,
   CLASSIFICATION_PROMPT,
+  FIRST_ROUND_OVERVIEW,
   whaleReportReminderText,
   stageOf,
   setStage,
@@ -46,6 +47,9 @@ check("重构八工具默认清单", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 check("重构 prompt 含终态句", RECONSTRUCTION_PROMPT.includes("Call whale_report before ending your turn"));
 check("分类 prompt 含终态句", CLASSIFICATION_PROMPT.includes("Call whale_report before ending your turn"));
+check("首轮介绍常量已导出且非空", typeof FIRST_ROUND_OVERVIEW === "string" && FIRST_ROUND_OVERVIEW.trim().length > 0);
+check("首轮介绍覆盖三段流程", FIRST_ROUND_OVERVIEW.includes("Task reconstruction") && FIRST_ROUND_OVERVIEW.includes("Task classification") && FIRST_ROUND_OVERVIEW.includes("whale_report"));
+check("首轮介绍长度合理", FIRST_ROUND_OVERVIEW.length < 800);
 check("提醒上限为正", MAX_WHALE_REMINDERS >= 1);
 check("重构提醒文本含 whale_report", typeof whaleReportReminderText("reconstruction") === "string" && whaleReportReminderText("reconstruction").includes("whale_report"));
 check("分类提醒文本含 whale_report", typeof whaleReportReminderText("classification") === "string" && whaleReportReminderText("classification").includes("whale_report"));
