@@ -34,7 +34,14 @@ import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
-import { DEFAULT_RECONSTRUCTION_TOOLS, reviewGuidanceText, toolCallable } from "kaz-shared";
+import {
+  DEFAULT_RECONSTRUCTION_TOOLS,
+  reviewGuidanceText,
+  toolCallable,
+  skillLifecycleCallable,
+  skillReviewGuidanceText,
+  SKILL_BOUNDARY_MAX_CHANGES,
+} from "kaz-shared";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -102,7 +109,7 @@ Task reconstruction is complete, but the turn ended before calling whale_report.
 }
 
 /** 任务完成 / plan-goal 结束时的紧凑复盘指引（方向1）：语义/文本已解耦到 kaz-shared。 */
-export { reviewGuidanceText };
+export { reviewGuidanceText, skillReviewGuidanceText };
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -111,6 +118,10 @@ const SETTINGS_SCHEMA = z.object({
   includeSubagents: z.boolean().default(false),
   /** 任务重构工具清单（配置面板代码框；白名单之上的过滤器）。 */
   reconstructionTools: z.array(z.string()).default([...DEFAULT_RECONSTRUCTION_TOOLS]),
+  /** 自主 skill 管理总开关；关闭后回到一阶段“按需自升级”。 */
+  skillAutonomyEnabled: z.boolean().default(true),
+  /** 每个安全边界允许的技能变更数上限（v2.0 硬上限为 1，设置值会被钳制到 1）。 */
+  skillAutonomyMaxChangesPerBoundary: z.number().min(1).default(1),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
@@ -118,6 +129,8 @@ export const DEFAULT_SECTION = {
   enabled: true,
   includeSubagents: false,
   reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
+  skillAutonomyEnabled: true,
+  skillAutonomyMaxChangesPerBoundary: 1,
 };
 
 // ---------------------------------------------------------------------------
@@ -162,10 +175,17 @@ function normalizeToolList(value) {
 function normalizeConfig(raw) {
   const value = raw && typeof raw === "object" ? raw : {};
   const tools = normalizeToolList(value.reconstructionTools);
+  const rawMaxChanges = value.skillAutonomyMaxChangesPerBoundary;
+  const maxChanges =
+    Number.isInteger(rawMaxChanges) && rawMaxChanges >= 1
+      ? Math.min(rawMaxChanges, SKILL_BOUNDARY_MAX_CHANGES)
+      : SKILL_BOUNDARY_MAX_CHANGES;
   return {
     enabled: value.enabled !== false,
     includeSubagents: value.includeSubagents === true,
     reconstructionTools: tools.length > 0 ? tools : [...DEFAULT_RECONSTRUCTION_TOOLS],
+    skillAutonomyEnabled: value.skillAutonomyEnabled !== false,
+    skillAutonomyMaxChangesPerBoundary: maxChanges,
   };
 }
 
@@ -547,9 +567,15 @@ export default {
     function stageOfAgent(agent) {
       return stageOf(agent, stageStore);
     }
-    /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。 */
+    /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
+     *  进入 reconstruction = 新逻辑任务运行开始，递增 [kaz-memory Review] 的 taskRunId。 */
     function setStageAgent(agent, stage) {
-      return setStage(agent, stage, stageStore);
+      const changed = setStage(agent, stage, stageStore);
+      if (changed === true && stage === "reconstruction") {
+        const sessionId = sessionIdOf(agent);
+        if (typeof sessionId === "string" && sessionId.length > 0) beginReviewTaskRun(sessionId);
+      }
+      return changed;
     }
 
     /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
@@ -591,6 +617,18 @@ export default {
     /** memory_save 当前环境是否可调用（可用性判断已抽到 kaz-shared）。 */
     function memorySaveCallable(agent) {
       return toolCallable({ kazMode: ctx.get("kazMode"), tools: ctx.get("tools") }, agent, "memory_save");
+    }
+
+    /** 生效的自主 skill 管理配置（kazMode 面板优先；缺失时按默认开、每边界 1 个）。 */
+    function skillAutonomyFor(agent) {
+      const current = liveFor(agent);
+      const enabled = current?.skillAutonomyEnabled !== false;
+      const rawMax = current?.skillAutonomyMaxChangesPerBoundary;
+      const maxChanges =
+        Number.isInteger(rawMax) && rawMax >= 1
+          ? Math.min(rawMax, SKILL_BOUNDARY_MAX_CHANGES)
+          : SKILL_BOUNDARY_MAX_CHANGES;
+      return { enabled, maxChanges };
     }
 
     /** ka-whale-workflow 配置面板里的重构工具清单（白名单之上的过滤器）。 */
@@ -816,11 +854,38 @@ export default {
     const manualBypassSessions = new Set();
     /** 每个 session 在当前 turn/stage 已自动提醒过的次数（防止 steer 死循环）。 */
     const turnReminderCounts = new Map();
-    /** 每 session 已注入过的复盘类型（normal/plan/goal），避免重复注入。 */
-    const reviewInjected = new Map();
+    /** [kaz-memory Review] task-run 状态：每 session { kinds, taskRunId, injectedRunId }。
+     *  kinds = session 级“每 kind 最多一次”；taskRunId = 逻辑任务运行标识；
+     *  injectedRunId = 上次注入所属的 taskRunId（同一任务运行最多注入一次复盘）。 */
+    const reviewRunState = new Map();
+    /** 技能自省（skill-review）每 session 已注入类型（normal/plan/goal），独立去重。 */
+    const skillReviewInjected = new Map();
+    /** 技能自省用的 plan/goal 激活状态观察（与 memory review 相互独立）。 */
+    const skillLastPlanActive = new Map();
+    const skillLastGoalActive = new Map();
     /** 每 session 上一次观察到的 plan/goal 激活状态（用于检测结束节点）。 */
     const lastPlanActive = new Map();
     const lastGoalActive = new Map();
+
+    /** 进入新的逻辑任务运行：进入 reconstruction 或新 plan/goal 激活时递增 taskRunId。 */
+    function beginReviewTaskRun(sessionId) {
+      let state = reviewRunState.get(sessionId);
+      if (state === undefined) {
+        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
+      }
+      state.taskRunId += 1;
+      reviewRunState.set(sessionId, state);
+    }
+
+    /** 读取（惰性创建）[kaz-memory Review] 运行状态。 */
+    function reviewRunStateOf(sessionId) {
+      let state = reviewRunState.get(sessionId);
+      if (state === undefined) {
+        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
+        reviewRunState.set(sessionId, state);
+      }
+      return state;
+    }
 
     /** 当前会话是否处于命令旁路。 */
     function isBypassed(agent) {
@@ -979,12 +1044,17 @@ export default {
       const prevGoal = lastGoalActive.get(sessionId);
       lastPlanActive.set(sessionId, planActive);
       lastGoalActive.set(sessionId, goalActive);
+      // 新 plan/goal 激活 = 新的逻辑任务运行（例如 /plan、/goal 或分类后启动模式）。
+      if (prevPlan === false && planActive === true) beginReviewTaskRun(sessionId);
+      if (prevGoal === false && goalActive === true) beginReviewTaskRun(sessionId);
 
       const inject = (kind) => {
         if (memorySaveCallable(agent) !== true) return false;
-        const injected = reviewInjected.get(sessionId);
-        const set = injected instanceof Set ? injected : new Set();
-        if (set.has(kind)) return false;
+        const state = reviewRunStateOf(sessionId);
+        // session 级：每种 kind（normal/plan/goal）在整个 session 最多注入一次。
+        if (state.kinds.has(kind)) return false;
+        // task-run 级：同一个逻辑任务运行内最多注入一次复盘，先到边界获胜。
+        if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
         const text = reviewGuidanceText(kind);
         let message;
         try {
@@ -997,8 +1067,9 @@ export default {
           return false;
         }
         agent.steer(message);
-        set.add(kind);
-        reviewInjected.set(sessionId, set);
+        state.kinds.add(kind);
+        state.injectedRunId = state.taskRunId;
+        reviewRunState.set(sessionId, state);
         reportRoundDisplay(agent, text, "复盘指引");
         return true;
       };
@@ -1016,6 +1087,74 @@ export default {
       // Normal 任务完成：done 且当前无 plan/goal 激活（每个 session 只注入一次 normal）。
       if (!planActive && !goalActive) {
         inject("normal");
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // 二阶段技能自省（skill-review）：与 [kaz-memory Review] 同一批安全边界，
+    // 但使用独立 form、独立 per-session per-kind 去重、独立可用性守卫；
+    // 受 skillAutonomyEnabled 开关控制，且仅当技能闭环基础工具可用时注入。
+    // -----------------------------------------------------------------------
+    ctx.on("agent/turn-stopping", ({ agent, signal }) => {
+      if (agent === null || agent === undefined || typeof agent !== "object") return;
+      if (signal?.aborted === true) return;
+      if (liveFor(agent).enabled !== true) return;
+      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
+      if (isBypassed(agent)) return;
+      const stage = stageOfAgent(agent);
+      if (stage !== "done") return;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return;
+      const autonomy = skillAutonomyFor(agent);
+      if (autonomy.enabled !== true) return;
+      if (
+        skillLifecycleCallable(
+          { kazMode: ctx.get("kazMode"), tools: ctx.get("tools") },
+          agent,
+        ) !== true
+      ) {
+        return;
+      }
+      const planActive = planModeActiveOf(agent);
+      const goalActive = goalModeActive(agent);
+      const prevPlan = skillLastPlanActive.get(sessionId);
+      const prevGoal = skillLastGoalActive.get(sessionId);
+      skillLastPlanActive.set(sessionId, planActive);
+      skillLastGoalActive.set(sessionId, goalActive);
+
+      const injectSkill = (kind) => {
+        const injected = skillReviewInjected.get(sessionId);
+        const kinds = injected instanceof Set ? injected : new Set();
+        if (kinds.has(kind)) return false;
+        const text = skillReviewGuidanceText(kind);
+        let message;
+        try {
+          message = createUserMessage({
+            content: [{ type: "text", text }],
+            source: { kind: "plugin", plugin: "ka-whale-workflow", form: "skill-review" },
+          });
+        } catch (error) {
+          ctx.logger.warn(`[ka-whale-workflow] 构造技能自省指引消息失败：${error instanceof Error ? error.message : String(error)}`);
+          return false;
+        }
+        agent.steer(message);
+        kinds.add(kind);
+        skillReviewInjected.set(sessionId, kinds);
+        reportRoundDisplay(agent, text, "技能自省");
+        return true;
+      };
+
+      // 与 memory review 相同的边界判定：Plan 结束 / Goal 结束 / Normal 完成。
+      if (prevPlan === true && planActive === false) {
+        injectSkill("plan");
+        return;
+      }
+      if (prevGoal === true && goalActive === false) {
+        injectSkill("goal");
+        return;
+      }
+      if (!planActive && !goalActive) {
+        injectSkill("normal");
       }
     });
 

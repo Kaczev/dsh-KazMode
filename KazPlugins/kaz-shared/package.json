@@ -14,7 +14,8 @@
     "lib/tool-lists.js",
     "lib/tool-plugin-catalog.js",
     "lib/tool-auto-on.js",
-    "lib/review-guidance.js"
+    "lib/review-guidance.js",
+    "lib/skill-guidance.js"
   ],
   "license": "MIT"
 }

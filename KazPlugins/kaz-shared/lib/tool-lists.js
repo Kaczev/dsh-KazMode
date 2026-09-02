@@ -309,3 +309,12 @@ export {
   reviewGuidanceText,
   toolCallable,
 } from "./review-guidance.js";
+
+/** 二阶段 技能自省：常量 + 文本 + 技能闭环可用性判断（见 skill-guidance.js）。 */
+export {
+  SKILL_BOUNDARY_MAX_CHANGES,
+  SKILL_EVIDENCE_MIN,
+  SKILL_LIFECYCLE_TOOLS,
+  skillReviewGuidanceText,
+  skillLifecycleCallable,
+} from "./skill-guidance.js";
