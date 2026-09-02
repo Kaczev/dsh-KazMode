@@ -8,6 +8,7 @@
     ".": {
       "default": "./lib/tool-lists.js"
     },
+    "./lib/safe-json-file.js": "./lib/safe-json-file.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -17,7 +18,9 @@
     "lib/review-guidance.js",
     "lib/skill-guidance.js",
     "lib/task-tool-selection.js",
-    "lib/agent-managed-tools.js"
+    "lib/agent-managed-tools.js",
+    "lib/skill-lifecycle.js",
+    "lib/safe-json-file.js"
   ],
   "license": "MIT"
 }

@@ -194,6 +194,11 @@ window.__ModuleLoader__.load({
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不进入鲸鱼工作流）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走鲸鱼工作流；默认关）" },
 					{ key: "reconstructionTools", kind: "codebox", label: "reconstructionTools（任务重构工具，逗号分隔）" },
+					{ key: "skillAutoLifecycleEnabled", kind: "boolean", label: "skillAutoLifecycleEnabled（Skill 全自动生命周期总开关；默认开）" },
+					{ key: "skillLifecycleUnusedDays", kind: "number", min: 1, step: 1, label: "skillLifecycleUnusedDays（未用多少天进入 retire-pending；默认 60）" },
+					{ key: "skillLifecyclePendingDays", kind: "number", min: 1, step: 1, label: "skillLifecyclePendingDays（retire-pending 宽限天数；默认 7）" },
+					{ key: "skillLifecycleAuditIntervalHours", kind: "number", min: 1, step: 1, label: "skillLifecycleAuditIntervalHours（后台周期审计小时数；默认 24）" },
+					{ key: "skillLifecycleMaxAutoActions", kind: "number", min: 1, max: 1, step: 1, label: "skillLifecycleMaxAutoActions（每周期自动动作数；恒钳制为 1）" },
 				],
 			},
 			{

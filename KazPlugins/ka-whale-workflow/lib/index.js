@@ -46,8 +46,16 @@ import {
   ENABLE_TOOL,
   normalizeOptionalTools,
   compactOptionalToolDirectory,
+  AGENT_MANAGED_STORAGE_FILE,
+  normalizeAgentManagedRegistry,
+  normalizeSkillLifecycle,
+  auditSkillLifecycle,
+  projectRegistryFromLifecycle,
+  transitionAllowed,
+  skillKeyOf,
 } from "kaz-shared";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readJsonFileSafe, writeJsonFileSafe } from "kaz-shared/lib/safe-json-file.js";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
@@ -55,6 +63,22 @@ export { DEFAULT_RECONSTRUCTION_TOOLS };
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
+
+/** 终案 E：lifecycle 意图源 / 机器审计 / agent-managed registry 文件（DSH_HOME/storages）。 */
+const LIFECYCLE_FILE_NAME = "kaz-skill-lifecycle.json";
+const LIFECYCLE_AUDIT_FILE_NAME = "kaz-skill-lifecycle-audit.jsonl";
+
+function defaultLifecycleFile() {
+  return join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", LIFECYCLE_FILE_NAME);
+}
+
+function defaultLifecycleAuditFile() {
+  return join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", LIFECYCLE_AUDIT_FILE_NAME);
+}
+
+function defaultAgentManagedRegistryFile() {
+  return join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", AGENT_MANAGED_STORAGE_FILE);
+}
 
 /** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类）。 */
 export const WHALE_REPORT_TOOL = "whale_report";
@@ -139,6 +163,12 @@ const SETTINGS_SCHEMA = z.object({
   skillAutonomyMaxChangesPerBoundary: z.number().min(1).default(1),
   /** 私有技能根目录；空串时回退到 DSH_HOME/profiles/web/KazPrivatePlugins。 */
   skillPrivateRoot: z.string().default(""),
+  /** 终案 E：全自动 Skill 生命周期（Kaz 面板总开关与参数）。 */
+  skillAutoLifecycleEnabled: z.boolean().default(true),
+  skillLifecycleUnusedDays: z.number().min(1).default(60),
+  skillLifecyclePendingDays: z.number().min(1).default(7),
+  skillLifecycleAuditIntervalHours: z.number().min(1).default(24),
+  skillLifecycleMaxAutoActions: z.number().min(1).default(1),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
@@ -150,6 +180,11 @@ export const DEFAULT_SECTION = {
   skillAutonomyEnabled: true,
   skillAutonomyMaxChangesPerBoundary: 1,
   skillPrivateRoot: "",
+  skillAutoLifecycleEnabled: true,
+  skillLifecycleUnusedDays: 60,
+  skillLifecyclePendingDays: 7,
+  skillLifecycleAuditIntervalHours: 24,
+  skillLifecycleMaxAutoActions: 1,
 };
 
 // ---------------------------------------------------------------------------
@@ -199,6 +234,8 @@ function normalizeConfig(raw) {
     Number.isInteger(rawMaxChanges) && rawMaxChanges >= 1
       ? Math.min(rawMaxChanges, SKILL_BOUNDARY_MAX_CHANGES)
       : SKILL_BOUNDARY_MAX_CHANGES;
+  const intDefault = (rawValue, fallback) =>
+    Number.isInteger(rawValue) && rawValue >= 1 ? rawValue : fallback;
   return {
     enabled: value.enabled !== false,
     includeSubagents: value.includeSubagents === true,
@@ -210,7 +247,104 @@ function normalizeConfig(raw) {
       typeof value.skillPrivateRoot === "string" && value.skillPrivateRoot.trim().length > 0
         ? value.skillPrivateRoot.trim()
         : "",
+    // 终案 E：全自动 Skill 生命周期配置。
+    skillAutoLifecycleEnabled: value.skillAutoLifecycleEnabled !== false,
+    skillLifecycleUnusedDays: intDefault(value.skillLifecycleUnusedDays, 60),
+    skillLifecyclePendingDays: intDefault(value.skillLifecyclePendingDays, 7),
+    skillLifecycleAuditIntervalHours: intDefault(value.skillLifecycleAuditIntervalHours, 24),
+    skillLifecycleMaxAutoActions: 1, // 硬性护栏：每周期最多 1 个自动动作
   };
+}
+
+/**
+ * tools/result 埋点过滤（纯函数）：只统计顶层调用（exec.parent === undefined）。
+ * 返回 { name, isError, agentId, subagent }；不满足条件返回 null。
+ */
+export function skillToolUseEvent(exec, result) {
+  if (exec === null || exec === undefined || typeof exec !== "object") return null;
+  if (exec.parent !== undefined && exec.parent !== null) return null;
+  if (typeof exec.name !== "string" || exec.name.trim().length === 0) return null;
+  if (result === null || result === undefined || typeof result !== "object") return null;
+  const agent = exec.agent;
+  return {
+    name: exec.name.trim(),
+    isError: result.isError === true,
+    agentId:
+      typeof agent?.session?.id === "string"
+        ? agent.session.id
+        : typeof agent?.id === "string"
+          ? agent.id
+          : null,
+    subagent: typeof agent?.options?.subagentDepth === "number" && agent.options.subagentDepth > 0,
+  };
+}
+
+/**
+ * 把一次顶层工具结果并入单条 lifecycle 记录（纯函数，返回新记录，不改入参）。
+ * 真实使用会使 retire-pending/retired 复活为 active；active/update-needed 保持原状态。
+ */
+export function applySkillToolUse(record, result, nowIso = new Date().toISOString()) {
+  if (record === null || record === undefined || typeof record !== "object") return null;
+  if (result === null || result === undefined || typeof result !== "object") return null;
+  const isError = result.isError === true;
+  const wasNonActive = record.status === "retire-pending" || record.status === "retired";
+  const status = wasNonActive ? "active" : record.status;
+  const now = typeof nowIso === "string" && nowIso.length > 0 ? nowIso : new Date().toISOString();
+  return {
+    ...record,
+    status,
+    statusChangedAt: wasNonActive ? now : record.statusChangedAt,
+    lastUsedAt: now,
+    lastSuccessfulAt: isError ? record.lastSuccessfulAt : now,
+    lastErrorAt: isError ? now : record.lastErrorAt,
+    usageCount: (Number.isInteger(record.usageCount) ? record.usageCount : 0) + 1,
+    failureCount: (Number.isInteger(record.failureCount) ? record.failureCount : 0) + (isError ? 1 : 0),
+    consecutiveFailures: isError
+      ? (Number.isInteger(record.consecutiveFailures) ? record.consecutiveFailures : 0) + 1
+      : 0,
+    retire:
+      wasNonActive
+        ? { reason: null, pendingAt: null, confirmedAt: null }
+        : record.retire ?? { reason: null, pendingAt: null, confirmedAt: null },
+  };
+}
+
+/** 由 registry 条目构造一条新的 lifecycle 记录（active，createdAt=firstSeenAt=now）。 */
+export function createLifecycleRecord(plugin, tool, nowIso = new Date().toISOString()) {
+  const now = typeof nowIso === "string" && nowIso.length > 0 ? nowIso : new Date().toISOString();
+  return {
+    plugin: typeof plugin === "string" ? plugin.trim() : "",
+    tool: typeof tool === "string" ? tool.trim() : "",
+    version: "0.0.0",
+    status: "active",
+    statusChangedAt: now,
+    createdAt: now,
+    firstSeenAt: now,
+    lastUsedAt: null,
+    lastSuccessfulAt: null,
+    lastErrorAt: null,
+    usageCount: 0,
+    failureCount: 0,
+    consecutiveFailures: 0,
+    probe: { lastRunAt: null, lastResult: "not-run", failCount: 0, passCount: 0 },
+    retire: { reason: null, pendingAt: null, confirmedAt: null },
+    update: { state: "none", evidence: [], patchRef: null, stagedVersion: null },
+    manifestRel: "",
+    switchRel: "",
+    audit: { lastAction: null, lastActionAt: null, actionCount: 0 },
+    autoFixPolicy: "never",
+  };
+}
+
+/** 由 audit 建议动作生成给 [skill Review] 的英文摘要；无动作返回空串。 */
+export function lifecycleSummaryText(actions) {
+  const list = Array.isArray(actions) ? actions : [];
+  const autoRetired = list.filter((a) => a?.type === "retire").length;
+  const pending = list.filter((a) => a?.type === "retire-pending").length;
+  const needsUpdate = list.filter((a) => a?.type === "update-needed" || a?.type === "commit-update").length;
+  const reconcile = list.filter((a) => a?.type === "reconcile-registry" || a?.type === "bootstrap-active").length;
+  if (list.length === 0) return "";
+  return `Lifecycle summary: auto-retired: ${autoRetired}; retire-pending: ${pending}; update-needed: ${needsUpdate}; reconcile/bootstrap: ${reconcile}.`;
 }
 
 /** 是否为会话型子代理（含 workflow / ralph 派生的子会话）。 */
@@ -618,7 +752,7 @@ function toolNamesOf(tools) {
 
 export default {
   name: "ka-whale-workflow",
-  inject: ["systemPrompt", "tools"],
+  inject: ["systemPrompt", "tools", "timer"],
   apply(ctx, config = {}) {
     const entry = normalizeConfig(config);
     let source = () => entry;
@@ -642,6 +776,85 @@ export default {
         ? config.stageStore.trim()
         : defaultStageFile(),
     );
+
+    // -----------------------------------------------------------------------
+    // 终案 E：lifecycle / registry / audit 文件路径（config 覆盖仅供离线探针）。
+    // -----------------------------------------------------------------------
+    const lifecycleFile =
+      typeof config.lifecycleFile === "string" && config.lifecycleFile.trim().length > 0
+        ? config.lifecycleFile.trim()
+        : defaultLifecycleFile();
+    const lifecycleAuditFile =
+      typeof config.lifecycleAuditFile === "string" && config.lifecycleAuditFile.trim().length > 0
+        ? config.lifecycleAuditFile.trim()
+        : defaultLifecycleAuditFile();
+    const agentManagedRegistryFile =
+      typeof config.agentManagedRegistryFile === "string" &&
+      config.agentManagedRegistryFile.trim().length > 0
+        ? config.agentManagedRegistryFile.trim()
+        : defaultAgentManagedRegistryFile();
+    const lifecycleBackupDir =
+      typeof config.lifecycleBackupDir === "string" && config.lifecycleBackupDir.trim().length > 0
+        ? config.lifecycleBackupDir.trim()
+        : dirname(lifecycleFile);
+
+    /** 读取并归一化 lifecycle JSON；缺失/损坏 → { ok:false }（feature off）。 */
+    function readLifecycleData() {
+      const fileResult = readJsonFileSafe(lifecycleFile);
+      return normalizeSkillLifecycle(fileResult.ok === true ? fileResult.data : null);
+    }
+
+    /** 读取 agent-managed registry（缺失/损坏 → 空 registry）。 */
+    function readRegistryData() {
+      const fileResult = readJsonFileSafe(agentManagedRegistryFile);
+      return normalizeAgentManagedRegistry(fileResult.ok === true ? fileResult.data : null);
+    }
+
+    /** 内存 lifecycle 副本（埋点先改内存，debounce 落盘，卸载前 flush）。 */
+    const lifecycleMemory = {
+      lifecycle: null,
+      dirty: false,
+      debounced: null,
+    };
+
+    function loadLifecycleMemory() {
+      const result = readLifecycleData();
+      lifecycleMemory.lifecycle = result.ok === true ? result.lifecycle : null;
+      lifecycleMemory.dirty = false;
+      return lifecycleMemory.lifecycle;
+    }
+
+    function persistLifecycleNow() {
+      if (lifecycleMemory.lifecycle === null) return false;
+      lifecycleMemory.lifecycle.updatedAt = new Date().toISOString();
+      const write = writeJsonFileSafe(lifecycleFile, lifecycleMemory.lifecycle, {
+        backupDir: lifecycleBackupDir,
+      });
+      if (write.ok === true) {
+        lifecycleMemory.dirty = false;
+        return true;
+      }
+      ctx.logger?.warn?.(
+        `[ka-whale-workflow] lifecycle 落盘失败：${write.error ?? "unknown"} (${lifecycleFile})`,
+      );
+      return false;
+    }
+
+    function scheduleLifecyclePersist() {
+      if (lifecycleMemory.lifecycle === null) return;
+      lifecycleMemory.dirty = true;
+      if (typeof ctx.debounce !== "function") {
+        persistLifecycleNow();
+        return;
+      }
+      if (lifecycleMemory.debounced !== null) return; // 已有待落盘任务
+      const debounced = ctx.debounce(() => {
+        lifecycleMemory.debounced = null;
+        if (lifecycleMemory.dirty) persistLifecycleNow();
+      }, 1500);
+      lifecycleMemory.debounced = debounced;
+      debounced();
+    }
     /** 当前会话的鲸鱼工作流阶段（JSON 存储优先，旧会话事件只读兜底）。 */
     function stageOfAgent(agent) {
       return stageOf(agent, stageStore);
@@ -774,6 +987,20 @@ export default {
       return { enabled, maxChanges };
     }
 
+    /** 终案 E：全自动 Skill 生命周期生效配置（总开关 + 阈值；max 恒钳制到 1）。 */
+    function skillLifecycleFor(agent) {
+      const current = liveFor(agent);
+      const intDefault = (rawValue, fallback) =>
+        Number.isInteger(rawValue) && rawValue >= 1 ? rawValue : fallback;
+      return {
+        enabled: current?.enabled !== false && current?.skillAutoLifecycleEnabled !== false,
+        unusedDays: intDefault(current?.skillLifecycleUnusedDays, 60),
+        pendingDays: intDefault(current?.skillLifecyclePendingDays, 7),
+        auditIntervalHours: intDefault(current?.skillLifecycleAuditIntervalHours, 24),
+        maxAutoActions: 1,
+      };
+    }
+
     /** 私有技能根目录：配置 skillPrivateRoot 优先；空时回退到 DSH_HOME/profiles/web/KazPrivatePlugins。 */
     function skillPrivateRootOf(agent) {
       const configured = liveFor(agent)?.skillPrivateRoot;
@@ -789,6 +1016,311 @@ export default {
     /** 私有过程文档目录：KazPrivatePlugins/process。 */
     function skillProcessFolderOf(agent) {
       return join(skillPrivateRootOf(agent), SKILL_PROCESS_DIR_NAME);
+    }
+
+    // -----------------------------------------------------------------------
+    // 终案 E：lifecycle 执行器（内部，不注册任何用户可见工具）。
+    // -----------------------------------------------------------------------
+
+    /** 追加一行机器审计 JSONL（只追加，不覆盖）。 */
+    function appendLifecycleAudit(entry) {
+      try {
+        mkdirSync(dirname(lifecycleAuditFile), { recursive: true });
+        appendFileSync(lifecycleAuditFile, JSON.stringify(entry) + String.fromCharCode(10), "utf8");
+      } catch (error) {
+        ctx.logger?.warn?.(
+          `[ka-whale-workflow] lifecycle audit 追加失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    /** 依据 record 的 manifestRel/switchRel（相对 KazPrivatePlugins 根）解析绝对路径。 */
+    function lifecycleRelFile(agent, rel) {
+      if (typeof rel !== "string" || rel.trim().length === 0) return null;
+      return join(skillPrivateRootOf(agent), rel.trim());
+    }
+
+    /** 写 lifecycle 文件（安全 JSON 写：无 BOM + 备份 + temp rename）。 */
+    function writeLifecycleFile(lifecycle) {
+      lifecycle.updatedAt = new Date().toISOString();
+      return writeJsonFileSafe(lifecycleFile, lifecycle, { backupDir: lifecycleBackupDir });
+    }
+
+    /** 写 registry 投影文件（不改 schema：version + plugins.agentManaged/tools）。 */
+    function writeRegistryFile(registry) {
+      return writeJsonFileSafe(agentManagedRegistryFile, registry, { backupDir: lifecycleBackupDir });
+    }
+
+    /** 写技能本地 switch/manifest（同步执行硬开关与记录）。 */
+    function writeSkillSideEffect(agent, rel, kind, payload) {
+      if (rel === null) return null;
+      const file = lifecycleRelFile(agent, rel);
+      if (file === null) return null;
+      try {
+        if (kind === "switch") {
+          return writeJsonFileSafe(file, { enabled: payload.enabled === true }, { backupDir: lifecycleBackupDir });
+        }
+        if (kind === "manifest") {
+          const current = readJsonFileSafe(file);
+          const old = current.ok === true && current.data !== null && typeof current.data === "object" ? current.data : {};
+          return writeJsonFileSafe(
+            file,
+            { ...old, ...payload, version: payload.version ?? old.version ?? "0.0.0", status: payload.status ?? old.status ?? "active" },
+            { backupDir: lifecycleBackupDir },
+          );
+        }
+      } catch (error) {
+        ctx.logger?.warn?.(
+          `[ka-whale-workflow] 写技能本地 ${kind} 失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return null;
+    }
+
+    /**
+     * 应用单个审计动作（已先由 auditSkillLifecycle 产出；此处再校验状态机）。
+     * 返回 { ok, action, backups, note }；任何写失败 → ok:false（调用方记审计并停止本轮）。
+     */
+    function applyLifecycleAction(action, lifecycle, registry, agent, source, nowIso) {
+      const now = nowIso;
+      const nextLifecycle = JSON.parse(JSON.stringify(lifecycle));
+      const nextRegistry = JSON.parse(JSON.stringify(registry));
+      const backups = [];
+      const recordKey = action.key;
+      let oldRecord = nextLifecycle.skills[recordKey] ?? null;
+      let changedLifecycle = false;
+      let changedRegistry = false;
+      const sideEffects = [];
+
+      const setRecord = (record) => {
+        nextLifecycle.skills[recordKey] = record;
+        oldRecord = record;
+        changedLifecycle = true;
+        record.audit = {
+          lastAction: action.type,
+          lastActionAt: now,
+          actionCount: (Number.isInteger(record.audit?.actionCount) ? record.audit.actionCount : 0) + 1,
+        };
+      };
+
+      if (action.type === "bootstrap-active") {
+        const record = createLifecycleRecord(action.plugin, action.tool, now);
+        setRecord(record);
+      } else if (action.type === "retire-pending") {
+        if (oldRecord === null || !transitionAllowed(oldRecord.status, "retire-pending")) {
+          return { ok: false, action, backups, note: "retire-pending transition rejected" };
+        }
+        setRecord({
+          ...oldRecord,
+          status: "retire-pending",
+          statusChangedAt: now,
+          retire: { reason: action.reason ?? "idle", pendingAt: now, confirmedAt: null },
+        });
+      } else if (action.type === "retire") {
+        if (oldRecord === null || !transitionAllowed(oldRecord.status, "retired")) {
+          return { ok: false, action, backups, note: "retire transition rejected" };
+        }
+        setRecord({
+          ...oldRecord,
+          status: "retired",
+          statusChangedAt: now,
+          retire: {
+            ...oldRecord.retire,
+            reason: oldRecord.retire?.reason ?? action.reason ?? "idle",
+            confirmedAt: now,
+          },
+        });
+        sideEffects.push({ rel: oldRecord.switchRel, kind: "switch", payload: { enabled: false } });
+        sideEffects.push({ rel: oldRecord.manifestRel, kind: "manifest", payload: { status: "retired" } });
+      } else if (action.type === "reactivate") {
+        if (oldRecord === null || !transitionAllowed(oldRecord.status, "active")) {
+          return { ok: false, action, backups, note: "reactivate transition rejected" };
+        }
+        setRecord({
+          ...oldRecord,
+          status: "active",
+          statusChangedAt: now,
+          retire: { reason: null, pendingAt: null, confirmedAt: null },
+        });
+        sideEffects.push({ rel: oldRecord.switchRel, kind: "switch", payload: { enabled: true } });
+        sideEffects.push({ rel: oldRecord.manifestRel, kind: "manifest", payload: { status: "active" } });
+      } else if (action.type === "update-needed") {
+        if (oldRecord === null || !transitionAllowed(oldRecord.status, "update-needed")) {
+          return { ok: false, action, backups, note: "update-needed transition rejected" };
+        }
+        setRecord({
+          ...oldRecord,
+          status: "update-needed",
+          statusChangedAt: now,
+          update: { ...oldRecord.update, state: "needed" },
+        });
+      } else if (action.type === "commit-update") {
+        if (oldRecord === null || !transitionAllowed(oldRecord.status, "active")) {
+          return { ok: false, action, backups, note: "commit-update transition rejected" };
+        }
+        const stagedVersion =
+          typeof oldRecord.update?.stagedVersion === "string" && oldRecord.update.stagedVersion.length > 0
+            ? oldRecord.update.stagedVersion
+            : oldRecord.version;
+        setRecord({
+          ...oldRecord,
+          status: "active",
+          statusChangedAt: now,
+          version: stagedVersion,
+          update: { state: "none", evidence: [], patchRef: null, stagedVersion: null },
+        });
+        sideEffects.push({ rel: oldRecord.manifestRel, kind: "manifest", payload: { status: "active", version: stagedVersion } });
+      } else if (action.type === "reconcile-registry") {
+        changedLifecycle = false;
+        if (oldRecord === null) {
+          // registry 含但 lifecycle 缺的动作由 bootstrap-active 处理；此处不应发生。
+          return { ok: false, action, backups, note: "reconcile without lifecycle record" };
+        }
+      } else {
+        return { ok: false, action, backups, note: `unknown action type ${action.type}` };
+      }
+
+      // registry 投影：retire / reactivate / bootstrap / reconcile 都要求 registry 与意图一致。
+      const projected = projectRegistryFromLifecycle(nextLifecycle, registry);
+      const beforeRegistryJson = JSON.stringify(nextRegistry);
+      const afterRegistryJson = JSON.stringify(projected);
+      if (beforeRegistryJson !== afterRegistryJson) {
+        nextRegistry.plugins = projected.plugins;
+        nextRegistry.version = projected.version;
+        changedRegistry = true;
+      }
+
+      if (changedLifecycle) {
+        const write = writeLifecycleFile(nextLifecycle);
+        if (write.ok !== true) {
+          return { ok: false, action, backups, note: `lifecycle write failed: ${write.error ?? "unknown"}` };
+        }
+        if (write.backup !== null) backups.push(write.backup);
+      }
+      if (changedRegistry) {
+        const write = writeRegistryFile(nextRegistry);
+        if (write.ok !== true) {
+          return { ok: false, action, backups, note: `registry write failed: ${write.error ?? "unknown"}` };
+        }
+        if (write.backup !== null) backups.push(write.backup);
+      }
+      for (const side of sideEffects) {
+        const write = writeSkillSideEffect(agent, side.rel, side.kind, side.payload);
+        if (write !== null && write.ok !== true) {
+          return { ok: false, action, backups, note: `skill ${side.kind} write failed: ${write.error ?? "unknown"}` };
+        }
+        if (write !== null && write.backup !== null) backups.push(write.backup);
+      }
+      return { ok: true, action, backups, note: action.reason ?? action.type };
+    }
+
+    /** 终案 E 审计入口：dryRun 只返回建议；真实执行 ≤ maxAutoActions（恒 1）。 */
+    let lifecycleBusy = false;
+    function runLifecycleAudit({ source = "manual", agent = null, dryRun = false } = {}) {
+      if (lifecycleBusy) {
+        return { ok: false, busy: true, dryRun, actions: [], suggested: [], executed: [] };
+      }
+      const cfg = skillLifecycleFor(agent);
+      if (cfg.enabled !== true) {
+        return { ok: false, disabled: true, dryRun, actions: [], suggested: [], executed: [] };
+      }
+      lifecycleBusy = true;
+      try {
+        const lifecycleResult = readLifecycleData();
+        if (lifecycleResult.ok !== true) {
+          return { ok: false, featureOff: true, dryRun, actions: [], suggested: [], executed: [] };
+        }
+        const lifecycle = lifecycleResult.lifecycle;
+        const registry = readRegistryData();
+        const nowIso = new Date().toISOString();
+        const patchExists = (key) => {
+          const record = lifecycle.skills[key];
+          const ref = record?.update?.patchRef;
+          if (typeof ref !== "string" || ref.trim().length === 0) return false;
+          const candidate = join(skillPrivateRootOf(agent), ref.trim());
+          return existsSync(candidate);
+        };
+        const suggested = auditSkillLifecycle(lifecycle, registry, nowIso, { patchExists });
+        if (dryRun) {
+          return { ok: true, dryRun: true, actions: suggested, suggested, executed: [] };
+        }
+        const chosen = suggested.slice(0, cfg.maxAutoActions);
+        const executed = [];
+        for (const action of chosen) {
+          const applied = applyLifecycleAction(action, lifecycle, registry, agent, source, nowIso);
+          if (applied.ok !== true) {
+            appendLifecycleAudit({
+              at: nowIso,
+              source,
+              action: action.type,
+              skillKey: action.key,
+              ok: false,
+              note: applied.note ?? "apply failed",
+              backups: applied.backups ?? [],
+              lifecycleFile,
+              registryFile: agentManagedRegistryFile,
+            });
+            return { ok: false, dryRun: false, actions: [action], suggested, executed, error: applied.note };
+          }
+          executed.push(action);
+          // 执行器直接写文件后，把内存副本重新同步（避免旧内存覆盖新状态）。
+          const synced = readLifecycleData();
+          if (synced.ok === true) {
+            lifecycleMemory.lifecycle = synced.lifecycle;
+            lifecycleMemory.dirty = false;
+          }
+          appendLifecycleAudit({
+            at: nowIso,
+            source,
+            action: action.type,
+            skillKey: action.key,
+            plugin: action.plugin,
+            tool: action.tool,
+            from: action.from,
+            to: action.to,
+            ok: true,
+            note: applied.note ?? "",
+            backups: applied.backups ?? [],
+            lifecycleFile,
+            registryFile: agentManagedRegistryFile,
+            rollback: applied.backups.length > 0 ? `Copy-Item '${applied.backups.join("', '")}' back to original paths` : "no backup created",
+          });
+        }
+        return { ok: true, dryRun: false, actions: chosen, suggested, executed };
+      } finally {
+        lifecycleBusy = false;
+      }
+    }
+
+    /** tools/result 埋点：只统计顶层调用、agent-managed/lifecycle 登记工具；内存更新 + debounce。 */
+    function recordToolUse(exec, result) {
+      const event = skillToolUseEvent(exec, result);
+      if (event === null) return false;
+      const cfg = skillLifecycleFor(exec?.agent);
+      if (cfg.enabled !== true) return false;
+      let lifecycle = lifecycleMemory.lifecycle;
+      if (lifecycle === null) {
+        lifecycle = loadLifecycleMemory();
+        if (lifecycle === null) return false;
+      }
+      const registry = readRegistryData();
+      let foundKey = null;
+      for (const [plugin, entry] of Object.entries(registry.plugins)) {
+        if (!entry.tools.includes(event.name)) continue;
+        const key = skillKeyOf(plugin, event.name);
+        if (key.length > 0 && Object.prototype.hasOwnProperty.call(lifecycle.skills, key)) {
+          foundKey = key;
+          break;
+        }
+      }
+      if (foundKey === null) return false;
+      const nowIso = new Date().toISOString();
+      const updated = applySkillToolUse(lifecycle.skills[foundKey], result, nowIso);
+      if (updated === null) return false;
+      lifecycle.skills[foundKey] = updated;
+      lifecycle.updatedAt = nowIso;
+      scheduleLifecyclePersist();
+      return true;
     }
 
     /** ka-whale-workflow 配置面板里的重构工具清单（白名单之上的过滤器）。 */
@@ -1143,6 +1675,12 @@ export default {
       stageOf: (agent) => stageOfAgent(agent),
       enabledFor: (agent) => liveFor(agent).enabled === true,
       taskToolStateOf: (agent) => taskToolStateOfAgent(agent),
+      // 终案 E：内部执行器入口（探针/定时器/边界共用；不是用户可见工具）。
+      runLifecycleAudit,
+      recordToolUse,
+      lifecycleFile,
+      lifecycleAuditFile,
+      agentManagedRegistryFile,
     };
     ctx.effect(() => {
       const disposeService = ctx.provide("kaWhaleWorkflow", kaWhaleWorkflowService);
@@ -1150,6 +1688,66 @@ export default {
         if (typeof disposeService === "function") disposeService();
       };
     }, "ka-whale-workflow: 发布 kaWhaleWorkflow 阶段服务");
+
+    // -----------------------------------------------------------------------
+    // 终案 E 运行时接线：tools/result 埋点 + 后台周期审计 + 启动 dry-run。
+    // 监听器内部都会再读总开关；timer 服务缺失时静默降级（离线探针兼容）。
+    // -----------------------------------------------------------------------
+    try {
+      const disposer = ctx.on("tools/result", (exec, result) => {
+        try {
+          recordToolUse(exec, result);
+        } catch (error) {
+          ctx.logger?.debug?.(
+            `[ka-whale-workflow] recordToolUse 失败：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      });
+      ctx.effect(() => () => {
+        try {
+          if (typeof disposer === "function") disposer();
+        } catch {
+          // ignore cleanup errors
+        }
+      }, "ka-whale-workflow: 释放 tools/result 埋点");
+    } catch (error) {
+      ctx.logger?.warn?.(
+        `[ka-whale-workflow] tools/result 监听注册失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const lifecycleIntervalHours = skillLifecycleFor(null).auditIntervalHours;
+    ctx.effect(() => {
+      if (typeof ctx.interval !== "function") return;
+      const dispose = ctx.interval(() => {
+        try {
+          runLifecycleAudit({ source: "timer", dryRun: false });
+        } catch (error) {
+          ctx.logger?.warn?.(
+            `[ka-whale-workflow] 周期生命周期审计失败：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }, Math.max(1, Number.isFinite(lifecycleIntervalHours) ? lifecycleIntervalHours : 24) * 3600000);
+      return () => {
+        try {
+          dispose();
+        } catch {
+          // ignore cleanup errors
+        }
+      };
+    }, "ka-whale-workflow: 终案 E 周期审计 timer");
+
+    if (typeof ctx.timeout === "function") {
+      ctx.timeout(() => {
+        try {
+          runLifecycleAudit({ source: "startup", dryRun: true });
+        } catch (error) {
+          ctx.logger?.debug?.(
+            `[ka-whale-workflow] 启动 dry-run 生命周期审计失败：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }, 5000);
+    }
 
     // -----------------------------------------------------------------------
     // 启动：真实用户消息被 inbox claim 后、assembly 之前进入对应阶段。
@@ -1435,6 +2033,22 @@ export default {
       skillLastPlanActive.set(sessionId, planActive);
       skillLastGoalActive.set(sessionId, goalActive);
 
+      // 终案 E：在 [skill Review] 注入前跑一次真实审计（每边界最多 1 个自动动作），
+      // 并把 lifecycle 摘要注入自省文本。
+      let lifecycleSummary = "";
+      if (skillLifecycleFor(agent).enabled === true) {
+        try {
+          const auditResult = runLifecycleAudit({ source: "boundary", agent, dryRun: false });
+          lifecycleSummary = lifecycleSummaryText(
+            Array.isArray(auditResult?.suggested) ? auditResult.suggested : [],
+          );
+        } catch (error) {
+          ctx.logger?.debug?.(
+            `[ka-whale-workflow] boundary lifecycle audit 失败：${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
       const injectSkill = (kind) => {
         const injected = skillReviewInjected.get(sessionId);
         const kinds = injected instanceof Set ? injected : new Set();
@@ -1443,6 +2057,7 @@ export default {
           kind,
           skillProcessFolderOf(agent),
           skillPrivateRootOf(agent),
+          lifecycleSummary,
         );
         let message;
         try {
@@ -1688,6 +2303,8 @@ export default {
 
     ctx.effect(() => () => {
       uninstallTools();
+      // 插件卸载前 flush lifecycle 内存脏数据（进程退出/热重载都尽量不丢埋点）。
+      if (lifecycleMemory.dirty) persistLifecycleNow();
     });
   },
 };

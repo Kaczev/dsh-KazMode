@@ -124,6 +124,11 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
     taskToolSelectionEnabled: true,
     skillPrivateRoot: "",
+    skillAutoLifecycleEnabled: true,
+    skillLifecycleUnusedDays: 60,
+    skillLifecyclePendingDays: 7,
+    skillLifecycleAuditIntervalHours: 24,
+    skillLifecycleMaxAutoActions: 1,
   },
   "create-plan": { enabled: false },
 };

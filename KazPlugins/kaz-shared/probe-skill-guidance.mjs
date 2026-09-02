@@ -34,9 +34,13 @@ check(
 const normalText = skillReviewGuidanceText();
 const planText = skillReviewGuidanceText("plan");
 const goalText = skillReviewGuidanceText("goal");
+const summaryText = skillReviewGuidanceText("normal", "", "", "Lifecycle summary: auto-retired: 1; retire-pending: 2; update-needed: 1.");
+const summaryEmptyText = skillReviewGuidanceText("normal", "", "", "");
 check("normal 文本含 [skill Review] 与完成语义", normalText.includes("[skill Review]") && normalText.includes("The task has completed."));
 check("plan 文本语义", planText.includes("[skill Review]") && planText.includes("The Plan has ended."));
 check("goal 文本语义", goalText.includes("[skill Review]") && goalText.includes("The Goal has ended."));
+check("summary 参数注入生命周期摘要", summaryText.includes("Lifecycle summary: auto-retired: 1; retire-pending: 2; update-needed: 1."));
+check("summary 为空时文本与无摘要一致（不出现 Lifecycle summary）", !summaryEmptyText.includes("Lifecycle summary") && summaryEmptyText === normalText);
 check("文本含证据门槛 ≥2", normalText.includes("at least 2 concrete evidence items"));
 check("文本含每边界 ≤1 变更", normalText.includes("at most 1 skill change"));
 check("文本禁批量/市场/通用 runner", normalText.includes("No batch extraction") && normalText.includes("no skill market") && normalText.includes("no generic skill runner"));

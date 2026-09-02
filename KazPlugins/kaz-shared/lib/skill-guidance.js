@@ -33,8 +33,9 @@ export const SKILL_LIFECYCLE_TOOLS = Object.freeze(["write", "edit", "pwsh", "sa
  * @param {"normal"|"plan"|"goal"} kind 安全边界场景
  * @param {string} [processFolder] 私有过程目录绝对路径（例如 .../KazPrivatePlugins/process）
  * @param {string} [pluginRoot] 私有插件根目录绝对路径（例如 .../KazPrivatePlugins）
+ * @param {string} [summary] 可选生命周期摘要（自动 Retire / 待确认 / 需更新）；为空时保持旧文案
  */
-export function skillReviewGuidanceText(kind = "normal", processFolder = "", pluginRoot = "") {
+export function skillReviewGuidanceText(kind = "normal", processFolder = "", pluginRoot = "", summary = "") {
   const label =
     kind === "plan"
       ? "The Plan has ended."
@@ -48,9 +49,12 @@ export function skillReviewGuidanceText(kind = "normal", processFolder = "", plu
     ? `write CANDIDATE.md under ${processFolder.trim()}/<candidate-name>/CANDIDATE.md (create the folder when missing), then implement the private plugin under ${pluginRoot.trim()}/<plugin>/ (package.json + lib/index.js + skills/<skill>/ + probe), add it as a file: dependency in the profile package.json and an insert in the profile cordis.patch.yml, register it in kaz-agent-managed-tools.json, and verify ALL probes before restart/versioning.`
     : `write CANDIDATE.md under the private Kaz process folder (KazPrivatePlugins/process/<skill-name>/CANDIDATE.md; create the folder when missing), then implement the private plugin under KazPrivatePlugins/<plugin>/ (package.json + lib/index.js + skills/<skill>/ + probe), add it as a file: dependency in the profile package.json and an insert in the profile cordis.patch.yml, register it in kaz-agent-managed-tools.json, and verify ALL probes before restart/versioning.`;
   const createLine = `- Create (one full skill lifecycle when justified): ${createTarget} Create is justified only when: the procedure can be encoded as an executable module + offline probe; AND it is not already covered by an active skill; AND it adds a tool/module an agent can actually call (or Kaczev explicitly asked for full implementation). Pure knowledge/runbook/config procedures: write memory only, do NOT create a CANDIDATE skill. CANDIDATE.md is process trace only and does NOT complete self-update; if you stop after CANDIDATE (e.g. implementation must wait for a later boundary), say explicitly "self-update is NOT complete yet" and keep a next-stage entry. CANDIDATE-only does not consume the at-most-1 skill-change budget; one Create = full lifecycle (CANDIDATE + implementation + probe + registration) in one boundary when justified.`;
+  const summaryText =
+    typeof summary === "string" && summary.trim().length > 0 ? summary.trim() : "";
+  const summaryLine = summaryText.length > 0 ? `${summaryText}\n` : "";
   return `[skill Review]
 >
-${label} If this run produced a reusable, low-risk, offline-verifiable procedure with at least ${SKILL_EVIDENCE_MIN} concrete evidence items (memory id, file path, error record, or repeated action), we may run at most ${SKILL_BOUNDARY_MAX_CHANGES} skill change at this safe boundary:
+${summaryLine}${label} If this run produced a reusable, low-risk, offline-verifiable procedure with at least ${SKILL_EVIDENCE_MIN} concrete evidence items (memory id, file path, error record, or repeated action), we may run at most ${SKILL_BOUNDARY_MAX_CHANGES} skill change at this safe boundary:
 ${createLine}
 - Update: record the observed defect/fix evidence and draft the version bump; do not change switch/version silently.
 - Retire: only if a documented trigger exists (superseded, broken after repair attempts, or long unused).

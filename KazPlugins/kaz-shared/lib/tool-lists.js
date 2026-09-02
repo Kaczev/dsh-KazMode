@@ -344,3 +344,24 @@ export {
   agentManagedRegistryHasPlugin,
   mergeAgentManagedToolsIntoSurface,
 } from "./agent-managed-tools.js";
+
+/** 终案 E 全自动 Skill 生命周期：纯函数（归一化 / audit 建议 / registry 投影 / 状态机，见 skill-lifecycle.js）。 */
+export {
+  SKILL_LIFECYCLE_VERSION,
+  SKILL_LIFECYCLE_STATUSES,
+  SKILL_LIFECYCLE_DEFAULT_UNUSED_DAYS_BEFORE_PENDING,
+  SKILL_LIFECYCLE_DEFAULT_PENDING_GRACE_DAYS,
+  SKILL_LIFECYCLE_DEFAULT_TOOL_FAIL_WINDOW_DAYS,
+  SKILL_LIFECYCLE_DEFAULT_TOOL_FAIL_THRESHOLD,
+  SKILL_LIFECYCLE_DEFAULT_TOOL_FAIL_RATE,
+  SKILL_LIFECYCLE_DEFAULT_PROBE_FAIL_THRESHOLD,
+  SKILL_LIFECYCLE_DEFAULT_AUDIT_INTERVAL_HOURS,
+  SKILL_LIFECYCLE_DEFAULT_MAX_AUTO_ACTIONS,
+  SKILL_LIFECYCLE_DEFAULTS,
+  normalizeSkillLifecycle,
+  normalizeSkillLifecycleDefaults,
+  skillKeyOf,
+  auditSkillLifecycle,
+  projectRegistryFromLifecycle,
+  transitionAllowed,
+} from "./skill-lifecycle.js";

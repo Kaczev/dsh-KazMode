@@ -19,6 +19,15 @@
 - `skillAutonomyEnabled`：自主 skill 管理总开关，默认开；关闭后回到一阶段“按需自升级”。
 - `skillAutonomyMaxChangesPerBoundary`：每个安全边界允许的技能变更数上限，默认 1（v2.0 硬上限为 1，面板设更大值会被钳制回 1）。**1 = 一个完整 Create 生命周期**（CANDIDATE + 私有插件 + probe + 注册）；CANDIDATE-only 不算一次 Create、不消耗该预算。
 - `skillPrivateRoot`：私有技能根目录，默认空；为空时按 `%DSH_HOME%\profiles\web\KazPrivatePlugins` 解析（过程目录在其下的 `process`）。
+- 终案 E 全自动 Skill 生命周期（内部执行器，不新增用户可见工具）：
+  - `skillAutoLifecycleEnabled`：总开关，默认 `true`；关闭 = 不埋点、不审计、不自动 Retire/提交，回到现状。
+  - `skillLifecycleUnusedDays`：未用多少天进入 `retire-pending`，默认 `60`。
+  - `skillLifecyclePendingDays`：`retire-pending` 宽限天数，默认 `7`；宽限后仍未用才 `retired`。
+  - `skillLifecycleAuditIntervalHours`：后台周期审计间隔，默认 `24`。
+  - `skillLifecycleMaxAutoActions`：每周期自动动作数，默认 `1`（硬性钳制为 1）。
+  - 埋点：`tools/result` 只统计 `exec.parent === undefined` 且 agent-managed/lifecycle 已登记工具；内存更新 → `ctx.debounce` 落盘 → 插件卸载前 flush。
+  - 状态存储：`~/.dsh/storages/kaz-skill-lifecycle.json`（意图源）与 `kaz-skill-lifecycle-audit.jsonl`（机器审计）；`kaz-agent-managed-tools.json` 只做投影同步。
+  - 自动动作先 dry-run / busy 锁 / 每轮 ≤1 / 先备份再原子写 / 审计 JSONL；`retired` 不硬删任何目录与 versions。
 
 ## 工具自动启用
 
