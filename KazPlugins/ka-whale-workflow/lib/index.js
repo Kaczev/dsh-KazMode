@@ -860,14 +860,16 @@ export default {
       return stageOf(agent, stageStore);
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
-     *  进入 reconstruction = 新逻辑任务运行开始，递增 [kaz-memory Review] 的 taskRunId，
-     *  并清除该 session 的旧任务工具状态（第三次升级：新一轮任务重新分类选择）。 */
+     *  进入 reconstruction = 新逻辑任务运行开始，递增 [kaz-memory Review] 与
+     *  skill-review 各自的 taskRunId，并清除该 session 的旧任务工具状态
+     *  （第三次升级：新一轮任务重新分类选择）。 */
     function setStageAgent(agent, stage) {
       const changed = setStage(agent, stage, stageStore);
       if (changed === true && stage === "reconstruction") {
         const sessionId = sessionIdOf(agent);
         if (typeof sessionId === "string" && sessionId.length > 0) {
           beginReviewTaskRun(sessionId);
+          beginSkillReviewTaskRun(sessionId);
           stageStore.removeTaskToolState(sessionId);
         }
       }
@@ -1766,8 +1768,9 @@ export default {
      *  kinds = session 级“每 kind 最多一次”；taskRunId = 逻辑任务运行标识；
      *  injectedRunId = 上次注入所属的 taskRunId（同一任务运行最多注入一次复盘）。 */
     const reviewRunState = new Map();
-    /** 技能自省（skill-review）每 session 已注入类型（normal/plan/goal），独立去重。 */
-    const skillReviewInjected = new Map();
+    /** 技能自省（skill-review）task-run 状态：与 memory review 同构但独立，
+     *  每 session { kinds, taskRunId, injectedRunId }；同一逻辑任务运行最多注入一次。 */
+    const skillReviewRunState = new Map();
     /** 技能自省用的 plan/goal 激活状态观察（与 memory review 相互独立）。 */
     const skillLastPlanActive = new Map();
     const skillLastGoalActive = new Map();
@@ -1791,6 +1794,26 @@ export default {
       if (state === undefined) {
         state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
         reviewRunState.set(sessionId, state);
+      }
+      return state;
+    }
+
+    /** 进入新的逻辑任务运行：skill-review 的独立 taskRunId（与 memory review 同步递增点）。 */
+    function beginSkillReviewTaskRun(sessionId) {
+      let state = skillReviewRunState.get(sessionId);
+      if (state === undefined) {
+        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
+      }
+      state.taskRunId += 1;
+      skillReviewRunState.set(sessionId, state);
+    }
+
+    /** 读取（惰性创建）skill-review 运行状态。 */
+    function skillReviewRunStateOf(sessionId) {
+      let state = skillReviewRunState.get(sessionId);
+      if (state === undefined) {
+        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
+        skillReviewRunState.set(sessionId, state);
       }
       return state;
     }
@@ -1956,8 +1979,14 @@ export default {
       lastPlanActive.set(sessionId, planActive);
       lastGoalActive.set(sessionId, goalActive);
       // 新 plan/goal 激活 = 新的逻辑任务运行（例如 /plan、/goal 或分类后启动模式）。
-      if (prevPlan === false && planActive === true) beginReviewTaskRun(sessionId);
-      if (prevGoal === false && goalActive === true) beginReviewTaskRun(sessionId);
+      if (prevPlan === false && planActive === true) {
+        beginReviewTaskRun(sessionId);
+        beginSkillReviewTaskRun(sessionId);
+      }
+      if (prevGoal === false && goalActive === true) {
+        beginReviewTaskRun(sessionId);
+        beginSkillReviewTaskRun(sessionId);
+      }
 
       const inject = (kind) => {
         if (memorySaveCallable(agent) !== true) return false;
@@ -2032,6 +2061,9 @@ export default {
       const prevGoal = skillLastGoalActive.get(sessionId);
       skillLastPlanActive.set(sessionId, planActive);
       skillLastGoalActive.set(sessionId, goalActive);
+      // 新 plan/goal 激活 = 新的逻辑任务运行（skill-review 独立 taskRunId）。
+      if (prevPlan === false && planActive === true) beginSkillReviewTaskRun(sessionId);
+      if (prevGoal === false && goalActive === true) beginSkillReviewTaskRun(sessionId);
 
       // 终案 E：在 [skill Review] 注入前跑一次真实审计（每边界最多 1 个自动动作），
       // 并把 lifecycle 摘要注入自省文本。
@@ -2050,9 +2082,11 @@ export default {
       }
 
       const injectSkill = (kind) => {
-        const injected = skillReviewInjected.get(sessionId);
-        const kinds = injected instanceof Set ? injected : new Set();
-        if (kinds.has(kind)) return false;
+        const state = skillReviewRunStateOf(sessionId);
+        // session 级：每种 kind（normal/plan/goal）在整个 session 最多注入一次。
+        if (state.kinds.has(kind)) return false;
+        // task-run 级：同一个逻辑任务运行内最多注入一次 skill-review，先到边界获胜。
+        if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
         const text = skillReviewGuidanceText(
           kind,
           skillProcessFolderOf(agent),
@@ -2070,8 +2104,9 @@ export default {
           return false;
         }
         agent.steer(message);
-        kinds.add(kind);
-        skillReviewInjected.set(sessionId, kinds);
+        state.kinds.add(kind);
+        state.injectedRunId = state.taskRunId;
+        skillReviewRunState.set(sessionId, state);
         reportRoundDisplay(agent, text, "技能自省");
         return true;
       };

@@ -19,7 +19,7 @@ check("DEFAULT_SECTION.skillAutonomyMaxChangesPerBoundary 默认 1", DEFAULT_SEC
 const TMP = mkdtempSync(join(tmpdir(), "whale-skill-review-"));
 const STORE_FILE = join(TMP, "ka-whale-workflow-stage.json");
 const store = createStageStore(STORE_FILE);
-for (const id of ["s-normal", "s-plan", "s-goal", "s-nocall", "s-off"]) {
+for (const id of ["s-normal", "s-plan", "s-goal", "s-nocall", "s-off", "s-dedup"]) {
   store.set(id, "done");
 }
 
@@ -176,6 +176,23 @@ goalActiveFlag = false;
 await runTurnStopping(goalAgent);
 const goalSkills = skillMessages(goalAgent);
 check("Goal 结束注入 goal skill-review", goalSkills.length === 1 && textOf(goalSkills[0]).includes("The Goal has ended."));
+
+// task-run 去重：Plan 结束已注入 → 同一逻辑任务的 Normal 完成不得二次注入。
+const dedupAgent = makeAgent("s-dedup");
+dedupAgent.session.events = [{ type: "plan/mode", data: { active: true } }];
+await runTurnStopping(dedupAgent); // 观察 plan 激活（新逻辑任务运行）
+dedupAgent.session.events = [
+  { type: "plan/mode", data: { active: true } },
+  { type: "plan/mode", data: { active: false } },
+];
+await runTurnStopping(dedupAgent); // Plan 结束 → 注入 plan skill-review
+check("Plan 结束注入一次 plan skill-review", skillMessages(dedupAgent).length === 1 && textOf(skillMessages(dedupAgent)[0]).includes("The Plan has ended."));
+await runTurnStopping(dedupAgent); // 同任务再次到 done（Normal 完成）
+const dedupSkills = skillMessages(dedupAgent);
+check(
+  "同任务 Normal 完成不再注入第二条 skill-review（task-run 去重）",
+  dedupSkills.length === 1 && !textOf(dedupSkills[0]).includes("The task has completed."),
+);
 
 // 可用性守卫：技能闭环工具不可见 → 不注入 skill-review。
 const noCallAgent = makeAgent("s-nocall");
