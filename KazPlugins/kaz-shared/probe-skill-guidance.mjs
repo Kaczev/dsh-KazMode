@@ -52,6 +52,15 @@ check("文本含 process trace only", pathText.includes("process trace only") &&
 check("文本不再包含 project process folder", !pathText.includes("project process folder") && !normalText.includes("project process folder"));
 check("路径文本为英文且无 CJK", !/[\u4e00-\u9fff]/.test(pathText));
 check("兜底文本明确 private Kaz process folder / KazPrivatePlugins", normalText.includes("private Kaz process folder") && normalText.includes("KazPrivatePlugins"));
+check("Create 含 justified 判定锚点", pathText.includes("Create is justified only when") && normalText.includes("Create is justified only when"));
+check("Create 要求 executable module + offline probe", pathText.includes("executable module + offline probe") && normalText.includes("executable module + offline probe"));
+check("Create 排除已 active skill 覆盖", pathText.includes("not already covered by an active skill") && normalText.includes("not already covered by an active skill"));
+check("Create 要求可调用工具/模块或 Kaczev 显式要求", pathText.includes("adds a tool/module an agent can actually call") && pathText.includes("Kaczev explicitly asked for full implementation"));
+check("runbook 只写 memory 不建 CANDIDATE", pathText.includes("Pure knowledge/runbook/config procedures") && pathText.includes("write memory only") && pathText.includes("do NOT create a CANDIDATE skill"));
+check("CANDIDATE-only 不算完成自我更新", pathText.includes("CANDIDATE-only") && pathText.includes("does NOT complete self-update"));
+check("CANDIDATE-only 不消耗变更预算", pathText.includes("does not consume the at-most-1 skill-change budget"));
+check("停在 CANDIDATE 需显式声明未完成", pathText.includes("self-update is NOT complete yet") && pathText.includes("keep a next-stage entry"));
+check("Create 粒度 = 完整生命周期", pathText.includes("one Create = full lifecycle") && pathText.includes("CANDIDATE + implementation + probe + registration"));
 
 const agent = { id: "s-skill" };
 const kazModeVisible = {

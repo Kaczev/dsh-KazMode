@@ -148,6 +148,10 @@ check("Normal 完成注入 skill-review", normalSkills.length === 1 && textOf(no
 check("skill-review 文本含 normal 语义", textOf(normalSkills[0]).includes("The task has completed."));
 check("skill-review 注入真实私有路径 KazPrivatePlugins", textOf(normalSkills[0]).includes("KazPrivatePlugins"));
 check("skill-review 文本不含 project process folder", !textOf(normalSkills[0]).includes("project process folder"));
+check("skill-review Create 要求完整生命周期", textOf(normalSkills[0]).includes("one full skill lifecycle") && textOf(normalSkills[0]).includes("one Create = full lifecycle"));
+check("skill-review justified 判定明确", textOf(normalSkills[0]).includes("Create is justified only when") && textOf(normalSkills[0]).includes("executable module + offline probe"));
+check("skill-review runbook 只写 memory", textOf(normalSkills[0]).includes("Pure knowledge/runbook/config procedures") && textOf(normalSkills[0]).includes("write memory only"));
+check("skill-review CANDIDATE-only 不完成/不消耗预算", textOf(normalSkills[0]).includes("CANDIDATE-only") && textOf(normalSkills[0]).includes("does NOT complete self-update") && textOf(normalSkills[0]).includes("does not consume"));
 check("skill-review 与 [kaz-memory Review] 独立共存", normalAgent.messages.some((m) => m?.source?.form === "review" && textOf(m).includes("[kaz-memory Review]")) && normalSkills.every((m) => !textOf(m).includes("[kaz-memory Review]")));
 await runTurnStopping(normalAgent);
 check("同一 session 不重复注入 normal skill-review", skillMessages(normalAgent).length === 1);
