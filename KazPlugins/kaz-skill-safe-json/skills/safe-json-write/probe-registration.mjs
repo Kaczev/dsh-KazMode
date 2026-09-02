@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+const fileRepoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 const profile = path.join(
   process.env.DSH_HOME || "C:\\Users\\Kaczev\\.dsh",
   "profiles",
@@ -19,6 +19,21 @@ const presetAgent = path.join(
   "kaz",
   "agent.cordis.yml",
 );
+
+// KazPlugins 在部分环境是指向 profile 的 junction：import.meta.url 会解析成
+// profile 路径，导致 repoRoot 拿不到项目 .dsh/storages。优先选带
+// KazPlugins/kaz-skill-safe-json 且带项目 .dsh/storages 的候选根。
+function hasRepoMarkers(root) {
+  return (
+    fs.existsSync(path.join(root, "KazPlugins", "kaz-skill-safe-json", "package.json")) &&
+    fs.existsSync(path.join(root, ".dsh", "storages", "other-tool-plugin.json"))
+  );
+}
+const repoRoot = hasRepoMarkers(process.cwd())
+  ? process.cwd()
+  : hasRepoMarkers(fileRepoRoot)
+    ? fileRepoRoot
+    : fileRepoRoot;
 
 let passed = 0;
 let failed = 0;
@@ -58,23 +73,31 @@ check("repo switch.json enabled", () => {
   if (sw.enabled !== true) throw new Error("enabled is not true");
 });
 
-check("project other-tool-plugin.json enables kaz-skill-safe-json", () => {
+check("project other-tool-plugin.json no longer contains kaz-skill-safe-json", () => {
   const data = readJson(path.join(repoRoot, ".dsh", "storages", "other-tool-plugin.json"));
-  if (data["kaz-skill-safe-json"] !== true) throw new Error("plugin not enabled");
+  if ("kaz-skill-safe-json" in data) throw new Error("plugin still in project other-tool-plugin.json");
 });
 
-check("project other-tool-plugin-catalog.json enables safe_json_write", () => {
+check("project other-tool-plugin-catalog.json no longer contains safe_json_write", () => {
   const data = readJson(path.join(repoRoot, ".dsh", "storages", "other-tool-plugin-catalog.json"));
-  if (data["kaz-skill-safe-json"]?.["safe_json_write"] !== true) {
-    throw new Error("tool not enabled");
+  if ("kaz-skill-safe-json" in data) throw new Error("plugin still in project other-tool-plugin-catalog.json");
+});
+
+check("kaz_tool_auto_on no longer auto-ons safe_json_write", () => {
+  const data = readJson(path.join(repoRoot, ".dsh", "storages", "ka_tool_auto_on_setting.json"));
+  for (const feature of ["plan", "goal", "whale"]) {
+    if (data[feature]?.tools?.includes("safe_json_write")) {
+      throw new Error(`safe_json_write still in ${feature}.tools`);
+    }
   }
 });
 
-check("kaz_tool_auto_on plan list includes safe_json_write", () => {
-  const data = readJson(path.join(repoRoot, ".dsh", "storages", "ka_tool_auto_on_setting.json"));
-  if (!data.plan?.tools?.includes("safe_json_write")) {
-    throw new Error("safe_json_write not in plan.tools");
-  }
+check("agent-managed registry registers kaz-skill-safe-json / safe_json_write", () => {
+  const home = process.env.DSH_HOME || "C:\\Users\\Kaczev\\.dsh";
+  const reg = readJson(path.join(home, "storages", "kaz-agent-managed-tools.json"));
+  const entry = reg?.plugins?.["kaz-skill-safe-json"];
+  if (entry?.agentManaged !== true) throw new Error("agentManaged marker missing");
+  if (!entry.tools?.includes("safe_json_write")) throw new Error("safe_json_write not registered");
 });
 
 check("profile package.json depends on kaz-skill-safe-json", () => {

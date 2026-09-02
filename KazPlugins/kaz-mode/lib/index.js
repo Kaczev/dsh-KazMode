@@ -68,6 +68,12 @@ import {
   baseToolNames,
   normalizeOptionalTools,
   optionalToolPoolNames,
+  AGENT_MANAGED_STORAGE_FILE,
+  normalizeAgentManagedRegistry,
+  agentManagedPluginKeys,
+  agentManagedToolNames,
+  agentManagedRegistryHasPlugin,
+  mergeAgentManagedToolsIntoSurface,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -426,6 +432,16 @@ function loadProjectOtherCatalog(cwd, logger) {
   return readJsonFile(projectPath(cwd, PROJECT_OTHER_TOOL_PLUGIN_CATALOG_FILE), {}, normalizeToolCatalog, logger);
 }
 
+/** Agent 管理「自写工具」registry：全局文件路径（DSH_HOME/storages，跨项目共享）。 */
+function agentManagedRegistryPath() {
+  return join(STORAGE_DIR, AGENT_MANAGED_STORAGE_FILE);
+}
+
+/** 读取全局 agent-managed registry；文件缺失/损坏/非法 → 空 registry（feature off）。 */
+function loadAgentManagedRegistry(logger) {
+  return readJsonFile(agentManagedRegistryPath(), {}, normalizeAgentManagedRegistry, logger);
+}
+
 function saveUserEnable(value, logger) {
   try {
     mkdirSync(STORAGE_DIR, { recursive: true });
@@ -573,6 +589,7 @@ function loadExternalToolPluginLayers(cwd, logger) {
   const projectCatalog = loadProjectCatalog(safeCwd, logger);
   const projectOtherEnable = loadProjectOtherEnable(safeCwd, logger);
   const projectOtherCatalog = loadProjectOtherCatalog(safeCwd, logger);
+  const agentManagedRegistry = loadAgentManagedRegistry(logger);
   const effective = computeEffectiveToolState({
     codeCatalog: TOOL_PLUGIN_CATALOG,
     codeEnabled: TOOL_PLUGINS,
@@ -619,6 +636,9 @@ function loadExternalToolPluginLayers(cwd, logger) {
     effectiveEqualsFactory: !projectDiffers && !userDiffersFactory,
     effectiveEqualsUser: !projectDiffers,
     hasProjectOverrides: projectDiffers,
+    agentManagedRegistry,
+    agentManagedPluginKeys: agentManagedPluginKeys(agentManagedRegistry),
+    agentManagedTools: agentManagedToolNames(agentManagedRegistry),
   };
 }
 
@@ -680,6 +700,8 @@ function isOfficialOrKazToolPluginKey(key) {
 /** 永久删除一个用户添加的外置插件（从用户/项目四文件里都移除）。 */
 function deleteExternalPluginPermanently(pluginKey, cwd, logger) {
   if (isOfficialOrKazToolPluginKey(pluginKey)) return false;
+  // 第14次更新：Agent 管理的自写工具不在用户可删层内（双保险，RPC 入口也会拦）。
+  if (agentManagedRegistryHasPlugin(loadAgentManagedRegistry(logger), pluginKey)) return false;
   for (const layer of ["user", "project"]) {
     const data = loadLayerFourFiles(layer, cwd, logger);
     delete data.enable[pluginKey];
@@ -694,6 +716,8 @@ function deleteExternalPluginPermanently(pluginKey, cwd, logger) {
 /** 永久删除一个用户添加的工具（从用户/项目四文件里都移除）。 */
 function deleteExternalToolPermanently(pluginKey, toolName, cwd, logger) {
   if (isOfficialOrKazToolPluginKey(pluginKey)) return false;
+  // 第14次更新：Agent 管理的自写工具不在用户可删层内（双保险，RPC 入口也会拦）。
+  if (agentManagedRegistryHasPlugin(loadAgentManagedRegistry(logger), pluginKey)) return false;
   for (const layer of ["user", "project"]) {
     const data = loadLayerFourFiles(layer, cwd, logger);
     delete data.catalog[pluginKey]?.[toolName];
@@ -1320,6 +1344,9 @@ export default {
           const universe = layers.effective.T0?.[pluginKey] ?? {};
           for (const tool of Object.keys(universe)) whitelist.delete(tool);
         }
+        // 第14次更新：Agent 管理「自写工具」层在任务过滤之前并入 Kaz 白名单；
+        // 全局生效、不受四文件/other-* 删除影响，registry 缺失/损坏 = 空集。
+        whitelist = mergeAgentManagedToolsIntoSurface(whitelist, layers.agentManagedRegistry);
       } catch (error) {
         ctx.logger?.debug?.("[kaz-mode] 计算统一工具插件面失败：" + safeMessage(error));
         whitelist = new Set();
@@ -1742,6 +1769,9 @@ export default {
           effectiveEqualsFactory: layers.effectiveEqualsFactory,
           effectiveEqualsUser: layers.effectiveEqualsUser,
           hasProjectOverrides: layers.hasProjectOverrides,
+          agentManagedRegistry: layers.agentManagedRegistry,
+          agentManagedPluginKeys: layers.agentManagedPluginKeys,
+          agentManagedTools: layers.agentManagedTools,
           ...extra,
         });
 
@@ -1798,12 +1828,14 @@ export default {
         }
 
         if (endpoint === "listToolPlugins") {
+          const agentRegistry = loadAgentManagedRegistry(ctx.logger);
           return {
             ok: true,
             value: {
               catalog: {
                 official: [...OFFICIAL_TOOL_PLUGIN_KEYS],
                 kaz: [...KAZ_TOOL_PLUGIN_KEYS],
+                agent: agentManagedPluginKeys(agentRegistry),
               },
             },
           };
@@ -1822,6 +1854,12 @@ export default {
           const key = normalizeExternalKey(pluginName);
           if (key.length === 0) return rpcFail("插件名无法归一化");
           const tool = typeof input.toolName === "string" ? input.toolName.trim() : "";
+          // 第14次更新：Agent 管理的自写工具由 Agent/自升级生命周期所有，
+          // 用户面板任何 add/remove/toggle 都不得触碰该层。
+          const agentRegistry = loadAgentManagedRegistry(ctx.logger);
+          if (agentManagedRegistryHasPlugin(agentRegistry, key)) {
+            return rpcFail("Agent 管理的自写工具不能通过工具控制面板修改");
+          }
 
           // 删除用户添加的插件 / 工具。
           if (input.removePlugin === true) {
@@ -2037,6 +2075,14 @@ export default {
         if (endpoint === "setToolAutoOn") {
           const feature = input.feature === "plan" || input.feature === "goal" || input.feature === "whale" ? input.feature : null;
           if (feature === null) return rpcFail("feature 必须是 plan、goal 或 whale");
+          // 第14次更新：Agent 管理的自写工具绝不能进入任何模式自动启用列表。
+          if (Array.isArray(input.tools)) {
+            const agentTools = new Set(agentManagedToolNames(loadAgentManagedRegistry(ctx.logger)));
+            const requested = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature]?.tools ?? [];
+            if (requested.some((tool) => agentTools.has(tool))) {
+              return rpcFail("Agent 管理的自写工具不能加入模式自动启用列表");
+            }
+          }
           const layer = input.layer === "user" || input.layer === "project" ? input.layer : "project";
           const cwd = resolveAutoOnCwd();
           const file = layer === "user" ? userAutoOnPath() : projectAutoOnPath(cwd);
@@ -2076,6 +2122,14 @@ export default {
           const cwd = resolveAutoOnCwd();
           const layers = loadAutoOnLayers(cwd, ctx.logger);
           if (!layers.hasProjectOverrides) return rpcFail("当前没有项目专属设置可设为默认");
+          // 第14次更新：防止把残留的 Agent 管理工具随项目专属设置复制进用户默认 auto-on。
+          const agentTools = new Set(agentManagedToolNames(loadAgentManagedRegistry(ctx.logger)));
+          for (const feature of ["plan", "goal", "whale"]) {
+            const tools = layers.effective?.[feature]?.tools ?? [];
+            if (tools.some((tool) => agentTools.has(tool))) {
+              return rpcFail("Agent 管理的自写工具不能进入模式自动启用设置");
+            }
+          }
           saveAutoOnLayerFile(userAutoOnPath(), layers.effective, ctx.logger);
           if (sessionId.length > 0) activeSession = { sessionId, cwd };
           return { ok: true, value: toolAutoOnSnapshot(sessionId, cwd) };

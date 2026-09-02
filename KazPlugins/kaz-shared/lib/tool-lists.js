@@ -329,3 +329,16 @@ export {
   optionalToolPoolNames,
   compactOptionalToolDirectory,
 } from "./task-tool-selection.js";
+
+/** 第14次更新 Agent 管理「自写工具」层：registry 校验 / agent 组 / 全局合并（见 agent-managed-tools.js）。 */
+export {
+  AGENT_MANAGED_PLUGIN_PREFIX,
+  AGENT_MANAGED_CATALOG_GROUP_ID,
+  AGENT_MANAGED_STORAGE_FILE,
+  normalizeAgentManagedRegistry,
+  agentManagedPluginKeys,
+  agentManagedToolNames,
+  agentManagedCatalogEntries,
+  agentManagedRegistryHasPlugin,
+  mergeAgentManagedToolsIntoSurface,
+} from "./agent-managed-tools.js";
