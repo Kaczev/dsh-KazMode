@@ -65,14 +65,13 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 
 ## 第 4 步 在 package.json 注册依赖
 
-打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中**合并**下面 14 行：
+打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中**合并**下面 13 行：
 
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "first-round-hints": "file:KazPlugins/first-round-hints",
 "ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
 "create-plan": "file:KazPlugins/create-plan",
-"kaz-skill-safe-json": "file:KazPlugins/kaz-skill-safe-json",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
 "kaz-memory": "file:KazPlugins/kaz-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",

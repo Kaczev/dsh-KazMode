@@ -41,6 +41,8 @@ import {
   skillLifecycleCallable,
   skillReviewGuidanceText,
   SKILL_BOUNDARY_MAX_CHANGES,
+  SKILL_PRIVATE_DIR_NAME,
+  SKILL_PROCESS_DIR_NAME,
   ENABLE_TOOL,
   normalizeOptionalTools,
   compactOptionalToolDirectory,
@@ -135,6 +137,8 @@ const SETTINGS_SCHEMA = z.object({
   skillAutonomyEnabled: z.boolean().default(true),
   /** 每个安全边界允许的技能变更数上限（v2.0 硬上限为 1，设置值会被钳制到 1）。 */
   skillAutonomyMaxChangesPerBoundary: z.number().min(1).default(1),
+  /** 私有技能根目录；空串时回退到 DSH_HOME/profiles/web/KazPrivatePlugins。 */
+  skillPrivateRoot: z.string().default(""),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
@@ -145,6 +149,7 @@ export const DEFAULT_SECTION = {
   taskToolSelectionEnabled: true,
   skillAutonomyEnabled: true,
   skillAutonomyMaxChangesPerBoundary: 1,
+  skillPrivateRoot: "",
 };
 
 // ---------------------------------------------------------------------------
@@ -201,6 +206,10 @@ function normalizeConfig(raw) {
     taskToolSelectionEnabled: value.taskToolSelectionEnabled !== false,
     skillAutonomyEnabled: value.skillAutonomyEnabled !== false,
     skillAutonomyMaxChangesPerBoundary: maxChanges,
+    skillPrivateRoot:
+      typeof value.skillPrivateRoot === "string" && value.skillPrivateRoot.trim().length > 0
+        ? value.skillPrivateRoot.trim()
+        : "",
   };
 }
 
@@ -763,6 +772,23 @@ export default {
           ? Math.min(rawMax, SKILL_BOUNDARY_MAX_CHANGES)
           : SKILL_BOUNDARY_MAX_CHANGES;
       return { enabled, maxChanges };
+    }
+
+    /** 私有技能根目录：配置 skillPrivateRoot 优先；空时回退到 DSH_HOME/profiles/web/KazPrivatePlugins。 */
+    function skillPrivateRootOf(agent) {
+      const configured = liveFor(agent)?.skillPrivateRoot;
+      if (typeof configured === "string" && configured.trim().length > 0) return configured.trim();
+      return join(
+        process.env.DSH_HOME || join(homedir(), ".dsh"),
+        "profiles",
+        "web",
+        SKILL_PRIVATE_DIR_NAME,
+      );
+    }
+
+    /** 私有过程文档目录：KazPrivatePlugins/process。 */
+    function skillProcessFolderOf(agent) {
+      return join(skillPrivateRootOf(agent), SKILL_PROCESS_DIR_NAME);
     }
 
     /** ka-whale-workflow 配置面板里的重构工具清单（白名单之上的过滤器）。 */
@@ -1413,7 +1439,11 @@ export default {
         const injected = skillReviewInjected.get(sessionId);
         const kinds = injected instanceof Set ? injected : new Set();
         if (kinds.has(kind)) return false;
-        const text = skillReviewGuidanceText(kind);
+        const text = skillReviewGuidanceText(
+          kind,
+          skillProcessFolderOf(agent),
+          skillPrivateRootOf(agent),
+        );
         let message;
         try {
           message = createUserMessage({

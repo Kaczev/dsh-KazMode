@@ -123,6 +123,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     includeSubagents: false,
     reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
     taskToolSelectionEnabled: true,
+    skillPrivateRoot: "",
   },
   "create-plan": { enabled: false },
 };

@@ -91,14 +91,14 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中：
 
 1. **删除**所有旧的 Kaz 依赖行（包括 `kaz-diag`、旧版 `kaz-*` 行）。
-2. **合并**下面 14 行（保留 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等其它依赖，只加不删其它项）：
+   - **保留**以 `file:KazPrivatePlugins/...` 开头的用户私有依赖行（如 `"kaz-skill-safe-json": "file:KazPrivatePlugins/kaz-skill-safe-json"`），它们不在公共 repo 里，整目录删除 `KazPlugins` 不会碰到。
+2. **合并**下面 13 行（保留 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等其它依赖，只加不删其它项）：
 
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "first-round-hints": "file:KazPlugins/first-round-hints",
 "ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
 "create-plan": "file:KazPlugins/create-plan",
-"kaz-skill-safe-json": "file:KazPlugins/kaz-skill-safe-json",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
 "kaz-memory": "file:KazPlugins/kaz-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
@@ -183,6 +183,7 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
    - `deepseek-default-model`
    - `first-round-hints`
    - `ka-whale-workflow`
+   - 私有 `kaz-skill-*` 的 insert 块（例如 `kaz-skill-safe-json`）**不是** Kaz 框架块，属于“非 Kaz 自定义块”，**保留**，不要删除。
 2. 文件中**非 Kaz 的自定义块保留**，不要动。
 3. 把下面**完整内容**追加到文件末尾（文件不存在则新建，直接写入）：
 

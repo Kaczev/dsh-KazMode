@@ -4,3 +4,4 @@
 .dsh/storages/memory_project.json
 *.7z
 /不入库文件
+/KazPlugins/kaz-skill-*

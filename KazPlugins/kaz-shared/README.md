@@ -22,7 +22,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode 面板 | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
 | `TOOL_AUTO_ON_CONFIG` / `MODE_SCOPED_TOOL_PLUGIN_KEYS` / `PLAN_AUTO_ON_TOOLS` / `GOAL_AUTO_ON_TOOLS` / `defaultToolAutoOnState` / `normalizeToolList` / `normalizeAutoOnLayer` / `mergeAutoOnLayers` / `autoOnSettingsEqual` / `hasAutoOnLayerFields` | kaz-mode（kaz_tool_auto_on） | 模式工具自动启用参数单一事实源 + 三层单 JSON 设置模型：原设置（代码）→ 默认设置（用户 JSON）→ 专属设置（项目 JSON）的归一化 / 合并 / 生效计算 |
 | `reviewGuidanceText` / `toolCallable` | ka-whale-workflow / kaz-memory | 方向1 复盘指引（英文/第三人称/紧凑）与工具可用性判定 |
-| `SKILL_BOUNDARY_MAX_CHANGES` / `SKILL_EVIDENCE_MIN` / `skillReviewGuidanceText` / `skillLifecycleCallable` | ka-whale-workflow | 二阶段技能自省常量/文本/闭环基础能力判定（每边界 ≤1 变更、证据 ≥2） |
+| `SKILL_PRIVATE_DIR_NAME` / `SKILL_PROCESS_DIR_NAME` / `SKILL_BOUNDARY_MAX_CHANGES` / `SKILL_EVIDENCE_MIN` / `skillReviewGuidanceText` / `skillLifecycleCallable` | ka-whale-workflow | 二阶段技能自省常量/文本/闭环基础能力判定（私有过程目录 `KazPrivatePlugins/process`、每边界 ≤1 变更、证据 ≥2） |
 
 > **官方/Kaz 分类修改点**：`lib/tool-plugin-catalog.js`。外置插件数据（手动添加）保存在用户目录 storages 的 `other-*.json`；项目专属开关调整：官方/Kaz 写项目 `tool-plugin.json` / `tool-plugin-catalog.json`，外置写项目 `other-*.json`，**不写在源码里**。
 >

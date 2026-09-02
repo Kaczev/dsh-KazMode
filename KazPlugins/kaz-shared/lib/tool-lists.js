@@ -312,6 +312,8 @@ export {
 
 /** 二阶段 技能自省：常量 + 文本 + 技能闭环可用性判断（见 skill-guidance.js）。 */
 export {
+  SKILL_PRIVATE_DIR_NAME,
+  SKILL_PROCESS_DIR_NAME,
   SKILL_BOUNDARY_MAX_CHANGES,
   SKILL_EVIDENCE_MIN,
   SKILL_LIFECYCLE_TOOLS,

@@ -1,6 +1,8 @@
 // kaz-shared 探针：验证二阶段 skill-guidance（常量/文本/闭环可用性）及 tool-lists 主入口 re-export。
 // 运行：node KazPlugins/kaz-shared/probe-skill-guidance.mjs
 import {
+  SKILL_PRIVATE_DIR_NAME,
+  SKILL_PROCESS_DIR_NAME,
   SKILL_BOUNDARY_MAX_CHANGES,
   SKILL_EVIDENCE_MIN,
   SKILL_LIFECYCLE_TOOLS,
@@ -17,6 +19,8 @@ function check(label, ok) {
 
 check("常量 SKILL_BOUNDARY_MAX_CHANGES = 1", SKILL_BOUNDARY_MAX_CHANGES === 1);
 check("常量 SKILL_EVIDENCE_MIN = 2", SKILL_EVIDENCE_MIN === 2);
+check("常量 SKILL_PRIVATE_DIR_NAME = KazPrivatePlugins", SKILL_PRIVATE_DIR_NAME === "KazPrivatePlugins");
+check("常量 SKILL_PROCESS_DIR_NAME = process", SKILL_PROCESS_DIR_NAME === "process");
 check(
   "SKILL_LIFECYCLE_TOOLS 覆盖 write/edit/pwsh/safe_json_write",
   Array.isArray(SKILL_LIFECYCLE_TOOLS) &&
@@ -37,6 +41,17 @@ check("文本含证据门槛 ≥2", normalText.includes("at least 2 concrete evi
 check("文本含每边界 ≤1 变更", normalText.includes("at most 1 skill change"));
 check("文本禁批量/市场/通用 runner", normalText.includes("No batch extraction") && normalText.includes("no skill market") && normalText.includes("no generic skill runner"));
 check("文本为英文且无 CJK", !/[\u4e00-\u9fff]/.test(normalText));
+
+const processFolder = "C:\\Users\\Kaczev\\.dsh\\profiles\\web\\KazPrivatePlugins\\process";
+const pluginRoot = "C:\\Users\\Kaczev\\.dsh\\profiles\\web\\KazPrivatePlugins";
+const pathText = skillReviewGuidanceText("normal", processFolder, pluginRoot);
+check("传入路径时 Create 含具体 processFolder", pathText.includes(`${processFolder}/<candidate-name>/CANDIDATE.md`));
+check("传入路径时 Create 含具体 pluginRoot", pathText.includes(`${pluginRoot}/<plugin>/`));
+check("文本含 create the folder when missing", pathText.includes("create the folder when missing") && normalText.includes("create the folder when missing"));
+check("文本含 process trace only", pathText.includes("process trace only") && normalText.includes("process trace only"));
+check("文本不再包含 project process folder", !pathText.includes("project process folder") && !normalText.includes("project process folder"));
+check("路径文本为英文且无 CJK", !/[\u4e00-\u9fff]/.test(pathText));
+check("兜底文本明确 private Kaz process folder / KazPrivatePlugins", normalText.includes("private Kaz process folder") && normalText.includes("KazPrivatePlugins"));
 
 const agent = { id: "s-skill" };
 const kazModeVisible = {

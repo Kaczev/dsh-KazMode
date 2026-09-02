@@ -146,6 +146,8 @@ await runTurnStopping(normalAgent);
 const normalSkills = skillMessages(normalAgent);
 check("Normal 完成注入 skill-review", normalSkills.length === 1 && textOf(normalSkills[0]).includes("[skill Review]"));
 check("skill-review 文本含 normal 语义", textOf(normalSkills[0]).includes("The task has completed."));
+check("skill-review 注入真实私有路径 KazPrivatePlugins", textOf(normalSkills[0]).includes("KazPrivatePlugins"));
+check("skill-review 文本不含 project process folder", !textOf(normalSkills[0]).includes("project process folder"));
 check("skill-review 与 [kaz-memory Review] 独立共存", normalAgent.messages.some((m) => m?.source?.form === "review" && textOf(m).includes("[kaz-memory Review]")) && normalSkills.every((m) => !textOf(m).includes("[kaz-memory Review]")));
 await runTurnStopping(normalAgent);
 check("同一 session 不重复注入 normal skill-review", skillMessages(normalAgent).length === 1);

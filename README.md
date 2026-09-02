@@ -7,7 +7,7 @@
 
 - **跨会话记忆**：模型会把经验存为明文记忆，同一话题下越用越好用。以往每次重开新对话，要么重新向模型说明项目，要么模型每次都需要自己重新探索项目，有了kaz-memory插件，模型可以从记忆中搜索，快速找到方向；
 - **agent自优化·记忆**：记忆系统并非单纯的记忆，而是会总结成经验，具有类似于skill的特性。agent会管理记忆，及时清除无用记忆，优化已有记忆。
-- **agent自优化·工具与skill**：agent会自己创建、管理、删除kaz-skill-<工具名>插件，内置SKILL，agent在工作时会选择性开启。
+- **agent自优化·工具与skill**：agent会自己创建、管理、删除kaz-skill-<工具名>插件，内置SKILL，agent在工作时会选择性开启。自建技能默认放在用户 profile 的 `KazPrivatePlugins`（如 `%USERPROFILE%\.dsh\profiles\web\KazPrivatePlugins`），是用户私有能力与过程产物，不随本仓库发布。
 - **提示词极简**：Kaz 会话的系统提示词由 `kaz/kaz-system-prompt.mjs` 按条件控制，默认是极简模式的 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时切换为记忆优先提示词，保障deepseek-v4的性能；
 - **工具面两阶段**：首次工具调用前按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`+`read`+`edit`），第一次工具调用后恢复白名单里的全部工具；
 - **根据任务适配模式**：会根据任务类别，自动启用Plan、Goal模式适配任务。
