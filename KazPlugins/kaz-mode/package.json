@@ -1,6 +1,6 @@
 {
   "name": "kaz-mode",
-  "version": "4.3.0",
+  "version": "4.4.7",
   "description": "kaz-mode 超级模式插件：Kaz 模式 agent preset + 会话头部开关按钮 + 集中管理面板，统一联动管理 thinking-anchor / round-minimal / plugin-filter / output-beep / round-display / deepseek-default-model / kaz-memory / ka-whale-workflow / create-plan。系统提示词由 kaz 预设的 kaz-system-prompt.mjs 控制（默认 \"You are a helpful software engineer assistant.\"，kaz-memory 启用时切换为记忆优先提示词），工具面 = 工具控制面板三层 JSON（原设置 → 用户默认 → 项目专属）+ kaz_tool_auto_on 临时放行（plan/goal/鲸鱼工作流）。",
   "type": "module",
   "main": "lib/index.js",
