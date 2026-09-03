@@ -205,11 +205,6 @@ function makeAgent(id, extraEvents = []) {
 }
 const whaleReport = () => registeredTools.get("whale_report");
 const execute = async (def, args, agent) => def.execute(args, { agent });
-const confirmContract = async (agent) => {
-  for (const handler of listeners.get("tools/result") ?? []) {
-    await handler({ name: "ask_user_question", agent }, { answers: [{ answer: "确认" }] });
-  }
-};
 const claimedHandler = listeners.get("agent/inbox/claimed")[0];
 const userMessage = { content: [{ type: "text", text: "新任务" }], source: { kind: "user" } };
 /** 插件内部阶段推进到 reconstruction（外部 store 与插件实例不同步，必须走 handler）。 */
@@ -234,16 +229,9 @@ const storeNow = () => createStageStore(STORE_FILE);
   const agent = makeAgent("s-classify");
   await enterReconstruction(agent);
   check("whale_report 无参进入 classification", (await execute(whaleReport(), {}, agent)).stage === "classification");
-  let contractThrew = false;
-  try {
-    await execute(whaleReport(), { mode: "normal", optional_tools: ["safe_json_write"] }, agent);
-  } catch (error) {
-    contractThrew = /task contract is not confirmed/.test(error.message);
-  }
-  check("契约未确认前拒绝展开 Task Surface（保持 classification）", contractThrew === true && workflowService.stageOf(agent) === "classification");
-  await confirmContract(agent);
+  // Kaczev 裁决：分类推进无需 ask_user_question 确认；直接 whale_report({mode}) 即 done。
   await execute(whaleReport(), { mode: "normal", optional_tools: ["safe_json_write"] }, agent);
-  check("分类 normal 写任务工具状态并进入 done", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-classify")?.mode === "normal");
+  check("分类无需确认直接进入 done（normal）", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-classify")?.mode === "normal");
   check("分类写 initialOptionalTools", JSON.stringify(storeNow().getTaskToolState("s-classify")?.initialOptionalTools) === JSON.stringify(["safe_json_write"]));
   check("分类写 jitEnabledTools=[]", Array.isArray(storeNow().getTaskToolState("s-classify")?.jitEnabledTools) && storeNow().getTaskToolState("s-classify").jitEnabledTools.length === 0);
   check("done 阶段 taskToolStateOf 返回状态", workflowService.taskToolStateOf(agent)?.taskRunId === storeNow().getTaskToolState("s-classify").taskRunId);
@@ -254,7 +242,6 @@ const storeNow = () => createStageStore(STORE_FILE);
   const agent = makeAgent("s-plan");
   await enterReconstruction(agent);
   await execute(whaleReport(), {}, agent);
-  await confirmContract(agent);
   await execute(whaleReport(), { mode: "plan", optional_tools: [] }, agent);
   check("分类启动 plan 后保留任务状态", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-plan")?.mode === "plan");
   check("plan 激活路径不清空状态", workflowService.taskToolStateOf(agent) !== null);
@@ -265,7 +252,6 @@ const storeNow = () => createStageStore(STORE_FILE);
   const agent = makeAgent("s-goal");
   await enterReconstruction(agent);
   await execute(whaleReport(), {}, agent);
-  await confirmContract(agent);
   await execute(whaleReport(), { mode: "goal", objective: "test goal", optional_tools: ["read_image"] }, agent);
   check("分类启动 goal 后保留任务状态", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-goal")?.mode === "goal");
   check("goal 创建已调用", goalsMock.created.some((item) => item.agent === "s-goal" && item.payload.objective === "test goal"));
@@ -277,7 +263,6 @@ const storeNow = () => createStageStore(STORE_FILE);
   const agent = makeAgent("s-invalid");
   await enterReconstruction(agent);
   await execute(whaleReport(), {}, agent);
-  await confirmContract(agent);
   let threw = false;
   try {
     await execute(whaleReport(), { mode: "normal", optional_tools: ["pwsh"] }, agent);
@@ -308,7 +293,6 @@ const storeNow = () => createStageStore(STORE_FILE);
   const agent = makeAgent("s-off");
   await enterReconstruction(agent);
   await execute(whaleReport(), {}, agent);
-  await confirmContract(agent);
   await execute(whaleReport(), { mode: "normal", optional_tools: ["safe_json_write"] }, agent);
   check("特性关闭：done 后不写 taskToolState", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-off") === null);
   check("特性关闭：taskToolStateOf=null", workflowService.taskToolStateOf(agent) === null);

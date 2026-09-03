@@ -47,6 +47,7 @@ check("重构八工具默认清单", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 check("重构 prompt 含终态句", RECONSTRUCTION_PROMPT.includes("Call whale_report before ending your turn"));
 check("分类 prompt 含终态句", CLASSIFICATION_PROMPT.includes("Call whale_report before ending your turn"));
+check("分类 prompt 不要求 ask_user_question 确认", !CLASSIFICATION_PROMPT.includes("ask_user_question (confirm") && !CLASSIFICATION_PROMPT.includes("Do not call whale_report until the user confirms"));
 check("首轮介绍常量已导出且非空", typeof FIRST_ROUND_OVERVIEW === "string" && FIRST_ROUND_OVERVIEW.trim().length > 0);
 check("首轮介绍覆盖三段流程", FIRST_ROUND_OVERVIEW.includes("Task reconstruction") && FIRST_ROUND_OVERVIEW.includes("Task classification") && FIRST_ROUND_OVERVIEW.includes("whale_report"));
 check("首轮介绍长度合理", FIRST_ROUND_OVERVIEW.length < 800);

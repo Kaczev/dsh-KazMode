@@ -119,7 +119,7 @@ Tie-breakers:
 - Generating a code snippet is Normal only when the request is concrete and single-turn. Building/designing a page or feature with unspecified details is Plan (or Goal when the user gave a clear objective to iterate on).
 - Do not rely only on the cleaned reconstruction: preserve signals from the original request's ambiguity.
 
-Before calling whale_report, present a visible task contract (goal / mode / task tool surface / subagent needs / maintenance) and call ask_user_question (confirm / modify / abandon). Do not call whale_report until the user confirms — confirmation is written to the ka-whale-workflow stage store, and Task Surface is not expanded before it.
+The user's message itself is the task instruction. After classification, call whale_report with the chosen mode; no separate ask_user_question confirmation is required to advance the workflow stage.
 
 Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage. Call whale_report before ending your turn; never end this stage with only the stage text.`;
 
@@ -1525,16 +1525,8 @@ export default {
         if (current === "classification") {
           const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
           const sessionId = sessionIdOf(agent);
-          // Kaz 5.0 契约确认闸门：未确认前不展开 Task Surface。确认状态写入
-          // stage store 的 contractState（由 ask_user_question 的结果监听写入）。
-          const contract = typeof sessionId === "string" ? stageStore.getContractState(sessionId) : null;
-          if (contract === null || contract.status !== "confirmed") {
-            const msg =
-              "whale_report rejected: task contract is not confirmed. Present the visible task contract, then call ask_user_question (confirm/modify/abandon) and wait for the user's confirmation before calling whale_report. Confirmation is recorded in ka-whale-workflow stage store.";
-            ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-            return Promise.reject(new Error(msg));
-          }
-          // 第三次升级：分类阶段必须输出 initial optional_tools；先纯校验，避免半启动。
+          // Kaczev 裁决（BUG-20260903-001）：分类阶段推进无需 ask_user_question 确认。
+          // 用户消息本身即任务指令；whale_report({mode}) 可直接完成模式启动与 done。
           const toolSelectionUsable =
             taskToolSelectionEnabledFor(agent) === true && kazModeTaskToolPoolFor(agent) !== null;
           let selectedOptionalTools = [];

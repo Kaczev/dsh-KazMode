@@ -129,15 +129,12 @@ async function runInbox(agent, turn) {
   }
 }
 
-/** 用 whale_report 把内部阶段推进到 done（reconstruction → classification → done）。 */
+/** 用 whale_report 把内部阶段推进到 done（reconstruction → classification → done）。
+ *  按 Kaczev 裁决：分类推进无需 ask_user_question 确认。 */
 async function classifyToDone(agent) {
   const def = registeredTools.get("whale_report");
   if (def === undefined || def === null || typeof def.execute !== "function") return false;
   await def.execute({}, { agent });
-  // 契约确认闸门：模拟 ask_user_question 返回「确认」，由 tools/result 监听写入 stage store。
-  for (const handler of listeners.get("tools/result") ?? []) {
-    await handler({ name: "ask_user_question", agent }, { answers: [{ answer: "确认" }] });
-  }
   await def.execute({ mode: "normal" }, { agent });
   return true;
 }

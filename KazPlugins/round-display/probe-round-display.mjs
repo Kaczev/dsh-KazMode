@@ -9,7 +9,7 @@
 //   ③ round-display：list / history 内条目按 at 降序（新消息排上）+ 同轮去重。
 // 运行：node KazPlugins/round-display/probe-round-display.mjs
 import { apply as kspApply } from "file:///C:/Users/Kaczev/Documents/GitHub/dsh-KazMode/kaz/kaz-system-prompt.mjs";
-import rdPlugin from "file:///C:/Users/Kaczev/Documents/GitHub/dsh-KazMode/KazPlugins/round-display/lib/index.js";
+import rdPlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/round-display/lib/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
