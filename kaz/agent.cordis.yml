@@ -3,17 +3,18 @@
 # 组合基底 = shipped `cordis` 预设的完整副本（完整工具面），persona 行保留为
 # 默认兜底（complete: false、includeRuntimeContext: false——运行时上下文快照
 # 由 persona 行的 includeRuntimeContext 抑制，不再需要 kaz-no-context 插件）。
-# Kaz 模式的系统提示词由本目录的 kaz-system-prompt.mjs 在组装层按条件收敛
-# （默认仍是 "You are a helpful software engineer assistant."；kaz-memory 启用时
-# 自动换成记忆优先提示词），任何插件都不再向 Kaz 会话注入其它提示段；首阶段
-# 极简（首次工具调用前仅 memory_search，之后恢复全部工具）由 round-minimal
-# 提供，工具面白名单由 kaz-mode 的 kaz-mode.toolWhitelist 决定（= Kaz 全部工具
-# 的手动编辑点）。工具过滤由 plugin-filter、思考锚点由 thinking-anchor（消息注入）、
-# 记忆由 kaz-memory 提供，全部由 kaz-mode 插件按本预设的选中状态联动启用/恢复。
+# Kaz 模式的系统提示词由本目录的 kaz-system-prompt.mjs 在组装层收敛为
+# DeepSeek 基础提示词（逐字、最前；不再按记忆插件开关切换 persona 变体），
+# 角色特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS（Step 1 初稿，未逐任务
+# 动态生成）；任何插件都不再向 Kaz 会话注入其它提示段；首阶段极简（首次工具
+# 调用前 ≤2 个工具，之后恢复全部工具）已收编进 kaz-mode/kaz-shared 核心机制，
+# 工具面白名单由 kaz-mode 的工具控制面板四文件 JSON 决定（= Kaz 全部工具）。
+# 工具过滤由 kaz-shared 的 DEFAULT_DISABLED_TOOLS + 兼容保留的 plugin-filter
+# 提供，记忆由 ka-whale-memory 提供，全部由 kaz-mode 插件按项目状态联动生效。
 # skill 工具与技能目录已从本预设整体移除（Kaczev 2026-08：Kaz 模式不需要
 # skill-catalog 合成消息，直接删掉 skill 能力）。
 #
-# 依赖契约：kaz-mode 存在时，round-minimal / plugin-filter / kaz-memory 三个
+# 依赖契约：kaz-mode 存在时，round-minimal / plugin-filter / ka-whale-memory 三个
 # 前置插件必须存在（kaz_mode_status 工具会报告，由 kaz-diag 插件注册）。
 #
 # 以下内容与 shipped `cordis` 逐行一致（其 TRUST 声明同样适用于本预设）：
@@ -53,9 +54,8 @@
 
 # ── system prompt controller ────────────────────────────────────────────────
 #
-# 系统提示词控制脚本：集中管理“各种情况下的系统提示词”。
-# 目前支持 kaz-memory 启用时切换为记忆优先提示词，默认保持原 persona。
-# 要加新情况时直接改 ./kaz-system-prompt.mjs 的 PROMPT_RULES。
+# 系统提示词控制脚本：Kaz 任何状态下 persona = DeepSeek 基础提示词（逐字、最前），
+# 不随记忆插件开关切换 persona 变体；角色特化段固定放 kaz-shared 的 KAZ_ROLE_PROMPTS。
 - id: kaz-system-prompt
   name: ./kaz-system-prompt.mjs
   config: {}

@@ -33,7 +33,7 @@ for (const dir of [PROJECT_A, PROJECT_B]) {
   writeFileSync(
     join(dir, ".dsh", "storages", "kaz-project-states.json"),
     JSON.stringify(
-      { version: 1, states: { "kaz-memory": { enabled: true }, "ka-whale-workflow": { enabled: true, taskToolSelectionEnabled: true } } },
+      { version: 1, states: { "ka-whale-memory": { enabled: true }, "ka-whale-workflow": { enabled: true, taskToolSelectionEnabled: true } } },
       null,
       2,
     ),
@@ -70,7 +70,10 @@ const SESSIONS = {
 };
 const agentOf = (id) => ({
   id,
-  session: { header: { id, cwd: SESSIONS[id].cwd, agentPreset: SESSIONS[id].agentPreset }, events: [] },
+  session: {
+    header: { id, cwd: SESSIONS[id].cwd, agentPreset: SESSIONS[id].agentPreset },
+    events: [{ type: "tool/call", seq: 0, time: Date.now(), data: { name: "pwsh" } }],
+  },
 });
 const taskStates = {
   "s-sel": { taskRunId: 1, mode: "normal", initialOptionalTools: ["safe_json_write"], jitEnabledTools: [] },

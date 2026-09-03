@@ -5,11 +5,11 @@
 
 ## 一、核心特性
 
-- **跨会话记忆**：模型会把经验存为明文记忆，同一话题下越用越好用。以往每次重开新对话，要么重新向模型说明项目，要么模型每次都需要自己重新探索项目，有了kaz-memory插件，模型可以从记忆中搜索，快速找到方向；
+- **跨会话记忆**：模型会把经验存为明文记忆，同一话题下越用越好用。以往每次重开新对话，要么重新向模型说明项目，要么模型每次都需要自己重新探索项目，有了ka-whale-memory插件，模型可以从记忆中搜索，快速找到方向；
 - **agent自优化·记忆**：记忆系统并非单纯的记忆，而是会总结成经验，具有类似于skill的特性。agent会管理记忆，及时清除无用记忆，优化已有记忆。
 - **agent自优化·工具与skill**：agent会自己创建、管理、删除kaz-skill-<工具名>插件，内置SKILL，agent在工作时会选择性开启。自建技能默认放在用户 profile 的 `KazPrivatePlugins`（如 `%USERPROFILE%\.dsh\profiles\web\KazPrivatePlugins`），是用户私有能力与过程产物，不随本仓库发布。
-- **提示词极简**：Kaz 会话的系统提示词由 `kaz/kaz-system-prompt.mjs` 按条件控制，默认是极简模式的 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时切换为记忆优先提示词，保障deepseek-v4的性能；
-- **工具面两阶段**：首次工具调用前按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`+`read`+`edit`），第一次工具调用后恢复白名单里的全部工具；
+- **提示词极简**：Kaz 会话的系统提示词由 `kaz/kaz-system-prompt.mjs` 按条件控制，默认是极简模式的 `You are a helpful software engineer assistant.`，`ka-whale-memory` 启用时切换为记忆优先提示词，保障deepseek-v4的性能；
+- **工具面两阶段**：首次工具调用前按 ka-whale-memory 自动暴露（开=`memory_search`；关=`pwsh`+`read`+`edit`），第一次工具调用后恢复白名单里的全部工具；
 - **根据任务适配模式**：会根据任务类别，自动启用Plan、Goal模式适配任务。
 - **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；
 - **功能按插件分离**：Kaz模式的功能是按插件分离的。如果仅想要Kaz模式的部分功能，也可以在 **Kaz面板** 里面单独开启；
@@ -83,7 +83,7 @@
 
 三个常用面板的入口位置（截图来自 dsh web 浏览器界面）：
 
-**记忆面板与 Kaz 面板**：记忆面板是 kaz-memory 的待确认记忆 / 记忆管理界面（人工确认 `memory_save` 等保存的内容）；Kaz 面板集中管理被管理插件的开关，并可把当前状态设为 Kaz / 非 Kaz 模式的默认。
+**记忆面板与 Kaz 面板**：记忆面板是 ka-whale-memory 的待确认记忆 / 记忆管理界面（人工确认 `memory_save` 等保存的内容）；Kaz 面板集中管理被管理插件的开关，并可把当前状态设为 Kaz / 非 Kaz 模式的默认。
 
 ![记忆面板和Kaz面板在哪打开](一些指引/记忆面板和Kaz面板在哪打开.png)
 
@@ -99,20 +99,18 @@
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（12 个插件 + kaz-shared 依赖包）
+├── KazPlugins/                     # 插件全家桶（10 个插件 + kaz-shared 依赖包）
 │   ├── create-plan/
 │   ├── deepseek-default-model/
-│   ├── first-round-hints/
 │   ├── ka-whale-workflow/
 │   ├── kaz-agent-preset-display/
-│   ├── kaz-memory/
+│   ├── ka-whale-memory/
 │   ├── kaz-mode/
 │   ├── kaz-shared/                  # 依赖包（非插件）：Kaz 工具清单单一事实源
 │   ├── output-beep/
 │   ├── plugin-filter/
 │   ├── round-display/
 │   ├── round-minimal/
-│   └── thinking-anchor/
 ├── kaz/                            # kaz 预设（不是 KazPlugins/kaz-mode/kaz-preset）
 │   ├── preset.yml
 │   └── agent.cordis.yml
@@ -131,22 +129,19 @@ dsh-KazMode/
 | 插件目录 | 插件 id / name | 作用 |
 | --- | --- | --- |
 | `kaz-mode` | `kaz-mode` | Kaz 模式超级模式：预设联动 + 会话头部按钮 + 集中管理面板 |
-| `round-minimal` | `round-minimal` | 首阶段极简：首次工具调用前按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`/`read`/`edit`）；第一轮注入精简工具解锁提示（Kaz 默认开）；当前轮工具面增删明细上报 round-display 显示 |
+| `round-minimal` | `round-minimal` | 首阶段极简（Kaz 5.0 已收编进核心机制，本目录保留回滚）：首次工具调用前 ≤2（ka-whale-memory 开=`memory_search`；关=`read`+`pwsh`）；当前轮工具面增删明细上报 round-display 显示 |
 | `plugin-filter` | `plugin-filter` | 工具过滤：移除或禁用指定工具 |
-| `thinking-anchor` | `thinking-anchor` | 思考锚点：新对话注入完整思考协议，之后每轮短提醒 |
-| `first-round-hints` | `first-round-hints` | 首轮注入 pwsh 使用要点等提示 |
 | `kaz-agent-preset-display` | `kaz-agent-preset-display` | 修正新对话 hero 上 agent preset 按钮显示；默认常驻开启，不受 Kaz 模式开关影响 |
 | `output-beep` | `output-beep` | 模型输出完毕 / 提问 / 提交 plan 方案时播放提示音 |
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
-| `kaz-memory` | `kaz-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
+| `ka-whale-memory` | `ka-whale-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
 | `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单在 ka-whale-workflow 配置面板的代码框中修改（与其它输入框同底色），`whale_report` / `create_goal` / `create_plan` 由工具自动启用面板临时放行 |
 | `create-plan` | `create-plan` | 挂在 Kaz 预设 planning isolate 组：`create_plan` 工具，让鲸鱼自己启用 plan 模式 |
 
 其中几个值得知道的插件（完整清单见上表）：
 
 - **默认关闭、按需开启**：
-  - `thinking-anchor`：用提示词提醒模型遵循 "We need…" 思维链、用英语思考（多数情况下不开效果也一样）。
   - `round-display`：显示每轮 Kaz 联动/附属插件给模型注入了什么信息。
 - **`kaz-agent-preset-display`**：显示补丁。官方新对话预设按钮在「先选模式 A、设置里默认 B、刷新页面」后会错显成 B；本插件让按钮优先显示该对话自己的预设。
 - **`output-beep`**：模型输出完毕 / 提问 / 提交 plan 方案时“滴”一声，提醒你可以继续打字（作者摸鱼专用 🐳）。

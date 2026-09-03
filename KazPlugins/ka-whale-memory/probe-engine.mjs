@@ -1,10 +1,10 @@
-// kaz-memory 引擎集成探针：真实 cordis ctx + 真实 storage hub + 真实 MemoryEngine。
+// ka-whale-memory 引擎集成探针：真实 cordis ctx + 真实 storage hub + 真实 MemoryEngine。
 // 验证（不 mock 任何存储层）：
 //   ① 项目记忆按项目根隔离：不同 projectRoot 各落各的 memory_project.json；
 //   ② 全局记忆对任何项目根可见；
 //   ③ search / setStatus / forget 跨项目域正确；
 //   ④ 文件确实落在 <项目>/.dsh/storages/memory_project.json 与 <全局>/storages/memory.json。
-// 运行：node kaz-memory/probe-engine.mjs
+// 运行：node ka-whale-memory/probe-engine.mjs
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -1,4 +1,4 @@
-// kaz-memory —— 独立记忆插件（BM25 检索 + 摘要 + 自动载入 + RPC 面板通道）
+// ka-whale-memory —— 独立记忆插件（BM25 检索 + 摘要 + 自动载入 + RPC 面板通道）
 // ===========================================================================
 //   2026-08 升级：
 //   * ctx.memory 引擎 + memory_save / memory_update / memory_list /
@@ -7,7 +7,7 @@
 //     created_at / updated_at（ISO 字符串）；旧记录（createdAt/updatedAt
 //     毫秒数字、无 summary）读取时自动迁移，写回时落新格式
 //   * memory_search = BM25 相关性排序（vendored okapibm25，离线可用；
-//     k1/b 可在 settings.yaml 的 kaz-memory.bm25 段调整），返回
+//     k1/b 可在 settings.yaml 的 ka-whale-memory.bm25 段调整），返回
 //     id/name/summary/keywords/score（不含 content），支持 limit/offset
 //     分页与 namespace/status 过滤；评分异步分块计算不阻塞主线程
 //   * memory_detail（新增）：按 id 分片读取完整 content
@@ -28,7 +28,7 @@
 //   * 项目记忆按项目文件夹隔离（2026-08-17）：project 记忆写在
 //     <项目文件夹>/.dsh/storages/memory_project.json，项目根从 agent 会话 cwd
 //     （exec.agent.session.header.cwd）解析——不再用 dsh 进程的 process.cwd()。
-//   * 面板数据通道 = 专用 Connection RPC（/kaz-memory，loopback）：list / open /
+//   * 面板数据通道 = 专用 Connection RPC（/ka-whale-memory，loopback）：list / open /
 //     rename / status / autoLoad / forget / openFolder / recentChanges。记忆数据（含 name）全部
 //     存在 JSON 文件里，settings.yaml 不再承载任何记忆存储信息（2026-08-19）。
 //   * 人工确认闸门已取消（2026-08）：模型 memory_save 直接写 applied，
@@ -49,11 +49,11 @@ import { effectiveToolWhitelist, TOOL_WHITELIST } from "kaz-shared";
 export { MemoryEngine, MemoryId } from "./engine.js";
 export { bm25Scores, bm25ScoresAsync, tokenize } from "./bm25.js";
 
-export const name = "kaz-memory";
+export const name = "ka-whale-memory";
 export const inject = ["storage", "systemPrompt", "tools", "connection"];
 
-/** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-memory: 段（面板桥接镜像）。 */
-const NAMESPACE = settingsNamespace("kaz-memory");
+/** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-memory: 段（面板桥接镜像）。 */
+const NAMESPACE = settingsNamespace("ka-whale-memory");
 
 /** memory_save / memory_update 的成功返回：只告诉模型操作成功与否，不回传记忆正文。 */
 const SAVE_RESULT_SCHEMA = {
@@ -220,7 +220,7 @@ function timeMs(value) {
   return 0;
 }
 
-/** 从 settings 段读取 BM25 参数（kaz-memory.bm25.k1 / b），缺省 1.2 / 0.75。 */
+/** 从 settings 段读取 BM25 参数（ka-whale-memory.bm25.k1 / b），缺省 1.2 / 0.75。 */
 function bm25Of(current) {
   const section =
     current !== null && typeof current === "object" && current.bm25 !== null && typeof current.bm25 === "object"
@@ -294,7 +294,7 @@ function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinim
       // 判定失败不阻断，交给工具面检查兜底
     }
   }
-  // 方案 A：kazMode 服务存在时按 agent 会话的工具面判定（该会话 kaz-memory
+  // 方案 A：kazMode 服务存在时按 agent 会话的工具面判定（该会话 ka-whale-memory
   // 关闭 / 不在白名单 / 首阶段极简都会被排除）；服务缺失时回退旧逻辑。
   if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.toolVisible === "function") {
     try {
@@ -319,7 +319,7 @@ function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinim
 }
 
 /**
- * 拼装首轮工具调用后注入的 [kaz-memory guidance] 上下文消息：
+ * 拼装首轮工具调用后注入的 [ka-whale-memory guidance] 上下文消息：
  *  统一消息格式 [标题] / > / 内容 / <；只发总述行（S）——记忆工具的具体
  *  用法由各工具描述自带，不再逐行重复 A/B/C/D。仅当 memory_search 在当前
  *  环境确实可调用（存在且可直接使用或经 run_code SDK 调用）时发送；
@@ -337,11 +337,11 @@ function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc,
       ? overrides.head.trim()
       : GUIDANCE_HEAD;
   if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc, kazModeSvc)) return "";
-  return ["[kaz-memory guidance]", ">", head, "<"].join("\n");
+  return ["[ka-whale-memory guidance]", ">", head, "<"].join("\n");
 }
 
 /**
- * 拼装每轮首次 memory_search 之后注入的 [kaz-memory guidance] 上下文消息：
+ * 拼装每轮首次 memory_search 之后注入的 [ka-whale-memory guidance] 上下文消息：
  *  提醒模型用 memory_forget 清理已完成、不再需要保留的任务记忆。
  *  仅在 memory_search 与 memory_forget 当前环境都确实可调用时发送。
  *
@@ -365,7 +365,7 @@ function composeForgetGuidance(grouping, kazSettings, overrides = {}, agent, too
     overrides.forget.trim().length > 0
       ? overrides.forget.trim()
       : GUIDANCE_FORGET;
-  return ["[kaz-memory guidance]", ">", line, "<"].join("\n");
+  return ["[ka-whale-memory guidance]", ">", line, "<"].join("\n");
 }
 const SETTINGS_SCHEMA = z.object({
   /** 总开关（Kaz 模式面板提供开关）：关闭时完全不注入记忆指引、不自动载入，
@@ -555,7 +555,7 @@ export async function apply(ctx, config = {}) {
         }
       }
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 解析当前项目根失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] 解析当前项目根失败：${error instanceof Error ? error.message : String(error)}`);
     }
     return lastProjectRoot;
   }
@@ -563,14 +563,14 @@ export async function apply(ctx, config = {}) {
   // ---- 自动载入：已注入标记持久化 ----
   // 2026-08-19 修复（Kaczev 报告）：autoLoadInjected 是进程内 WeakMap，dsh 重启
   // 后清空，恢复的会话会把 memory_search 误判为「首次可用」而重复注入。修复：
-  // 把已注入的 agent id 持久化到 <DSH_HOME>/storages/kaz-memory-auto-injected.json
+  // 把已注入的 agent id 持久化到 <DSH_HOME>/storages/ka-whale-memory-auto-injected.json
   // （默认 ~/.dsh/storages；config.autoInjectedStore 可覆盖，探针用临时文件），
   // 重启后同一会话不再注入。仅在实际注入成功后才落标。
   // 固定指引与遗忘指引改为按 turn 重复注入，不再做「每会话一次」的持久化去重。
   const AUTO_INJECTED_STORE =
     typeof config.autoInjectedStore === "string" && config.autoInjectedStore.trim().length > 0
       ? config.autoInjectedStore.trim()
-      : join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", "kaz-memory-auto-injected.json");
+      : join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", "ka-whale-memory-auto-injected.json");
   const persistedInjected = new Set();
   try {
     if (existsSync(AUTO_INJECTED_STORE)) {
@@ -587,7 +587,7 @@ export async function apply(ctx, config = {}) {
       }
     }
   } catch (error) {
-    ctx.logger.warn(`[kaz-memory] 读取注入标记失败：${error instanceof Error ? error.message : String(error)}`);
+    ctx.logger.warn(`[ka-whale-memory] 读取注入标记失败：${error instanceof Error ? error.message : String(error)}`);
   }
   function persistInjected() {
     try {
@@ -605,7 +605,7 @@ export async function apply(ctx, config = {}) {
         "utf8",
       );
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 持久化注入标记失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] 持久化注入标记失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
   const autoLoadInjected = new WeakMap();
@@ -614,7 +614,7 @@ export async function apply(ctx, config = {}) {
   /** 进程内缓存：某 agent 最近一次已注入遗忘指引的 turn。 */
   const forgetInjectedTurn = new WeakMap();
 
-  // 加载时预标记现有 agent（thinking-anchor 同款）：自动载入视为已注入。
+  // 加载时预标记现有 agent（旧消息注入插件同款）：自动载入视为已注入。
   // 重启后恢复的会话即使不在持久化标记里（例如标记文件晚于会话创建、
   // 或 id 格式差异），也不会被重复注入；持久化标记继续兜底「重启后晚于插件
   // 加载才恢复的会话」。固定指引/遗忘指引不再预标记——新行为按 turn 注入，
@@ -631,7 +631,7 @@ export async function apply(ctx, config = {}) {
       persistInjected();
     }
   } catch (error) {
-    ctx.logger.debug(`[kaz-memory] 预标记现有 agent 失败：${error instanceof Error ? error.message : String(error)}`);
+    ctx.logger.debug(`[ka-whale-memory] 预标记现有 agent 失败：${error instanceof Error ? error.message : String(error)}`);
   }
 
   async function buildAutoLoadMessage(agent) {
@@ -643,23 +643,36 @@ export async function apply(ctx, config = {}) {
         projectRoot: projectRootOf({ agent }),
       });
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 加载自动载入记忆失败: ${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] 加载自动载入记忆失败: ${error instanceof Error ? error.message : String(error)}`);
       return undefined;
     }
     if (!Array.isArray(records) || records.length === 0) return undefined;
     // 方向1：DEPRECATED 不自动载入。
     const activeRecords = records.filter(record => record.lifecycle_status !== 'DEPRECATED');
     if (activeRecords.length === 0) return undefined;
-    const lines = ["[kaz-memory Auto-Load]", ">", "We know:"];
-    for (const record of activeRecords) {
-      // 自动载入只注入 content 正文，不再额外带标题/namespace，减小上下文占用。
-      const body = String(record.content ?? "").replace(/\r?\n/g, "\n  ");
-      lines.push(`- ${body}`);
+    // Kaz 5.0 记忆快照单通道：autoLoad 折叠进任务开始快照，只注入 id + summary，
+    // 预算 ≤8 条；不再把 content 正文整段注入（C05/R-C05）。
+    const SNAPSHOT_BUDGET = 8;
+    const snapshot = activeRecords.slice(0, SNAPSHOT_BUDGET);
+    const lines = [
+      "[ka-whale-memory Auto-Load]",
+      ">",
+      "We know (memory snapshot, id + summary, " + snapshot.length + "/" + SNAPSHOT_BUDGET + "):",
+    ];
+    for (const record of snapshot) {
+      const summary =
+        typeof record.summary === "string" && record.summary.trim().length > 0
+          ? record.summary.trim()
+          : typeof record.name === "string" && record.name.trim().length > 0
+            ? record.name.trim()
+            : "(no summary)";
+      const id = String(record.id ?? "");
+      lines.push(`- id: ${id} | summary: ${summary.replace(/\r?\n/g, " ")}`);
     }
     lines.push("<");
     return createUserMessage({
       content: [{ type: "text", text: lines.join("\n") }],
-      source: { kind: "plugin", plugin: "kaz-memory", form: "recall" },
+      source: { kind: "plugin", plugin: "ka-whale-memory", form: "recall" },
     });
   }
 
@@ -700,7 +713,7 @@ export async function apply(ctx, config = {}) {
   });
 
   // ---- 面板数据通道（Connection RPC，不经过 settings.yaml） ----
-  // 客户端经 createWebConnectionRpc() 调用 /kaz-memory 通道；记忆数据（含 name）
+  // 客户端经 createWebConnectionRpc() 调用 /ka-whale-memory 通道；记忆数据（含 name）
   // 全部存在 JSON 文件里，settings.yaml 不再承载任何记忆存储信息。
   function rootOf(payload) {
     if (payload !== null && typeof payload === "object" && typeof payload.project === "string" && payload.project.length > 0) {
@@ -784,22 +797,22 @@ export async function apply(ctx, config = {}) {
       }
       return rpcFail(`unknown endpoint '${String(endpoint)}'`);
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] RPC ${String(endpoint)} 失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] RPC ${String(endpoint)} 失败：${error instanceof Error ? error.message : String(error)}`);
       return rpcFail(error instanceof Error ? error.message : String(error));
     }
   };
   const connection = ctx.get("connection");
   if (connection !== undefined && connection !== null && connection.rpc !== undefined && typeof connection.rpc.handle === "function") {
-    const disposeRpc = connection.rpc.handle("/kaz-memory", rpcHandler, { authority: "loopback" });
+    const disposeRpc = connection.rpc.handle("/ka-whale-memory", rpcHandler, { authority: "loopback" });
     ctx.effect(() => () => { void disposeRpc(); });
   } else {
-    ctx.logger.warn("[kaz-memory] connection 服务不可用，面板 RPC 通道未注册（仅工具与自动载入可用）");
+    ctx.logger.warn("[ka-whale-memory] connection 服务不可用，面板 RPC 通道未注册（仅工具与自动载入可用）");
   }
 
   // ---- 固定指引文本：settings 里 guidance 留空则发固定总述行
   // （工具细节由工具描述自带，不再重复 A/B/C/D 行）；仅在 memory_search 当前
   // 环境可调用时以合成用户消息注入。Kaz 模式会把 systemPrompt 段全部滤掉，
-  // 所以这里不再注册 tool:memory:kaz-memory 段，改为 pre-step 上下文注入。
+  // 所以这里不再注册 tool:memory:ka-whale-memory 段，改为 pre-step 上下文注入。
   // 方案 A：kazMode 服务存在时按 agent 会话判定工具可用性（后台会话不受
   // 切换对话影响）；服务缺失时回退全局 enabled 兜底。----
   const getKazModeSvc = () => {
@@ -816,7 +829,7 @@ export async function apply(ctx, config = {}) {
     try {
       const svc = ctx.get("kazMode");
       if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
-        const cfg = svc.pluginConfig(agent, "kaz-memory");
+        const cfg = svc.pluginConfig(agent, "ka-whale-memory");
         if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
       }
     } catch {
@@ -884,10 +897,10 @@ export async function apply(ctx, config = {}) {
     try {
       const rd = ctx.get("roundDisplay");
       if (rd !== undefined && rd !== null && typeof rd.report === "function" && typeof content === "string" && content.trim().length > 0) {
-        rd.report({ agent, plugin: "kaz-memory", title: "guidance", content });
+        rd.report({ agent, plugin: "ka-whale-memory", title: "guidance", content });
       }
     } catch (error) {
-      ctx.logger.debug(`[kaz-memory] 上报 round-display 失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.debug(`[ka-whale-memory] 上报 round-display 失败：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -962,7 +975,7 @@ export async function apply(ctx, config = {}) {
   }
 
   /**
-   * 指定 turn 内是否已注入过 kaz-memory 的指定 form 消息。
+   * 指定 turn 内是否已注入过 ka-whale-memory 的指定 form 消息。
    * 用于跨重启/同 turn 内防重复：以 turn/start 事件切分轮次。
    */
   function hasInjectedInTurn(agent, form, turn) {
@@ -991,7 +1004,7 @@ export async function apply(ctx, config = {}) {
         if (data === null || typeof data !== "object") continue;
         const source = data.source;
         if (source === null || typeof source !== "object") continue;
-        if (source.kind !== "plugin" || source.plugin !== "kaz-memory") continue;
+        if (source.kind !== "plugin" || source.plugin !== "ka-whale-memory") continue;
         if (form !== undefined && source.form !== form) continue;
         return true;
       }
@@ -1002,8 +1015,8 @@ export async function apply(ctx, config = {}) {
   }
 
   /**
-   * 会话日志里是否已注入过 kaz-memory 的消息（自动载入 recall 或固定指引 guidance）。
-   * 这是自动载入跨重启去重的最终防线：只要会话历史里已经出现过 kaz-memory 的注入记录，
+   * 会话日志里是否已注入过 ka-whale-memory 的消息（自动载入 recall 或固定指引 guidance）。
+   * 这是自动载入跨重启去重的最终防线：只要会话历史里已经出现过 ka-whale-memory 的注入记录，
    * 就不再注入。
    */
   function hasInjectedBefore(agent, form) {
@@ -1016,7 +1029,7 @@ export async function apply(ctx, config = {}) {
         if (data === null || typeof data !== "object") return false;
         const source = data.source;
         if (source === null || typeof source !== "object") return false;
-        if (source.kind !== "plugin" || source.plugin !== "kaz-memory") return false;
+        if (source.kind !== "plugin" || source.plugin !== "ka-whale-memory") return false;
         if (form !== undefined && source.form !== form) return false;
         return true;
       });
@@ -1042,7 +1055,7 @@ export async function apply(ctx, config = {}) {
         if (data === null || typeof data !== "object") continue;
         const source = data.source;
         if (source === null || typeof source !== "object") continue;
-        if (source.kind === "plugin" && source.plugin === "kaz-memory" && source.form === "guidance") {
+        if (source.kind === "plugin" && source.plugin === "ka-whale-memory" && source.form === "guidance") {
           firstIndex = index;
           break;
         }
@@ -1081,7 +1094,7 @@ export async function apply(ctx, config = {}) {
     if (autoLoadInjected.has(agent)) return decision;
     // 跨重启去重：该会话此前已注入过（持久化标记）→ 跳过。
     if (agent.id !== undefined && persistedInjected.has(String(agent.id))) return decision;
-    // 最终防线：会话日志里已出现过 kaz-memory 自动载入记录 → 跳过。
+    // 最终防线：会话日志里已出现过 ka-whale-memory 自动载入记录 → 跳过。
     if (hasInjectedBefore(agent, "recall")) return decision;
     const recall = await buildAutoLoadMessage(agent);
     if (recall === undefined) return decision;
@@ -1127,10 +1140,10 @@ export async function apply(ctx, config = {}) {
       try {
         message = createUserMessage({
           content: [{ type: "text", text }],
-          source: { kind: "plugin", plugin: "kaz-memory", form: "guidance" },
+          source: { kind: "plugin", plugin: "ka-whale-memory", form: "guidance" },
         });
       } catch (error) {
-        ctx.logger.warn(`[kaz-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger.warn(`[ka-whale-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
         return decision;
       }
       reportRoundDisplay(agent, text);
@@ -1145,10 +1158,10 @@ export async function apply(ctx, config = {}) {
     try {
       message = createUserMessage({
         content: [{ type: "text", text }],
-        source: { kind: "plugin", plugin: "kaz-memory", form: "guidance" },
+        source: { kind: "plugin", plugin: "ka-whale-memory", form: "guidance" },
       });
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
       return decision;
     }
     guidanceFirstTurnCache.set(agent, turn);
@@ -1179,10 +1192,10 @@ export async function apply(ctx, config = {}) {
     try {
       message = createUserMessage({
         content: [{ type: "text", text }],
-        source: { kind: "plugin", plugin: "kaz-memory", form: "forget-guidance" },
+        source: { kind: "plugin", plugin: "ka-whale-memory", form: "forget-guidance" },
       });
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 构造遗忘指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] 构造遗忘指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
       return decision;
     }
     forgetInjectedTurn.set(agent, turn);
@@ -1191,7 +1204,7 @@ export async function apply(ctx, config = {}) {
   });
 
   // ---- 组装层兜底：无条件移除基础英文记忆指引（tool:memory）----
-  // kaz-memory 不再注册 tool:memory:kaz-memory 系统提示段；固定指引改为首轮
+  // ka-whale-memory 不再注册 tool:memory:ka-whale-memory 系统提示段；固定指引改为首轮
   // 工具调用后以上下文消息注入。这里保留全模式兜底：任何会话、任何模式都
   // 不再注入基础英文记忆指引（tool:memory）。
   ctx.on("system-prompt/assemble", async (assembly, context, next) => {
@@ -1205,7 +1218,7 @@ export async function apply(ctx, config = {}) {
 
   // ---- 六工具（与 @max-null/dsh-memory 同名同 schema 同行为；memory_update /
   // memory_detail 为扩展）。描述与参数说明为英文（模型推理用英文）。
-  // 注册跟随 kaz-memory.enabled（2026-08-21）：关闭 = 六工具完全注销（不只是
+  // 注册跟随 ka-whale-memory.enabled（2026-08-21）：关闭 = 六工具完全注销（不只是
   // 移出 Kaz 工具面），热重载；任何模式下都不再出现在工具列表里。----
   const toolDefs = [
   defineTool({
@@ -1330,7 +1343,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_search",
       description:
-        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score — content is NOT included; use memory_detail to read the full content of a hit. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the kaz-memory.bm25 settings section. DEPRECATED memories are excluded by default. Returns an empty array when nothing matches; errors when the query is empty.",
+        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score — content is NOT included; use memory_detail to read the full content of a hit. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the ka-whale-memory.bm25 settings section. DEPRECATED memories are excluded by default. Returns an empty array when nothing matches; errors when the query is empty.",
       parameters: {
         query: { type: "string", required: true, description: "Search query (BM25 over content + summary + keywords)." },
         limit: { type: "number", description: "Max hits to return (default 10, max 100)." },
@@ -1407,7 +1420,7 @@ export async function apply(ctx, config = {}) {
     }),
 ];
 
-  // ---- 六工具注册跟随 kaz-memory.enabled（2026-08-21 修复，恢复文档语义）：
+  // ---- 六工具注册跟随 ka-whale-memory.enabled（2026-08-21 修复，恢复文档语义）：
   // enabled=true 时注册，enabled=false 时完全注销（不只是移出 Kaz 工具面），
   // 热重载生效——任何模式下关闭本插件都不再出现记忆工具。会话级可见性
   // 仍由 kaz-mode 在组装/执行层按 agent 会话计算：启用的会话里记忆工具
@@ -1419,7 +1432,7 @@ export async function apply(ctx, config = {}) {
       try {
         toolDisposers.push(ctx.tools.register(def));
       } catch (error) {
-        ctx.logger.warn(`[kaz-memory] 注册工具 ${def.name} 失败：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger.warn(`[ka-whale-memory] 注册工具 ${def.name} 失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -1428,7 +1441,7 @@ export async function apply(ctx, config = {}) {
       try {
         dispose();
       } catch (error) {
-        ctx.logger.warn(`[kaz-memory] 注销工具失败：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger.warn(`[ka-whale-memory] 注销工具失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
     toolDisposers = [];
@@ -1438,7 +1451,7 @@ export async function apply(ctx, config = {}) {
     if (enabled) installTools();
     else uninstallTools();
     ctx.logger.info(
-      `[kaz-memory] 配置已生效：enabled=${enabled ? "true" : "false"}` +
+      `[ka-whale-memory] 配置已生效：enabled=${enabled ? "true" : "false"}` +
         `（六工具${enabled ? "已注册" : "已完全注销"}；会话级可见性由 kaz-mode 按 agent 会话过滤）`,
     );
   }
@@ -1448,7 +1461,7 @@ export async function apply(ctx, config = {}) {
     try {
       mkdirSync(folder, { recursive: true });
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 确保记忆文件夹存在失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] 确保记忆文件夹存在失败：${error instanceof Error ? error.message : String(error)}`);
     }
     const platform = process.platform;
     const command = platform === "win32" ? "explorer" : platform === "darwin" ? "open" : "xdg-open";
@@ -1456,10 +1469,10 @@ export async function apply(ctx, config = {}) {
     try {
       child = spawn(command, [folder], { stdio: "ignore", detached: true });
     } catch (error) {
-      ctx.logger.warn(`[kaz-memory] 打开文件夹失败：${error instanceof Error ? error.message : String(error)}`);
+      ctx.logger.warn(`[ka-whale-memory] 打开文件夹失败：${error instanceof Error ? error.message : String(error)}`);
       return;
     }
-    child.on("error", (error) => ctx.logger.warn(`[kaz-memory] 打开文件夹失败：${error instanceof Error ? error.message : String(error)}`));
+    child.on("error", (error) => ctx.logger.warn(`[ka-whale-memory] 打开文件夹失败：${error instanceof Error ? error.message : String(error)}`));
     child.unref();
   }
   const openFolderAction = typeof config.openFolder === "function" ? config.openFolder : openFolder;

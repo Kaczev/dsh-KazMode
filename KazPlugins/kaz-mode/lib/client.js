@@ -86,21 +86,10 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * 被管理的插件与其配置字段（字段与各插件 settings.yaml 段一一对应）。
-		 * tag 作为悬停简介（Tooltip），解决名称过长被省略号截断的问题。
+		 * 内部插件配置定义（Kaz 5.0 Step1：仅 4 个组件显示，其余保留为内部
+		 * 状态模型，面板不再渲染）。
 		 */
-		const PLUGINS = [
-			{
-				id: "thinking-anchor",
-				namespace: "thinking-anchor",
-				name: "thinking-anchor",
-				tag: "思考锚点 · 消息注入",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
-					{ key: "instruction", kind: "textarea", label: "instruction（思考指令，多行；对话开始时作为消息注入）" },
-					{ key: "turnReminder", kind: "textarea", label: "turnReminder（每轮思考链提醒，作为消息注入；留空 = 用内置默认）" },
-				],
-			},
+		const ALL_PLUGINS = [
 			{
 				id: "round-minimal",
 				namespace: "round-minimal",
@@ -158,9 +147,9 @@ window.__ModuleLoader__.load({
 				],
 			},
 			{
-				id: "kaz-memory",
-				namespace: "kaz-memory",
-				name: "kaz-memory",
+				id: "ka-whale-memory",
+				namespace: "ka-whale-memory",
+				name: "ka-whale-memory",
 				tag: "独立记忆组件（有独立开关）",
 				note: "记忆自动载入在对话开始时注入；六个记忆工具（memory_save/update/list/search/detail/forget）仅在 kaz-memory 开启时注册并加入工具面（关闭 = 六工具完全注销，任何模式都不再出现，热重载）。",
 				fields: [
@@ -171,17 +160,6 @@ window.__ModuleLoader__.load({
 					{ key: "guidanceForget", kind: "textarea", label: "guidanceForget（遗忘指引文本；仅在 guidanceForgetEnabled=true 时生效；留空 = 内置默认）" },
 					{ key: "bm25", path: ["k1"], kind: "number", step: 0.1, label: "bm25.k1（BM25 词频饱和参数；默认 1.2，一般 1.2~2.0）" },
 					{ key: "bm25", path: ["b"], kind: "number", step: 0.05, label: "bm25.b（BM25 长度归一化参数；默认 0.75，0 = 不做长度归一化）" },
-				],
-			},
-			{
-				id: "first-round-hints",
-				namespace: "first-round-hints",
-				name: "first-round-hints",
-				tag: "首轮其它消息提示 · 对话开始注入",
-				note: "对话开始时把消息作为一条合成用户消息注入一次（kaz-memory 自动载入 / thinking-anchor 同款机制）。",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：对话开始时注入消息）" },
-					{ key: "message", kind: "textarea", label: "message（注入的消息内容；留空 = 内置默认 pwsh 使用要点）" },
 				],
 			},
 			{
@@ -213,6 +191,12 @@ window.__ModuleLoader__.load({
 			},
 		];
 
+		/** Kaz 5.0 面板保留组件：output-beep / deepseek-default-model / round-display
+		 *  （kaz-agent-preset-display 作为常驻补丁单独在 PATCH_PLUGINS 显示）。
+		 *  外置工具添加通道在 kaz-mode 配置区（ToolPluginsSection）中保留。 */
+		const KAZ_PANEL_COMPONENT_IDS = Object.freeze(["output-beep", "deepseek-default-model", "round-display"]);
+		const PLUGINS = ALL_PLUGINS.filter((plugin) => KAZ_PANEL_COMPONENT_IDS.includes(plugin.id));
+
 		/** 常驻补丁插件：不随 Kaz/非Kaz 模式切换而关闭，专门修正 dsh 显示/体验问题。 */
 		const PATCH_PLUGINS = [
 			{
@@ -243,7 +227,7 @@ window.__ModuleLoader__.load({
 			"plan-mode-controller",
 		]);
 		/** Kaz 模式自家插件，排序时位于官方之上、外置之下。 */
-		const KAZ_TOOL_PLUGIN_KEYS = new Set(["kaz-memory", "create-plan"]);
+		const KAZ_TOOL_PLUGIN_KEYS = new Set(["ka-whale-memory", "create-plan"]);
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
 		const RPC_CHANNEL = "/kaz-mode";
@@ -1994,9 +1978,9 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "kzm-note" },
-						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 按条件控制（默认 You are a helpful software engineer assistant.，kaz-memory 启用时切换为记忆优先提示词）+ 工具面两阶段：首次工具调用前仅 round-minimal 首轮工具集，首次调用后恢复 Kaz 全部工具（工具控制面板四文件模型的生效白名单，子代理会话同样适用）；" +
-							"联动插件：thinking-anchor（消息注入）+ round-minimal + plugin-filter + output-beep + round-display + deepseek-default-model + kaz-memory；" +
-							"kaz-memory 关闭时其工具自动移出白名单。",
+						"Kaz 模式 = 系统提示词由 kaz-system-prompt.mjs 收敛为 DeepSeek 基础提示词（逐字、最前；角色特化段固定放 KAZ_ROLE_PROMPTS）+ 工具面两阶段：首次工具调用前仅 KAZ_FIRST_ROUND_TOOLS（≤2），首次调用后恢复 Kaz 全部工具（工具控制面板四文件模型的生效白名单，子代理会话同样适用）；" +
+							"面板保留：output-beep + deepseek-default-model + kaz-agent-preset-display + round-display（仅 Kaz）+" +
+							"外置工具添加通道；ka-whale-memory 关闭时其工具自动移出白名单。",
 					),
 					displayPreset === KAZ_PRESET_ID &&
 						effectiveKazEnabled !== true &&

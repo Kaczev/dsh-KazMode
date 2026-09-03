@@ -7,10 +7,14 @@ import {
   BASE_TOOLS,
   MODE_SCOPED_TOOLS,
   MEMORY_TOOLS,
+  KAZ_MAINTENANCE_ONLY_TOOLS,
+  OPTIONAL_TOOLS_WARN_THRESHOLD,
+  OPTIONAL_TOOLS_MAX,
   baseToolNames,
   normalizeOptionalTools,
   optionalToolPoolNames,
   compactOptionalToolDirectory,
+  validateOptionalToolCount,
 } from "./lib/tool-lists.js";
 
 let failures = 0;
@@ -105,12 +109,25 @@ check(
       !MEMORY_TOOLS.some((tool) => pool.includes(tool)),
   );
   check("optional 池去重且排序", JSON.stringify(pool) === JSON.stringify([...new Set(pool)].sort()));
+  check("可选池不含记忆写工具（维护子代理专用）", !KAZ_MAINTENANCE_ONLY_TOOLS.some((tool) => pool.includes(tool)));
 }
 
 {
-  const surface = new Set(["safe_json_write", "read", "enable_tool", "exit_plan_mode"]);
+  const surface = new Set(["safe_json_write", "read", "enable_tool", "exit_plan_mode", "memory_save", "memory_update", "memory_forget"]);
   const pool = optionalToolPoolNames(surface);
   check("optional 池接受 Set 且默认 memory off 不把 memory 当 base", JSON.stringify(pool) === JSON.stringify(["safe_json_write"]));
+  check("可选池始终过滤 memory_save/update/forget", !pool.includes("memory_save") && !pool.includes("memory_update") && !pool.includes("memory_forget"));
+}
+
+{
+  const ok6 = validateOptionalToolCount(["a", "b", "c", "d", "e", "f"]);
+  const warn7 = validateOptionalToolCount(["a", "b", "c", "d", "e", "f", "g"]);
+  const warn8 = validateOptionalToolCount(["a", "b", "c", "d", "e", "f", "g", "h"]);
+  const reject9 = validateOptionalToolCount(["a", "b", "c", "d", "e", "f", "g", "h", "i"]);
+  check("validateOptionalToolCount ≤6 通过", ok6.ok === true && ok6.warn === null && ok6.error === null && ok6.count === 6);
+  check("validateOptionalToolCount 7/8 提醒", warn7.ok === true && warn7.warn !== null && warn8.ok === true && warn8.warn !== null && warn7.count === 7 && warn8.count === 8);
+  check("validateOptionalToolCount >8 拒绝", reject9.ok === false && reject9.error !== null && reject9.count === 9);
+  check("可选阈值常量唯一口径", OPTIONAL_TOOLS_WARN_THRESHOLD === 6 && OPTIONAL_TOOLS_MAX === 8);
 }
 
 {

@@ -21,7 +21,8 @@ const TMP = mkdtempSync(join(tmpdir(), "kzm-probe-"));
 const PROJECT_A = join(TMP, "proj-a"); // 无项目覆盖：Kaz 默认记忆开 / 非 Kaz 默认记忆关
 const PROJECT_B = join(TMP, "proj-b"); // 项目覆盖记忆关
 const PROJECT_C = join(TMP, "proj-c"); // 项目覆盖记忆开
-for (const dir of [PROJECT_A, PROJECT_B, PROJECT_C]) {
+const PROJECT_D = join(TMP, "proj-d"); // 旧键 kaz-memory 项目覆盖（兼容读）
+for (const dir of [PROJECT_A, PROJECT_B, PROJECT_C, PROJECT_D]) {
   mkdirSync(join(dir, ".dsh", "storages"), { recursive: true });
 }
 function writeProjectStates(dir, states) {
@@ -32,27 +33,36 @@ function writeProjectStates(dir, states) {
   );
 }
 writeProjectStates(PROJECT_A, {});
-writeProjectStates(PROJECT_B, { "kaz-memory": { enabled: false } });
-writeProjectStates(PROJECT_C, { "kaz-memory": { enabled: true } });
+writeProjectStates(PROJECT_B, { "ka-whale-memory": { enabled: false } });
+writeProjectStates(PROJECT_C, { "ka-whale-memory": { enabled: true } });
+writeProjectStates(PROJECT_D, { "kaz-memory": { enabled: true } });
 
-// 会话：agentPreset 决定 Kaz/非 Kaz；项目状态文件（按 cwd）决定 kaz-memory 开关。
+// 会话：agentPreset 决定 Kaz/非 Kaz；项目状态文件（按 cwd）决定 ka-whale-memory 开关。
 const SESSIONS = {
   "s-kaz": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
   "s-plain": { cwd: PROJECT_B, agentPreset: "router-standard" },
   "s-plain-mem": { cwd: PROJECT_C, agentPreset: "router-standard" },
+  "s-kaz-legacy": { cwd: PROJECT_D, agentPreset: "kaz" },
   "s-kaz-plan": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-goal": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-whale-rec": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-whale-cls": { cwd: PROJECT_A, agentPreset: "kaz" },
+  // 专门验证首轮极简（无任何 tool/call）的 Kaz 会话。
+  "s-kaz-min": { cwd: PROJECT_A, agentPreset: "kaz" },
+  "s-kaz-min-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
 };
 
-/** plan/mode 会话事件：s-kaz-plan 模拟“当前处于 plan 模式”；whale 阶段事件同理。 */
+/** plan/mode 会话事件：s-kaz-plan 模拟“当前处于 plan 模式”；whale 阶段事件同理。
+ *  除 s-kaz-min 外都先放一条 tool/call，模拟“首次工具调用后”的全量阶段，
+ *  使既有工具面断言不再被首轮极简（核心收编后默认生效）干扰。 */
 const eventsOf = (id) => {
-  if (id === "s-kaz-plan") return [{ type: "plan/mode", seq: 1, time: Date.now(), data: { active: true } }];
-  if (id === "s-kaz-whale-rec") return [{ type: "ka-whale-workflow/stage", seq: 1, time: Date.now(), data: { stage: "reconstruction" } }];
-  if (id === "s-kaz-whale-cls") return [{ type: "ka-whale-workflow/stage", seq: 1, time: Date.now(), data: { stage: "classification" } }];
-  return [];
+  if (id === "s-kaz-min" || id === "s-kaz-min-nomem") return [];
+  const base = [{ type: "tool/call", seq: 0, time: Date.now(), data: { name: "pwsh" } }];
+  if (id === "s-kaz-plan") return [...base, { type: "plan/mode", seq: 1, time: Date.now(), data: { active: true } }];
+  if (id === "s-kaz-whale-rec") return [...base, { type: "ka-whale-workflow/stage", seq: 1, time: Date.now(), data: { stage: "reconstruction" } }];
+  if (id === "s-kaz-whale-cls") return [...base, { type: "ka-whale-workflow/stage", seq: 1, time: Date.now(), data: { stage: "classification" } }];
+  return base;
 };
 
 const agentOf = (id) => ({
@@ -195,6 +205,18 @@ const sKaz = agentOf("s-kaz");
 const sKazNomem = agentOf("s-kaz-nomem");
 const sPlain = agentOf("s-plain");
 const sPlainMem = agentOf("s-plain-mem");
+const sKazLegacy = agentOf("s-kaz-legacy");
+const sKazMin = agentOf("s-kaz-min");
+const sKazMinNomem = agentOf("s-kaz-min-nomem");
+
+// ② 硬边界 2：首次工具调用前工具面 ≤2（kaz-memory/ka-whale-memory 开与关两种状态）。
+{
+  const onSurface = kazMode.surfaceOf(sKazMin);
+  const offSurface = kazMode.surfaceOf(sKazMinNomem);
+  check("①.11 首轮极简（记忆开）工具面 ≤2 且仅 memory_search", onSurface !== null && onSurface.size <= 2 && onSurface.has("memory_search") && onSurface.size === 1);
+  check("①.11 首轮极简（记忆关）工具面 ≤2 且 read/pwsh", offSurface !== null && offSurface.size <= 2 && offSurface.has("read") && offSurface.has("pwsh") && offSurface.size === 2);
+  check("①.11 首轮极简不放行 edit/write/web_search", kazMode.toolVisible(sKazMin, "edit") === false && kazMode.toolVisible(sKazMin, "write") === false && kazMode.toolVisible(sKazMin, "web_search") === false && kazMode.toolVisible(sKazMinNomem, "edit") === false);
+}
 
 {
   const rpc = rpcHandlers.get("/kaz-mode");
@@ -247,8 +269,10 @@ const sPlainMem = agentOf("s-plain-mem");
 
 check("① kazEnabled(kaz 会话)=true", kazMode.kazEnabled(sKaz) === true);
 check("① kazEnabled(非 kaz 会话)=false", kazMode.kazEnabled(sPlain) === false);
-check("① pluginEnabled(s-kaz, kaz-memory)=true", kazMode.pluginEnabled(sKaz, "kaz-memory") === true);
-check("① pluginEnabled(s-kaz-nomem, kaz-memory)=false", kazMode.pluginEnabled(sKazNomem, "kaz-memory") === false);
+check("① pluginEnabled(s-kaz, ka-whale-memory)=true", kazMode.pluginEnabled(sKaz, "ka-whale-memory") === true);
+check("① pluginEnabled(s-kaz-nomem, ka-whale-memory)=false", kazMode.pluginEnabled(sKazNomem, "ka-whale-memory") === false);
+check("① pluginEnabled(s-kaz-legacy, ka-whale-memory)=true（旧键兼容读）", kazMode.pluginEnabled(sKazLegacy, "ka-whale-memory") === true);
+check("① toolVisible(s-kaz-legacy, memory_search)=true（旧键兼容读）", kazMode.toolVisible(sKazLegacy, "memory_search") === true);
 check("① toolVisible(s-kaz, memory_search)=true（记忆开）", kazMode.toolVisible(sKaz, "memory_search") === true);
 check("① toolVisible(s-kaz-nomem, memory_search)=false（记忆关）", kazMode.toolVisible(sKazNomem, "memory_search") === false);
 check("① toolVisible(s-plain, memory_search)=false（非 Kaz 记忆关）", kazMode.toolVisible(sPlain, "memory_search") === false);
@@ -305,7 +329,7 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
     tools: [{ name: "pwsh" }],
     sections: [
       { name: "deployment:persona", text: "other" },
-      { name: "thinking-anchor:policy", text: "anchor" },
+      { name: "other:policy", text: "anchor" },
     ],
     contexts: [],
     variables: {},
@@ -313,7 +337,7 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   await listener(assembly, { agent: sKaz }, () => assembly);
   const persona = assembly.sections.find((s) => s.name === "deployment:persona");
   check("⑥ Kaz 会话不再由 kaz-mode 改写 persona", persona !== undefined && persona.text === "other");
-  check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "thinking-anchor:policy"));
+  check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "other:policy"));
 }
 
 // ⑦ kaz_tool_auto_on：三层单 JSON（原设置/默认设置/专属设置）+ 运行时临时放行

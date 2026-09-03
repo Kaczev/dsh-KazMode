@@ -441,7 +441,7 @@ export class MemoryEngine extends Service {
     /** BM25 search (okapibm25 via bm25ScoresAsync, non-blocking for ~1000
      *  memories). Scores are computed over content + summary + keywords
      *  (content is the primary field); k1 / b come from the caller (usually
-     *  the `kaz-memory.bm25` settings section). */
+     *  the `ka-whale-memory.bm25` settings section). */
     async search(query, filter = {}, bm25 = {}) {
         // 方向1：memory_search 默认不返回 DEPRECATED（可用 filter.includeDeprecated 显式包含）。
         const includeDeprecated = filter?.includeDeprecated === true;

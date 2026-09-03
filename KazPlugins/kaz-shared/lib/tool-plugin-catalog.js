@@ -40,7 +40,7 @@ export const TOOL_PLUGIN_CATALOG = {
   "tool-web": {
     "web_search" : true
   },
-  "kaz-memory": {
+  "ka-whale-memory": {
     "memory_save" : true,
     "memory_update" : true,
     "memory_list" : true,
@@ -96,7 +96,7 @@ export const TOOL_PLUGINS = {
   "tool-ask-user" : true,
   "tool-todo" : true,
   "tool-web" : true,
-  "kaz-memory" : true,
+  "ka-whale-memory" : true,
   "tool-bash" : false,
   "tool-ralph" : false,
   "tool-str-replace-editor" : false,
@@ -136,6 +136,6 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
 
 /** Kaz 模式自家插件（用于 UI 面板分栏）。 */
 export const KAZ_TOOL_PLUGIN_KEYS = [
-  "kaz-memory",
+  "ka-whale-memory",
   "create-plan"
 ];

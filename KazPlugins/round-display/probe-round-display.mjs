@@ -14,6 +14,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** Kaz 5.0 Step1：kaz-system-prompt 恒为 DeepSeek 基础提示词（不再有短 persona 变体）。 */
+const BASE_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
+
+Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
+
+The final white response should be crisp and to the point, and only appear after reasoning and working.`;
+
 let failures = 0;
 function check(label, ok) {
   console.log(`${ok ? "PASS" : "FAIL"}  ${label}`);
@@ -148,7 +155,7 @@ function makeSettings() {
     check(
       "①.a assemble 上报真实系统提示词（persona 在最前，plan 段随后，\\n\\n 连接）",
       systemReport !== undefined &&
-        systemReport.content === "You are a helpful software engineer assistant.\n\nPLAN_SECTION",
+        systemReport.content === BASE_PROMPT + "\n\nPLAN_SECTION",
     );
     check("①.a assemble 返回值原样透传", result === assembly);
     check("①.a 过滤后 sections 只剩 persona + plan", assembly.sections.length === 2 && assembly.sections[0].name === "deployment:persona" && assembly.sections[1].name === "plan:policy");
@@ -169,7 +176,7 @@ function makeSettings() {
     await assemble(assembly, { agent: AGENT }, async () => assembly);
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
-    check("①.b plan 空段被过滤，只报 persona", systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.");
+    check("①.b plan 空段被过滤，只报 persona", systemReport !== undefined && systemReport.content === BASE_PROMPT);
   }
 
   // ①.b2 whale section：persona + ka-whale-workflow:prompt 都被保留
@@ -190,7 +197,7 @@ function makeSettings() {
     check(
       "①.b2 保留 ka-whale-workflow 段（persona 最前）",
       systemReport !== undefined &&
-        systemReport.content === "You are a helpful software engineer assistant.\n\nWHALE_SECTION" &&
+        systemReport.content === BASE_PROMPT + "\n\nWHALE_SECTION" &&
         assembly.sections.length === 2 &&
         assembly.sections[0].name === "deployment:persona" &&
         assembly.sections[1].name === "ka-whale-workflow:prompt",
@@ -292,10 +299,10 @@ function makeSettings() {
     check(
       "①.c goal 模式开启时保留自定义 tool:goal 段（persona 在最前）",
       systemReport !== undefined &&
-        systemReport.content.startsWith("You are a helpful software engineer assistant.\n\n") &&
-        systemReport.content.includes("We are in goal mode.") &&
+        systemReport.content.startsWith(BASE_PROMPT + "\n\n") &&
+        systemReport.content.includes("We are in goal mode until the goal is complete, blocked, or the user switches mode.") &&
         systemReport.content.includes("at least 3 consecutive goal rounds") &&
-        systemReport.content.includes("If the goal is blocked, stay in goal mode"),
+        systemReport.content.includes("If blocked, stay in goal mode, report it, and resume when the user provides new direction."),
     );
     check(
       "①.c 过滤后 sections 只剩 persona + tool:goal",
@@ -303,7 +310,7 @@ function makeSettings() {
         assembly.sections[0].name === "deployment:persona" &&
         assembly.sections[1].name === "tool:goal",
     );
-    check("①.c tool:goal 文本已替换为 Kaz 自定义版", assembly.sections[1].text.includes("We are in goal mode."));
+    check("①.c tool:goal 文本已替换为 Kaz 自定义版", assembly.sections[1].text.includes("We are in goal mode until the goal is complete, blocked, or the user switches mode."));
   }
 
   // ①.d goal 模式开启 + plan + tool:goal 同时存在：persona → plan:policy → tool:goal
@@ -325,8 +332,8 @@ function makeSettings() {
     check(
       "①.d goal 模式开启时 plan + tool:goal 真实 system = persona + plan + 自定义 tool:goal",
       systemReport !== undefined &&
-        systemReport.content.startsWith("You are a helpful software engineer assistant.\n\nPLAN_SECTION\n\n") &&
-        systemReport.content.includes("We are in goal mode."),
+        systemReport.content.startsWith(BASE_PROMPT + "\n\nPLAN_SECTION\n\n") &&
+        systemReport.content.includes("We are in goal mode until the goal is complete, blocked, or the user switches mode."),
     );
     check(
       "①.d 过滤后 sections 顺序 persona → plan:policy → tool:goal",
@@ -362,7 +369,7 @@ function makeSettings() {
     const systemReport = offReports.find((r) => r.plugin === "kaz-system-prompt");
     check(
       "①.e goal 模式未开启时 tool:goal 被丢弃，真实 system 只有 persona",
-      systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.",
+      systemReport !== undefined && systemReport.content === BASE_PROMPT,
     );
     check(
       "①.e 过滤后 sections 只剩 persona",
@@ -396,7 +403,7 @@ function makeSettings() {
     const systemReport = offReports.find((r) => r.plugin === "kaz-system-prompt");
     check(
       "①.f goal 模式未开启时 plan + tool:goal 只剩 persona + plan",
-      systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.\n\nPLAN_SECTION",
+      systemReport !== undefined && systemReport.content === BASE_PROMPT + "\n\nPLAN_SECTION",
     );
     check(
       "①.f 过滤后 sections 只剩 persona + plan:policy",
@@ -432,7 +439,7 @@ function makeSettings() {
     const systemReport = noGoalReports.find((r) => r.plugin === "kaz-system-prompt");
     check(
       "①.g update_goal 可见但无目标时 tool:goal 被丢弃",
-      systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.",
+      systemReport !== undefined && systemReport.content === BASE_PROMPT,
     );
     check("①.g 过滤后 sections 只剩 persona", assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona");
   }
@@ -463,7 +470,7 @@ function makeSettings() {
     const systemReport = hiddenReports.find((r) => r.plugin === "kaz-system-prompt");
     check(
       "①.h 目标存在但 update_goal 不可见时 tool:goal 被丢弃",
-      systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.",
+      systemReport !== undefined && systemReport.content === BASE_PROMPT,
     );
     check("①.h 过滤后 sections 只剩 persona", assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona");
   }
@@ -495,7 +502,7 @@ function makeSettings() {
     check(
       "①.i 目标 paused + update_goal 可见时保留自定义 tool:goal",
       systemReport !== undefined &&
-        systemReport.content.includes("We are in goal mode.") &&
+        systemReport.content.includes("We are in goal mode until the goal is complete, blocked, or the user switches mode.") &&
         assembly.sections.length === 2 &&
         assembly.sections[1].name === "tool:goal",
     );
@@ -527,7 +534,7 @@ function makeSettings() {
     const systemReport = completeReports.find((r) => r.plugin === "kaz-system-prompt");
     check(
       "①.j 目标 complete 时 tool:goal 被丢弃",
-      systemReport !== undefined && systemReport.content === "You are a helpful software engineer assistant.",
+      systemReport !== undefined && systemReport.content === BASE_PROMPT,
     );
     check("①.j 过滤后 sections 只剩 persona", assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona");
   }

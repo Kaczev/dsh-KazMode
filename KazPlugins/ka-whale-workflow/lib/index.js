@@ -46,6 +46,7 @@ import {
   ENABLE_TOOL,
   normalizeOptionalTools,
   compactOptionalToolDirectory,
+  validateOptionalToolCount,
   AGENT_MANAGED_STORAGE_FILE,
   normalizeAgentManagedRegistry,
   normalizeSkillLifecycle,
@@ -118,6 +119,8 @@ Tie-breakers:
 - Generating a code snippet is Normal only when the request is concrete and single-turn. Building/designing a page or feature with unspecified details is Plan (or Goal when the user gave a clear objective to iterate on).
 - Do not rely only on the cleaned reconstruction: preserve signals from the original request's ambiguity.
 
+Before calling whale_report, present a visible task contract (goal / mode / task tool surface / subagent needs / maintenance) and call ask_user_question (confirm / modify / abandon). Do not call whale_report until the user confirms — confirmation is written to the ka-whale-workflow stage store, and Task Surface is not expanded before it.
+
 Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage. Call whale_report before ending your turn; never end this stage with only the stage text.`;
 
 /** 任务分类 prompt（完整版）：任务工具选择开启时渲染 <可选工具目录> 并强制 optional_tools。 */
@@ -126,7 +129,7 @@ export const CLASSIFICATION_PROMPT = `${CLASSIFICATION_PROMPT_BODY}
 Optional tools for this task (non-base, currently enabled in Kaz; empty list = deliberately use none):
 <可选工具目录>
 
-Call whale_report with the chosen mode and \`optional_tools\`: an array of optional tool names to pre-enable for this task. Do not list base tools or mode auto-on tools. If you deliberately want no optional tools, pass \`optional_tools: []\`. \`enable_tool\` remains available during execution, so nothing is locked.`;
+Call whale_report with the chosen mode and \`optional_tools\`: an array of optional tool names to pre-enable for this task. Do not list base tools or mode auto-on tools. If you deliberately want no optional tools, pass \`optional_tools: []\`. \`enable_tool\` remains available during execution, so nothing is locked. Keep optional tools minimal: >6 triggers a convergence warning, >8 is rejected.`;
 
 /** 首轮全流程介绍：仅新对话第一轮注入一次，位置早于 TaskReconstruction 块。 */
 export const FIRST_ROUND_OVERVIEW = `[ka-whale-workflow overview]
@@ -493,15 +496,32 @@ export function normalizeTaskToolStateValue(raw) {
   };
 }
 
+/** 任务契约状态：pending = 模型已产出契约等待 ask_user_question；
+ *  confirmed = 用户确认（可展开 Task Surface）；modified/abandoned 未确认。 */
+const CONTRACT_STATUSES = new Set(["none", "pending", "confirmed", "modified", "abandoned"]);
+
+/** 归一化一条任务契约状态；损坏/字段形状错误返回 null。 */
+export function normalizeContractStateValue(raw) {
+  if (raw === null || raw === undefined || typeof raw !== "object") return null;
+  const status = CONTRACT_STATUSES.has(raw.status) ? raw.status : "none";
+  return {
+    status,
+    contractText: typeof raw.contractText === "string" ? raw.contractText : "",
+    confirmedAt: typeof raw.confirmedAt === "string" ? raw.confirmedAt : "",
+  };
+}
+
 /**
  * 创建阶段状态存储（可注入文件路径，便于探针用临时文件）。
- * 结构：{ version: 2, sessions: { "<sessionId>": "reconstruction"|"classification"|"done" },
- *        taskToolState: { "<sessionId>": { taskRunId, mode, initialOptionalTools, jitEnabledTools } } }
- * 旧文件缺少 taskToolState 时仍按 v1 读取；损坏 JSON / 损坏状态一律丢弃。
+ * 结构：{ version: 3, sessions: { "<sessionId>": "reconstruction"|"classification"|"done" },
+ *        taskToolState: { "<sessionId>": { taskRunId, mode, initialOptionalTools, jitEnabledTools } },
+ *        contractState: { "<sessionId>": { status, contractText, confirmedAt } } }
+ * 旧文件缺少 taskToolState / contractState 时仍按旧版读取；损坏 JSON / 损坏状态一律丢弃。
  */
 export function createStageStore(file) {
   const sessions = {};
   const taskToolState = {};
+  const contractState = {};
   try {
     if (file !== undefined && file !== null && existsSync(file)) {
       let raw = readFileSync(file, "utf8");
@@ -523,6 +543,14 @@ export function createStageStore(file) {
           if (normalized !== null) taskToolState[id] = normalized;
         }
       }
+      const rawContracts = parsed !== null && typeof parsed === "object" ? parsed.contractState : undefined;
+      if (rawContracts !== null && typeof rawContracts === "object") {
+        for (const [id, rawContract] of Object.entries(rawContracts)) {
+          if (id.length === 0) continue;
+          const normalized = normalizeContractStateValue(rawContract);
+          if (normalized !== null) contractState[id] = normalized;
+        }
+      }
     }
   } catch {
     // 存储损坏时从空状态开始，不影响主流程
@@ -531,7 +559,7 @@ export function createStageStore(file) {
     if (typeof file !== "string" || file.length === 0) return true;
     try {
       mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, JSON.stringify({ version: 2, sessions, taskToolState }, null, 2) + String.fromCharCode(10), "utf8");
+      writeFileSync(file, JSON.stringify({ version: 3, sessions, taskToolState, contractState }, null, 2) + String.fromCharCode(10), "utf8");
       return true;
     } catch {
       return false;
@@ -567,6 +595,25 @@ export function createStageStore(file) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       if (!Object.prototype.hasOwnProperty.call(taskToolState, sessionId)) return false;
       delete taskToolState[sessionId];
+      persist();
+      return true;
+    },
+    getContractState(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const value = contractState[sessionId];
+      return value === undefined ? null : JSON.parse(JSON.stringify(value));
+    },
+    setContractState(sessionId, value) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const normalized = normalizeContractStateValue(value);
+      if (normalized === null) return false;
+      contractState[sessionId] = normalized;
+      return persist();
+    },
+    removeContractState(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (!Object.prototype.hasOwnProperty.call(contractState, sessionId)) return false;
+      delete contractState[sessionId];
       persist();
       return true;
     },
@@ -871,7 +918,7 @@ export default {
       return stageOf(agent, stageStore);
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
-     *  进入 reconstruction = 新逻辑任务运行开始，递增 [kaz-memory Review] 与
+     *  进入 reconstruction = 新逻辑任务运行开始，递增 [ka-whale-memory Review] 与
      *  skill-review 各自的 taskRunId，并清除该 session 的旧任务工具状态
      *  （第三次升级：新一轮任务重新分类选择）。 */
     function setStageAgent(agent, stage) {
@@ -882,6 +929,7 @@ export default {
           beginReviewTaskRun(sessionId);
           beginSkillReviewTaskRun(sessionId);
           stageStore.removeTaskToolState(sessionId);
+          stageStore.removeContractState(sessionId);
         }
       }
       return changed;
@@ -1458,6 +1506,7 @@ export default {
             ok: { type: "boolean", required: true },
             stage: { type: "string", required: true },
             restarted: { type: "boolean", required: true },
+            warning: { type: "string" },
           },
         },
         render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
@@ -1476,10 +1525,20 @@ export default {
         if (current === "classification") {
           const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
           const sessionId = sessionIdOf(agent);
+          // Kaz 5.0 契约确认闸门：未确认前不展开 Task Surface。确认状态写入
+          // stage store 的 contractState（由 ask_user_question 的结果监听写入）。
+          const contract = typeof sessionId === "string" ? stageStore.getContractState(sessionId) : null;
+          if (contract === null || contract.status !== "confirmed") {
+            const msg =
+              "whale_report rejected: task contract is not confirmed. Present the visible task contract, then call ask_user_question (confirm/modify/abandon) and wait for the user's confirmation before calling whale_report. Confirmation is recorded in ka-whale-workflow stage store.";
+            ctx.logger.info(`[ka-whale-workflow] ${msg}`);
+            return Promise.reject(new Error(msg));
+          }
           // 第三次升级：分类阶段必须输出 initial optional_tools；先纯校验，避免半启动。
           const toolSelectionUsable =
             taskToolSelectionEnabledFor(agent) === true && kazModeTaskToolPoolFor(agent) !== null;
           let selectedOptionalTools = [];
+          let optionalWarning = null;
           if (toolSelectionUsable) {
             const pool = kazModeTaskToolPoolFor(agent);
             selectedOptionalTools = normalizeOptionalTools(args?.optional_tools);
@@ -1494,6 +1553,18 @@ export default {
                   `whale_report rejected: optional_tools contains "${invalid}", which is not in the current optional tool pool (base/mode-scoped/unknown/not in Kaz surface). Allowed: ${allowed}`,
                 ),
               );
+            }
+            // Kaz 5.0 可选工具规则唯一触发点（契约生成 / whale_report({optional_tools})）：
+            // >6 提醒收敛，>8 拒绝。
+            const countCheck = validateOptionalToolCount(selectedOptionalTools);
+            if (countCheck.ok !== true) {
+              ctx.logger.info(`[ka-whale-workflow] ${countCheck.error}`);
+              return Promise.reject(new Error(countCheck.error));
+            }
+            if (countCheck.warn !== null) {
+              optionalWarning = countCheck.warn;
+              ctx.logger.info(`[ka-whale-workflow] ${countCheck.warn}`);
+              reportRoundDisplay(agent, countCheck.warn, "可选工具提醒");
             }
           }
           const launches = [];
@@ -1544,7 +1615,12 @@ export default {
             "任务分类完成（模式：" + mode + (launches.length > 0 ? "，已启动 " + launches.join("、") : "") + "），鲸鱼工作流结束" + (toolSelectionUsable ? "，任务工具面已按 optional_tools 收敛" : "，放行 Kaz 白名单工具") + "。",
             "阶段切换",
           );
-          return Promise.resolve({ ok: true, stage: "done", restarted: false });
+          return Promise.resolve({
+            ok: true,
+            stage: "done",
+            restarted: false,
+            ...(optionalWarning === null ? {} : { warning: optionalWarning }),
+          });
         }
         return Promise.reject(
           new Error("whale_report can only be called during task reconstruction or task classification"),
@@ -1706,9 +1782,43 @@ export default {
     // 终案 E 运行时接线：tools/result 埋点 + 后台周期审计 + 启动 dry-run。
     // 监听器内部都会再读总开关；timer 服务缺失时静默降级（离线探针兼容）。
     // -----------------------------------------------------------------------
+
+    /** 从 ask_user_question 的结果推断用户对任务契约的选择，并写入 stage store。 */
+    function recordContractFromAskResult(exec, result) {
+      try {
+        if (exec === null || exec === undefined || typeof exec !== "object") return;
+        if (exec.name !== "ask_user_question") return;
+        const agent = exec.agent;
+        const sessionId = sessionIdOf(agent);
+        if (typeof sessionId !== "string" || sessionId.length === 0) return;
+        if (stageOfAgent(agent) !== "classification") return;
+        const text = JSON.stringify(result ?? {});
+        const lower = text.toLowerCase();
+        let status = null;
+        if (/(确认|confirm)/.test(lower)) status = "confirmed";
+        else if (/(修改|modify|调整)/.test(lower)) status = "modified";
+        else if (/(放弃|abandon|取消)/.test(lower)) status = "abandoned";
+        if (status === null) return;
+        const existing = stageStore.getContractState(sessionId) ?? { status: "none", contractText: "", confirmedAt: "" };
+        stageStore.setContractState(sessionId, {
+          ...existing,
+          status,
+          confirmedAt: status === "confirmed" ? new Date().toISOString() : existing.confirmedAt,
+        });
+        ctx.logger.info(
+          `[ka-whale-workflow] 任务契约 ask_user_question 结果写入 stage store：${status} (session=${sessionId})`,
+        );
+      } catch (error) {
+        ctx.logger?.debug?.(
+          `[ka-whale-workflow] 记录 ask_user_question 契约结果失败：${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     try {
       const disposer = ctx.on("tools/result", (exec, result) => {
         try {
+          recordContractFromAskResult(exec, result);
           recordToolUse(exec, result);
         } catch (error) {
           ctx.logger?.debug?.(
@@ -1775,7 +1885,7 @@ export default {
     const manualBypassSessions = new Set();
     /** 每个 session 在当前 turn/stage 已自动提醒过的次数（防止 steer 死循环）。 */
     const turnReminderCounts = new Map();
-    /** [kaz-memory Review] task-run 状态：每 session { kinds, taskRunId, injectedRunId }。
+    /** [ka-whale-memory Review] task-run 状态：每 session { kinds, taskRunId, injectedRunId }。
      *  kinds = session 级“每 kind 最多一次”；taskRunId = 逻辑任务运行标识；
      *  injectedRunId = 上次注入所属的 taskRunId（同一任务运行最多注入一次复盘）。 */
     const reviewRunState = new Map();
@@ -1799,7 +1909,7 @@ export default {
       reviewRunState.set(sessionId, state);
     }
 
-    /** 读取（惰性创建）[kaz-memory Review] 运行状态。 */
+    /** 读取（惰性创建）[ka-whale-memory Review] 运行状态。 */
     function reviewRunStateOf(sessionId) {
       let state = reviewRunState.get(sessionId);
       if (state === undefined) {
@@ -2042,7 +2152,7 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 二阶段技能自省（skill-review）：与 [kaz-memory Review] 同一批安全边界，
+    // 二阶段技能自省（skill-review）：与 [ka-whale-memory Review] 同一批安全边界，
     // 但使用独立 form、独立 per-session per-kind 去重、独立可用性守卫；
     // 受 skillAutonomyEnabled 开关控制，且仅当技能闭环基础工具可用时注入。
     // -----------------------------------------------------------------------

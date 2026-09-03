@@ -305,21 +305,21 @@ export default {
       return source();
     }
 
-    /** 该代理此刻的首轮工具白名单：显式配置优先；为空时按 kaz-memory 启用状态解析。 */
+    /** 该代理此刻的首轮工具白名单：显式配置优先；为空时按 ka-whale-memory 启用状态解析。 */
     function effectiveFirstRoundTools(agent) {
       const current = liveFor(agent);
       const explicit = Array.isArray(current.firstRoundTools) ? current.firstRoundTools.filter((t) => typeof t === "string" && t.trim().length > 0) : [];
       if (explicit.length > 0) return explicit;
-      let kazMemoryEnabled;
+      let memoryEnabled;
       try {
         const svc = ctx.get("kazMode");
         if (svc !== undefined && svc !== null && typeof svc.pluginEnabled === "function" && agent) {
-          kazMemoryEnabled = svc.pluginEnabled(agent, "kaz-memory") === true;
+          memoryEnabled = svc.pluginEnabled(agent, "ka-whale-memory") === true;
         }
       } catch {
         // 服务缺失时交给 resolveFirstRoundTools 兜底
       }
-      return resolveFirstRoundTools({ kazMemoryEnabled });
+      return resolveFirstRoundTools({ kaWhaleMemoryEnabled: memoryEnabled });
     }
 
     /** 该代理此刻是否处于极简阶段（enabled、非子代理（按配置）、尚无 tool/call）。 */

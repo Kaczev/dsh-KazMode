@@ -5,8 +5,8 @@
 //   1) 主动上报：发布 roundDisplay 服务（report 接口），其它要发送信息的插件
 //      在发送时调用 ctx.get("roundDisplay")?.report({ agent, plugin, title, content })
 //      告诉本插件要显示（best-effort：服务不存在时静默跳过，不影响主流程）。
-//      （2026-08-21：删除旧的"被动捕获组装段"逻辑——thinking-anchor / kaz-memory
-//      已改为消息注入，且 kaz-mode 会把非 persona 提示段滤掉，组装层根本读不到
+//      （2026-08-21：删除旧的"被动捕获组装段"逻辑——记忆/工作流插件已改为
+//      消息注入，且 kaz-mode 会把非 persona 提示段滤掉，组装层根本读不到
 //      它们的段；现在所有展示内容全部来自各插件的主动 report。）
 //   2) 面板通道：专用 RPC（/round-display，loopback）——list 返回当前轮
 //      （最近 turn/start 的 data.turn；每次用户发一条消息 = 一轮）的注入记录，

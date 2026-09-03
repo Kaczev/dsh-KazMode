@@ -13,6 +13,7 @@
 
 import {
   MEMORY_TOOLS,
+  KAZ_MAINTENANCE_ONLY_TOOLS,
 } from "./tool-lists.js";
 import {
   PLAN_AUTO_ON_TOOLS,
@@ -68,16 +69,18 @@ export function normalizeOptionalTools(value) {
   return out;
 }
 
-/** 由 surface（Set/数组）计算可选池：不在基础面、也不在模式限定面的工具名。 */
+/** 由 surface（Set/数组）计算可选池：不在基础面、也不在模式限定面的工具名。
+ *  记忆写工具只进维护子代理白名单，绝不进入主线可选池（Kaz 5.0 硬边界 7/8）。 */
 export function optionalToolPoolNames(surface, { memoryEnabled = false } = {}) {
   const base = new Set(baseToolNames({ memoryEnabled }));
   const scoped = new Set(MODE_SCOPED_TOOLS);
+  const maintenance = new Set(KAZ_MAINTENANCE_ONLY_TOOLS);
   const seen = new Set();
   const out = [];
   const list = surface instanceof Set ? [...surface] : Array.isArray(surface) ? surface : [];
   for (const raw of list) {
     if (typeof raw !== "string" || raw.length === 0) continue;
-    if (base.has(raw) || scoped.has(raw) || seen.has(raw)) continue;
+    if (base.has(raw) || scoped.has(raw) || maintenance.has(raw) || seen.has(raw)) continue;
     seen.add(raw);
     out.push(raw);
   }
@@ -98,4 +101,41 @@ export function compactOptionalToolDirectory(entries) {
     out.push(name + ": " + (oneLine.length > 0 ? oneLine : "(no description)"));
   }
   return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Kaz 5.0 可选工具规则（唯一触发点：契约生成 / whale_report({optional_tools})）
+//   >6 提醒收敛；>8 拒绝。计数口径 = 任务可选工具数（不含基础面与模式限定面）。
+// ---------------------------------------------------------------------------
+
+/** 提醒阈值：可选工具超过 6 个时提醒收敛。 */
+export const OPTIONAL_TOOLS_WARN_THRESHOLD = 6;
+
+/** 硬上限：可选工具超过 8 个时拒绝。 */
+export const OPTIONAL_TOOLS_MAX = 8;
+
+/** 固定提醒文案模板（保持唯一，避免各插件自说自话）。 */
+export const OPTIONAL_TOOLS_WARN_MESSAGE = (count) =>
+  `[ka-whale-workflow] optional_tools 提醒：当前 ${count} 个可选工具超过 ${OPTIONAL_TOOLS_WARN_THRESHOLD} 个，请收敛到更少的任务可选工具（硬上限 ${OPTIONAL_TOOLS_MAX}）。`;
+
+/** 固定拒绝文案模板。 */
+export const OPTIONAL_TOOLS_REJECT_MESSAGE = (count) =>
+  `whale_report rejected: optional_tools 数量为 ${count}，超过硬上限 ${OPTIONAL_TOOLS_MAX}（>6 提醒、>8 拒绝）。请收敛后再提交。`;
+
+/**
+ * 校验可选工具数量（纯函数）：
+ *  - count <= 6 → { ok: true, count, warn: null, error: null }
+ *  - 7 <= count <= 8 → { ok: true, count, warn, error: null }
+ *  - count > 8 → { ok: false, count, warn: null, error }
+ */
+export function validateOptionalToolCount(value) {
+  const tools = normalizeOptionalTools(value);
+  const count = new Set(tools).size;
+  if (count > OPTIONAL_TOOLS_MAX) {
+    return { ok: false, count, warn: null, error: OPTIONAL_TOOLS_REJECT_MESSAGE(count) };
+  }
+  if (count > OPTIONAL_TOOLS_WARN_THRESHOLD) {
+    return { ok: true, count, warn: OPTIONAL_TOOLS_WARN_MESSAGE(count), error: null };
+  }
+  return { ok: true, count, warn: null, error: null };
 }

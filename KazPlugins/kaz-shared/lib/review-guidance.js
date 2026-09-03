@@ -35,7 +35,7 @@ export function reviewGuidanceText(kind = "normal", maxItems = MEMORY_REVIEW_MAX
         ? "The Goal has ended."
         : "The task has completed.";
   const n = Number.isInteger(maxItems) && maxItems >= 1 ? maxItems : MEMORY_REVIEW_MAX_ITEMS;
-  return `[kaz-memory Review]
+  return `[ka-whale-memory Review]
 >
 ${label} If there was a substantive change or new conclusion (not repeating known content), we may write 1–${n} memories with memory_save:
 - type: success_pattern / error_pattern / insight, etc.

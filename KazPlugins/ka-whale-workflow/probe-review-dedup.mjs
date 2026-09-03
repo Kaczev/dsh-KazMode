@@ -1,4 +1,4 @@
-// ka-whale-workflow 复盘去重探针：同一逻辑任务运行最多一次 [kaz-memory Review]，
+// ka-whale-workflow 复盘去重探针：同一逻辑任务运行最多一次 [ka-whale-memory Review]，
 // 先到边界获胜；新任务运行（进入 reconstruction）后可再次注入；
 // session 级“每 kind 一次”上限仍然成立。
 // 运行：node KazPlugins/ka-whale-workflow/probe-review-dedup.mjs
@@ -134,6 +134,10 @@ async function classifyToDone(agent) {
   const def = registeredTools.get("whale_report");
   if (def === undefined || def === null || typeof def.execute !== "function") return false;
   await def.execute({}, { agent });
+  // 契约确认闸门：模拟 ask_user_question 返回「确认」，由 tools/result 监听写入 stage store。
+  for (const handler of listeners.get("tools/result") ?? []) {
+    await handler({ name: "ask_user_question", agent }, { answers: [{ answer: "确认" }] });
+  }
   await def.execute({ mode: "normal" }, { agent });
   return true;
 }
@@ -155,9 +159,9 @@ runAgent.session.events = [
   { type: "plan/mode", data: { active: false } },
 ];
 await runTurnStopping(runAgent); // Plan 结束 → 注入 plan 复盘
-check("Plan 结束注入一次 [kaz-memory Review]", memoryReviewMessages(runAgent).length === 1 && textOf(memoryReviewMessages(runAgent)[0]).includes("[kaz-memory Review]"));
+check("Plan 结束注入一次 [ka-whale-memory Review]", memoryReviewMessages(runAgent).length === 1 && textOf(memoryReviewMessages(runAgent)[0]).includes("[ka-whale-memory Review]"));
 await runTurnStopping(runAgent); // 同任务再次到 done（Normal 完成）
-check("同任务 Normal 完成不再注入第二条 [kaz-memory Review]", memoryReviewMessages(runAgent).length === 1);
+check("同任务 Normal 完成不再注入第二条 [ka-whale-memory Review]", memoryReviewMessages(runAgent).length === 1);
 
 // ---------------------------------------------------------------------------
 // 场景 2：新逻辑任务进入 reconstruction 后，Normal 完成允许再次注入。

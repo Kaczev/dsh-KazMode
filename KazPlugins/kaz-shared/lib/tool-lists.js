@@ -25,13 +25,23 @@ import {
   KAZ_TOOL_PLUGIN_KEYS,
 } from "./tool-plugin-catalog.js";
 
-/** kaz-memory 开启时的首轮工具白名单：第一轮先查记忆，触发首次工具调用后再恢复。 */
+/** 首轮工具面常量（Kaz 5.0 设计）：所有插件状态下 ≤2。
+ *  - "ka-whale-memory" / legacy "kaz-memory" 开 → memory_search（1 个）；
+ *  - 其余（记忆关 / 未知）→ read + pwsh（2 个）。
+ */
+export const KAZ_FIRST_ROUND_TOOLS = Object.freeze({
+  "ka-whale-memory": Object.freeze(["memory_search"]),
+  "kaz-memory": Object.freeze(["memory_search"]),
+  default: Object.freeze(["read", "pwsh"]),
+});
+
+/** kaz-memory/ka-whale-memory 开启时的首轮工具白名单：第一轮先查记忆，触发首次工具调用后再恢复。 */
 export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = ["memory_search"];
 
-/** kaz-memory 关闭时的首轮工具白名单：回到原来的 pwsh + read + edit（shell + 看/改文件）。 */
-export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = ["pwsh", "read", "edit"];
+/** kaz-memory/ka-whale-memory 关闭时的首轮工具白名单：read + pwsh（≤2，2026-09 收编 round-minimal）。 */
+export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = ["read", "pwsh"];
 
-/** 兜底默认（kaz-memory 状态未知时）：pwsh + read + edit（旧行为）。 */
+/** 兜底默认（kaz-memory 状态未知时）：read + pwsh（≤2）。 */
 export const DEFAULT_FIRST_ROUND_TOOLS = DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF;
 
 /** ka-whale-workflow 任务重构阶段的默认工具清单（配置面板黑底白字框展示/编辑）。 */
@@ -48,22 +58,27 @@ export const DEFAULT_RECONSTRUCTION_TOOLS = [
 
 const FIRST_ROUND_TOOL_RULES = [
   {
+    id: "ka-whale-memory",
+    test: (kaWhaleMemoryEnabled) => kaWhaleMemoryEnabled === true,
+    tools: KAZ_FIRST_ROUND_TOOLS["ka-whale-memory"],
+  },
+  {
     id: "kaz-memory",
-    test: (kazMemoryEnabled) => kazMemoryEnabled === true,
-    tools: DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON,
+    test: (_kaWhaleMemoryEnabled, kazMemoryEnabled) => kazMemoryEnabled === true,
+    tools: KAZ_FIRST_ROUND_TOOLS["kaz-memory"],
   },
   {
     id: "default",
     test: () => true,
-    tools: DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF,
+    tools: KAZ_FIRST_ROUND_TOOLS.default,
   },
 ];
 
-/** 按 kaz-memory 启用状态解析首轮工具白名单。 */
-export function resolveFirstRoundTools({ kazMemoryEnabled } = {}) {
+/** 按 ka-whale-memory/kaz-memory 启用状态解析首轮工具白名单。 */
+export function resolveFirstRoundTools({ kazMemoryEnabled, kaWhaleMemoryEnabled } = {}) {
   for (const rule of FIRST_ROUND_TOOL_RULES) {
     try {
-      if (rule.test(kazMemoryEnabled)) return [...rule.tools];
+      if (rule.test(kaWhaleMemoryEnabled, kazMemoryEnabled)) return [...rule.tools];
     } catch {
       // 跳过异常规则
     }
@@ -91,19 +106,82 @@ export const MANAGED_CARRIER_TOOLS = {
   "create-plan": ["create_plan"],
 };
 
+/** Kaz 5.0 组件命名：ka-whale-memory 为新 id；kaz-memory 仅作旧键兼容读。 */
+export const KAZ_MEMORY_COMPONENT_ID = "ka-whale-memory";
+export const KAZ_MEMORY_LEGACY_COMPONENT_ID = "kaz-memory";
+
+/** Kaz 5.0 固定核心工具全集（代码级维护，冻结；用户 JSON 不扩写它）。
+ *  外置工具只进 KAZ_EXTERNAL_CANDIDATES 候选层，不写进本全集。 */
+const _toolUniverse = {};
+for (const [plugin, tools] of Object.entries(TOOL_PLUGIN_CATALOG)) {
+  _toolUniverse[plugin] = Object.freeze(
+    Object.fromEntries(Object.keys(tools).map((tool) => [tool, true])),
+  );
+}
+for (const [plugin, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
+  _toolUniverse[plugin] = Object.freeze(
+    Object.fromEntries(tools.map((tool) => [tool, true])),
+  );
+}
+export const KAZ_TOOL_UNIVERSE = Object.freeze(_toolUniverse);
+
+/** Kaz 5.0 基础工具面初稿（v0.4 K2 冻结的 12 项；允许 >8，Step 4 复审）。
+ *  注意：任务工具选择的运行时 BASE_TOOLS 在 Step 4 前保留 enable_tool 兼容层；
+ *  本常量是设计基准面，作为 schema-token 指标复审的对照。 */
+export const KAZ_BASE_TOOLS = Object.freeze([
+  "ask_user_question",
+  "edit",
+  "glob",
+  "grep",
+  "memory_detail",
+  "memory_list",
+  "memory_search",
+  "pwsh",
+  "read",
+  "todo_write",
+  "web_search",
+  "write",
+]);
+
+/** 外置工具候选注册表层（面板添加只写这里；probe/验证通过后才可被任务契约选中）。 */
+export const KAZ_EXTERNAL_CANDIDATES = Object.freeze({
+  version: 1,
+  candidates: Object.freeze({}),
+  storageHint: "user other-*.json / project other-*.json（面板添加通道）",
+});
+
+/** Kaz 5.0 角色特化段（初稿）：只按角色/任务类型固定，禁止按任务实例动态生成。 */
+export const KAZ_ROLE_PROMPTS = Object.freeze({
+  main: Object.freeze(
+    "We are the main-line driver of the confirmed task contract. Keep gray reasoning concise; use memory read tools at task start when relevant; stay in Step scope.",
+  ),
+  subagent: Object.freeze({
+    toolCreator: Object.freeze("We are a tool creator subagent. Create tools only within the delegated whitelist and report evidence."),
+    memoryMaintainer: Object.freeze("We are the memory maintenance subagent. Write concise memories with evidence; deletion requires main-model approval."),
+    retriever: Object.freeze("We are the retrieval subagent. Return id+summary, keep budgets, avoid dumping full contents."),
+  }),
+});
+
+/** 只进维护子代理面的记忆写工具（主线基础面/可选池都不放行）。 */
+export const KAZ_MAINTENANCE_ONLY_TOOLS = Object.freeze([
+  "memory_save",
+  "memory_update",
+  "memory_forget",
+]);
+
 /** Kaz 模式默认系统提示词。 */
 export const FIXED_PERSONA = "You are a helpful software engineer assistant.";
 
-/** 被管理插件目录。 */
+/** 被管理插件目录（Kaz 5.0：两个旧首轮提示组件已删除；面板只显示 4 个组件，
+ *  但内部状态模型仍保留 ka-whale-workflow / ka-whale-memory / create-plan / round-minimal /
+ *  plugin-filter 等隐藏组件，供状态联动与回滚）。 */
 export const MANAGED_PLUGINS = [
-  { id: "thinking-anchor", label: "thinking-anchor（思考锚点 · 消息注入）" },
-  { id: "round-minimal", label: "round-minimal（首阶段极简 · 首次工具调用后恢复）" },
-  { id: "plugin-filter", label: "plugin-filter（工具过滤）" },
+  { id: "round-minimal", label: "round-minimal（首阶段极简 · 已收编进核心机制，面板隐藏）" },
+  { id: "plugin-filter", label: "plugin-filter（工具过滤 · 已收编进 kaz-shared/preset，面板隐藏）" },
   { id: "output-beep", label: "output-beep（输出完成提示音）" },
   { id: "round-display", label: "round-display（每轮注入显示）" },
   { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 采样参数）" },
-  { id: "kaz-memory", label: "kaz-memory（独立记忆组件）" },
-  { id: "first-round-hints", label: "first-round-hints（首轮其它消息提示 · 对话开始注入）" },
+  { id: "ka-whale-memory", label: "ka-whale-memory（独立记忆组件，原 kaz-memory 改名）" },
   { id: "ka-whale-workflow", label: "ka-whale-workflow（鲸鱼工作流：任务重构→任务分类）" },
   { id: "create-plan", label: "create-plan（create_plan 工具：鲸鱼自己启用 plan 模式）" },
 ];
@@ -148,12 +226,15 @@ export function computeSurface({ toolWhitelist = [], minimalPhase = false, first
 // 四文件模型
 // ---------------------------------------------------------------------------
 
-/** 归一化插件/工具名（匹配用）：小写，非字母数字连续串折叠为单个 “-”。 */
+/** 归一化插件/工具名（匹配用）：小写，非字母数字连续串折叠为单个 “-”。
+ *  kaz-memory → ka-whale-memory（改名矩阵的旧键兼容读：所有用户/项目 JSON
+ *  里的旧键经此归一化到新组件 id）。 */
 export function normalizeExternalKey(value) {
-  return String(value ?? "")
+  const key = String(value ?? "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+  return key === KAZ_MEMORY_LEGACY_COMPONENT_ID ? KAZ_MEMORY_COMPONENT_ID : key;
 }
 
 /** 清洗“插件启用”字典（纯对象）→ { plugin: bool }；兼容旧数组（视为全部 true）。 */
@@ -330,6 +411,11 @@ export {
   normalizeOptionalTools,
   optionalToolPoolNames,
   compactOptionalToolDirectory,
+  OPTIONAL_TOOLS_WARN_THRESHOLD,
+  OPTIONAL_TOOLS_MAX,
+  OPTIONAL_TOOLS_WARN_MESSAGE,
+  OPTIONAL_TOOLS_REJECT_MESSAGE,
+  validateOptionalToolCount,
 } from "./task-tool-selection.js";
 
 /** 第14次更新 Agent 管理「自写工具」层：registry 校验 / agent 组 / 全局合并（见 agent-managed-tools.js）。 */

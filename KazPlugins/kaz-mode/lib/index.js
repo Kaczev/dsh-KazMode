@@ -1,26 +1,24 @@
 // kaz-mode
 // ===========================================================================
 // 「Kaz 模式」超级模式插件 —— 统一管理并联动本工作区插件：
-//   thinking-anchor（思考锚点 · 消息注入）、round-minimal（首阶段极简）、
-//   plugin-filter（工具过滤）、output-beep（提示音）、round-display（注入显示）、
-//   deepseek-default-model（DeepSeek 采样参数）、kaz-memory（独立记忆组件）、
+//   round-minimal（首阶段极简 · 已收编核心）、plugin-filter（工具过滤 · 已收编
+//   kaz-shared/preset）、output-beep（提示音）、round-display（注入显示）、
+//   deepseek-default-model（DeepSeek 采样参数）、ka-whale-memory（独立记忆组件）、
 //   并提供集中管理面板与头部开关按钮（客户端半）。
 //
-// Kaz 模式的语义（2026-08 重构后）：
-//   1) 系统提示词由 kaz 预设的 kaz-system-prompt.mjs 控制：组装层按条件收敛为
-//      persona（默认 "You are a helpful software engineer assistant."；kaz-memory
-//      启用时切换为记忆优先提示词）+ 计划模式段（计划模式仍需生效），其余任何
-//      提示段（thinking-anchor / round-minimal 轮次提示 / kaz-memory 指引 /
-//      tool:* 指导段 / 运行时上下文…）一律过滤。本插件不再负责系统提示词。
+// Kaz 模式的语义（Kaz 5.0 Step 1 后）：
+//   1) 系统提示词由 kaz 预设的 kaz-system-prompt.mjs 收敛为 DeepSeek 基础提示词
+//      （逐字、最前；不再按记忆插件开关切换 persona 变体）+ 计划模式段（计划模式
+//      仍需生效）。角色特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS；本插件
+//      不再负责系统提示词。
 //   2) 工具面两阶段（工具清单全部由 kaz-shared 的 tool-lists.js 管理）：
-//        - 首次工具调用前（round-minimal 首阶段信号）：仅保留 round-minimal
-//          首轮工具集 firstRoundTools（为空时由 kaz-shared 按 kaz-memory 自动解析：
-//          kaz-memory 开 → memory_search；关 → pwsh + read + edit）；
+//        - 首次工具调用前（核心机制收编 round-minimal）：仅保留 KAZ_FIRST_ROUND_TOOLS
+//          首轮工具集（ka-whale-memory 开 → memory_search；关 → read + pwsh，≤2）；
 //        - 首次工具调用后：恢复 Kaz 全部工具 = 工具插件 JSON（官方/外置统一：
 //          代码目录 → 用户默认 → 项目设置）。
 //          不再有 settings.yaml 的 toolWhitelist / minimalTools / 群组加减。
 //        - 记忆工具是否真正出现 ⇔ 插件 enabled 时注册到 harness（关闭时
-//          kaz-memory 把工具完全注销）且仍在工具插件 JSON 中。
+//          ka-whale-memory 把工具完全注销）且仍在工具插件 JSON 中。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
 //      再按项目/默认状态应用（同一项目内所有会话共享）。变为 false（关闭 / 切走）
@@ -97,7 +95,6 @@ const FALLBACK_PRESET_ID = "cordis";
 
 /** 出厂默认（非 Kaz 模式）：Kaz 插件初始默认全关。 */
 const FACTORY_NON_KAZ_DEFAULTS = {
-  "thinking-anchor": { enabled: false, instruction: "", turnReminder: "" },
   "round-minimal": {
     enabled: false,
     firstRoundTools: [],
@@ -116,8 +113,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     enabled: false,
     generation_kwargs: { temperature: 0.6, top_p: 0.95, repetition_penalty: 1.2 },
   },
-  "kaz-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
-  "first-round-hints": { enabled: false },
+  "ka-whale-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "ka-whale-workflow": {
     enabled: false,
     includeSubagents: false,
@@ -134,17 +130,16 @@ const FACTORY_NON_KAZ_DEFAULTS = {
 };
 
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
-/** 默认不开启thinking-anchor */
 /** 默认不开启kaz-memory的guidanceHeadEnabled，因为有系统提示词 */
 /** 20260831默认不开启round-minimal，因为发现现在关闭也可以WeNeed */
 /** 20260831发现关闭round-minimal之后，模型表现不稳定，出现Let me思维链，所以重新开启 */
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
-  if (id === "thinking-anchor" || id === "round-display") {
+  if (id === "round-display") {
     FACTORY_KAZ_DEFAULTS[id].enabled = false;
   }
-  if (id === "kaz-memory") {
+  if (id === "ka-whale-memory") {
     FACTORY_KAZ_DEFAULTS[id].guidanceHeadEnabled = false;
   }
 }
@@ -291,12 +286,19 @@ function factoryDefaults() {
   };
 }
 
-/** 规范化插件状态 map：只保留对象值。 */
+/** 规范化插件状态 map：只保留对象值；旧键 kaz-memory 归一化到 ka-whale-memory（改名兼容读）。 */
 function normalizePluginMap(raw) {
   const result = {};
   if (raw === null || typeof raw !== "object") return result;
-  for (const [id, value] of Object.entries(raw)) {
-    if (value !== null && typeof value === "object") result[id] = value;
+  for (const [rawId, value] of Object.entries(raw)) {
+    if (value === null || typeof value !== "object") continue;
+    const id = normalizeExternalKey(rawId);
+    if (id.length === 0) continue;
+    if (result[id] !== undefined) {
+      result[id] = { ...result[id], ...value };
+    } else {
+      result[id] = value;
+    }
   }
   return result;
 }
@@ -347,7 +349,8 @@ function projectStatesPath(cwd) {
   return join(cwd, ".dsh", "storages", PROJECT_STATES_FILE);
 }
 
-/** 读取项目目录下的项目专属状态；不存在或损坏时返回空对象。 */
+/** 读取项目目录下的项目专属状态；不存在或损坏时返回空对象。
+ *  旧键 kaz-memory 会经 normalizePluginMap 归一化到 ka-whale-memory。 */
 function loadProjectStates(cwd, logger) {
   try {
     const file = projectStatesPath(cwd);
@@ -356,7 +359,8 @@ function loadProjectStates(cwd, logger) {
     if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
     const parsed = JSON.parse(raw);
     if (parsed === null || typeof parsed !== "object") return {};
-    return parsed.states !== null && typeof parsed.states === "object" ? parsed.states : {};
+    const states = parsed.states !== null && typeof parsed.states === "object" ? parsed.states : {};
+    return normalizePluginMap(states);
   } catch (error) {
     logger?.warn?.("[kaz-mode] 读取项目状态文件失败：" + safeMessage(error));
     return {};
@@ -1059,20 +1063,34 @@ export default {
       }
     }
 
-    /** 该代理此刻是否处于首阶段极简：完全由 round-minimal 服务判定
-     *  （它自身按 enabled / 首次工具调用前判断）；服务缺失或禁用 → 无首阶段。 */
+    /** 会话里是否已发生第一次工具调用（round-minimal 能力收编进核心机制后使用）。 */
+    function hasToolCallEvent(agent) {
+      try {
+        const events = agent?.session?.events;
+        if (!Array.isArray(events)) return false;
+        return events.some((event) => event !== null && typeof event === "object" && event.type === "tool/call");
+      } catch {
+        return false;
+      }
+    }
+
+    /** 该代理此刻是否处于首阶段极简（round-minimal 能力收编进核心机制）：
+     *  1) 兼容期：round-minimal 服务仍在时以其判定为准（回滚/旧会话）；
+     *  2) 核心兜底：Kaz 模式所有非子代理会话在第一次 tool/call 前都保持极简，
+     *     保证首轮工具面 ≤2（硬边界 2）。
+     *  注意：kazSurfaceFor 只用于 Kaz 会话，因此这里不会误伤非 Kaz 模式。 */
     function isMinimalAgent(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
       if (isSubagent(agent)) return false;
       const roundMinimal = ctx.get("roundMinimal");
       if (roundMinimal !== undefined && roundMinimal !== null && typeof roundMinimal.isMinimal === "function") {
         try {
-          return roundMinimal.isMinimal(agent) === true;
+          if (roundMinimal.isMinimal(agent) === true) return true;
         } catch {
-          return false;
+          // 服务异常时回落到核心判定
         }
       }
-      return false;
+      return !hasToolCallEvent(agent);
     }
 
     // -----------------------------------------------------------------------
@@ -1381,7 +1399,7 @@ export default {
       }
       if (taskState !== null) {
         whitelist.add(ENABLE_TOOL);
-        const memoryEnabled = states["kaz-memory"]?.enabled === true;
+        const memoryEnabled = states["ka-whale-memory"]?.enabled === true;
         const allowed = new Set([
           ...baseToolNames({ memoryEnabled }),
           ...normalizeOptionalTools(taskState.initialOptionalTools),
@@ -1396,7 +1414,7 @@ export default {
       }
       // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
       // 才保留记忆工具，避免新对话/未落盘状态被误判为启用。
-      if (states["kaz-memory"]?.enabled !== true) {
+      if (states["ka-whale-memory"]?.enabled !== true) {
         for (const tool of MEMORY_TOOLS) whitelist.delete(tool);
       }
       // 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，对应工具不进入工具面。
@@ -1425,7 +1443,7 @@ export default {
         minimalPhase,
         firstRoundTools,
         // firstRoundTools 为空时：kaz-memory 开 → memory_search；关 → pwsh/read/edit
-        kazMemoryEnabled: states["kaz-memory"]?.enabled === true,
+        kazMemoryEnabled: states["ka-whale-memory"]?.enabled === true,
       });
     }
 
@@ -1441,7 +1459,7 @@ export default {
      *  （其余交还宿主）。2026-08-21 加固：状态缺失（undefined）按「禁用」处理——
      *  原先 `!== false` 会把新对话/未落盘状态的会话误判为启用。 */
     function nonKazToolVisible(states, name) {
-      if (MEMORY_TOOLS.includes(name)) return states["kaz-memory"]?.enabled === true;
+      if (MEMORY_TOOLS.includes(name)) return states["ka-whale-memory"]?.enabled === true;
       if (carrierToolHidden(states, name)) return false;
       return true;
     }
@@ -1499,7 +1517,7 @@ export default {
         if (!agentKazEnabled(agent)) return [];
         const states = agentEffectiveStates(agent);
         const surface = kazSurfaceFor(agent, source(), states, { taskFilter: false });
-        return optionalToolPoolNames(surface, { memoryEnabled: states["kaz-memory"]?.enabled === true });
+        return optionalToolPoolNames(surface, { memoryEnabled: states["ka-whale-memory"]?.enabled === true });
       },
     };
     ctx.effect(() => {
@@ -1537,7 +1555,7 @@ export default {
       if (hasAgent) {
         const states = agentEffectiveStates(agent);
         const remove = new Set();
-        if (states["kaz-memory"]?.enabled !== true) {
+        if (states["ka-whale-memory"]?.enabled !== true) {
           for (const tool of MEMORY_TOOLS) remove.add(tool);
         }
         for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
@@ -1572,18 +1590,18 @@ export default {
             kind: "deny",
             reason:
               `工具 "${name}" 不在本会话 Kaz 模式工具面内（工具控制面板 JSON：官方/外置 + 已启用记忆插件）。` +
-              `如需使用，请在 Kaz 面板的「工具控制面板」或项目/用户 JSON 中放行（首次工具调用前仅 round-minimal 首轮工具集）。`,
+              `如需使用，请在 Kaz 面板的「工具控制面板」或项目/用户 JSON 中放行（首次工具调用前仅核心首轮工具集，≤2）。`,
           };
         }
         return next();
       }
 
       // 非 Kaz 会话：记忆工具/携带工具组件按项目开关拒绝（常驻注册但该项目不可用）。
-      if (MEMORY_TOOLS.includes(name) && states["kaz-memory"]?.enabled === false) {
-        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（该项目 kaz-memory 已关闭）`);
+      if (MEMORY_TOOLS.includes(name) && states["ka-whale-memory"]?.enabled === false) {
+        ctx.logger.info(`[kaz-mode] 拒绝调用工具 "${name}"（该项目 ka-whale-memory 已关闭）`);
         return {
           kind: "deny",
-          reason: `工具 "${name}" 在当前项目不可用（kaz-memory 已关闭）；如需使用请在 Kaz 面板的当前项目专属设置中开启 kaz-memory。`,
+          reason: `工具 "${name}" 在当前项目不可用（ka-whale-memory 已关闭）；如需使用请在 Kaz 面板的当前项目专属设置中开启 ka-whale-memory。`,
         };
       }
       if (carrierToolHidden(states, name)) {

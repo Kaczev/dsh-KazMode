@@ -30,7 +30,7 @@ function writeProjectStates(dir, states) {
   );
 }
 writeProjectStates(PROJECT_A, { "ka-whale-workflow": { enabled: true, taskToolSelectionEnabled: true } });
-writeProjectStates(PROJECT_B, { "kaz-memory": { enabled: false }, "ka-whale-workflow": { enabled: true, taskToolSelectionEnabled: true } });
+writeProjectStates(PROJECT_B, { "ka-whale-memory": { enabled: false }, "ka-whale-workflow": { enabled: true, taskToolSelectionEnabled: true } });
 
 // 用户默认四文件：把 read_image / job_list / subagent 放进 Kaz 白名单。
 const STORAGE_DIR = join(TMP, "dsh-storages");
@@ -64,8 +64,9 @@ const SESSIONS = {
 };
 
 const eventsOf = (id) => {
-  if (id === "s-plan") return [{ type: "plan/mode", seq: 1, time: Date.now(), data: { active: true } }];
-  return [];
+  const base = [{ type: "tool/call", seq: 0, time: Date.now(), data: { name: "pwsh" } }];
+  if (id === "s-plan") return [...base, { type: "plan/mode", seq: 1, time: Date.now(), data: { active: true } }];
+  return base;
 };
 const agentOf = (id) => ({
   id,

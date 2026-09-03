@@ -1,4 +1,4 @@
-// ka-whale-workflow 技能自省探针：skill-review 与 [kaz-memory Review] 同一批安全边界，
+// ka-whale-workflow 技能自省探针：skill-review 与 [ka-whale-memory Review] 同一批安全边界，
 // 独立 form / 独立 per-session per-kind 去重；受 skillAutonomyEnabled 与
 // skillLifecycleCallable 守卫；验证设置默认值。
 // 运行：node KazPlugins/ka-whale-workflow/probe-skill-review.mjs
@@ -152,7 +152,7 @@ check("skill-review Create 要求完整生命周期", textOf(normalSkills[0]).in
 check("skill-review justified 判定明确", textOf(normalSkills[0]).includes("Create is justified only when") && textOf(normalSkills[0]).includes("executable module + offline probe"));
 check("skill-review runbook 只写 memory", textOf(normalSkills[0]).includes("Pure knowledge/runbook/config procedures") && textOf(normalSkills[0]).includes("write memory only"));
 check("skill-review CANDIDATE-only 不完成/不消耗预算", textOf(normalSkills[0]).includes("CANDIDATE-only") && textOf(normalSkills[0]).includes("does NOT complete self-update") && textOf(normalSkills[0]).includes("does not consume"));
-check("skill-review 与 [kaz-memory Review] 独立共存", normalAgent.messages.some((m) => m?.source?.form === "review" && textOf(m).includes("[kaz-memory Review]")) && normalSkills.every((m) => !textOf(m).includes("[kaz-memory Review]")));
+check("skill-review 与 [ka-whale-memory Review] 独立共存", normalAgent.messages.some((m) => m?.source?.form === "review" && textOf(m).includes("[ka-whale-memory Review]")) && normalSkills.every((m) => !textOf(m).includes("[ka-whale-memory Review]")));
 await runTurnStopping(normalAgent);
 check("同一 session 不重复注入 normal skill-review", skillMessages(normalAgent).length === 1);
 

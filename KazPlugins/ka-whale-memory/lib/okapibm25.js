@@ -6,7 +6,7 @@
 // annotations were removed, the algorithm is unchanged. The full license text
 // lives in LICENSE-okapibm25.
 //
-// kaz-memory uses this library in lib/bm25.js to score every memory with BM25
+// ka-whale-memory uses this library in lib/bm25.js to score every memory with BM25
 // during memory_search. It ships inside the plugin, so installing the plugin
 // never needs network access.
 // ===========================================================================

@@ -1,4 +1,4 @@
-// kaz-memory 宿主半探针：在 mock ctx 上运行插件，验证：
+// ka-whale-memory 宿主半探针：在 mock ctx 上运行插件，验证：
 //   ① memory_list 只返回 id/name/updated_at/keywords（不含正文），按 updated_at 倒序 + limit 分页；
 //   ② memory_search 返回完整正文；
 //   ③ 固定指引 tool:memory 用 [标题] > < 消息格式，说明 list 只回名称、search 回全文；
@@ -7,7 +7,7 @@
 //      不同项目根看到各自的项目记忆；memory_save(namespace=project) 写入对应项目根；
 //   ⑥ paths 镜像：global / project 两个记忆 json 所在文件夹；
 //   ⑦ openFolder 动作：target=global/project 分别打开对应文件夹（config.openFolder 覆盖，不真开资源管理器）。
-// 运行：node kaz-memory/probe-kaz-memory.mjs
+// 运行：node ka-whale-memory/probe-ka-whale-memory.mjs
 import { apply } from "./lib/index.js";
 import { applyContentEdits, applyKeywordPatch } from "./lib/engine.js";
 import { tmpdir } from "node:os";
@@ -249,7 +249,7 @@ const toolsMock = {
 };
 
 /** mock kazMode 服务（方案 A）：toolVisible 由 mockKazVisible 表驱动（缺省 = 可见）。
- *  测试通过 mockKazVisible.set(name, bool) 模拟「该会话 kaz-memory 的某个记忆工具
+ *  测试通过 mockKazVisible.set(name, bool) 模拟「该会话 ka-whale-memory 的某个记忆工具
  *  是否在工具面内」。 */
 const mockKazVisible = new Map();
 const mockKazMode = {
@@ -371,7 +371,7 @@ function guidanceTextOf(decision) {
       source !== null &&
       typeof source === "object" &&
       source.kind === "plugin" &&
-      source.plugin === "kaz-memory" &&
+      source.plugin === "ka-whale-memory" &&
       source.form === "guidance";
     const blocks = message !== null && typeof message === "object" ? message.content : undefined;
     if (Array.isArray(blocks)) {
@@ -381,7 +381,7 @@ function guidanceTextOf(decision) {
           typeof block === "object" &&
           block.type === "text" &&
           typeof block.text === "string" &&
-          (isGuidanceSource || block.text.includes("[kaz-memory guidance]"))
+          (isGuidanceSource || block.text.includes("[ka-whale-memory guidance]"))
         ) {
           return block.text;
         }
@@ -401,7 +401,7 @@ function forgetGuidanceTextOf(decision) {
       source !== null &&
       typeof source === "object" &&
       source.kind === "plugin" &&
-      source.plugin === "kaz-memory" &&
+      source.plugin === "ka-whale-memory" &&
       source.form === "forget-guidance";
     const blocks = message !== null && typeof message === "object" ? message.content : undefined;
     if (Array.isArray(blocks)) {
@@ -440,7 +440,7 @@ check("③ guidanceHeadEnabled 默认关：不注入固定指引", hasGuidance(a
 const defaultOnSearchAgent = { id: "guidance-forget-default-on", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 check("③ guidanceForgetEnabled 默认开：注入遗忘指引", hasForgetGuidance(await runPreStep(defaultOnSearchAgent, 2)) === true);
 // 以下 guidance 测试显式打开固定指引开关（guidanceHead / guidanceForget 留空 = 内置默认）。
-await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceForgetEnabled: true });
+await settings.update("ka-whale-memory", { guidanceHeadEnabled: true, guidanceForgetEnabled: true });
 await settle();
 
 const preBefore = await runPreStep(beforeToolAgent, 2);
@@ -448,7 +448,7 @@ check("③ 首次工具调用前不注入指引", hasGuidance(preBefore) === fal
 const preAfter = await runPreStep(afterToolAgent, 2);
 const guidanceText = guidanceTextOf(preAfter);
 check("③ 首轮工具调用后注入指引", hasGuidance(preAfter) === true);
-check("③ 指引使用 [标题] > < 消息格式", guidanceText.startsWith("[kaz-memory guidance]") && guidanceText.includes("\n>\n") && guidanceText.trimEnd().endsWith("<"));
+check("③ 指引使用 [标题] > < 消息格式", guidanceText.startsWith("[ka-whale-memory guidance]") && guidanceText.includes("\n>\n") && guidanceText.trimEnd().endsWith("<"));
 check("③ 指引含主动行动式总述行（先查记忆 + 存重要事实）", guidanceText.includes("We need to search the memory (memory_search)") && guidanceText.includes("save memories (memory_save)"));
 check(
   "③ 指引只含固定总述行（无四工具说明行）",
@@ -463,14 +463,14 @@ const preNextTurn = await runPreStep(afterToolAgent, 1, [], 2);
 check("③ 首次发送后的下一轮开头重复注入固定指引", hasGuidance(preNextTurn) === true);
 const preNextTurnLater = await runPreStep(afterToolAgent, 2, [], 2);
 check("③ 下一轮非开头 step 不重复注入", hasGuidance(preNextTurnLater) === false);
-const resumedHeadAgent = { id: "guidance-resumed", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "user/message", data: { source: { kind: "plugin", plugin: "kaz-memory", form: "guidance" }, content: [{ type: "text", text: "[kaz-memory guidance]" }] } }, { type: "turn/start", data: { turn: 2 } }] } };
+const resumedHeadAgent = { id: "guidance-resumed", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "user/message", data: { source: { kind: "plugin", plugin: "ka-whale-memory", form: "guidance" }, content: [{ type: "text", text: "[ka-whale-memory guidance]" }] } }, { type: "turn/start", data: { turn: 2 } }] } };
 check("③ 重启后从会话历史推导首次发送轮次并在下一轮开头重复", hasGuidance(await runPreStep(resumedHeadAgent, 1, [], 2)) === true);
 
 // ③d 每轮首次 memory_search 后注入遗忘指引
 const searchToolAgent = { id: "guidance-search-tool", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 const preSearchTool = await runPreStep(searchToolAgent, 2);
 check("③d 首次 memory_search 后注入遗忘指引", hasForgetGuidance(preSearchTool) === true);
-check("③d 遗忘指引使用 [标题] > < 消息格式", forgetGuidanceTextOf(preSearchTool).startsWith("[kaz-memory guidance]") && forgetGuidanceTextOf(preSearchTool).includes("\n>\n") && forgetGuidanceTextOf(preSearchTool).trimEnd().endsWith("<"));
+check("③d 遗忘指引使用 [标题] > < 消息格式", forgetGuidanceTextOf(preSearchTool).startsWith("[ka-whale-memory guidance]") && forgetGuidanceTextOf(preSearchTool).includes("\n>\n") && forgetGuidanceTextOf(preSearchTool).trimEnd().endsWith("<"));
 check("③d 遗忘指引包含 memory_forget 清理已完成任务", forgetGuidanceTextOf(preSearchTool).includes("We need to forget memories (memory_forget)"));
 const preSearchToolAgain = await runPreStep(searchToolAgent, 3, [], 1);
 check("③d 同一轮内遗忘指引只注入一次", hasForgetGuidance(preSearchToolAgain) === false);
@@ -487,44 +487,44 @@ const preSearchTurn2Again = await runPreStep(searchAgainTurnAgent, 3, [], 2);
 check("③d 第 2 轮内不重复注入遗忘指引", hasForgetGuidance(preSearchTurn2Again) === false);
 
 // ③b guidanceHead 覆盖总述行；guidanceSearch 等字段保留兼容但不再生效
-await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "Custom head line", guidanceSearch: "Custom search line" });
+await settings.update("ka-whale-memory", { guidanceHeadEnabled: true, guidanceHead: "Custom head line", guidanceSearch: "Custom search line" });
 await settle();
 const headAgent = { id: "guidance-head", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 const gHead = guidanceTextOf(await runPreStep(headAgent, 2));
 check("③b guidanceHead 覆盖总述行", gHead.includes("Custom head line") && !gHead.includes("search the memory (memory_search)"));
 check("③b guidanceSearch 不再生效（工具细节并入工具描述）", !gHead.includes("Custom search line") && !gHead.includes("memory_search："));
 check("③b 其余工具说明行不再发送", !gHead.includes("memory_save：") && !gHead.includes("memory_forget："));
-await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "", guidanceSearch: "" });
+await settings.update("ka-whale-memory", { guidanceHeadEnabled: true, guidanceHead: "", guidanceSearch: "" });
 await settle();
 const defaultAgent = { id: "guidance-default", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③b 清空 guidanceHead 后恢复内置默认", guidanceTextOf(await runPreStep(defaultAgent, 2)).includes("search the memory (memory_search)"));
 
 // ③c 旧字段 guidance（整段覆盖）仍优先
-await settings.update("kaz-memory", { guidance: "整段覆盖的指引文本" });
+await settings.update("ka-whale-memory", { guidance: "整段覆盖的指引文本" });
 await settle();
 const legacyAgent = { id: "guidance-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 check("③c 旧字段 guidance 整段覆盖", guidanceTextOf(await runPreStep(legacyAgent, 2)) === "整段覆盖的指引文本");
-await settings.update("kaz-memory", { guidance: "" });
-await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "Dynamic head after legacy" });
+await settings.update("ka-whale-memory", { guidance: "" });
+await settings.update("ka-whale-memory", { guidanceHeadEnabled: true, guidanceHead: "Dynamic head after legacy" });
 await settle();
 const dynamicAgent = { id: "guidance-dynamic", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
 const dynamicGuidance = guidanceTextOf(await runPreStep(dynamicAgent, 2));
-check("③c 清空旧字段后按 guidanceHead 动态拼装", dynamicGuidance.startsWith("[kaz-memory guidance]") && dynamicGuidance.includes("Dynamic head after legacy"));
+check("③c 清空旧字段后按 guidanceHead 动态拼装", dynamicGuidance.startsWith("[ka-whale-memory guidance]") && dynamicGuidance.includes("Dynamic head after legacy"));
 
 // ③d2 guidanceForget 覆盖遗忘指引；旧字段 guidance 整段覆盖时不再追加
-await settings.update("kaz-memory", { guidanceForget: "Custom forget line" });
+await settings.update("ka-whale-memory", { guidanceForget: "Custom forget line" });
 await settle();
 const customForgetAgent = { id: "guidance-forget-custom", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 const gForget = forgetGuidanceTextOf(await runPreStep(customForgetAgent, 2));
 check("③d2 guidanceForget 覆盖遗忘指引", gForget.includes("Custom forget line") && !gForget.includes("We need to forget memories (memory_forget)"));
-await settings.update("kaz-memory", { guidanceForget: "" });
+await settings.update("ka-whale-memory", { guidanceForget: "" });
 await settle();
-await settings.update("kaz-memory", { guidance: "整段覆盖的指引文本" });
+await settings.update("ka-whale-memory", { guidance: "整段覆盖的指引文本" });
 await settle();
 const legacyForgetAgent = { id: "guidance-forget-legacy", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "memory_search" }] } };
 check("③d2 旧字段 guidance 整段覆盖时不追加遗忘指引", hasForgetGuidance(await runPreStep(legacyForgetAgent, 2)) === false);
-await settings.update("kaz-memory", { guidance: "" });
-await settings.update("kaz-memory", { guidanceHeadEnabled: true, guidanceHead: "" });
+await settings.update("ka-whale-memory", { guidance: "" });
+await settings.update("ka-whale-memory", { guidanceHeadEnabled: true, guidanceHead: "" });
 await settle();
 
 // ④ RPC list：只回元数据（含 name/summary/autoLoad，无正文），按 updated_at 倒序
@@ -729,7 +729,7 @@ const asm = {
   tools: [],
   sections: [
     { name: "tool:memory", text: "Use memory tools for cross-session preferences..." },
-    { name: "tool:memory:kaz-memory", text: "[kaz-memory 记忆指引]\n>\nS\n<" },
+    { name: "tool:memory:ka-whale-memory", text: "[ka-whale-memory 记忆指引]\n>\nS\n<" },
     { name: "persona", text: "p" },
   ],
   contexts: [],
@@ -740,7 +740,7 @@ let filtered = asm;
   for (const fn of asmListeners) filtered = await fn(filtered, {}, () => filtered);
 })();
 check("⑪ 基础英文 tool:memory 段被移除", !filtered.sections.some((s) => s.name === "tool:memory"));
-check("⑪ 其它层提供的 tool:memory:kaz-memory 段不被兜底误删", filtered.sections.some((s) => s.name === "tool:memory:kaz-memory"));
+check("⑪ 其它层提供的 tool:memory:ka-whale-memory 段不被兜底误删", filtered.sections.some((s) => s.name === "tool:memory:ka-whale-memory"));
 check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "persona"));
 
 // ⑫ 自动载入：每会话一次 + 跨重启持久化（2026-08-19 修复）
@@ -781,12 +781,14 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
     const pre = h.lns.get("agent/pre-step")[0];
     return pre({ step: 1, agent }, async () => ({ kind: "enter", messages: [] }));
   }
-  const hasRecall = (d) => (d?.messages ?? []).some((m) => JSON.stringify(m).includes("[kaz-memory Auto-Load]"));
+  const hasRecall = (d) => (d?.messages ?? []).some((m) => JSON.stringify(m).includes("[ka-whale-memory Auto-Load]"));
 
   const h1 = makeAutoCtx(storePath);
   await apply(h1.c, { autoInjectedStore: storePath });
   const d1 = await primeAndStep(h1, agentA);
   check("⑫ 首次：memory_search 可用时注入自动载入消息", hasRecall(d1) === true);
+  const recallJson = JSON.stringify(d1);
+  check("⑫ 快照只注入 id+summary（≤8），不含 content 正文", recallJson.includes("id: auto-1") && recallJson.includes("summary: Auto Mem") && !recallJson.includes("Auto content"));
   check("⑫ 标记文件已写入且含 agent id", existsSync(storePath) && readFileSync(storePath, "utf8").includes("session-test-A"));
 
   const d2 = await primeAndStep(h1, agentA);
@@ -801,7 +803,7 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   const d4 = await primeAndStep(h2, agentB);
   check("⑫ 重启后新会话仍正常注入一次", hasRecall(d4) === true);
 
-  // ⑫b 加载时预标记现有 agent（thinking-anchor 同款）：新 agent 不在持久化
+  // ⑫b 加载时预标记现有 agent（旧消息注入插件同款）：新 agent 不在持久化
   // 标记里、但插件加载时已存在 → 预标记后不注入（覆盖重启场景的兜底）。
   const agentC = { id: "session-test-C", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 2 } }] } };
   const h3 = makeAutoCtx(storePath, [agentC]);
@@ -812,20 +814,20 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   rmSync(storePath, { force: true });
 }
 
-// ⑬ 会话级总开关（方案 A：kazMode 服务按 agent 会话判定）：该会话 kaz-memory
+// ⑬ 会话级总开关（方案 A：kazMode 服务按 agent 会话判定）：该会话 ka-whale-memory
 // 关闭（mock toolVisible=false）→ 指引为空；开启 → 指引恢复。自动载入仍走
 // 全局 settings 门控（独立 harness，见下）。
 {
-  // 指引门控（主 harness：kazMode mock 模拟该会话 kaz-memory 开关）
+  // 指引门控（主 harness：kazMode mock 模拟该会话 ka-whale-memory 开关）
   mockKazVisible.set("memory_search", false);
   mockKazVisible.set("memory_forget", false);
   await settle();
   const disabledGuidanceAgent = { id: "guidance-disabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-  check("⑬ 会话 kaz-memory 关闭后记忆指引为空", hasGuidance(await runPreStep(disabledGuidanceAgent, 2)) === false);
+  check("⑬ 会话 ka-whale-memory 关闭后记忆指引为空", hasGuidance(await runPreStep(disabledGuidanceAgent, 2)) === false);
   mockKazVisible.clear();
   await settle();
   const enabledGuidanceAgent = { id: "guidance-enabled", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 1 } }, { type: "tool/call", name: "pwsh" }] } };
-  check("⑬ 会话 kaz-memory 开启后指引恢复", guidanceTextOf(await runPreStep(enabledGuidanceAgent, 2)).startsWith("[kaz-memory guidance]"));
+  check("⑬ 会话 ka-whale-memory 开启后指引恢复", guidanceTextOf(await runPreStep(enabledGuidanceAgent, 2)).startsWith("[ka-whale-memory guidance]"));
 
   // 自动载入门控（独立 harness，捕获注册期 settings 实例）
   const storeOff = join(tmpdir(), "km-off-" + Date.now() + ".json");
@@ -853,17 +855,17 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
     tools: { register: () => () => {} },
   };
   await apply(cOff, { autoInjectedStore: storeOff });
-  await regSettings.update("kaz-memory", { enabled: false });
+  await regSettings.update("ka-whale-memory", { enabled: false });
   await settle();
   const agentOff = { id: "session-off", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 2 } }] } };
   const asmOff = lnsOff.get("system-prompt/assemble")[0];
   await asmOff({ tools: [{ name: "memory_search" }], sections: [] }, { agent: agentOff }, async () => ({}));
   const preOff = lnsOff.get("agent/pre-step")[0];
   const dOff = await preOff({ step: 1, agent: agentOff }, async () => ({ kind: "enter", messages: [] }));
-  const hasRecallOff = (d) => (d?.messages ?? []).some((m) => JSON.stringify(m).includes("[kaz-memory Auto-Load]"));
+  const hasRecallOff = (d) => (d?.messages ?? []).some((m) => JSON.stringify(m).includes("[ka-whale-memory Auto-Load]"));
   check("⑬ 关闭后自动载入不注入", hasRecallOff(dOff) === false);
   // 正向对照：重新开启后，新会话应正常注入一次
-  await regSettings.update("kaz-memory", { enabled: true });
+  await regSettings.update("ka-whale-memory", { enabled: true });
   await settle();
   const agentOn = { id: "session-on", session: { header: { cwd: "C:/projA" }, events: [{ type: "turn/start", data: { turn: 2 } }] } };
   await asmOff({ tools: [{ name: "memory_search" }], sections: [] }, { agent: agentOn }, async () => ({}));
@@ -877,10 +879,10 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
 {
   const SIX = ["memory_save", "memory_update", "memory_list", "memory_search", "memory_detail", "memory_forget"];
   check("⑮ 初始六工具已注册", SIX.every((n) => registeredTools.has(n)));
-  await settings.update("kaz-memory", { enabled: false });
+  await settings.update("ka-whale-memory", { enabled: false });
   await settle();
   check("⑮ 关闭后六工具完全注销（全局注销，热重载生效）", SIX.every((n) => !registeredTools.has(n)));
-  await settings.update("kaz-memory", { enabled: true });
+  await settings.update("ka-whale-memory", { enabled: true });
   await settle();
   check("⑮ 重新开启后六工具恢复注册", SIX.every((n) => registeredTools.has(n)));
 }

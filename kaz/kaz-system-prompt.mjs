@@ -28,32 +28,17 @@
  * session/event 从 host 根 scope 派发，agent scope 监听器收不到（output-beep
  * 能收是因为它在 host 平面）。
  *
- * 规则按顺序匹配：第一个 `test` 返回 true 的规则胜出。
- * 需要新增“某种情况下的系统提示词”时，在 PROMPT_RULES 里加一条即可。
- *
- * 目前规则：
- *   - kaz-memory 启用 → 记忆优先提示词（每次任务前先 memory_search，完成后
- *     memory_save）
- *   - 默认 → 原有 Kaz 默认 persona
+ * 规则：Kaz 任何状态下 persona 都等于 DeepSeek 基础提示词（逐字、最前），
+ * 不再按 kaz-memory/ka-whale-memory 插件开关切换 persona 变体（C12/R-C12）；
+ * 记忆搜索/保存指引改由追加消息承担。
+ * 角色/任务类型特化段若需要，固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS，
+ * 代码级维护，禁止按具体任务实例动态生成 system。
  */
 
 export const name = 'kaz-system-prompt'
 
 /** 只依赖事件系统；不需要额外 inject。 */
 export const inject = []
-
-/** 判断某个被管理插件在当前 agent 会话里是否启用（经 kazMode 服务）。 */
-function pluginEnabled(ctx, agent, pluginId) {
-  try {
-    const svc = ctx.get('kazMode')
-    if (svc && typeof svc.pluginEnabled === 'function' && agent) {
-      return svc.pluginEnabled(agent, pluginId) === true
-    }
-  } catch {
-    // 服务不可用时按未启用处理
-  }
-  return false
-}
 
 /**
  * 判断当前会话是否处于 goal 模式（决定是否注入 tool:goal 段）：
@@ -164,38 +149,18 @@ function reportInjectedMessage(ctx, agent, message) {
 }
 
 /**
- * 各种情况下的系统提示词。
- * `test` 返回 true 时使用 `text`；多条规则时取第一条命中的。
+ * DeepSeek 基础提示词：逐字保留且必须位于所有提示词第一段（v0.4 §0.1）。
+ * Kaz 任何状态下都不再切换 persona 变体。
  */
-const PROMPT_RULES = [
-  {
-    id: 'kaz-memory',
-    test: (ctx, agent) => pluginEnabled(ctx, agent, 'kaz-memory'),
-    text:`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
-    
-Search memory at the start and whenever stuck or needing details (e.g., request format). Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, search memory again; if still unresolved, report to the user.
-    
-After reasoning, save concise insights — including workarounds, useful tools, and dead ends avoided, even if not used in the final answer.
-    
-The final white response should be crisp and to the point, and only appear after reasoning and saving are complete.`
-  },
-  {
-    id: 'default',
-    test: () => true,
-    text: 'You are a helpful software engineer assistant.',
-  },
-]
+const BASE_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
 
-/** 取当前会话命中的系统提示词。 */
-function resolvePrompt(ctx, agent) {
-  for (const rule of PROMPT_RULES) {
-    try {
-      if (rule.test(ctx, agent)) return rule.text
-    } catch {
-      // 某条规则异常时跳过，继续往下找
-    }
-  }
-  return PROMPT_RULES[PROMPT_RULES.length - 1].text
+Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
+
+The final white response should be crisp and to the point, and only appear after reasoning and working.`
+
+/** 取当前会话命中的系统提示词：恒为 DeepSeek 基础提示词。 */
+function resolvePrompt() {
+  return BASE_PROMPT
 }
 
 /** persona 段名（与 kaz preset 的 persona 行一致）。 */
@@ -218,7 +183,7 @@ export function apply(ctx, _config) {
       // 服务缺失时不拦截，继续按 Kaz 预设处理
     }
 
-    const prompt = resolvePrompt(ctx, agent)
+    const prompt = resolvePrompt()
 
     // 保持 plan mode 段与 tool:goal 段（仅 goal 模式开启时），其余提示段
     // 收敛为 persona 一句。顺序：persona 绝对最前（与 dsh 原生 order 排序一致：

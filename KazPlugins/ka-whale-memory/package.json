@@ -1,7 +1,7 @@
 {
-  "name": "kaz-memory",
+  "name": "ka-whale-memory",
   "version": "0.2.0",
-  "description": "Kaz 记忆插件：跨会话明文记忆（memory_save/update/list/search/detail/forget 六工具 + 保存即生效 + 每条记忆可标记「自动载入」）。2026-08 升级：每条记忆含 name/keywords/summary/content/created_at/updated_at（ISO 字符串，旧格式读时自动迁移）；memory_search 用 vendored okapibm25 库做 BM25 相关性排序（k1/b 可在 settings.yaml 的 kaz-memory.bm25 段调整），返回 id/name/summary/keywords/score（不含正文）+ limit/offset 分页，评分异步分块计算不阻塞主线程；memory_detail 按 id 分片读取全文；memory_save 必填 name/keywords/content/summary 且直接保存为 applied（无人工确认）；已生效且标记自动载入的记忆会在对话开始时以上下文注入一次；项目记忆按项目文件夹隔离（<项目>/.dsh/storages/memory_project.json）；客户端半在会话头部提供「记忆」按钮、记忆面板、自动载入开关与「打开记忆文件夹」按钮。",
+  "description": "Kaz 记忆插件：跨会话明文记忆（memory_save/update/list/search/detail/forget 六工具 + 保存即生效 + 每条记忆可标记「自动载入」）。2026-08 升级：每条记忆含 name/keywords/summary/content/created_at/updated_at（ISO 字符串，旧格式读时自动迁移）；memory_search 用 vendored okapibm25 库做 BM25 相关性排序（k1/b 可在 settings.yaml 的 ka-whale-memory.bm25 段调整），返回 id/name/summary/keywords/score（不含正文）+ limit/offset 分页，评分异步分块计算不阻塞主线程；memory_detail 按 id 分片读取全文；memory_save 必填 name/keywords/content/summary 且直接保存为 applied（无人工确认）；已生效且标记自动载入的记忆会在对话开始时以上下文注入一次；项目记忆按项目文件夹隔离（<项目>/.dsh/storages/memory_project.json）；客户端半在会话头部提供「记忆」按钮、记忆面板、自动载入开关与「打开记忆文件夹」按钮。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

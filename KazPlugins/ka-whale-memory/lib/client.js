@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-	id: "kaz-memory",
+	id: "ka-whale-memory",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
@@ -17,7 +17,7 @@ window.__ModuleLoader__.load({
 		const createPortal = reactDom.createPortal;
 
 		/** 宿主注册的专用 RPC 通道（记忆数据不经过 settings.yaml）。 */
-		const RPC_CHANNEL = "/kaz-memory";
+		const RPC_CHANNEL = "/ka-whale-memory";
 
 		const inject = ["slots", "connection", "settingsScope"];
 
@@ -104,19 +104,19 @@ window.__ModuleLoader__.load({
 .kzm-root[data-compact="true"] .kzm-label{display:none}
 .kzm-root[data-compact="true"] .kzm-chevron{display:none}
 `;
-			const tagId = "kaz-memory/styles";
+			const tagId = "ka-whale-memory/styles";
 			if (typeof document !== "undefined") {
 				let tag = document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]");
 				if (tag === null) {
 					tag = document.createElement("style");
-					tag.dataset.plugin = "kaz-memory";
+					tag.dataset.plugin = "ka-whale-memory";
 					tag.dataset.pluginCss = tagId;
 					document.head.appendChild(tag);
 				}
 				tag.textContent = css;
 			}
 
-			// ---- 专用 RPC 客户端（宿主 /kaz-memory 通道，记忆数据不经过 settings） ----
+			// ---- 专用 RPC 客户端（宿主 /ka-whale-memory 通道，记忆数据不经过 settings） ----
 			// 客户端 connection 服务由 @deepseek-ai/dsh-client-connection 提供（inject 边保证先加载），
 			// 它自带 rpc 调用器（ctx.connection.rpc），无需从模块导入（createWebConnectionRpc 未导出）。
 			let rpc = null;
@@ -140,11 +140,11 @@ window.__ModuleLoader__.load({
 						return result.value;
 					}
 					lastRpcError = endpoint + ": " + (result !== null && typeof result === "object" && result.error ? result.error.message : "RPC 返回失败");
-					console.warn("[kaz-memory] rpc", endpoint, lastRpcError);
+					console.warn("[ka-whale-memory] rpc", endpoint, lastRpcError);
 					return null;
 				} catch (error) {
 					lastRpcError = endpoint + ": " + (error !== null && typeof error === "object" && error.message ? error.message : String(error));
-					console.warn("[kaz-memory] rpc", endpoint, error);
+					console.warn("[ka-whale-memory] rpc", endpoint, error);
 					return null;
 				}
 			}
@@ -202,11 +202,11 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			// ---- settings 绑定：kaz-memory.enabled（standalone 兜底开关，热重载） ----
+			// ---- settings 绑定：ka-whale-memory.enabled（standalone 兜底开关，热重载） ----
 			let kmScope = null;
 			try {
 				if (ctx.settingsScope !== undefined && ctx.settingsScope !== null && typeof ctx.settingsScope.bind === "function") {
-					kmScope = ctx.settingsScope.bind({ namespace: "kaz-memory" });
+					kmScope = ctx.settingsScope.bind({ namespace: "ka-whale-memory" });
 				}
 			} catch {
 				kmScope = null;
@@ -226,7 +226,7 @@ window.__ModuleLoader__.load({
 				return useSyncExternalStore(binding.subscribe, binding.getSnapshot, binding.getSnapshot);
 			}
 
-			/** kaz-memory 是否启用（settings 快照解析；不可读时按默认 true）。 */
+			/** ka-whale-memory 是否启用（settings 快照解析；不可读时按默认 true）。 */
 			function enabledOf(snap) {
 				if (snap === null || snap === undefined || snap.status !== "ready") return true;
 				const value = snap.value;
@@ -684,7 +684,7 @@ window.__ModuleLoader__.load({
 				const snap = useScope(kmScope);
 				const settingsEnabled = enabledOf(snap);
 				const sessionId = useCurrentSessionId();
-				const sessionEnabled = useSessionPluginEnabled("kaz-memory", sessionId);
+				const sessionEnabled = useSessionPluginEnabled("ka-whale-memory", sessionId);
 				// 优先用与 Kaz 面板同源的会话状态；取不到（kaz-mode 未加载/无会话）时回退 settings.yaml 开关。
 				const enabled = sessionEnabled !== null ? sessionEnabled : settingsEnabled;
 				if (enabled !== true) return null;
@@ -692,7 +692,7 @@ window.__ModuleLoader__.load({
 			}
 			ctx.slots.inject("sidebar.footer.action", () =>
 				ctx.slots.register(
-					{ name: "sidebar.footer.action", id: "kaz-memory", order: -2 },
+					{ name: "sidebar.footer.action", id: "ka-whale-memory", order: -2 },
 					MemorySlot,
 				),
 			);

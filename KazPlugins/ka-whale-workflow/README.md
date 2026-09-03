@@ -9,7 +9,7 @@
 - round-minimal 优先：首次工具调用前不进入重构，第一次工具调用后立刻进入。
 - 首轮介绍：新对话首个真实用户消息（turn=1）注入一次 `[ka-whale-workflow overview]`，简述「任务重构 → 任务分类 → 执行」全流程；与 first-round-hints 同风格、由本插件自持，位置早于 TaskReconstruction 块。续接旧对话、插件关闭、`/plan` `/goal` 命令旁路、子代理（默认）不注入。
 - 阶段状态写入插件自己的 JSON 存储（`~/.dsh/storages/ka-whale-workflow-stage.json`，按 session id 索引），重启/续接会话自动恢复；**不再写会话事件**（自定义会话事件会让 dsh 重载日志时拒绝整条会话）。
-- 复盘（方向1）：任务进入 `done` 后，在 **Normal 任务完成**、**Plan 结束**、**Goal 结束**节点各注入一次 `[kaz-memory Review]` 紧凑指引（同一逻辑任务运行最多一次，先到边界获胜；且每 session 每类型一次）；指引要求模型只在有实质变化/新结论时写 1–2 条 `memory_save`，默认 `CANDIDATE`，无证据不得标 `high`，无实质结论不写。
+- 复盘（方向1）：任务进入 `done` 后，在 **Normal 任务完成**、**Plan 结束**、**Goal 结束**节点各注入一次 `[ka-whale-memory Review]` 紧凑指引（同一逻辑任务运行最多一次，先到边界获胜；且每 session 每类型一次）；指引要求模型只在有实质变化/新结论时写 1–2 条 `memory_save`，默认 `CANDIDATE`，无证据不得标 `high`，无实质结论不写。
 - 技能自省（二阶段）：同一批安全边界注入独立的 `[skill Review]`（`form=skill-review`），引导模型自主判断是否 Create / Update / Retire 一个可执行 skill（证据 ≥2、每边界 ≤1 变更、不批量）；与 memory review 相互独立、独立 per-session per-kind 去重；仅当 `skillAutonomyEnabled` 为 true 且 `write`/`edit`/`pwsh`/`safe_json_write` 至少一项可用时注入。过程文档在私有 `KazPrivatePlugins/process`，插件本体在私有 `KazPrivatePlugins/`，不再使用无法定位的 `project process folder` 占位词。Create 的完成态 = CANDIDATE + 私有插件 + probe + 注册；只写 CANDIDATE 不算完成、不消耗变更预算；纯知识/配置 runbook 只写 memory，不建 CANDIDATE skill。
 
 ## 设置
