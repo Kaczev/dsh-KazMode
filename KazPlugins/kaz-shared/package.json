@@ -9,6 +9,7 @@
       "default": "./lib/tool-lists.js"
     },
     "./lib/safe-json-file.js": "./lib/safe-json-file.js",
+    "./lib/step4-metrics.js": "./lib/step4-metrics.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -23,7 +24,8 @@
     "lib/safe-json-file.js",
     "lib/subagent-policy.js",
     "lib/maintenance-report.js",
-    "lib/hot-load-probe.js"
+    "lib/hot-load-probe.js",
+    "lib/step4-metrics.js"
   ],
   "license": "MIT"
 }

@@ -24,6 +24,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `reviewGuidanceText` / `toolCallable` | ka-whale-workflow / kaz-memory | 方向1 复盘指引（英文/第三人称/紧凑）与工具可用性判定 |
 | `BASE_TOOLS` / `MEMORY_READ_TOOLS` / `KAZ_MAINTENANCE_ONLY_TOOLS` / `baseToolNames` / `optionalToolPoolNames` / `validateOptionalToolCount` | kaz-mode / ka-whale-workflow | 任务分类工具面：主线基础面只含记忆**读**工具；记忆写工具（`memory_save/update/forget`）只进维护子代理白名单；可选池 >6 提醒、>8 拒绝 |
 | `SUBAGENT_ROLE_IDS` / `SUBAGENT_ROLE_INSTANCES` / `SUBAGENT_ROLE_TOOL_FILTERS` / `toolFilterForRole` / `projectTaskWhitelist` / `assertSubsetOf` | Kaz 6.0 Step 2 子代理编排层 | 子代理 `toolFilter` 白名单投影：固定角色（toolCreator / memoryMaintainer / retriever）→ 独立 tool 实例；主线全量面 vs 子代理受限子集；记忆写只进 memoryMaintainer |
+| `estimateToolsSchemaTokens` / `surfaceSnapshots` / `surfaceTransitionCount` / `budgetReviewPoint` | Kaz 6.0 Step 4 缓存/噪音验收 | schema token 固定密度估计、request/header 工具面去重快照与变化次数、Task Surface/`KAZ_BASE_TOOLS` 预算复审点（纯函数） |
 | `MAINTENANCE_REPORT_FIELDS` / `normalizeMaintenanceReport` / `maintenanceReportToText` / `parseMaintenanceReport` / `shortMaintenanceReport` | Kaz 6.0 Step 2 维护子代理试点 | 维护子代理返回“结论/证据/失败与阻塞/下一步建议”结构化短 report；主模型不重读全文 |
 | `validatePhysicalDeletionRequest` / `newDeletionAudit` | Kaz 6.0 Step 2 删除闸门 | 物理删除必须主模型批准 + 删除前备份 + 审计；执行者固定 maintenance-subagent |
 | `hotLoadProbe` / `hotLoadVerdictText` | Kaz 6.0 Step 2 受控热加载 | 统一记录 DSH 是否支持运行时私有插件注册；不支持时一律“下一任务/重启后生效”，不扩展当前 Task Surface |
@@ -69,6 +70,8 @@ npm install --legacy-peer-deps --no-audit --no-fund --save ./KazPlugins/kaz-shar
 ```powershell
 node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-shared\probe-tool-lists.mjs"
 # 期望输出：KAZ-SHARED PROBE OK
+node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-shared\probe-step4-metrics.mjs"
+# 期望输出：STEP4-METRICS PROBE OK
 node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-shared\probe-skill-guidance.mjs"
 # 期望输出：SKILL-GUIDANCE PROBE OK
 node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-shared\probe-subagent-policy.mjs"
