@@ -232,7 +232,7 @@ const sNomem = agentOf("s-nomem");
   check("surfaceOf(selected) 含 JIT 已点亮（job_list）", surface.has("job_list"));
   check("surfaceOf(selected) 不含未选 optional（subagent）", !surface.has("subagent"));
   check("surfaceOf(selected) 含 enable_tool", surface.has("enable_tool"));
-  check("surfaceOf(selected, memory on) memory 在基础面", surface.has("memory_search") && surface.has("memory_save"));
+  check("surfaceOf(selected, memory on) 读记忆进基础面、写记忆不进", surface.has("memory_search") && surface.has("memory_list") && surface.has("memory_detail") && !surface.has("memory_save") && !surface.has("memory_update") && !surface.has("memory_forget"));
   const emptySurface = kazMode.surfaceOf(sEmpty);
   check("空 optional 列表 = 仅基础 + enable_tool", emptySurface.has("read") && emptySurface.has("enable_tool") && !emptySurface.has("read_image") && !emptySurface.has("job_list") && !emptySurface.has("subagent"));
   const noStateSurface = kazMode.surfaceOf(sNoState);
@@ -252,7 +252,7 @@ const sNomem = agentOf("s-nomem");
 // ④ memory 开关
 {
   const emptyMemSurface = kazMode.surfaceOf(sEmpty);
-  check("memory on：memory 工具进基础面", emptyMemSurface.has("memory_search") && emptyMemSurface.has("memory_save"));
+  check("memory on：记忆读工具进基础面、写工具不进", emptyMemSurface.has("memory_search") && emptyMemSurface.has("memory_list") && !emptyMemSurface.has("memory_save") && !emptyMemSurface.has("memory_forget"));
   const nomemSurface = kazMode.surfaceOf(sNomem);
   check("memory off：memory 工具不进面", !nomemSurface.has("memory_search") && !nomemSurface.has("memory_save"));
   check("memory off：基础/optional 不受影响", nomemSurface.has("read") && nomemSurface.has("enable_tool") && !nomemSurface.has("read_image"));

@@ -12,7 +12,7 @@
 // ===========================================================================
 
 import {
-  MEMORY_TOOLS,
+  MEMORY_READ_TOOLS,
   KAZ_MAINTENANCE_ONLY_TOOLS,
 } from "./tool-lists.js";
 import {
@@ -47,11 +47,12 @@ export const MODE_SCOPED_TOOLS = Object.freeze([
   ]),
 ]);
 
-/** 基础工具名：kaz-memory 启用时把 MEMORY_TOOLS 并入基础面。 */
+/** 基础工具名：kaz-memory 启用时把记忆**读**工具并入基础面；
+ *  记忆写工具只进维护子代理白名单（KAZ_MAINTENANCE_ONLY_TOOLS），主线基础面不放行。 */
 export function baseToolNames({ memoryEnabled = false } = {}) {
   const names = [...BASE_TOOLS];
   if (memoryEnabled === true) {
-    for (const tool of MEMORY_TOOLS) {
+    for (const tool of MEMORY_READ_TOOLS) {
       if (!names.includes(tool)) names.push(tool);
     }
   }

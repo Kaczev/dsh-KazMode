@@ -7,6 +7,7 @@ import {
   BASE_TOOLS,
   MODE_SCOPED_TOOLS,
   MEMORY_TOOLS,
+  MEMORY_READ_TOOLS,
   KAZ_MAINTENANCE_ONLY_TOOLS,
   OPTIONAL_TOOLS_WARN_THRESHOLD,
   OPTIONAL_TOOLS_MAX,
@@ -54,9 +55,10 @@ check(
     JSON.stringify(off) === JSON.stringify([...BASE_TOOLS]),
   );
   check(
-    "baseToolNames memory on = BASE_TOOLS + MEMORY_TOOLS",
-    [...BASE_TOOLS, ...MEMORY_TOOLS].every((tool) => on.includes(tool)) &&
-      on.length === BASE_TOOLS.length + MEMORY_TOOLS.length,
+    "baseToolNames memory on = BASE_TOOLS + 记忆读子集且不含写工具",
+    [...BASE_TOOLS, ...MEMORY_READ_TOOLS].every((tool) => on.includes(tool)) &&
+      on.length === BASE_TOOLS.length + MEMORY_READ_TOOLS.length &&
+      !KAZ_MAINTENANCE_ONLY_TOOLS.some((tool) => on.includes(tool)),
   );
 }
 

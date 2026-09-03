@@ -99,6 +99,14 @@ export const MEMORY_TOOLS = [
   "memory_forget",
 ];
 
+/** 主线任务面（记忆开时）允许进入基础面的记忆**读**工具。
+ *  记忆写工具只进维护子代理白名单（KAZ_MAINTENANCE_ONLY_TOOLS），主线不持有。 */
+export const MEMORY_READ_TOOLS = Object.freeze([
+  "memory_list",
+  "memory_search",
+  "memory_detail",
+]);
+
 /** 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，这些工具不应出现在工具面。
  *  （whale_report 由 ka-whale-workflow 注册；create_plan 由 create-plan 注册。） */
 export const MANAGED_CARRIER_TOOLS = {
@@ -430,6 +438,42 @@ export {
   agentManagedRegistryHasPlugin,
   mergeAgentManagedToolsIntoSurface,
 } from "./agent-managed-tools.js";
+
+/** Kaz 6.0 Step 2 受控热加载判定与降级路径（见 hot-load-probe.js）。 */
+export {
+  HOT_LOAD_INPUT_KEYS,
+  HOT_LOAD_SUPPORTED,
+  HOT_LOAD_UNSUPPORTED,
+  hotLoadProbe,
+  hotLoadVerdictText,
+} from "./hot-load-probe.js";
+
+/** Kaz 6.0 Step 2 维护子代理结构化短 report / 物理删除闸门（见 maintenance-report.js）。 */
+export {
+  MAINTENANCE_REPORT_FIELDS,
+  MAINTENANCE_REPORT_ITEM_MAX,
+  MAINTENANCE_REPORT_MAX_CHARS,
+  normalizeMaintenanceReport,
+  maintenanceReportToText,
+  parseMaintenanceReport,
+  shortMaintenanceReport,
+  validatePhysicalDeletionRequest,
+  newDeletionAudit,
+} from "./maintenance-report.js";
+
+/** Kaz 6.0 Step 2 子代理 toolFilter 白名单投影（见 subagent-policy.js）。 */
+export {
+  SUBAGENT_ROLE_IDS,
+  SUBAGENT_ROLE_INSTANCES,
+  SUBAGENT_ROLE_TOOL_FILTERS,
+  SUBAGENT_ROLE_MEMORY_READ_TOOLS,
+  SUBAGENT_MAINTENANCE_MEMORY_WRITE_TOOLS,
+  normalizeToolNameList,
+  normalizeSubagentRole,
+  toolFilterForRole,
+  projectTaskWhitelist,
+  assertSubsetOf,
+} from "./subagent-policy.js";
 
 /** 终案 E 全自动 Skill 生命周期：纯函数（归一化 / audit 建议 / registry 投影 / 状态机，见 skill-lifecycle.js）。 */
 export {
