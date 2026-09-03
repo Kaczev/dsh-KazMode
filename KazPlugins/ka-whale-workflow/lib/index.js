@@ -131,6 +131,18 @@ Optional tools for this task (non-base, currently enabled in Kaz; empty list = d
 
 Call whale_report with the chosen mode and \`optional_tools\`: an array of optional tool names to pre-enable for this task. Do not list base tools or mode auto-on tools. If you deliberately want no optional tools, pass \`optional_tools: []\`. \`enable_tool\` remains available during execution, so nothing is locked. Keep optional tools minimal: >6 triggers a convergence warning, >8 is rejected.`;
 
+/** Goal 恢复阶段名：非 complete goal（blocked / paused / disarmed active）存在时，
+ *  新一轮真实人类消息先进入本阶段，确认继续原 Goal / 新任务 / 结束，再决定走向。 */
+export const GOAL_RECOVERY_STAGE = "goal-recovery";
+
+/** Goal 恢复阶段 prompt：让模型先经 ask_user_question 澄清意图，再按选择推进。 */
+export const GOAL_RECOVERY_PROMPT = `Goal recovery stage: a non-complete goal already exists in this session. Before routing this human message as a new task, confirm Kaczev's intent with ask_user_question:
+- Continue the original goal → call whale_report({mode:'goal'}) with no objective; it resumes the existing goal when rounds remain and gives structured guidance when they are exhausted.
+- Start a new task → call whale_report() with no mode; this enters task reconstruction.
+- End the current goal → do not resume or silently create; tell Kaczev to complete/clear it (for example with /goal) or choose another option.
+
+Do not call whale_report before ask_user_question has returned an answer. Call whale_report before ending your turn; never end this stage with only the stage text.`;
+
 /** 首轮全流程介绍：仅新对话第一轮注入一次，位置早于 TaskReconstruction 块。 */
 export const FIRST_ROUND_OVERVIEW = `[ka-whale-workflow overview]
 >
@@ -145,8 +157,14 @@ When the conversation ends, ka-whale-workflow will remind us to save insights an
 /** 同一 turn/stage 内最多自动提醒次数（防止模型反复漏调 whale_report 导致死循环）。 */
 export const MAX_WHALE_REMINDERS = 2;
 
-/** 任务重构/分类阶段漏调 whale_report 时的提醒消息文本。 */
+/** 任务重构/分类/Goal 恢复阶段漏调 whale_report 时的提醒消息文本。 */
 export function whaleReportReminderText(stage) {
+  if (stage === "goal-recovery") {
+    return `[ka-whale-workflow Reminder]
+>
+Goal recovery is waiting for whale_report. If Kaczev chose to continue the existing goal, call whale_report({mode:'goal'}) with no objective; if Kaczev chose a new task, call whale_report() with no mode. Do not end the turn without calling whale_report.
+<`;
+  }
   if (stage === "classification") {
     return `[ka-whale-workflow Reminder]
 >
@@ -428,6 +446,12 @@ export function planModeActiveOf(agent) {
 /** 该 agent 会话是否处于 goal 模式：经 goals 服务查询，phase 为 active/paused
  *  即为激活（与 kaz-mode 的 goalActive 同源；服务缺失按未开启处理）。 */
 export function goalModeActiveOf(agent, goals) {
+  const goal = currentGoalOf(agent, goals);
+  return goal !== null && (goal.phase === "active" || goal.phase === "paused");
+}
+
+/** 读取 goals 服务返回的当前 goal view；无目标/服务缺失/异常一律返回 null。 */
+export function currentGoalOf(agent, goals) {
   try {
     if (
       goals === undefined ||
@@ -436,14 +460,52 @@ export function goalModeActiveOf(agent, goals) {
       agent === null ||
       agent === undefined
     ) {
-      return false;
+      return null;
     }
     const goal = goals.get(agent);
-    if (goal === null || goal === undefined || typeof goal !== "object") return false;
-    return goal.phase === "active" || goal.phase === "paused";
+    if (goal === null || goal === undefined || typeof goal !== "object") return null;
+    return goal;
+  } catch {
+    return null;
+  }
+}
+
+/** 当前开启的模型回合内是否出现真实人类消息（source.kind === "user"）。
+ *  与 @deepseek-ai/dsh-tool-goal 的 requireDirectHuman 语义一致。 */
+export function hasDirectHumanInOpenTurn(agent) {
+  try {
+    const events = agent?.session?.events;
+    if (!Array.isArray(events)) return false;
+    let start = -1;
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const boundary = events[index];
+      if (boundary === null || typeof boundary !== "object") continue;
+      if (boundary.type === "turn/end") return false;
+      if (boundary.type === "turn/start") {
+        start = index;
+        break;
+      }
+    }
+    if (start === -1) return false;
+    for (let index = start + 1; index < events.length; index += 1) {
+      const event = events[index];
+      if (event === null || typeof event !== "object" || event.type !== "user/message") continue;
+      if (event.data?.source?.kind === "user") return true;
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+/** 是否存在需要“Goal 恢复确认”的非 complete goal：blocked / paused / disarmed active。
+ *  返回 goal view；无目标、complete、active+armed 或 activation 未知时返回 null。 */
+export function goalRecoveryNeededOf(agent, goals) {
+  const goal = currentGoalOf(agent, goals);
+  if (goal === null || goal.phase === "complete") return null;
+  if (goal.phase === "blocked" || goal.phase === "paused") return goal;
+  if (goal.phase === "active" && goal.activation === "disarmed") return goal;
+  return null;
 }
 
 /** 插件自己的阶段状态文件名（DSH_HOME/storages 下，按 session id 索引）。
@@ -513,7 +575,7 @@ export function normalizeContractStateValue(raw) {
 
 /**
  * 创建阶段状态存储（可注入文件路径，便于探针用临时文件）。
- * 结构：{ version: 3, sessions: { "<sessionId>": "reconstruction"|"classification"|"done" },
+ * 结构：{ version: 3, sessions: { "<sessionId>": "reconstruction"|"goal-recovery"|"classification"|"done" },
  *        taskToolState: { "<sessionId>": { taskRunId, mode, initialOptionalTools, jitEnabledTools } },
  *        contractState: { "<sessionId>": { status, contractText, confirmedAt } } }
  * 旧文件缺少 taskToolState / contractState 时仍按旧版读取；损坏 JSON / 损坏状态一律丢弃。
@@ -530,7 +592,7 @@ export function createStageStore(file) {
       const data = parsed !== null && typeof parsed === "object" ? parsed.sessions : undefined;
       if (data !== null && typeof data === "object") {
         for (const [id, stage] of Object.entries(data)) {
-          if (id.length > 0 && (stage === "reconstruction" || stage === "classification" || stage === "done")) {
+          if (id.length > 0 && (stage === "reconstruction" || stage === "goal-recovery" || stage === "classification" || stage === "done")) {
             sessions[id] = stage;
           }
         }
@@ -642,7 +704,7 @@ export function stageOf(agent, store = null) {
   const sessionId = sessionIdOf(agent);
   if (store !== null && store !== undefined && typeof store.get === "function") {
     const stored = store.get(sessionId);
-    if (stored === "reconstruction" || stored === "classification" || stored === "done") return stored;
+    if (stored === "reconstruction" || stored === "goal-recovery" || stored === "classification" || stored === "done") return stored;
   }
   return legacyStageOf(agent);
 }
@@ -749,9 +811,13 @@ export function hasInjectedInTurn(agent, form, turn) {
   }
 }
 
-/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）直接重新进入「任务重构」。
+/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）默认进入「任务重构」。
+ *  非 complete goal 需要恢复确认时（context.goalRecovery 非空）先进入 goal-recovery；
  *  Plan/Goal 模式激活时（context.modeActive=true）保持 idle/done，不进入任务重构。 */
 export function nextStageOnUserMessage(current, _turn, context = {}) {
+  if (context?.goalRecovery !== null && context?.goalRecovery !== undefined) {
+    if (current === "idle" || current === "done" || current === GOAL_RECOVERY_STAGE) return GOAL_RECOVERY_STAGE;
+  }
   if (context?.modeActive === true && (current === "idle" || current === "done")) return current;
   return "reconstruction";
 }
@@ -1029,6 +1095,11 @@ export default {
       } catch {
         return false;
       }
+    }
+
+    /** 是否存在需要 Goal 恢复确认的非 complete goal（blocked / paused / disarmed active）。 */
+    function goalRecoveryNeeded(agent) {
+      return goalRecoveryNeededOf(agent, ctx.get("goals"));
     }
 
     /** memory_save 当前环境是否可调用（可用性判断已抽到 kaz-shared）。 */
@@ -1398,9 +1469,11 @@ export default {
       const candidates =
         stage === "reconstruction"
           ? [...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]
-          : stage === "classification"
-            ? [WHALE_REPORT_TOOL]
-            : [];
+          : stage === "goal-recovery"
+            ? ["ask_user_question", WHALE_REPORT_TOOL]
+            : stage === "classification"
+              ? [WHALE_REPORT_TOOL]
+              : [];
       const out = [];
       for (const tool of candidates) {
         if (out.includes(tool)) continue;
@@ -1425,16 +1498,32 @@ export default {
       const prompt =
         stage === "reconstruction"
           ? RECONSTRUCTION_PROMPT
-          : stage === "classification"
-            ? toolSelectionUsable
-              ? CLASSIFICATION_PROMPT
-              : CLASSIFICATION_PROMPT_BODY
-            : "";
+          : stage === GOAL_RECOVERY_STAGE
+            ? GOAL_RECOVERY_PROMPT
+            : stage === "classification"
+              ? toolSelectionUsable
+                ? CLASSIFICATION_PROMPT
+                : CLASSIFICATION_PROMPT_BODY
+              : "";
       const tools = availableStageTools(agent, stage);
       const list = tools.length > 0 ? tools.join(", ") : "the currently available tools";
       let rendered = prompt.replace(/<工具列表>/g, list);
       if (stage === "classification" && toolSelectionUsable) {
         rendered = rendered.replace(/<可选工具目录>/g, optionalToolDirectoryFor(agent) || "(no optional tools available)");
+      }
+      if (stage === "classification") {
+        const existingGoal = currentGoalOf(agent, ctx.get("goals"));
+        if (existingGoal !== null && existingGoal.phase !== "complete") {
+          const roundsStarted = Number.isSafeInteger(existingGoal.roundsStarted) ? existingGoal.roundsStarted : 0;
+          const maxGoalRounds = Number.isSafeInteger(existingGoal.maxGoalRounds) ? existingGoal.maxGoalRounds : 1;
+          const reason =
+            existingGoal.phase === "blocked" && typeof existingGoal.blockedReason === "object" && existingGoal.blockedReason !== null
+              ? `; blockedReason=${existingGoal.blockedReason.message ?? JSON.stringify(existingGoal.blockedReason)}`
+              : "";
+          rendered =
+            `[Goal status] Existing non-complete goal: phase=${existingGoal.phase}; roundsStarted=${roundsStarted}; maxGoalRounds=${maxGoalRounds}; objective=${existingGoal.objective}${reason}\n\n` +
+            rendered;
+        }
       }
       return rendered;
     }
@@ -1470,22 +1559,70 @@ export default {
       return tool.execute({ active }, exec);
     }
 
+    /**
+     * C15 / 描述v0.4 §9.3：mode='goal' 的统一启动/恢复逻辑。
+     *  - 无 goal 或 phase=complete → goals.create（必须给 objective）；
+     *  - 已存在非 complete goal → 直接人类回合且轮次未耗尽时 goals.resume；
+     *    轮次耗尽 / 想换目标 → 结构化拒绝，绝不静默 create/edit/clear。
+     */
+    function launchGoalMode(agent, goals, args) {
+      if (goals === undefined || goals === null || typeof goals.get !== "function" || typeof goals.create !== "function") {
+        throw new Error("goals service is unavailable; cannot start or resume goal");
+      }
+      const objective = typeof args?.objective === "string" ? args.objective.trim() : "";
+      const existing = currentGoalOf(agent, goals);
+      if (existing === null || existing.phase === "complete") {
+        if (objective.length === 0) {
+          throw new Error("whale_report mode=goal requires an objective when creating a new goal");
+        }
+        goals.create(agent, {
+          objective,
+          ...(typeof args?.max_goal_rounds === "number" && Number.isInteger(args.max_goal_rounds) && args.max_goal_rounds > 0
+            ? { maxGoalRounds: args.max_goal_rounds }
+            : {}),
+        });
+        return;
+      }
+      if (typeof goals.resume !== "function") {
+        throw new Error("goals service cannot resume an existing goal (resume is unavailable)");
+      }
+      const ref = { id: existing.id, revision: existing.revision };
+      const roundsStarted = Number.isSafeInteger(existing.roundsStarted) ? existing.roundsStarted : 0;
+      const maxGoalRounds = Number.isSafeInteger(existing.maxGoalRounds) ? existing.maxGoalRounds : 1;
+      if (objective.length > 0 && objective !== existing.objective) {
+        throw new Error(
+          `cannot create a new goal while a non-complete goal already exists (phase=${existing.phase}); ` +
+            `complete/clear the current goal first. To continue the existing goal, call whale_report({mode:'goal'}) without a new objective.`,
+        );
+      }
+      if (!hasDirectHumanInOpenTurn(agent)) {
+        throw new Error("whale_report mode=goal cannot resume an existing goal without a direct human turn on a top-level agent");
+      }
+      if (roundsStarted >= maxGoalRounds) {
+        throw new Error(
+          `goal "${existing.id}" has exhausted ${roundsStarted}/${maxGoalRounds} goal rounds; ` +
+            `raise maxGoalRounds (e.g. /goal edit) and then resume, or complete/clear it before creating a new goal.`,
+        );
+      }
+      goals.resume(agent, ref);
+    }
+
     // -----------------------------------------------------------------------
     // whale_report 工具：重构/分类各调用一次，向插件汇报阶段完成。
     // -----------------------------------------------------------------------
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call once per stage: during task reconstruction, calling without mode only advances to task classification (stage='classification'); during task classification, pass mode ('normal' | 'plan' | 'goal') to finish the workflow (stage='done') and launch plan/goal mode if needed, so create_plan/create_goal are not needed. For goal mode, also pass objective.",
+        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call once per stage: during task reconstruction, calling without mode only advances to task classification (stage='classification'); during task classification, pass mode ('normal' | 'plan' | 'goal') to finish the workflow (stage='done') and launch plan/goal mode if needed, so create_plan/create_goal are not needed. During goal recovery, call whale_report({mode:'goal'}) with no objective to resume the existing goal, or whale_report() with no mode to start a new task. For mode='goal', pass objective only when creating a new goal; when a non-complete goal already exists, omit objective so whale_report resumes the existing goal.",
       parameters: {
         mode: {
           type: "string",
           description:
-            "Only for the task classification stage: 'normal' (no mode, default), 'plan' (enter plan mode), or 'goal' (create a goal; objective required).",
+            "Only for task classification: 'normal' (no mode, default), 'plan' (enter plan mode), or 'goal' (resume an existing goal, or create a new one when none/complete). During goal recovery, pass 'goal' to resume or omit mode to enter task reconstruction.",
         },
         objective: {
           type: "string",
-          description: "Required when mode='goal': the concrete completion objective for the goal.",
+          description: "Required when mode='goal' creates a new goal (no current goal or current phase=complete). When a non-complete goal exists, omit objective to resume it; passing a different objective is rejected with guidance instead of silently creating a new goal.",
         },
         max_goal_rounds: {
           type: "number",
@@ -1517,6 +1654,23 @@ export default {
           return Promise.reject(new Error("whale_report requires a calling agent"));
         }
         const current = stageOfAgent(agent);
+        if (current === GOAL_RECOVERY_STAGE) {
+          // Goal 恢复：继续原 Goal → whale_report({mode:'goal'})；新任务 → whale_report()。
+          if (args?.mode === "goal") {
+            try {
+              await launchGoalMode(agent, ctx.get("goals"), args);
+            } catch (error) {
+              return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+            }
+            setStageAgent(agent, "done");
+            reportRoundDisplay(agent, "Goal 恢复确认：继续原 Goal，已恢复目标模式。", "阶段切换");
+            return Promise.resolve({ ok: true, stage: "done", restarted: false });
+          }
+          if (setStageAgent(agent, "reconstruction")) {
+            reportRoundDisplay(agent, "Goal 恢复确认：开始新任务，进入任务重构。", "阶段切换");
+          }
+          return Promise.resolve({ ok: true, stage: "reconstruction", restarted: false });
+        }
         if (current === "reconstruction") {
           setStageAgent(agent, "classification");
           reportRoundDisplay(agent, "任务重构完成，进入任务分类。", "阶段切换");
@@ -1571,24 +1725,11 @@ export default {
               return Promise.reject(new Error("failed to enter plan mode: " + (error instanceof Error ? error.message : String(error))));
             }
           } else if (mode === "goal") {
-            const objective = typeof args?.objective === "string" ? args.objective.trim() : "";
-            if (objective.length === 0) {
-              return Promise.reject(new Error("whale_report mode=goal requires an objective"));
-            }
-            const goals = ctx.get("goals");
-            if (goals === undefined || goals === null || typeof goals.create !== "function") {
-              return Promise.reject(new Error("goals service is unavailable; cannot create goal"));
-            }
             try {
-              goals.create(agent, {
-                objective,
-                ...(typeof args?.max_goal_rounds === "number" && Number.isInteger(args.max_goal_rounds) && args.max_goal_rounds > 0
-                  ? { maxGoalRounds: args.max_goal_rounds }
-                  : {}),
-              });
+              await launchGoalMode(agent, ctx.get("goals"), args);
               launches.push("goal");
             } catch (error) {
-              return Promise.reject(new Error("failed to create goal: " + (error instanceof Error ? error.message : String(error))));
+              return Promise.reject(error instanceof Error ? error : new Error(String(error)));
             }
           }
           // 全部成功后才写任务工具状态（plan/goal bridge 失败时不写状态、保持 classification）。
@@ -1615,7 +1756,7 @@ export default {
           });
         }
         return Promise.reject(
-          new Error("whale_report can only be called during task reconstruction or task classification"),
+          new Error("whale_report can only be called during task reconstruction, goal recovery, or task classification"),
         );
       },
       presentCall: () => ({ card: "generic", title: "鲸鱼工作流汇报", kind: "other" }),
@@ -1968,12 +2109,20 @@ export default {
       const planActive = planModeActiveOf(agent);
       const goalActive = goalModeActive(agent);
       const modeActive = planActive || goalActive;
-      // 第 2、3、4……轮（turn>=2，模型不在运行）：直接重新进入任务重构；
-      // Plan/Goal 模式激活时保持 idle/done，不进入任务重构。
+      const recoveryGoal = goalRecoveryNeeded(agent);
+      // 第 2、3、4……轮（turn>=2，模型不在运行）：有非 complete goal 时先进
+      // Goal 恢复确认；否则 Plan/Goal 模式激活时保持 idle/done，不进入任务重构；
+      // 其余进入任务重构。
       if (typeof turn === "number" && turn >= 2) {
-        const next = nextStageOnUserMessage(current, turn, { modeActive });
+        const next = nextStageOnUserMessage(current, turn, { modeActive, goalRecovery: recoveryGoal });
         if (setStageAgent(agent, next)) {
-          reportRoundDisplay(agent, "收到新一轮消息，重新进入任务重构。", "阶段切换");
+          reportRoundDisplay(
+            agent,
+            next === GOAL_RECOVERY_STAGE
+              ? "收到新一轮消息：存在非 complete goal，进入 Goal 恢复确认。"
+              : "收到新一轮消息，重新进入任务重构。",
+            "阶段切换",
+          );
         }
         return;
       }
@@ -1981,6 +2130,13 @@ export default {
       if (current !== "idle") return;
       // Plan/Goal 模式激活时不开启任务重构，保持在当前模式。
       if (modeActive) return;
+      // 非 complete goal（如 blocked）在 idle 起手时也先进入 Goal 恢复确认。
+      if (recoveryGoal !== null) {
+        if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
+          reportRoundDisplay(agent, "存在非 complete goal，进入 Goal 恢复确认。", "阶段切换");
+        }
+        return;
+      }
       if (isMinimal(agent)) {
         pendingStart.add(sessionId);
         return;
@@ -2025,6 +2181,13 @@ export default {
       if (current !== "idle") return;
       // Plan/Goal 模式激活时不开启任务重构，保持在当前模式。
       if (planModeActiveOf(agent) || goalModeActive(agent)) return;
+      // 非 complete goal（如 blocked）在 round-minimal 解除后也先进 Goal 恢复确认。
+      if (goalRecoveryNeeded(agent) !== null) {
+        if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
+          reportRoundDisplay(agent, "round-minimal 已解除：存在非 complete goal，进入 Goal 恢复确认。", "阶段切换");
+        }
+        return;
+      }
       if (setStageAgent(agent, "reconstruction")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
       }
@@ -2041,7 +2204,7 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
       if (isBypassed(agent)) return;
       const stage = stageOfAgent(agent);
-      if (stage !== "reconstruction" && stage !== "classification") return;
+      if (stage !== "reconstruction" && stage !== "classification" && stage !== GOAL_RECOVERY_STAGE) return;
       const sessionId = sessionIdOf(agent);
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
       let state = turnReminderCounts.get(sessionId);
@@ -2255,24 +2418,41 @@ export default {
           const planActive = planModeActiveOf(agent);
           const goalActive = goalModeActive(agent);
           const modeActive = planActive || goalActive;
+          const recoveryGoal = goalRecoveryNeeded(agent);
           if (hasRealUserMessage) {
             if (turn >= 2) {
-              const next = nextStageOnUserMessage(stage, turn, { modeActive });
+              const next = nextStageOnUserMessage(stage, turn, { modeActive, goalRecovery: recoveryGoal });
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
                   agent,
-                  "收到新一轮消息，重新进入任务重构（pre-step 兜底）。",
+                  next === GOAL_RECOVERY_STAGE
+                    ? "收到新一轮消息：存在非 complete goal，进入 Goal 恢复确认（pre-step 兜底）。"
+                    : "收到新一轮消息，重新进入任务重构（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
             } else if (stage === "idle" && !isMinimal(agent) && !modeActive) {
-              if (setStageAgent(agent, "reconstruction")) {
-                reportRoundDisplay(agent, "进入任务重构（pre-step 兜底）。", "阶段切换");
+              const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
+              if (setStageAgent(agent, next)) {
+                reportRoundDisplay(
+                  agent,
+                  next === GOAL_RECOVERY_STAGE
+                    ? "进入 Goal 恢复确认（pre-step 兜底）。"
+                    : "进入任务重构（pre-step 兜底）。",
+                  "阶段切换",
+                );
               }
             }
           } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !modeActive) {
-            if (setStageAgent(agent, "reconstruction")) {
-              reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构（pre-step 兜底）。", "阶段切换");
+            const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
+            if (setStageAgent(agent, next)) {
+              reportRoundDisplay(
+                agent,
+                next === GOAL_RECOVERY_STAGE
+                  ? "round-minimal 已解除，进入 Goal 恢复确认（pre-step 兜底）。"
+                  : "round-minimal 已解除，进入任务重构（pre-step 兜底）。",
+                "阶段切换",
+              );
             }
           }
         }
@@ -2328,15 +2508,19 @@ export default {
       const form =
         stage === "reconstruction"
           ? "reconstruction"
-          : stage === "classification"
-            ? "classification"
-            : null;
+          : stage === GOAL_RECOVERY_STAGE
+            ? "goal-recovery"
+            : stage === "classification"
+              ? "classification"
+              : null;
       if (form === null) return decision;
       if (hasInjectedInTurn(agent, form, turn)) return decision;
       const title =
         stage === "reconstruction"
           ? "ka-whale-workflow TaskReconstruction"
-          : "ka-whale-workflow TaskClassification";
+          : stage === GOAL_RECOVERY_STAGE
+            ? "ka-whale-workflow GoalRecovery"
+            : "ka-whale-workflow TaskClassification";
       const text = ["[" + title + "]", ">", renderPrompt(agent, stage), "<"].join("\n");
       let message;
       try {
@@ -2351,7 +2535,11 @@ export default {
       reportRoundDisplay(
         agent,
         text,
-        stage === "reconstruction" ? "任务重构" : "任务分类",
+        stage === "reconstruction"
+          ? "任务重构"
+          : stage === GOAL_RECOVERY_STAGE
+            ? "Goal 恢复确认"
+            : "任务分类",
       );
       return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
     });
@@ -2367,7 +2555,7 @@ export default {
         if (agent === null || agent === undefined || typeof agent !== "object") return "";
         if (liveFor(agent).enabled !== true) return "";
         const stage = stageOfAgent(agent);
-        if (stage !== "reconstruction" && stage !== "classification") return "";
+        if (stage !== "reconstruction" && stage !== GOAL_RECOVERY_STAGE && stage !== "classification") return "";
         if (isBypassed(agent)) return "";
         return renderPrompt(agent, stage);
       },
@@ -2415,18 +2603,24 @@ export default {
         !planModeActiveOf(agent) &&
         !goalModeActive(agent)
       ) {
-        if (setStageAgent(agent, "reconstruction")) {
+        const recoveryGoal = goalRecoveryNeeded(agent);
+        const nextStage = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
+        if (setStageAgent(agent, nextStage)) {
           reportRoundDisplay(
             agent,
-            "round-minimal 已解除，进入任务重构（assemble 兜底）。",
+            nextStage === GOAL_RECOVERY_STAGE
+              ? "round-minimal 已解除，进入 Goal 恢复确认（assemble 兜底）。"
+              : "round-minimal 已解除，进入任务重构（assemble 兜底）。",
             "阶段切换",
           );
-          stage = "reconstruction";
+          stage = nextStage;
         }
       }
       let allowed = null;
       if (stage === "reconstruction") {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
+      } else if (stage === GOAL_RECOVERY_STAGE) {
+        allowed = new Set(["ask_user_question", WHALE_REPORT_TOOL]);
       } else if (stage === "classification") {
         allowed = new Set([WHALE_REPORT_TOOL]);
       }
@@ -2473,6 +2667,8 @@ export default {
       let allowed = null;
       if (stage === "reconstruction") {
         allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
+      } else if (stage === GOAL_RECOVERY_STAGE) {
+        allowed = new Set(["ask_user_question", WHALE_REPORT_TOOL]);
       } else if (stage === "classification") {
         allowed = new Set([WHALE_REPORT_TOOL]);
       }

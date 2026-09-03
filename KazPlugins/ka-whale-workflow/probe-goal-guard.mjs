@@ -1,7 +1,8 @@
-// ka-whale-workflow Goal 守卫探针：Goal 模式激活（active/paused）时，
-// 真实用户消息（新轮/断线重连后）不进入任务重构；Goal 结束后恢复重构。
+// ka-whale-workflow Goal 守卫探针（Step 3 修订）：Goal 模式激活（active+armed）时，
+// 真实用户消息（新轮/断线重连后）不进入任务重构；blocked/paused/disarmed-active 的
+// 非 complete goal 进入 Goal 恢复确认；Goal 结束后恢复任务重构。
 // 运行：node KazPlugins/ka-whale-workflow/probe-goal-guard.mjs
-import plugin, { DEFAULT_RECONSTRUCTION_TOOLS, createStageStore } from "./lib/index.js";
+import plugin, { DEFAULT_RECONSTRUCTION_TOOLS, createStageStore, GOAL_RECOVERY_STAGE } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,7 @@ const STORE_FILE = join(TMP, "ka-whale-workflow-stage.json");
 const store = createStageStore(STORE_FILE);
 store.set("s-claim", "done");
 store.set("s-paused", "done");
+store.set("s-blocked", "done");
 store.set("s-pre", "done");
 
 const listeners = new Map();
@@ -122,7 +124,7 @@ for (const handler of claimedHandlers) {
 }
 check("goal 结束后新轮消息恢复任务重构", stageFromFile("s-claim") === "reconstruction");
 
-// 3) paused goal 同样视为激活（与 kaz-system-prompt 的 goalActive 一致）。
+// 3) paused goal：非 complete goal 需要恢复确认，进入 goal-recovery，不直接任务重构。
 store.set("s-paused", "done");
 goalPhase = "paused";
 const pausedAgent = {
@@ -133,9 +135,22 @@ const pausedAgent = {
 for (const handler of claimedHandlers) {
   await handler({ agent: pausedAgent, message: userMessage(), turn: 2 });
 }
-check("goal paused 时新轮消息同样保持 done", stageFromFile("s-paused") === "done");
+check("goal paused 时新轮消息进入 Goal 恢复确认", stageFromFile("s-paused") === GOAL_RECOVERY_STAGE);
 
-// 4) agent/pre-step 兜底路径同样不进入任务重构（goal active）。
+// 3b) blocked goal：Step 3 核心场景，同样进入 goal-recovery，而不是任务重构。
+store.set("s-blocked", "done");
+goalPhase = "blocked";
+const blockedAgent = {
+  id: "s-blocked",
+  session: { id: "s-blocked", events: [] },
+  steer() {},
+};
+for (const handler of claimedHandlers) {
+  await handler({ agent: blockedAgent, message: userMessage(), turn: 2 });
+}
+check("goal blocked 时新轮消息进入 Goal 恢复确认", stageFromFile("s-blocked") === GOAL_RECOVERY_STAGE);
+
+// 4) agent/pre-step 兜底路径同样不进入任务重构（goal active+armed）。
 goalPhase = "active";
 const preAgent = {
   id: "s-pre",
