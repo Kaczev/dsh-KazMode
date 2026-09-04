@@ -57,7 +57,8 @@
 
 ## 未做（留给后续世代）
 
-- B4 面板只读化、B5 旧代码清理、B6 KAZ_ROLE_PROMPTS 全量终稿/round-display/paths/热重载。
+- B4 面板只读化由 34 世完成（见 `KazPlugins/kaz-mode/README.md`）。
+- 未做：B5 旧代码清理、B6 KAZ_ROLE_PROMPTS 全量终稿/round-display/paths/热重载。
 - 33 世只做 `KAZ_ROLE_PROMPTS.main` 的 Goal-active 最小同步；全量 Persona 终稿留给 B6/36 世。
 - 不删除旧 `subagent` / `create_goal` / 旧角色常量（B5 处理）。
 

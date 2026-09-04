@@ -43,32 +43,30 @@ Kaz 模式同时具备两个入口，双向同步：
    经 `kazMode` 服务在使用时刻按 agent 项目读取；**kaz-mode 不再把任何插件状态写进
    settings.yaml**。旧的 `kaz-session-states.json` 已不再读取，可直接删除。
 
-### 工具控制面板（官方 / 外置统一管理）
+### 工具控制面板（B4 · 只读 + 三类候选）
 
-**不再使用 settings.yaml 的 `kaz-mode.toolWhitelist`。** 官方工具与外置插件统一走同一套四文件模型：
+**v0.9 B4 起，工具控制面板不再提供启用/停用、删除、恢复或“设为默认设置”写入口。**
+Kaz 工具面由代码级固定面（`KAZ_STABLE_MAIN_TOOLS` / workflow 面）与 stage 机决定；
+旧 four-file JSON（`tool-plugin*.json` / `other-tool-plugin*.json`）继续兼容读取，
+只作为只读状态来源，UI 不写启用状态。
 
-- **原设置（factory）**：`kaz-shared/lib/tool-plugin-catalog.js`
-  （`TOOL_PLUGIN_CATALOG` = 工具目录，`TOOL_PLUGINS` = 插件能力开关）
-  + 用户 `~/.dsh/storages/other-tool-plugin.json` / `other-tool-plugin-catalog.json`
-  （用户手动添加，共享到所有项目）；
-- **用户默认**：`~/.dsh/storages/tool-plugin.json` + `tool-plugin-catalog.json`
-  + `other-tool-plugin.json` + `other-tool-plugin-catalog.json`；
-- **项目专属**：`<项目>/.dsh/storages/` 下四个同名文件，覆盖用户默认。
-  - 官方/Kaz 插件/工具的开关 → 项目 `tool-plugin.json` / `tool-plugin-catalog.json`
-  - 外置插件/工具的开关 → 项目 `other-tool-plugin.json` / `other-tool-plugin-catalog.json`
-
-Kaz 面板的「工具控制面板」区块是唯一白名单管理器：插件能力开关（大开关）、工具开关
-（小开关）、手动添加插件/工具、删除用户添加的外置插件/工具。**手动添加插件/工具写入
-用户目录的 `other-*` 文件**（共享到所有项目）；**开关调整写入项目目录**（官方/Kaz 写
-`tool-plugin` 两个文件，外置写 `other-*` 两个文件，均为专属、不跨项目）；「设为默认设置」
-用项目四个文件替换用户四个对应文件；「恢复原设置」把用户默认两个文件替换为代码出厂
-数据，并把用户 `other-*` 全部置为 true。不做自动检测、不写“未知插件”、没有忽略/隐藏。“已知但默认关闭”的插件/工具保持关闭。
+- **只读展示**：Stable Main Surface、Workflow Carrier Tools、`tool-jobs` 固定集合，
+  以及当前四文件模型生效状态；
+- **用户可操作范围**：
+  1. 私有插件候选：查看 / 添加（写入 `kaz-agent-managed-tools.json` 的
+     `candidates` schema v2；不直接进主面，需经受控委派/任务计划选择）；
+  2. `tool-jobs`：只读查看官方固定集合 `job_list / job_output / job_kill`；
+  3. 外置插件候选：查看 / 添加（沿用用户 `other-*` 四文件作为候选层；
+     不直接进主面）。
+- 旧写 RPC（`setExternalToolPlugin` 的开关/删除、`resetExternalToolPlugins`、
+  `setExternalToolPluginsAsDefault`）保留入口但返回 `read-only` 拒绝语义，
+  由 B5 再做入口清理。
 
 ```jsonc
-// 插件启用字典（tool-plugin.json / other-tool-plugin.json）
+// 插件启用字典（tool-plugin.json / other-tool-plugin.json）——兼容读
 { "tool-fs": true, "dsh-pixel-art": true }
 
-// 工具开关字典（tool-plugin-catalog.json / other-tool-plugin-catalog.json）
+// 工具开关字典（tool-plugin-catalog.json / other-tool-plugin-catalog.json）——兼容读
 { "tool-fs": { "read": true, "write": true, "edit": true } }
 ```
 
@@ -110,16 +108,18 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   （模式默认 + 项目覆盖），settings.yaml 只作 standalone 兜底；
 - Kaz 面板里可单独开/关每个插件（改项目覆盖或模式默认），改动即时生效。
 
-### 4. Kaz 工具面（工具控制面板 JSON 唯一闸门）
+### 4. Kaz 工具面（代码级固定 + 只读面板 + 三类候选）
 
-- **工具控制面板 JSON** = Kaz 模式的「全部工具来源」——官方/外置统一，按插件分组；
-  - 原设置：`kaz-shared/lib/tool-plugin-catalog.js`（`TOOL_PLUGIN_CATALOG` + `TOOL_PLUGINS`）；
-  - 用户默认：`~/.dsh/storages/tool-plugin.json` + `tool-plugin-catalog.json`
-    + `other-tool-plugin.json` + `other-tool-plugin-catalog.json`；
-  - 项目专属：`<项目>/.dsh/storages/` 下四个文件（官方/Kaz 写 `tool-plugin` 两个，外置写 `other-*` 两个）；
-  - 官方/Kaz 分类修改点：`kaz-shared/lib/tool-plugin-catalog.js`；
-  - 不做自动检测；新插件/新工具只能手动添加，写入用户 `other-*` 文件（共享所有项目）；
-    开关调整写项目对应文件，可经「设为默认设置」把项目四个文件复制为用户默认。
+- **Stable Main Surface 由 `KAZ_STABLE_MAIN_TOOLS` 代码级固定**，不由工具控制面板 JSON
+  或用户开关决定；workflow 面由代码常量与 stage 机决定；
+- 旧 four-file JSON（`tool-plugin*.json` / `other-tool-plugin*.json`）继续兼容读取，
+  只作为面板只读状态来源；
+- 面板可操作范围仅剩：
+  - 私有插件候选（查看/添加到 `kaz-agent-managed-tools.json` 的 `candidates` schema v2）；
+  - `tool-jobs` 固定集合查看；
+  - 外置插件候选（查看/添加，仍写用户 `other-*` 候选层）；
+- 添加候选**不会直接进入 Stable Main/Sub Surface**，后续经受控委派/任务计划选择；
+- 旧写 RPC 返回 `read-only` 拒绝语义；B5 再做入口清理。
 - `kaz-memory` 关闭 → 六工具自动移出。
 - v0.8 Step B2：`kaz_tool_auto_on` 已退役，工具自动启用区块/RPC/JSON 读写已删除。
 
@@ -168,8 +168,9 @@ KazPlugins 目录随 profile 以 `file:` 依赖 + junction 装配；`cordis.patc
 
 ```powershell
 node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
+node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.mjs"
 ```
-（探针已随 2026-08-25 重构同步。）
+（探针已随 v0.9 B4 同步。）
 
 ## 验收要点
 
@@ -183,11 +184,12 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    assignedTools 显示，旧/未知子代理回落到保守 Base；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
-5. Kaz 面板「工具控制面板」区块只作为旧 JSON 兼容读/外置候选展示；Step A 主面不受
-   其 false 开关影响；
-6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「项目专属设置/默认设置」——settings.yaml
-   里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
-   `kaz-defaults.json`、`kaz-project-states.json` 与工具控制面板 JSON。
+5. Kaz 面板「工具控制面板」只读展示 Stable Main/workflow 面与三类候选
+   （私有插件候选、`tool-jobs`、外置插件候选）；无启用/停用/删除/恢复/设为默认控件；
+6. 旧 four-file JSON 兼容读取仍通过；UI 不写启用状态。工具控制面板之外的插件设置
+   （output-beep / round-display / deepseek-default-model 等项目状态）仍可正常调整，
+   不新增/改写被管理插件的 settings.yaml 段，改动只落在 `kaz-defaults.json`、
+   `kaz-project-states.json` 与工具候选 JSON。
 7. v0.9：纯 `minimal → Stable Main` 一次变化；`exit_plan_mode` / 旧
    `create_goal/subagent` 永不出现在 Kaz v0.9 主面；Goal 读工具与 `whale_report`
    常驻，不再因 plan/goal/工作流阶段出现工具面抖动。

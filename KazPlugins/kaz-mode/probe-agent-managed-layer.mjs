@@ -241,12 +241,16 @@ for (const agent of [sSel, sEmpty, sNoState]) {
   check("addTool 拒绝 agent 插件", addTool?.ok === false);
 }
 
-// ④ reset 不触碰 agent 层
+// ④ B4 reset 只读且不触碰 agent 层
 {
   const resetUser = await rpc("resetExternalToolPlugins", { cwd: PROJECT_A, layer: "user" });
-  check("resetExternalToolPlugins(user) 仍返回 agent registry", resetUser?.ok === true && resetUser.value?.agentManagedRegistry?.plugins?.["kaz-skill-safe-json"]?.tools?.includes("safe_json_write") === true);
+  check("resetExternalToolPlugins(user) 返回 read-only", resetUser?.ok === false && resetUser.error?.code === "read-only");
+  const afterUser = await rpc("getExternalToolPlugins", { cwd: PROJECT_A });
+  check("reset(user) 后 agent registry 仍保留", afterUser?.ok === true && afterUser.value?.agentManagedRegistry?.plugins?.["kaz-skill-safe-json"]?.tools?.includes("safe_json_write") === true);
   const resetProject = await rpc("resetExternalToolPlugins", { cwd: PROJECT_A, layer: "project" });
-  check("resetExternalToolPlugins(project) 仍返回 agent registry", resetProject?.ok === true && resetProject.value?.agentManagedRegistry?.plugins?.["kaz-skill-safe-json"]?.tools?.includes("safe_json_write") === true);
+  check("resetExternalToolPlugins(project) 返回 read-only", resetProject?.ok === false && resetProject.error?.code === "read-only");
+  const afterProject = await rpc("getExternalToolPlugins", { cwd: PROJECT_A });
+  check("reset(project) 后 agent registry 仍保留", afterProject?.ok === true && afterProject.value?.agentManagedRegistry?.plugins?.["kaz-skill-safe-json"]?.tools?.includes("safe_json_write") === true);
   const unfiltered = kazMode.unfilteredSurfaceOf(sSel);
   check("reset 后 agent 工具仍不进稳定主面（保持 Step A 固定面）", unfiltered?.has("safe_json_write") === false);
 }

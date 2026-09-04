@@ -236,23 +236,31 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   check("②.5 子代理 minimal = memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
 }
 
-// ①.6 RPC：四文件模型（Step A 固定主面下，外置工具只写候选层，不进主面）
+// ①.6 RPC：B4 只读面板 + 三类候选（固定主面下，候选只写候选层，不进主面）
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
   check("①.6 getExternalToolPlugins 返回四文件模型", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.userEnable === "object" && typeof getRes.value.userCatalog === "object" && typeof getRes.value.effective === "object");
+  check("①.6 getExternalToolPlugins 返回 B4 只读面（stableMainTools/workflowTools/toolJobs/privatePluginCandidates）", getRes?.ok === true && Array.isArray(getRes.value.stableMainTools) && Array.isArray(getRes.value.workflowTools) && Array.isArray(getRes.value.toolJobs) && Array.isArray(getRes.value.privatePluginCandidates));
   check("①.6 初始 projectDiffers=false / userDiffersFactory=false", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
   const addP = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", addPlugin: true });
-  check("①.6 addPlugin 写入用户 other-enable/other-catalog", addP !== null && addP.ok === true && addP.value.userOtherEnable["dsh-pixel-art"] === true);
+  check("①.6 addPlugin 写入用户 other-enable/other-catalog（外置候选层）", addP !== null && addP.ok === true && addP.value.userOtherEnable["dsh-pixel-art"] === true);
   const addT = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", toolName: "render_pixel_art", addTool: true });
   check("①.6 addTool 写入用户 other-catalog", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true);
-  check("①.6 手动添加的插件/工具写入候选层，但 Step A 固定主面不放行外置工具", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true && kazMode.toolVisible(sKaz, "render_pixel_art") === false);
-  const resetU = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "user" });
-  check("①.6 reset(user) 用出厂数据替换默认层并把 other-* 全置 true", resetU !== null && resetU.ok === true && resetU.value.userEnable["tool-fs"] === true && resetU.value.userCatalog["tool-fs"]?.read === true && resetU.value.userOtherEnable["dsh-pixel-art"] === true && resetU.value.projectOtherEnable["dsh-pixel-art"] === undefined);
+  check("①.6 手动添加的外置候选不进入 Stable Main Surface", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true && kazMode.toolVisible(sKaz, "render_pixel_art") === false);
   const tog = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", layer: "project", capable: false });
-  check("①.6 外置插件 capable false 写入项目 other-enable 字典", tog !== null && tog.ok === true && tog.value.projectOtherEnable["dsh-pixel-art"] === false);
+  check("①.6 开关写返回 read-only 且不写项目 other-enable", tog !== null && tog.ok === false && tog.error?.code === "read-only" && (tog.value === undefined || tog.value.projectOtherEnable?.["dsh-pixel-art"] === undefined));
   const rem = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", removePlugin: true });
-  check("①.6 removePlugin 删除用户添加插件", rem !== null && rem.ok === true && rem.value.userOtherEnable["dsh-pixel-art"] === undefined && rem.value.projectOtherEnable["dsh-pixel-art"] === undefined && rem.value.projectOtherCatalog["dsh-pixel-art"] === undefined);
+  check("①.6 removePlugin 返回 read-only 且候选仍保留", rem !== null && rem.ok === false && rem.error?.code === "read-only" && (rem.value === undefined || rem.value.userOtherEnable?.["dsh-pixel-art"] !== undefined));
+  const resetU = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "user" });
+  check("①.6 reset(user) 返回 read-only", resetU !== null && resetU.ok === false && resetU.error?.code === "read-only");
+  const asDefault = await rpc("setExternalToolPluginsAsDefault", { cwd: TMP });
+  check("①.6 setExternalToolPluginsAsDefault 返回 read-only", asDefault !== null && asDefault.ok === false && asDefault.error?.code === "read-only");
+  const priv = await rpc("addPrivatePluginCandidate", { cwd: TMP, tool: "safe_json_write", description: "Safely write JSON files", source: "KazPrivatePlugins/test", available: true });
+  check("①.6 addPrivatePluginCandidate 写入 schema v2 candidates", priv !== null && priv.ok === true && Array.isArray(priv.value.privatePluginCandidates) && priv.value.privatePluginCandidates.some((c) => c.tool === "safe_json_write" && c.available === true));
+  check("①.6 私有插件候选不进入 Stable Main Surface", kazMode.toolVisible(sKaz, "safe_json_write") === false);
+  const getAfter = await rpc("getExternalToolPlugins", { cwd: TMP });
+  check("①.6 旧 four-file JSON 兼容读仍通过（getExternalToolPlugins 返回 user/project/effective）", getAfter !== null && getAfter.ok === true && typeof getAfter.value.userEnable === "object" && typeof getAfter.value.userOtherCatalog === "object" && typeof getAfter.value.effective === "object");
 }
 
 // ①.8 官方工具统一走 factory/JSON，不再依赖 settings.yaml 的 toolWhitelist

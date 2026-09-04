@@ -36,8 +36,11 @@ check(
     !/const PLUGINS = \[\s*\{\s*id: "ka-whale-memory"/.test(clientSrc),
 );
 check(
-  "外置工具添加通道保留（＋ 添加插件 / ＋ 添加工具）",
-  clientSrc.includes("＋ 添加插件") && clientSrc.includes("＋ 添加工具"),
+  "B4 三类候选添加/查看通道保留（外置插件、外置工具、私有插件候选）",
+  clientSrc.includes("＋ 添加外置插件") &&
+    clientSrc.includes("＋ 添加工具") &&
+    clientSrc.includes("＋ 添加私有插件候选") &&
+    clientSrc.includes("tool-jobs"),
 );
 
 // 已删除组件在 KazPlugins/kaz 代码/配置中无残留引用（排除本探针自身）。

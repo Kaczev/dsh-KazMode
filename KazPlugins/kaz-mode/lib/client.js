@@ -1224,7 +1224,6 @@ window.__ModuleLoader__.load({
 			function ToolPluginsSection({ sessionId, cwd, writable }) {
 				const [data, setData] = useState(null);
 				const [catalog, setCatalog] = useState({ official: [...OFFICIAL_TOOL_PLUGIN_KEYS], kaz: [...KAZ_TOOL_PLUGIN_KEYS], agent: [] });
-				const [expanded, setExpanded] = useState(() => new Set());
 				const [busy, setBusy] = useState(false);
 
 				const refresh = useCallback(async () => {
@@ -1248,16 +1247,8 @@ window.__ModuleLoader__.load({
 
 				const targetCwd = () => (data !== null && typeof data.cwd === "string" && data.cwd.length > 0 ? data.cwd : cwd || "");
 
-				const applyPatchLayer = async (patch, targetLayer) => {
-					if (!writable) return;
-					const res = await rpcCall("setExternalToolPlugin", { sessionId: sessionId || "", cwd: targetCwd(), layer: targetLayer, ...patch });
-					if (res !== null) setData(res);
-				};
-
-				const applyPatch = async (patch) => applyPatchLayer(patch, "project");
-
-				const addPlugin = async () => {
-					const name = window.prompt("输入要添加的插件名（fiber.name，不是包名）");
+				const addExternalPlugin = async () => {
+					const name = window.prompt("输入要添加的外置插件名（fiber.name，不是包名）");
 					if (name === null || name.trim().length === 0) return;
 					const key = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 					if (key.length === 0) return;
@@ -1265,49 +1256,30 @@ window.__ModuleLoader__.load({
 					if (res !== null) setData(res);
 				};
 
-				const addTool = async () => {
-					const pluginName = window.prompt("输入插件名（fiber.name）");
-					if (pluginName === null || pluginName.trim().length === 0) return;
-					const toolName = window.prompt("输入工具名");
-					if (toolName === null || toolName.trim().length === 0) return;
-					const key = pluginName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-					if (key.length === 0) return;
-					const res = await rpcCall("setExternalToolPlugin", { sessionId: sessionId || "", cwd: targetCwd(), pluginName: key, toolName: toolName.trim(), addTool: true });
-					if (res !== null) setData(res);
-				};
-
-				const addToolFor = async (key) => {
-					const toolName = window.prompt("输入工具名");
+				const addExternalToolFor = async (key) => {
+					const toolName = window.prompt(`为外置插件 "${key}" 输入工具名`);
 					if (toolName === null || toolName.trim().length === 0) return;
 					const res = await rpcCall("setExternalToolPlugin", { sessionId: sessionId || "", cwd: targetCwd(), pluginName: key, toolName: toolName.trim(), addTool: true });
 					if (res !== null) setData(res);
 				};
 
-				const applyDeleteTool = async (key, tool) => {
-					if (!writable) return;
-					if (typeof window !== "undefined" && !window.confirm(`确定删除工具 "${tool}" 吗？`)) return;
-					const res = await rpcCall("setExternalToolPlugin", { sessionId: sessionId || "", cwd: targetCwd(), pluginName: key, toolName: tool, remove: true });
-					if (res !== null) setData(res);
-				};
-
-				const applyRemovePlugin = async (key) => {
-					if (!writable) return;
-					if (typeof window !== "undefined" && !window.confirm(`确定移除插件 "${key}" 吗？`)) return;
-					const res = await rpcCall("setExternalToolPlugin", { sessionId: sessionId || "", cwd: targetCwd(), pluginName: key, removePlugin: true });
-					if (res !== null) setData(res);
-				};
-
-				const resetLayer = async (target) => {
-					if (!writable) return;
-					const res = await rpcCall("resetExternalToolPlugins", { sessionId: sessionId || "", cwd: targetCwd(), layer: target || "project" });
-					if (res !== null) setData(res);
-				};
-
-				const applySetAsDefault = async () => {
-					if (!writable) return;
-					if (typeof window !== "undefined" && !window.confirm("确定把当前项目专属设置覆盖到用户默认设置吗？")) return;
-					const res = await rpcCall("setExternalToolPluginsAsDefault", { sessionId: sessionId || "", cwd: targetCwd() });
-					if (res !== null) setData(res);
+				const addPrivateCandidate = async () => {
+					const tool = window.prompt("输入私有插件候选工具名（tool）");
+					if (tool === null || tool.trim().length === 0) return;
+					const description = window.prompt("输入一句英文用途描述（可留空）", "");
+					const source = window.prompt("输入来源路径（例如 KazPrivatePlugins/<plugin>，可留空）", "");
+					const res = await rpcCall("addPrivatePluginCandidate", {
+						sessionId: sessionId || "",
+						cwd: targetCwd(),
+						tool: tool.trim(),
+						description: description === null ? "" : description.trim(),
+						source: source === null ? "" : source.trim(),
+						available: true,
+					});
+					if (res !== null && typeof res.privatePluginCandidates === "object") {
+						const layers = await rpcCall("getExternalToolPlugins", { sessionId: sessionId || "", cwd: targetCwd() });
+						if (layers !== null) setData(layers);
+					}
 				};
 
 				if (data === null) {
@@ -1318,19 +1290,12 @@ window.__ModuleLoader__.load({
 				const T0 = effective.T0 ?? {};
 				const T = effective.T ?? {};
 				const P = effective.P !== null && typeof effective.P === "object" ? effective.P : {};
-				const defaultsP = effective.P1 !== null && typeof effective.P1 === "object" ? effective.P1 : {};
-				const defaultsT = effective.T1 !== null && typeof effective.T1 === "object" ? effective.T1 : {};
-				const enabledPlugins = new Set(Object.keys(P).filter((key) => P[key] === true));
 				const userOtherEnable = data.userOtherEnable !== null && typeof data.userOtherEnable === "object" ? data.userOtherEnable : {};
 				const projectOtherEnable = data.projectOtherEnable !== null && typeof data.projectOtherEnable === "object" ? data.projectOtherEnable : {};
 				const userEnable = data.userEnable !== null && typeof data.userEnable === "object" ? data.userEnable : {};
 				const projectEnable = data.projectEnable !== null && typeof data.projectEnable === "object" ? data.projectEnable : {};
 				const agentManagedRegistry = data.agentManagedRegistry !== null && typeof data.agentManagedRegistry === "object" ? data.agentManagedRegistry : {};
-				const agentManagedPlugins =
-					agentManagedRegistry.plugins !== null && typeof agentManagedRegistry.plugins === "object" ? agentManagedRegistry.plugins : {};
-
-				const pluginOwned = (key) => (P[key] ?? false) !== (defaultsP[key] ?? false);
-				const toolOwned = (key, tool) => (T[key]?.[tool] ?? false) !== (defaultsT[key]?.[tool] ?? false);
+				const agentManagedPlugins = agentManagedRegistry.plugins !== null && typeof agentManagedRegistry.plugins === "object" ? agentManagedRegistry.plugins : {};
 
 				const pluginKeys = [...new Set([...Object.keys(T0), ...Object.keys(userOtherEnable), ...Object.keys(projectOtherEnable), ...Object.keys(userEnable), ...Object.keys(projectEnable), ...Object.keys(agentManagedPlugins)])].sort();
 				const displayPluginKeys = pluginKeys.filter((key) => {
@@ -1338,59 +1303,37 @@ window.__ModuleLoader__.load({
 					if (tools.length > 0) return true;
 					return key in userOtherEnable || key in projectOtherEnable || key in userEnable || key in projectEnable || key in agentManagedPlugins;
 				});
-
 				const categoryOf = (key) => (catalog.agent.includes(key) || key in agentManagedPlugins ? "agent" : catalog.official.includes(key) ? "official" : catalog.kaz.includes(key) ? "kaz" : "external");
-				const mainPlugins = displayPluginKeys.filter((key) => categoryOf(key) === "external" || categoryOf(key) === "kaz" || categoryOf(key) === "official" || categoryOf(key) === "agent");
-				const groups = [
-					{ id: "external", title: "外置插件", keys: mainPlugins.filter((key) => categoryOf(key) === "external") },
-					{ id: "kaz", title: "Kaz 插件", keys: mainPlugins.filter((key) => categoryOf(key) === "kaz") },
-					{ id: "official", title: "官方插件", keys: mainPlugins.filter((key) => categoryOf(key) === "official") },
-					{ id: "agent", title: "自写工具（Agent 管理 · 全局）", keys: mainPlugins.filter((key) => categoryOf(key) === "agent") },
-				].filter((group) => group.keys.length > 0);
+				const externalKeys = displayPluginKeys.filter((key) => categoryOf(key) === "external").sort();
+				const externalToolsOf = (key) => Object.keys(T0[key] ?? {}).sort();
+				const pluginEnabledOf = (key) => (agentManagedPlugins[key] !== undefined && agentManagedPlugins[key] !== null ? true : P[key] === true);
 
-				const userDiffersFactory = data.userDiffersFactory === true;
-				const effectiveEqualsFactory = data.effectiveEqualsFactory === true;
-				const effectiveEqualsUser = data.effectiveEqualsUser === true;
-				const hasProjectOverrides = data.hasProjectOverrides === true;
-				let restoreLabel = null;
-				let restoreOrange = false;
-				let restoreAction = null;
-				if (effectiveEqualsFactory) {
-					restoreLabel = "恢复原设置";
-					restoreOrange = false;
-					restoreAction = async () => {
-						if (typeof window !== "undefined" && !window.confirm("确定恢复为代码内出厂设置吗？")) return;
-						await resetLayer("user");
-						await resetLayer("project");
-					};
-				} else if (effectiveEqualsUser) {
-					restoreLabel = "恢复原设置";
-					restoreOrange = true;
-					restoreAction = async () => {
-						if (typeof window !== "undefined" && !window.confirm("确定把用户默认设置恢复为原设置吗？")) return;
-						await resetLayer("project");
-						await resetLayer("user");
-					};
-				} else {
-					restoreLabel = "恢复默认设置";
-					restoreOrange = false;
-					restoreAction = async () => {
-						if (typeof window !== "undefined" && !window.confirm("确定清除当前项目专属设置，恢复为用户默认设置吗？")) return;
-						await resetLayer("project");
-					};
-				}
+				const stableMainTools = Array.isArray(data.stableMainTools) ? data.stableMainTools : [];
+				const workflowTools = Array.isArray(data.workflowTools) ? data.workflowTools : [];
+				const toolJobs = Array.isArray(data.toolJobs) ? data.toolJobs : [];
+				const privatePluginCandidates = Array.isArray(data.privatePluginCandidates) ? data.privatePluginCandidates : [];
 
-				const renderPluginRow = (key) => {
-					const open = expanded.has(key);
-					const agentEntry = agentManagedPlugins[key];
-					const agentManaged = agentEntry !== undefined && agentEntry !== null && typeof agentEntry === "object";
-					const tools = agentManaged
-						? Array.isArray(agentEntry.tools)
-							? [...agentEntry.tools].sort()
-							: []
-						: Object.keys(T0[key] ?? {}).sort();
-					const pluginEnabled = agentManaged ? true : enabledPlugins.has(key);
-					const isExternal = !agentManaged && categoryOf(key) === "external";
+				const renderToolChips = (names) => createElement(
+					"div",
+					{ className: "kzm-field-line", style: { flexWrap: "wrap", gap: "4px" } },
+					names.map((name) => createElement("span", { key: name, className: "kzm-badge", "data-state": "on", style: { cursor: "default" } }, name)),
+				);
+
+				const renderCandidateRow = (candidate) => createElement(
+					"div",
+					{ key: candidate.tool, className: "kzm-state-item" },
+					createElement(
+						"div",
+						{ className: "kzm-state-row" },
+						createElement("span", { className: "kzm-state-name", title: candidate.tool }, candidate.tool),
+						createElement("span", { className: "kzm-badge", "data-state": candidate.available === true ? "on" : "off" }, candidate.available === true ? "available" : "candidate"),
+					),
+					createElement("p", { className: "kzm-note" }, (candidate.description || "(no description)") + (candidate.source ? " · " + candidate.source : "")),
+				);
+
+				const renderExternalRow = (key) => {
+					const tools = externalToolsOf(key);
+					const enabled = pluginEnabledOf(key);
 					return createElement(
 						"div",
 						{ key, className: "kzm-state-item" },
@@ -1398,49 +1341,10 @@ window.__ModuleLoader__.load({
 							"div",
 							{ className: "kzm-state-row" },
 							createElement("span", { className: "kzm-state-name", title: key }, key),
-							!agentManaged && pluginOwned(key) && createElement("span", { className: "kzm-override-badge" }, "专属"),
-							agentManaged
-								? null
-								: isExternal
-									? createElement("button", { type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyRemovePlugin(key) }, "移除")
-									: createElement("span", { className: "kzm-cfg-btn", style: { visibility: "hidden" }, "aria-hidden": true }, "移除"),
-							createElement("button", { type: "button", className: "kzm-cfg-btn", onClick: () => setExpanded((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }) }, open ? "收起" : "展开"),
-							agentManaged
-								? createElement("span", { className: "kzm-badge", "data-state": "on", title: "Agent 管理 · 全局启用 · 仅 Agent/自升级流程可修改" }, "全局启用")
-								: createElement(Toggle, {
-									checked: pluginEnabled,
-									disabled: !writable || busy,
-									title: "插件启用开关",
-									onChange: (next) => void applyPatch({ pluginName: key, capable: next }),
-								}),
+							createElement("span", { className: "kzm-badge", "data-state": enabled ? "on" : "off", style: { cursor: "default" } }, enabled ? "候选已启用" : "候选未启用"),
+							createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addExternalToolFor(key) }, "＋ 添加工具"),
 						),
-						open &&
-							createElement(
-								"div",
-								{ className: "kzm-tp-tools" },
-								createElement("p", { className: "kzm-tp-tools-title" }, "工具"),
-								tools.length === 0 && createElement("p", { className: "kzm-note" }, agentManaged ? "暂无工具（Agent 管理）。" : "暂无工具；请手动添加。"),
-								tools.map((tool) => {
-									const enabled = agentManaged ? true : pluginEnabled && T[key]?.[tool] === true;
-									return createElement(
-										"div",
-										{ key: tool, className: "kzm-field-line" },
-										createElement("span", { className: "kzm-state-name", title: tool }, tool),
-										!agentManaged && toolOwned(key, tool) && createElement("span", { className: "kzm-override-badge" }, "专属"),
-										!agentManaged && isExternal &&
-											createElement("button", { type: "button", className: "kzm-cfg-btn kzm-danger-btn", disabled: !writable || busy, onClick: () => void applyDeleteTool(key, tool) }, "删除"),
-										agentManaged
-											? createElement("span", { className: "kzm-badge", "data-state": "on", title: "全局启用 · 仅 Agent/自升级流程可修改" }, "全局启用")
-											: createElement(Toggle, {
-												checked: enabled,
-												disabled: !writable || busy || !pluginEnabled,
-												title: "工具开关",
-												onChange: (next) => void applyPatch({ pluginName: key, toolName: tool, enabled: next }),
-											}),
-									);
-								}),
-								!agentManaged && createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addToolFor(key) }, "＋ 添加工具"),
-							),
+						createElement("div", { className: "kzm-field-line", style: { flexWrap: "wrap", gap: "4px" } }, tools.map((tool) => createElement("span", { key: tool, className: "kzm-badge", "data-state": "on", style: { cursor: "default" } }, tool))),
 					);
 				};
 
@@ -1450,28 +1354,26 @@ window.__ModuleLoader__.load({
 					createElement(
 						"div",
 						{ className: "kzm-state-head" },
-						createElement("span", { className: "kzm-state-title" }, "工具控制面板（当前项目）"),
-						restoreLabel !== null &&
-							createElement("button", { type: "button", className: "kzm-reset-btn", "data-drifted": restoreOrange ? "true" : "false", disabled: !writable || busy, onClick: restoreAction }, restoreLabel),
-						hasProjectOverrides &&
-							createElement("button", { type: "button", className: "kzm-set-default-btn", disabled: !writable || busy, onClick: () => void applySetAsDefault() }, "设为默认设置"),
+						createElement("span", { className: "kzm-state-title" }, "工具控制面板（B4 · 只读）"),
 					),
-					createElement("p", { className: "kzm-state-desc" }, "只放行本面板里的插件和工具；其它一律拦截。当前项目：" + (targetCwd() || "（未知）")),
-					createElement("div", { className: "kzm-tp-add" }, createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addPlugin() }, "＋ 添加插件")),
-					groups.map((group) =>
-						createElement(
-							Fragment,
-							{ key: group.id },
-							createElement("p", { className: "kzm-tp-group-title" }, group.title),
-							group.id === "agent" &&
-								createElement("p", { className: "kzm-note" }, "这些自写工具由 Agent/自升级流程管理：跨项目全局启用，任务分类时由 Agent 决定是否选入本任务；面板不提供开关/删除/恢复等操作。"),
-							group.keys.map((key) => renderPluginRow(key)),
-						),
-					),
+					createElement("p", { className: "kzm-state-desc" }, "Stable Main/Sub Surface 与 workflow 面由代码级固定面决定；本面板只读展示，不再提供启用/停用、删除、恢复或设为默认设置。当前项目：" + (targetCwd() || "（未知）")),
+					createElement("p", { className: "kzm-tp-group-title" }, "Stable Main Surface（代码级固定 · 只读）"),
+					renderToolChips(stableMainTools.length > 0 ? stableMainTools : ["(unavailable)"]),
+					createElement("p", { className: "kzm-tp-group-title" }, "Workflow Carrier Tools（代码级 · 只读）"),
+					renderToolChips(workflowTools.length > 0 ? workflowTools : ["(none)"]),
+					createElement("p", { className: "kzm-tp-group-title" }, "tool-jobs（固定集合 · 只读）"),
+					renderToolChips(toolJobs.length > 0 ? toolJobs : ["(none)"]),
+					createElement("p", { className: "kzm-tp-group-title" }, "私有插件候选（查看/添加 · 不直接进主面）"),
+					privatePluginCandidates.length === 0 && createElement("p", { className: "kzm-note" }, "暂无私有插件候选。"),
+					privatePluginCandidates.map((candidate) => renderCandidateRow(candidate)),
+					createElement("div", { className: "kzm-tp-add" }, createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addPrivateCandidate() }, "＋ 添加私有插件候选")),
+					createElement("p", { className: "kzm-tp-group-title" }, "外置插件候选（查看/添加 · 不直接进主面）"),
+					externalKeys.length === 0 && createElement("p", { className: "kzm-note" }, "暂无外置插件候选。"),
+					externalKeys.map((key) => renderExternalRow(key)),
+					createElement("div", { className: "kzm-tp-add" }, createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addExternalPlugin() }, "＋ 添加外置插件")),
 					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
 				);
 			}
-
 
 			function KazPanel() {
 				const kazSnap = useScope(kazScope);

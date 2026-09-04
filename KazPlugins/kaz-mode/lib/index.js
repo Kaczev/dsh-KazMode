@@ -65,11 +65,15 @@ import {
   normalizeOptionalTools,
   optionalToolPoolNames,
   AGENT_MANAGED_STORAGE_FILE,
-  normalizeAgentManagedRegistry,
+  PRIVATE_PLUGIN_CANDIDATE_VERSION,
+  normalizeAgentManagedCandidateRegistry,
+  normalizePrivatePluginCandidate,
+  upsertPrivatePluginCandidate,
   agentManagedPluginKeys,
   agentManagedToolNames,
   agentManagedRegistryHasPlugin,
   mergeAgentManagedToolsIntoSurface,
+  KAZ_V09_TOOL_JOBS,
   V09_SUBAGENT_ROLE_MINIMAL_TOOLS,
 } from "kaz-shared";
 
@@ -443,9 +447,53 @@ function agentManagedRegistryPath() {
   return join(STORAGE_DIR, AGENT_MANAGED_STORAGE_FILE);
 }
 
-/** 读取全局 agent-managed registry；文件缺失/损坏/非法 → 空 registry（feature off）。 */
+/** 读取全局 agent-managed registry；文件缺失/损坏/非法 → 空 registry（feature off）。
+ *  v0.9 B4：返回 schema version 2 的完整视图（plugins + private-plugin candidates），
+ *  旧文件缺 candidates 时由 normalizeAgentManagedCandidateRegistry 兼容读为空。 */
 function loadAgentManagedRegistry(logger) {
-  return readJsonFile(agentManagedRegistryPath(), {}, normalizeAgentManagedRegistry, logger);
+  return readJsonFile(
+    agentManagedRegistryPath(),
+    {},
+    normalizeAgentManagedCandidateRegistry,
+    logger,
+  );
+}
+
+/** 写回全局 agent-managed registry（保留 schema version 2 plugins + candidates）。 */
+function saveAgentManagedRegistry(registry, logger) {
+  try {
+    mkdirSync(STORAGE_DIR, { recursive: true });
+    const normalized = normalizeAgentManagedCandidateRegistry(registry);
+    writeFileSync(
+      agentManagedRegistryPath(),
+      JSON.stringify(
+        {
+          version: PRIVATE_PLUGIN_CANDIDATE_VERSION,
+          plugins: normalized.plugins,
+          candidates: normalized.candidates,
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    return true;
+  } catch (error) {
+    logger?.warn?.("[kaz-mode] 写入 agent-managed registry 失败：" + safeMessage(error));
+    return false;
+  }
+}
+
+/** 向私有插件候选注册表新增/更新一条候选（面板添加通道；只写 candidates 层）。 */
+function upsertPrivatePluginCandidateFile(candidate, logger) {
+  const current = loadAgentManagedRegistry(logger);
+  const normalized = normalizePrivatePluginCandidate(candidate);
+  if (normalized === null) return { ok: false, error: "candidate 缺少合法 tool 字段" };
+  const next = upsertPrivatePluginCandidate(current, normalized);
+  if (!saveAgentManagedRegistry(next, logger)) {
+    return { ok: false, error: "无法写入 kaz-agent-managed-tools.json" };
+  }
+  return { ok: true, registry: next };
 }
 
 function saveUserEnable(value, logger) {
@@ -1499,6 +1547,13 @@ export default {
     function rpcFail(message) {
       return { ok: false, error: { code: "internal", message: String(message), details: {} } };
     }
+    /** v0.9 B4：工具控制面板已只读；旧写入口返回只读语义而不是执行写入。 */
+    function rpcReadOnly(message) {
+      return {
+        ok: false,
+        error: { code: "read-only", message: String(message), details: {} },
+      };
+    }
     const rpcHandler = async (endpoint, payload) => {
       try {
         const input = payload !== null && typeof payload === "object" ? payload : {};
@@ -1514,6 +1569,7 @@ export default {
           endpoint !== "setExternalToolPlugin" &&
           endpoint !== "resetExternalToolPlugins" &&
           endpoint !== "setExternalToolPluginsAsDefault" &&
+          endpoint !== "addPrivatePluginCandidate" &&
           endpoint !== "setProjectPlugin" &&
           endpoint !== "clearProject" &&
           endpoint !== "clearProjectPlugin"
@@ -1559,6 +1615,13 @@ export default {
           agentManagedRegistry: layers.agentManagedRegistry,
           agentManagedPluginKeys: layers.agentManagedPluginKeys,
           agentManagedTools: layers.agentManagedTools,
+          // v0.9 B4：只读展示所需的代码级固定面/候选清单。
+          stableMainTools: [...KAZ_STABLE_MAIN_TOOLS],
+          workflowTools: [...(MANAGED_CARRIER_TOOLS["ka-whale-workflow"] ?? [])],
+          toolJobs: [...KAZ_V09_TOOL_JOBS],
+          privatePluginCandidates: Array.isArray(layers.agentManagedRegistry?.candidates)
+            ? layers.agentManagedRegistry.candidates.map((candidate) => ({ ...candidate }))
+            : [],
           ...extra,
         });
 
@@ -1648,19 +1711,18 @@ export default {
             return rpcFail("Agent 管理的自写工具不能通过工具控制面板修改");
           }
 
-          // 删除用户添加的插件 / 工具。
-          if (input.removePlugin === true) {
-            if (!deleteExternalPluginPermanently(key, cwd, ctx.logger)) return rpcFail("原设置插件不能删除");
-            const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
-            return { ok: true, value: toolPluginValue(layers) };
+          // v0.9 B4：面板只允许“添加候选”。旧的删除/开关/恢复/设为默认全部拒绝写。
+          if (input.removePlugin === true || input.remove === true) {
+            return rpcReadOnly("工具控制面板已只读：不再提供删除入口");
           }
-          if (tool.length > 0 && input.remove === true) {
-            if (!deleteExternalToolPermanently(key, tool, cwd, ctx.logger)) return rpcFail("原设置工具不能删除");
-            const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
-            return { ok: true, value: toolPluginValue(layers) };
+          if (typeof input.capable === "boolean" || typeof input.enabled === "boolean") {
+            return rpcReadOnly("工具控制面板已只读：不再提供启用/停用开关");
+          }
+          if (input.layer === "user" || input.layer === "project") {
+            return rpcReadOnly("工具控制面板已只读：不能直接写入四文件开关层");
           }
 
-          // 手动添加插件：写入用户 other-*（共享到所有项目）。
+          // 手动添加插件候选：写入用户 other-*（共享到所有项目；外置候选层）。
           if (input.addPlugin === true) {
             const user = loadLayerFourFiles("user", cwd, ctx.logger);
             user.otherEnable[key] = true;
@@ -1670,7 +1732,7 @@ export default {
             return { ok: true, value: toolPluginValue(layers) };
           }
 
-          // 手动添加工具：写入用户 other-catalog，并确保插件在用户 other-enable 里。
+          // 手动添加工具候选：写入用户 other-catalog，并确保插件在用户 other-enable 里。
           if (input.addTool === true && tool.length > 0) {
             const user = loadLayerFourFiles("user", cwd, ctx.logger);
             user.otherEnable[key] = true;
@@ -1680,60 +1742,37 @@ export default {
             return { ok: true, value: toolPluginValue(layers) };
           }
 
-          // 其它开关：官方/Kaz 插件写 tool-plugin 文件；外置插件写 other-* 文件。
-          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
-          if (layer === null) return rpcFail("缺少 layer");
-          const data = loadLayerFourFiles(layer, cwd, ctx.logger);
-          const isExternal = !isOfficialOrKazToolPluginKey(key);
-          const enableTarget = isExternal ? data.otherEnable : data.enable;
-          const catalogTarget = isExternal ? data.otherCatalog : data.catalog;
+          return rpcReadOnly("工具控制面板已只读：仅支持添加外置插件/工具候选");
+        }
 
-          if (typeof input.capable === "boolean") {
-            enableTarget[key] = input.capable;
-          }
-          if (tool.length > 0 && typeof input.enabled === "boolean") {
-            catalogTarget[key] = { ...(catalogTarget[key] ?? {}), [tool]: input.enabled };
-          }
-          saveLayerFourFiles(layer, cwd, data, ctx.logger);
-          const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
-          return { ok: true, value: toolPluginValue(layers) };
+        if (endpoint === "addPrivatePluginCandidate") {
+          const tool = typeof input.tool === "string" ? input.tool.trim() : "";
+          const description = typeof input.description === "string" ? input.description.trim() : "";
+          const source = typeof input.source === "string" ? input.source.trim() : "";
+          if (tool.length === 0) return rpcFail("缺少 tool");
+          const result = upsertPrivatePluginCandidateFile(
+            { tool, description, source, available: input.available === true },
+            ctx.logger,
+          );
+          if (result.ok !== true) return rpcFail(result.error || "无法写入私有插件候选注册表");
+          const registry = loadAgentManagedRegistry(ctx.logger);
+          return {
+            ok: true,
+            value: {
+              registry,
+              privatePluginCandidates: Array.isArray(registry.candidates)
+                ? registry.candidates.map((candidate) => ({ ...candidate }))
+                : [],
+            },
+          };
         }
 
         if (endpoint === "resetExternalToolPlugins") {
-          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
-          if (layer === null) return rpcFail("缺少 layer");
-          const cwd = resolveExternalCwd();
-          if (layer === "user") {
-            // 恢复原设置：默认两个文件用代码出厂数据完全替换；
-            // 用户 other-* 保留键但全部置为 true。
-            const user = loadLayerFourFiles("user", cwd, ctx.logger);
-            saveUserEnable(TOOL_PLUGINS, ctx.logger);
-            saveUserCatalog(TOOL_PLUGIN_CATALOG, ctx.logger);
-            saveUserOtherEnable(allTruePluginEnableDict(user.otherEnable), ctx.logger);
-            saveUserOtherCatalog(allTrueToolCatalog(user.otherCatalog), ctx.logger);
-          } else {
-            // 恢复默认设置：清空项目四个文件（含项目 other-* 的外置专属开关）。
-            saveProjectEnable(cwd, {}, ctx.logger);
-            saveProjectCatalog(cwd, {}, ctx.logger);
-            saveProjectOtherEnable(cwd, {}, ctx.logger);
-            saveProjectOtherCatalog(cwd, {}, ctx.logger);
-          }
-          const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
-          return { ok: true, value: toolPluginValue(layers) };
+          return rpcReadOnly("工具控制面板已只读：不再提供恢复/重置入口");
         }
 
         if (endpoint === "setExternalToolPluginsAsDefault") {
-          const cwd = resolveExternalCwd();
-          const before = loadExternalToolPluginLayers(cwd, ctx.logger);
-          if (!before.hasProjectOverrides) return rpcFail("当前没有项目专属设置可设为默认");
-          const project = loadLayerFourFiles("project", cwd, ctx.logger);
-          // 用项目四个文件替换用户四个对应文件。
-          saveUserEnable(project.enable, ctx.logger);
-          saveUserCatalog(project.catalog, ctx.logger);
-          saveUserOtherEnable(project.otherEnable, ctx.logger);
-          saveUserOtherCatalog(project.otherCatalog, ctx.logger);
-          const layers = loadExternalToolPluginLayers(cwd, ctx.logger);
-          return { ok: true, value: toolPluginValue(layers) };
+          return rpcReadOnly("工具控制面板已只读：不再提供设为默认设置入口");
         }
 
         if (endpoint === "applySession") {
