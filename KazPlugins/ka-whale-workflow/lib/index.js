@@ -83,6 +83,7 @@ import {
   V09_ROLE_REPORT_TOOLS,
   stageDefinitionFor,
   stageInjectionText,
+  stageIdsForRole,
   canAdvance,
   isMainWorkflowStage,
   isSubagentWorkflowStage,
@@ -2122,29 +2123,51 @@ export default {
 
     // -----------------------------------------------------------------------
     // *_sub_whale_report：子代理作用域的 v0.9 report 包装。
-    // 注册为全局工具，但只在子代理的 role Stable Surface / toolFilter 中放行；
-    // 主模型 Stable Main Surface 不放行。
+    // 它同时具备两个能力：
+    //   1) 与主模型 whale_report 相同的“推进本角色 workflow”能力（nextStage）；
+    //   2) 原生子代理 report：把输出汇报给主模型（output）。
+    // 每个受控角色只放行自己的 *_sub_whale_report，阶段机也按角色不同。
     // -----------------------------------------------------------------------
     const subWhaleReportDefs = [];
+    const roleOfReportTool = (tool) => {
+      for (const [role, name] of Object.entries(V09_ROLE_REPORT_TOOLS)) {
+        if (name === tool) return role;
+      }
+      return null;
+    };
     for (const reportTool of KAZ_V09_SUB_WHALE_REPORT_TOOLS) {
+      const role = roleOfReportTool(reportTool);
+      if (role === null) continue;
+      const roleFlow = stageIdsForRole(role).join(" → ");
       const reportDef = defineTool({
         name: reportTool,
         description:
-          `Advance/report through the v0.9 ${reportTool.replace("_sub_whale_report", "")} subagent workflow. ` +
-          `This tool is available only inside the matching v0.9 subagent role and wraps the DSH subagent report capability. ` +
-          `Call it with the self-contained result/advance payload before finishing.`,
+          `Advance/report through the v0.9 ${role} subagent workflow (${roleFlow}). ` +
+          `This tool is available only inside the matching v0.9 subagent role. ` +
+          `Pass output for the native report to the parent main model, and nextStage to advance ` +
+          `this role's ka-whale-workflow stage before reporting (must be in the current stage's ` +
+          `Can advance to list). If nextStage is omitted, only the report is sent and the stage stays unchanged.`,
         parameters: {
           output: {
             type: "string",
             required: true,
-            description: "Self-contained report/advance content for the parent main agent.",
+            description: "Report/result text sent to the parent main model through the native subagent report.",
+          },
+          nextStage: {
+            type: "string",
+            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before reporting.`,
           },
         },
         output: {
           schema: {
             type: "object",
             additionalProperties: false,
-            properties: { messageId: { type: "string" } },
+            properties: {
+              messageId: { type: "string" },
+              role: { type: "string" },
+              stage: { type: "string" },
+              advanced: { type: "boolean" },
+            },
           },
           render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
         },
@@ -2153,6 +2176,13 @@ export default {
           if (agent === null || agent === undefined || typeof agent !== "object") {
             return Promise.reject(new Error(`${reportTool} requires a calling subagent`));
           }
+          const controlledRole = controlledSubagentRoleOfAgent(agent);
+          if (controlledRole !== role) {
+            return Promise.reject(
+              new Error(`${reportTool} can only be called by a controlled v0.9 "${role}" subagent`),
+            );
+          }
+          ensureControlledSubagentStarted(agent);
           const subagents = ctx.get("subagents");
           if (
             subagents === undefined ||
@@ -2167,8 +2197,36 @@ export default {
           if (output.trim().length === 0) {
             return Promise.reject(new Error(`${reportTool} requires a non-empty output.`));
           }
+          const nextStage = typeof args?.nextStage === "string" ? args.nextStage.trim() : "";
+          const current = stageOfAgent(agent);
+          let advanced = false;
+          if (nextStage.length > 0) {
+            const def = stageDefinitionFor(role, current);
+            if (def === null || !def.canAdvance.includes(nextStage)) {
+              const allowed = def === null ? "(unknown stage)" : def.canAdvance.join(", ");
+              return Promise.reject(
+                new Error(
+                  `${reportTool} cannot advance from "${current}" to "${nextStage}" for role "${role}". ` +
+                    `Allowed next stages: ${allowed}`,
+                ),
+              );
+            }
+            if (setStageAgent(agent, nextStage)) {
+              advanced = true;
+              reportRoundDisplay(agent, `${reportTool}: ${role} ${current} → ${nextStage}`, "阶段切换");
+            }
+          }
           const content = [{ type: "text", text: output }];
-          return { messageId: await subagents.reportFrom(agent, content, { delivery: "next-step", signal: exec.signal }) };
+          const messageId = await subagents.reportFrom(agent, content, {
+            delivery: "next-step",
+            signal: exec.signal,
+          });
+          return {
+            messageId,
+            role,
+            stage: nextStage.length > 0 ? nextStage : current,
+            advanced,
+          };
         },
       });
       subWhaleReportDefs.push(reportDef);

@@ -48,7 +48,8 @@
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 四个 `*_sub_whale_report`
-  （包装 DSH reportFrom，continuable child 内真实可调用）；
+  （每个工具按角色不同流程推进 stage，并包装 DSH reportFrom 把 output 汇报给
+  父主模型；`nextStage` 用于推进，省略 `nextStage` 时只原生汇报）；
   `list_agents / send_message / interrupt_agent` 由 DSH subagent-control 提供，
   ka-whale-workflow/kaz-shared 负责 Stable Main Surface 放行。
 - `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` /

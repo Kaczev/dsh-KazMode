@@ -54,6 +54,7 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
       return registeredTools.get(name);
     },
   };
+  const capturedReports = [];
   const mockKazMode = {
     pluginConfig: () => ({ enabled: true, includeSubagents, reconstructionTools: [] }),
     toolVisible: () => true,
@@ -81,12 +82,20 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
       if (name === "kazMode") return mockKazMode;
       if (name === "goals") return { get: () => undefined };
       if (name === "roundDisplay") return { report: () => {} };
+      if (name === "subagents") {
+        return {
+          reportFrom: async (_child, content, options) => {
+            capturedReports.push({ content, options });
+            return "report-1";
+          },
+        };
+      }
       return undefined;
     },
     systemPrompt: { section() { return () => {}; } },
     tools: toolsMock,
   };
-  return { listeners, registeredTools, base };
+  return { listeners, registeredTools, base, capturedReports };
 }
 
 function stageFromFile(file, sessionId) {
@@ -169,6 +178,35 @@ check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL
   const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const allow = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
   check("worker assess-complexity 软闸门：read 拒绝、memory_search 放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow");
+}
+
+// *_sub_whale_report：output + nextStage 应同时推进角色 workflow 并原生汇报给主模型。
+{
+  const agent = subagentAgent("child-worker");
+  // child-worker 已在上一段进入 assess-complexity；这里验证推进能力。
+  check("前置：child-worker 处于 assess-complexity", stageFromFile(STORE_FILE, "child-worker") === "assess-complexity");
+  const workReport = h1.registeredTools.get("work_sub_whale_report");
+  const beforeReports = h1.capturedReports.length;
+  const result = await workReport.execute(
+    { output: "assessed: complex delegation", nextStage: "challenge-plan" },
+    { agent, signal: new AbortController().signal },
+  );
+  check("report+nextStage 推进 worker assess-complexity → challenge-plan", result?.stage === "challenge-plan" && result?.role === "worker" && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  check("report+nextStage 仍调用原生 reportFrom 汇报给主模型", result?.messageId === "report-1" && h1.capturedReports.length === beforeReports + 1);
+  check("reportFrom 收到输出内容与 delivery=next-step", h1.capturedReports.at(-1)?.options?.delivery === "next-step" && JSON.stringify(h1.capturedReports.at(-1)?.content ?? []).includes("assessed: complex delegation"));
+  const readAllow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
+  const writeDeny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
+  check("推进后 challenge-plan 软闸门：read 放行、write 拒绝", readAllow?.kind === "allow" && writeDeny?.kind === "deny");
+  let badError = null;
+  try {
+    await workReport.execute(
+      { output: "bad advance", nextStage: "decide-tools" },
+      { agent, signal: new AbortController().signal },
+    );
+  } catch (error) {
+    badError = error;
+  }
+  check("非法 nextStage 被拒绝且 stage 不变", badError !== null && String(badError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
 }
 
 // memoryMaintainer: idle 进入 assess-delegation 并注入 role 专属文本。
