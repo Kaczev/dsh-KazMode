@@ -16,7 +16,6 @@ import {
   KAZ_MAINTENANCE_ONLY_TOOLS,
 } from "./tool-lists.js";
 import {
-  PLAN_AUTO_ON_TOOLS,
   GOAL_AUTO_ON_TOOLS,
   TOOL_AUTO_ON_CONFIG,
 } from "./tool-auto-on.js";
@@ -38,10 +37,10 @@ export const BASE_TOOLS = Object.freeze([
   ENABLE_TOOL,
 ]);
 
-/** 模式限定工具：从 kaz_tool_auto_on 派生，默认仅模式激活/鲸鱼阶段临时放行。 */
+/** 模式限定工具：从 kaz_tool_auto_on 派生，默认仅模式激活/鲸鱼阶段临时放行。
+ *  v0.8 Step B1：Plan 已从 Kaz 移除，不再含 exit_plan_mode。 */
 export const MODE_SCOPED_TOOLS = Object.freeze([
   ...new Set([
-    ...PLAN_AUTO_ON_TOOLS,
     ...GOAL_AUTO_ON_TOOLS,
     ...TOOL_AUTO_ON_CONFIG.whale.tools,
   ]),

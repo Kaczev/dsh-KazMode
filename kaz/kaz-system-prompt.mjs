@@ -1,4 +1,4 @@
-/**
+﻿/**
  * kaz-system-prompt —— Kaz 模式的系统提示词控制器。
  *
  * 这个脚本放在 kaz preset 目录里，专门负责“在什么情况下用哪句系统提示词”。
@@ -8,21 +8,13 @@
  * 同时也负责把展示信息上报 round-display（best-effort）：
  *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
- *     plan 模式激活时 = persona 段 + plan:policy 段；goal 模式开启时
- *     （目标存在且 phase 为 active/paused、Kaz 白名单里 update_goal 工具
- *     可见）再追加 tool:goal 段（文本为 Kaz 自定义版），顺序
- *     persona → plan:policy → tool:goal）；
+ *     Kaz 收敛后的真实 system = persona 段 + ka-whale-workflow 段，不再注入
+ *     plan:policy / tool:goal 段——v0.8 Step B1 已实际移除原生 Plan 与
+ *     tool:goal 自定义文本逻辑）；
  *   - agent/pre-step 扫描上报：
- *       - dsh-plan-mode 的进入/退出通知（source.plugin === "plan-mode"）；
  *       - dsh-goal-round-driver 的 <goal_round>（source.kind === "goal"）；
  *       - dsh-tool-goal 的 <goal_complete>/<goal_blocked>
  *         （source.plugin === "tool-goal"）；
- *   - agent/pre-step 另扫描 agent.session.events 里的 plan/mode 事件兜底：
- *     dsh-plan-mode 只在“上一个请求头描述的是另一种模式”时才生成
- *     source.plugin === "plan-mode" 的通知消息（例如首条消息前进入 plan 模式、
- *     或经 exit_plan_mode 退出时都没有该消息），所以直接由 plan/mode 状态事件
- *     合成进入/退出文本上报，保证 round-display 始终能看到切换；与既有通知
- *     消息重复时由 round-display 去重。
  *
  * 注意：不监听 session/event——kaz-system-prompt 挂在 agent scope 下，而
  * session/event 从 host 根 scope 派发，agent scope 监听器收不到（output-beep
@@ -39,47 +31,6 @@ export const name = 'kaz-system-prompt'
 
 /** 只依赖事件系统；不需要额外 inject。 */
 export const inject = []
-
-/**
- * 判断当前会话是否处于 goal 模式（决定是否注入 tool:goal 段）：
- *   - 当前存在目标（ctx.goals.get(agent) 非空）；
- *   - 目标 phase 为 active 或 paused（complete/blocked 后退出 goal 模式）；
- *   - Kaz 白名单里 update_goal 工具可见（create_goal/get_goal 不参与判定）。
- * 任何服务缺失或异常时按“未开启”处理（安全隐藏）。
- */
-function goalActive(ctx, agent) {
-  try {
-    const goals = ctx.get('goals')
-    if (!goals || typeof goals.get !== 'function' || !agent) return false
-    const goal = goals.get(agent)
-    if (!goal || (goal.phase !== 'active' && goal.phase !== 'paused')) return false
-    const svc = ctx.get('kazMode')
-    if (!svc || typeof svc.toolVisible !== 'function') return false
-    return svc.toolVisible(agent, 'update_goal') === true
-  } catch {
-    // 服务不可用时按未启用处理
-  }
-  return false
-}
-
-/** 从官方 tool:goal 文本提取 blocked 阈值（缺省 3，与官方配置保持一致）。 */
-function goalBlockedThreshold(originalText) {
-  const match = typeof originalText === 'string' ? /at least (\d+) consecutive goal rounds/.exec(originalText) : null
-  const value = match ? Number(match[1]) : 3
-  return Number.isSafeInteger(value) && value >= 1 ? value : 3
-}
-
-/** Kaz 自定义 tool:goal 系统提示词（仅 goal 模式开启时使用）。 */
-function customGoalSystemPrompt(originalText) {
-  const threshold = goalBlockedThreshold(originalText)
-  return `We are in goal mode until the goal is complete, blocked, or the user switches mode.
-
-The goal spans multiple turns: never try to finish it in one turn. Use todo_write to split it into small subtasks; do one todo item per round, then end your turn — the goal-round driver starts the next round automatically, so the user does not need to wait. "Don't wait" / "keep going" only means don't pause for permission, not that you should collapse all rounds into one turn. Only an explicit "do everything in this one reply" overrides this pacing.
-
-When updating a goal, call 'get_goal' first and copy its exact 'goal_id' and 'revision'. If the session is resumed or forked, rearm the goal with 'update_goal action resume'.
-
-Complete only when the whole objective is actually achieved. Block only after the same blocker persists for at least ${threshold} consecutive goal rounds; report the concrete condition in 'blocked_reason'. Difficulty or remaining work does not count as blocked. If blocked, stay in goal mode, report it, and resume when the user provides new direction.`
-}
 
 /** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。 */
 function reportRoundDisplay(ctx, agent, content, plugin = "kaz-system-prompt", title = "system prompt") {
@@ -129,7 +80,7 @@ function textOfMessage(message) {
   }
 }
 
-/** 把一条带 source 的注入消息上报 round-display（goal_round / goal wrapup / plan 通知）。 */
+/** 把一条带 source 的注入消息上报 round-display（goal_round / goal wrapup）。 */
 function reportInjectedMessage(ctx, agent, message) {
   try {
     const source = message === null || typeof message !== "object" ? undefined : message.source
@@ -140,8 +91,6 @@ function reportInjectedMessage(ctx, agent, message) {
       reportRoundDisplay(ctx, agent, text, "goal-round-driver", "goal round")
     } else if (source.plugin === "tool-goal") {
       reportRoundDisplay(ctx, agent, text, "tool-goal", "goal wrapup")
-    } else if (source.plugin === "plan-mode") {
-      reportRoundDisplay(ctx, agent, text, "plan-mode", "plan mode notice")
     }
   } catch {
     // 上报失败不影响主流程
@@ -166,7 +115,7 @@ function resolvePrompt() {
 /** persona 段名（与 kaz preset 的 persona 行一致）。 */
 const PERSONA_SECTION = 'deployment:persona'
 
-/** ka-whale-workflow 工作流提示词段前缀（保持 persona 之后、plan/goal 之前）。 */
+/** ka-whale-workflow 工作流提示词段前缀（保持 persona 之后）。 */
 const WHALE_SECTION_PREFIX = 'ka-whale-workflow:'
 
 export function apply(ctx, _config) {
@@ -185,25 +134,9 @@ export function apply(ctx, _config) {
 
     const prompt = resolvePrompt()
 
-    // 保持 plan mode 段与 tool:goal 段（仅 goal 模式开启时），其余提示段
-    // 收敛为 persona 一句。顺序：persona 绝对最前（与 dsh 原生 order 排序一致：
-    // persona 0 < plan:policy 50 < tool:goal 114），plan 段、tool:goal 段随后。
-    // goal 模式 = 目标存在（active/paused）且 update_goal 工具可见；开启时
-    // 把 tool:goal 文本替换为 Kaz 自定义版本。
-    const planSection = assembly.sections.find(
-      (section) =>
-        section !== null &&
-        typeof section === 'object' &&
-        typeof section.name === 'string' &&
-        /plan/i.test(section.name),
-    )
-    const goalSection = assembly.sections.find(
-      (section) =>
-        section !== null &&
-        typeof section === 'object' &&
-        typeof section.name === 'string' &&
-        section.name === 'tool:goal',
-    )
+    // v0.8 Step B1：收敛为 persona + ka-whale-workflow 段，其余提示段一律过滤；
+    // 不再保留/替换 plan:policy 或 tool:goal 段（原生 Plan 已从 Kaz 移除，
+    // tool:goal 自定义文本逻辑已删除）。persona 绝对最前。
     const kept = []
 
     let personaKept = false
@@ -226,19 +159,13 @@ export function apply(ctx, _config) {
         section.name.startsWith(WHALE_SECTION_PREFIX),
     )
     for (const section of whaleSections) kept.push(section)
-    if (planSection !== undefined) kept.push(planSection)
-    if (goalSection !== undefined && goalActive(ctx, agent)) {
-      goalSection.text = customGoalSystemPrompt(goalSection.text)
-      kept.push(goalSection)
-    }
 
     assembly.sections = kept
     // 等后续监听器（kaz-mode 只过滤工具段；round-minimal 首轮还会按首轮工具
     // 白名单过滤 tool:* 段）跑完，
     // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
-    // renderPrompt 一致：空段过滤、"\n\n" 连接）。persona 在最前；ka-whale-workflow
-    // 段在 persona 之后；plan 模式激活时含 plan:policy 段；goal 模式开启时再含
-    // tool:goal 段（自定义文本）。这正是模型真实看到的 system 字段。
+    // renderPrompt 一致：空段过滤、"\n\n" 连接）。persona 在最前；
+    // ka-whale-workflow 段在 persona 之后。这正是模型真实看到的 system 字段。
     const nextResult = await next()
     const finalAssembly = nextResult ?? assembly
     const finalPrompt = realPromptOf(finalAssembly?.sections)
@@ -246,20 +173,11 @@ export function apply(ctx, _config) {
     return nextResult
   })
 
-  // goal/plan 注入消息上报：
+  // goal 注入消息上报：
   //   - agent/pre-step 直接扫描本次 step 的 messages（goal_round 由 followup 进
-  //     inbox、tool-goal wrapup 由 deferContext 进 next-step、plan-mode 通知由
-  //     瀑布追加或 inbox.claim 进 messages）；
-  //   - 同一 pre-step 再扫描 agent.session.events 里的 plan/mode 事件：
-  //     dsh-plan-mode 不保证为每次切换生成 source.plugin === "plan-mode" 消息
-  //     （首条消息前进入 / exit_plan_mode 退出都没有），由状态事件合成兜底。
-  //     不监听 session/event：kaz-system-prompt 在 agent scope，而 session/event
-  //     从 host 根 scope 派发，agent scope 监听器收不到（见文件头注释）。
+  //     inbox、tool-goal wrapup 由 deferContext 进 next-step）。
+  //   - 原生 Plan 已移除，不再扫描 plan/mode 状态事件或上报 plan-mode 通知。
   // 重复上报由 round-display 按 (plugin, content) 去重。
-  const startedAt = Date.now()
-  /** sessionId -> 已处理过的最大 plan/mode seq（含加载前基线，避免 resume 时补报旧切换）。 */
-  const lastPlanModeSeq = new Map()
-
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
     if (decision === null || typeof decision !== 'object' || decision.kind !== 'enter') return decision
@@ -279,35 +197,6 @@ export function apply(ctx, _config) {
     const messages = Array.isArray(decision.messages) ? decision.messages : []
     for (const message of messages) {
       reportInjectedMessage(ctx, agent, message)
-    }
-
-    // plan/mode 状态事件兜底：本轮新增的切换（seq > 已见且发生在插件加载后）
-    // 合成进入/退出通知。轮间切换会在这里自然落到“plan 模式生效的那一轮”。
-    try {
-      const events = agent.session?.events
-      if (Array.isArray(events)) {
-        const sessionId = agent.id ?? agent.session?.id
-        if (typeof sessionId === 'string') {
-          const lastSeen = lastPlanModeSeq.get(sessionId) ?? -1
-          let maxSeen = lastSeen
-          for (const event of events) {
-            if (event === null || typeof event !== 'object' || event.type !== 'plan/mode') continue
-            const seq = typeof event.seq === 'number' ? event.seq : -1
-            if (seq > maxSeen) maxSeen = seq
-            if (seq <= lastSeen) continue
-            // resume/冷启动的旧事件不补报（插件加载时间之前的切换已经过去）。
-            if (typeof event.time === 'number' && event.time < startedAt) continue
-            if (typeof event.data?.active !== 'boolean') continue
-            const text = event.data.active
-              ? 'The user switched this session to plan mode.'
-              : 'The user switched this session back to the default mode.'
-            reportRoundDisplay(ctx, agent, text, 'plan-mode', 'plan mode notice')
-          }
-          if (maxSeen > lastSeen) lastPlanModeSeq.set(sessionId, maxSeen)
-        }
-      }
-    } catch {
-      // 上报失败不影响主流程
     }
 
     return decision

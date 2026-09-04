@@ -1,6 +1,7 @@
 // ka-whale-workflow 技能自省探针：skill-review 与 [ka-whale-memory Review] 同一批安全边界，
 // 独立 form / 独立 per-session per-kind 去重；受 skillAutonomyEnabled 与
 // skillLifecycleCallable 守卫；验证设置默认值。
+// v0.8 Step B1：原生 Plan 已移除，只测 normal / goal 边界。
 // 运行：node KazPlugins/ka-whale-workflow/probe-skill-review.mjs
 import plugin, { DEFAULT_RECONSTRUCTION_TOOLS, DEFAULT_SECTION, createStageStore } from "./lib/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -156,7 +157,7 @@ check("skill-review 与 [ka-whale-memory Review] 独立共存", normalAgent.mess
 await runTurnStopping(normalAgent);
 check("同一 session 不重复注入 normal skill-review", skillMessages(normalAgent).length === 1);
 
-// Plan 结束：注入 plan skill-review。
+// v0.8 Step B1：旧 plan/mode 事件不再触发 plan skill-review（仍可能只走 normal 边界）。
 const planAgent = makeAgent("s-plan");
 planAgent.session.events = [{ type: "plan/mode", data: { active: true } }];
 await runTurnStopping(planAgent);
@@ -166,7 +167,7 @@ planAgent.session.events = [
 ];
 await runTurnStopping(planAgent);
 const planSkills = skillMessages(planAgent);
-check("Plan 结束注入 plan skill-review", planSkills.length === 1 && textOf(planSkills[0]).includes("The Plan has ended."));
+check("旧 plan/mode 事件不再注入 plan skill-review", planSkills.length === 1 && !textOf(planSkills[0]).includes("The Plan has ended.") && textOf(planSkills[0]).includes("The task has completed."));
 
 // Goal 结束：注入 goal skill-review。
 const goalAgent = makeAgent("s-goal");
@@ -177,16 +178,13 @@ await runTurnStopping(goalAgent);
 const goalSkills = skillMessages(goalAgent);
 check("Goal 结束注入 goal skill-review", goalSkills.length === 1 && textOf(goalSkills[0]).includes("The Goal has ended."));
 
-// task-run 去重：Plan 结束已注入 → 同一逻辑任务的 Normal 完成不得二次注入。
+// task-run 去重：Goal 结束已注入 → 同一逻辑任务的 Normal 完成不得二次注入。
 const dedupAgent = makeAgent("s-dedup");
-dedupAgent.session.events = [{ type: "plan/mode", data: { active: true } }];
-await runTurnStopping(dedupAgent); // 观察 plan 激活（新逻辑任务运行）
-dedupAgent.session.events = [
-  { type: "plan/mode", data: { active: true } },
-  { type: "plan/mode", data: { active: false } },
-];
-await runTurnStopping(dedupAgent); // Plan 结束 → 注入 plan skill-review
-check("Plan 结束注入一次 plan skill-review", skillMessages(dedupAgent).length === 1 && textOf(skillMessages(dedupAgent)[0]).includes("The Plan has ended."));
+goalActiveFlag = true;
+await runTurnStopping(dedupAgent); // 观察 goal 激活（新逻辑任务运行）
+goalActiveFlag = false;
+await runTurnStopping(dedupAgent); // Goal 结束 → 注入 goal skill-review
+check("Goal 结束注入一次 goal skill-review", skillMessages(dedupAgent).length === 1 && textOf(skillMessages(dedupAgent)[0]).includes("The Goal has ended."));
 await runTurnStopping(dedupAgent); // 同任务再次到 done（Normal 完成）
 const dedupSkills = skillMessages(dedupAgent);
 check(

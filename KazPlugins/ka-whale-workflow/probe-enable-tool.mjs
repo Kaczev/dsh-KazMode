@@ -49,10 +49,7 @@ const toolsMock = {
     return registeredTools.get(name);
   },
 };
-registeredTools.set("create_plan", {
-  name: "create_plan",
-  execute: async (args) => ({ ok: true, active: args?.active === true }),
-});
+// v0.8 Step B1：create_plan 已移除，不再注册。
 const mockKazMode = {
   pluginConfig: (agent) => {
     const baseCfg = { enabled: true, includeSubagents: false, reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS], taskToolSelectionEnabled: true };

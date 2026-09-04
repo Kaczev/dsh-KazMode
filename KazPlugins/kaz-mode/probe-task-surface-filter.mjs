@@ -1,8 +1,8 @@
 // kaz-mode 探针：任务分类工具选择（第三次升级）—— kazSurfaceFor 任务过滤。
-// 覆盖：selected optional 进面；unselected optional 不进最终面；plan/goal auto-on
-// 不被任务过滤移除；memory 开时 memory 工具在基础面；enable_tool 在任务过滤开启时
-// 可见；无任务状态 = 全量白名单（feature off）；unfilteredSurfaceOf/taskToolPoolOf
-// 一致；assemble 与 pre-execute 同走 kazSurfaceFor。
+// 覆盖：selected optional 进面；unselected optional 不进最终面；Goal 三件套常驻、
+// 原生 Plan 已移除（旧 plan/mode 事件不追加工具）；memory 开时 memory 工具在基础面；
+// enable_tool 在任务过滤开启时可见；无任务状态 = 全量白名单（feature off）；
+// unfilteredSurfaceOf/taskToolPoolOf 一致；assemble 与 pre-execute 同走 kazSurfaceFor。
 // 运行：node KazPlugins/kaz-mode/probe-task-surface-filter.mjs
 import plugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/kaz-mode/lib/index.js";
 import { optionalToolPoolNames } from "../kaz-shared/lib/tool-lists.js";
@@ -238,11 +238,11 @@ const sNomem = agentOf("s-nomem");
   check("无任务状态 = 固定主面（不回退旧全量、不加 enable_tool）", noStateSurface.has("read") && noStateSurface.has("subagent") && !noStateSurface.has("read_image") && !noStateSurface.has("job_list") && !noStateSurface.has("enable_tool"));
 }
 
-// ③ v0.8 Step A：Plan 显式例外；Goal 三件套常驻
+// ③ v0.8 Step A/B1：Goal 三件套常驻；原生 Plan 已移除，旧 plan/mode 事件不再例外
 {
   const planSurface = kazMode.surfaceOf(sPlan);
-  check("plan 激活：exit_plan_mode 作为显式例外加入", planSurface.has("exit_plan_mode"));
-  check("plan 激活：外部 optional 仍不进面", !planSurface.has("read_image") && !planSurface.has("job_list"));
+  check("旧 plan/mode 事件不再加入 exit_plan_mode（B1 移除 Plan 例外）", !planSurface.has("exit_plan_mode"));
+  check("旧 plan/mode 事件下外部 optional 仍不进面", !planSurface.has("read_image") && !planSurface.has("job_list"));
   const goalSurface = kazMode.surfaceOf(sGoal);
   check("goal 激活：get_goal/update_goal 常驻（非动态）", goalSurface.has("get_goal") && goalSurface.has("update_goal") && goalSurface.has("create_goal"));
   check("goal 激活：外部 optional 仍不进面", !goalSurface.has("job_list") && !goalSurface.has("read_image"));

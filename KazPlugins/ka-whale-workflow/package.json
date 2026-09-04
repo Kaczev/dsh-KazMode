@@ -1,7 +1,7 @@
 {
   "name": "ka-whale-workflow",
   "version": "0.1.0",
-  "description": "鲸鱼工作流：用户消息后先任务重构、再任务分类；whale_report 工具汇报阶段完成并统一启动 plan/goal 模式；任务重构工具清单在 ka-whale-workflow 配置面板的代码框中修改，whale_report 由 kaz_tool_auto_on 临时放行。",
+  "description": "鲸鱼工作流（v0.8 Step A/B1）：主/子两套新流程上下文 + whale_report 常驻工作簿记；支持 mode=goal / normal，原生 Plan 已移除。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

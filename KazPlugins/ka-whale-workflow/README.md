@@ -10,8 +10,8 @@
   Communication → 汇报候选经验/技能建议（不自写记忆/技能）。
 - Goal 继续确认（`[ka-whale-workflow goal continuation]`）：存在非 complete goal
   时按轮注入，让 Kaczev 选择“继续原 Goal / 新任务 / 结束”。
-- `whale_report`：Stable Main Surface 常驻工具。Step A 后它只做工作簿记/模式记录；
-  不再触发“只剩 whale_report”的阶段级工具面切换。
+- `whale_report`：Stable Main Surface 常驻工具。Step A/B1 后它只做工作簿记/模式记录
+  （mode='goal' 或 normal）；v0.8 Step B1 起 mode='plan' 被拒绝。
 - 阶段 system 段已删除：`ka-whale-workflow:prompt` 不再注册/改写；阶段内容只以
   追加历史消息进入。
 - 阶段工具过滤已删除：ka-whale-workflow 不再按 reconstruction/classification/
@@ -40,5 +40,5 @@ Step A 的 Stable Main Surface 定义在 `kaz-shared/lib/tool-lists.js`：
 `whale_report` + `subagent`。`send_message` / `list_agents` 暂不默认加入；
 per-task 角色/toolFilter 投影留给后续受控委派 Step。
 
-原生 Plan 仍是显式模式边界例外：Plan 模式激活时可追加 auto-on 的 plan 工具；
-该例外在原生 Plan 实际移除 Step 后删除。
+v0.8 Step B1：原生 Plan 已从 Kaz 实际移除，不再存在 Plan 显式模式边界例外；
+主模型工具序列为纯 `minimal → Stable Main Surface` 一次变化。

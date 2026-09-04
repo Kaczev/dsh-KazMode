@@ -1,4 +1,5 @@
-// 方向1 Stage2 小探针：验证任务完成（stage=done、无 plan/goal）时注入复盘指引。
+// 方向1 Stage2 小探针：验证任务完成（stage=done、无 goal）时注入复盘指引。
+// v0.8 Step B1：原生 Plan 已移除，plan/mode 事件不再触发 plan 复盘。
 import plugin, { DEFAULT_RECONSTRUCTION_TOOLS, createStageStore } from "./lib/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,7 +133,7 @@ function messageText(m) {
     : "";
 }
 
-// Plan 结束：先 active=true，再 active=false → 注入 plan 复盘。
+// v0.8 Step B1：旧 plan/mode 事件先 active 后 inactive 不再注入 plan 复盘。
 const planSteered = [];
 const planAgent = {
   id: "s-review-plan",
@@ -146,7 +147,7 @@ planAgent.session.events = [{ type: "plan/mode", data: { active: false } }];
 for (const handler of turnStoppingHandlers) {
   await handler({ agent: planAgent, turn: 2, signal: undefined });
 }
-check("plan 结束注入 plan 复盘", planSteered.some((m) => messageText(m).includes("[ka-whale-memory Review]") && messageText(m).includes("The Plan has ended.")));
+check("旧 plan/mode 事件不再注入 plan 复盘", !planSteered.some((m) => messageText(m).includes("The Plan has ended.")));
 
 // Goal 结束：先 active，再 inactive → 注入 goal 复盘。
 const goalSteered = [];

@@ -1,6 +1,7 @@
 // ka-whale-workflow 探针：任务级工具状态（第三次升级）。
 // 覆盖：stage-store round-trip / 损坏状态；进入 reconstruction 清旧状态；分类写状态；
-// 分类启动 plan/goal 保留状态；直接 /plan 旁路清状态且 taskToolStateOf()=null；
+// whale_report mode=goal 保留状态；直接 /goal 旁路清状态且 taskToolStateOf()=null；
+// v0.8 Step B1：whale_report mode='plan' 被拒绝。
 // 特性关闭不写状态。
 // 运行：node KazPlugins/ka-whale-workflow/probe-task-tool-state.mjs
 import plugin, {
@@ -126,11 +127,7 @@ const toolsMock = {
     return registeredTools.get(name);
   },
 };
-// create_plan bridge 假工具：允许 whale_report mode=plan 进入 plan 模式。
-registeredTools.set("create_plan", {
-  name: "create_plan",
-  execute: async (args) => ({ ok: true, active: args?.active === true }),
-});
+// v0.8 Step B1：不再注册 create_plan；whale_report mode='plan' 应被拒绝。
 
 const mockKazMode = {
   pluginConfig: (agent) => {
@@ -233,12 +230,17 @@ const storeNow = () => createStageStore(STORE_FILE);
   check("done 阶段 taskToolStateOf=null（任务过滤已退役）", workflowService.taskToolStateOf(agent) === null);
 }
 
-// whale_report mode=plan：仍可启动原生 Plan（显式例外），不写任务工具状态
+// whale_report mode=plan：v0.8 Step B1 已拒绝（原生 Plan 移除）
 {
   const agent = makeAgent("s-plan");
   await enterReconstruction(agent);
-  const result = await execute(whaleReport(), { mode: "plan" }, agent);
-  check("whale_report mode=plan → done（原生 Plan 例外）", result.stage === "done" && storeNow().getTaskToolState("s-plan") === null);
+  let rejected = false;
+  try {
+    await execute(whaleReport(), { mode: "plan" }, agent);
+  } catch {
+    rejected = true;
+  }
+  check("whale_report mode=plan → 拒绝（原生 Plan 已移除）", rejected === true && storeNow().getTaskToolState("s-plan") === null);
 }
 
 // whale_report mode=goal：创建 goal，不写任务工具状态
@@ -258,14 +260,14 @@ const storeNow = () => createStageStore(STORE_FILE);
   check("legacy optional_tools 忽略：仍 done 且不报池校验", result.stage === "done" && workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-invalid") === null);
 }
 
-// 直接 /plan 旁路清状态且 taskToolStateOf=null
+// 直接 /goal 旁路清状态且 taskToolStateOf=null
 {
   const bypassEvents = [
     { type: "turn/start", data: { turn: 1 } },
     { type: "step/start", data: { turn: 1, step: 1 } },
     { type: "step/end", data: { turn: 1, step: 1 } },
     { type: "turn/end", data: { turn: 1 } },
-    { type: "command/run", data: { name: "plan", args: "bypass", commandId: "cmd-bypass" } },
+    { type: "command/run", data: { name: "goal", args: "目标", commandId: "cmd-bypass" } },
     { type: "command/done", data: { commandId: "cmd-bypass", kind: "success" } },
   ];
   const agent = makeAgent("s-bypass", bypassEvents);

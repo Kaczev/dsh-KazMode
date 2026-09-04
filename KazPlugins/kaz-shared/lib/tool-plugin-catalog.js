@@ -74,16 +74,10 @@ export const TOOL_PLUGIN_CATALOG = {
   "tool-workflow": {
     "workflow" : false
   },
-  "plan-mode": {
-    "exit_plan_mode" : false
-  },
   "goal": {
     "create_goal" : false,
     "get_goal" : false,
     "update_goal" : false
-  },
-  "create_plan": {
-    "create_plan" : false
   }
 };
 
@@ -105,9 +99,7 @@ export const TOOL_PLUGINS = {
   "tool-subagent-list-agents" : false,
   "tool-subagent-report" : false,
   "tool-workflow" : false,
-  "plan-mode" : false,
-  "goal" : false,
-  "create_plan" : false
+  "goal" : false
 }
 
 /** DSH 官方插件（fiber.name 归一化后的 key）。 */
@@ -129,13 +121,10 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
   "tool-todo",
   "tool-web",
   "tool-workflow",
-  "plan-mode",
-  "planmodecontroller",
   "goal",
 ];
 
 /** Kaz 模式自家插件（用于 UI 面板分栏）。 */
 export const KAZ_TOOL_PLUGIN_KEYS = [
   "ka-whale-memory",
-  "create-plan"
 ];

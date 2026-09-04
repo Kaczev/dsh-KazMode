@@ -54,7 +54,7 @@ const SESSIONS = {
   "s-kaz-min-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
 };
 
-/** 会话事件：s-kaz-plan 模拟“当前处于 plan 模式”；sub 会话模拟子代理。
+/** 会话事件：s-kaz-plan 模拟旧 plan/mode 事件（v0.8 Step B1 后应被忽略）；sub 会话模拟子代理。
  *  除 s-kaz-min / s-kaz-sub-min 外都先放一条 tool/call，模拟“首次工具调用后”的稳定阶段。 */
 const eventsOf = (id) => {
   const isSub = SESSIONS[id]?.subagent === true;
@@ -230,7 +230,7 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   check("②.5 主面含 create_goal/get_goal/update_goal（常驻）", kazMode.toolVisible(sKaz, "create_goal") === true && kazMode.toolVisible(sKaz, "get_goal") === true && kazMode.toolVisible(sKaz, "update_goal") === true);
   check("②.5 主面含 whale_report/subagent", kazMode.toolVisible(sKaz, "whale_report") === true && kazMode.toolVisible(sKaz, "subagent") === true);
   check("②.5 主面不含 send_message/list_agents/enable_tool/workflow/subagent_fork", kazMode.toolVisible(sKaz, "send_message") === false && kazMode.toolVisible(sKaz, "list_agents") === false && kazMode.toolVisible(sKaz, "enable_tool") === false && kazMode.toolVisible(sKaz, "workflow") === false && kazMode.toolVisible(sKaz, "subagent_fork") === false);
-  check("②.5 非 Plan 主面不含 exit_plan_mode（Plan 例外只存在于 Plan 模式）", kazMode.toolVisible(sKaz, "exit_plan_mode") === false);
+  check("②.5 主面不含 exit_plan_mode（v0.8 Step B1：原生 Plan 已移除）", kazMode.toolVisible(sKaz, "exit_plan_mode") === false);
   check("②.5 记忆关稳定主面=固定集剔除记忆读三件", nomem !== null && nomem.size === 14 && !nomem.has("memory_search") && nomem.has("get_goal"));
   check("②.5 子代理稳定面 = 保守 Subagent Base 11", sub !== null && sub.size === 11 && sub.has("read") && sub.has("web_search") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
   check("②.5 子代理 minimal = memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
@@ -267,7 +267,7 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const list1 = await rpc("listToolPlugins", {});
-  check("①.9 listToolPlugins 返回 catalog 且官方含 planmodecontroller", list1 !== null && list1.ok === true && list1.value.catalog !== null && Array.isArray(list1.value.catalog.official) && list1.value.catalog.official.includes("planmodecontroller"));
+  check("①.9 listToolPlugins 返回 catalog 且官方不再含 plan-mode/planmodecontroller（B1）", list1 !== null && list1.ok === true && list1.value.catalog !== null && Array.isArray(list1.value.catalog.official) && !list1.value.catalog.official.includes("plan-mode") && !list1.value.catalog.official.includes("planmodecontroller"));
 }
 
 // ①.10 项目级插件状态 RPC：setProjectPlugin / clearProjectPlugin / clearProject
@@ -358,14 +358,14 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "other:policy"));
 }
 
-// ⑦ v0.8 Step A：Goal 三件套常驻 + 原生 Plan 作为显式模式边界例外
+// ⑦ v0.8 Step A/B1：Goal 三件套常驻；原生 Plan 已移除，旧 plan/mode 事件不再追加工具
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const sKazPlan = agentOf("s-kaz-plan");
   const sKazGoal = agentOf("s-kaz-goal");
   const sKazBase = agentOf("s-kaz");
 
-  // 预置用户默认 auto-on JSON + 工具控制 JSON（旧 JSON 只作兼容读，Plan 例外仍读取）。
+  // 预置用户默认 auto-on JSON + 工具控制 JSON（旧 JSON 只作兼容读；B1 后 Plan 不生效）。
   writeFileSync(
     join(TMP, "dsh-storages", "ka_tool_auto_on_setting.json"),
     JSON.stringify(
@@ -396,13 +396,13 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
     "utf8",
   );
 
-  check("⑦ 非 Plan 稳定主面：Goal 三件套常驻，exit_plan_mode 不可见", kazMode.toolVisible(sKazBase, "create_goal") === true && kazMode.toolVisible(sKazBase, "get_goal") === true && kazMode.toolVisible(sKazBase, "update_goal") === true && kazMode.toolVisible(sKazBase, "exit_plan_mode") === false);
-  check("⑦ Plan 模式（显式例外）：stable + exit_plan_mode，Goal 仍常驻", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === true && kazMode.toolVisible(sKazPlan, "create_goal") === true && kazMode.toolVisible(sKazPlan, "get_goal") === true);
+  check("⑦ 稳定主面：Goal 三件套常驻，exit_plan_mode 不可见", kazMode.toolVisible(sKazBase, "create_goal") === true && kazMode.toolVisible(sKazBase, "get_goal") === true && kazMode.toolVisible(sKazBase, "update_goal") === true && kazMode.toolVisible(sKazBase, "exit_plan_mode") === false);
+  check("⑦ 旧 plan/mode 事件已不再产生 Plan 例外（exit_plan_mode 不可见）", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false && kazMode.toolVisible(sKazPlan, "create_goal") === true && kazMode.toolVisible(sKazPlan, "get_goal") === true);
   check("⑦ Goal 会话：Goal 常驻、无 Plan 例外", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === true && kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
   check("⑦ whale_report 常驻主面（不再依赖工作流阶段）", kazMode.toolVisible(sKazBase, "whale_report") === true && kazMode.toolVisible(sKazGoal, "whale_report") === true && kazMode.toolVisible(sKazPlan, "whale_report") === true);
 
   const snap = await rpc("getToolAutoOn", { sessionId: "s-kaz-plan" });
-  check("⑦ getToolAutoOn 仍可读 Plan 例外三层状态", snap?.ok === true && snap.value?.effective?.plan?.enabled === true && Array.isArray(snap.value?.effective?.plan?.tools) && snap.value.effective.plan.tools.includes("exit_plan_mode"));
+  check("⑦ getToolAutoOn 旧 JSON 仍只读兼容（UI/RPC 退役属 B2）", snap?.ok === true && snap.value?.effective?.plan?.enabled === true && Array.isArray(snap.value?.effective?.plan?.tools) && snap.value.effective.plan.tools.includes("exit_plan_mode"));
 }
 
 rmSync(TMP, { recursive: true, force: true });

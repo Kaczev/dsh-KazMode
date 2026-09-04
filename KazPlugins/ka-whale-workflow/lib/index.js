@@ -15,7 +15,7 @@
 // 工具面（由 kaz-mode + kaz-shared 执行）：
 //   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface（固定集）；
 //   - 子代理：minimal → Stable Subagent Base（Step A 静态保守集，assigned 待后续）；
-//   - 原生 Plan 是显式模式边界例外（Plan 移除前保留）。
+//   - v0.8 Step B1：原生 Plan 已移除，纯 minimal → Stable Main 一次变化。
 //
 // 阶段状态（内部兼容）：
 //   写入插件自己的 JSON 存储（~/.dsh/storages/ka-whale-workflow-stage.json，
@@ -78,11 +78,8 @@ function defaultAgentManagedRegistryFile() {
 /** whale_report：v0.8 Step A 后为 Stable Main Surface 常驻工具（不再由阶段临时放行）。 */
 export const WHALE_REPORT_TOOL = "whale_report";
 
-/** create_plan：planning isolate 组内的 realm 桥。whale_report 通过它进入/退出 plan 模式。 */
-const CREATE_PLAN_TOOL = "create_plan";
-
-/** 用户手动指令开启模式的命令名（/plan、/goal）。 */
-const MANUAL_COMMAND_NAMES = ["plan", "goal"];
+/** 用户手动指令开启模式的命令名（v0.8 Step B1：/plan 已移除，仅剩 /goal）。 */
+const MANUAL_COMMAND_NAMES = ["goal"];
 
 /** v0.8 Step A 主流程上下文注入文案（不再有 TaskReconstruction/Classification）。 */
 export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
@@ -126,7 +123,7 @@ export function whaleReportReminderText(_stage) {
   return "";
 }
 
-/** 任务完成 / plan-goal 结束时的紧凑复盘指引（方向1）：语义/文本已解耦到 kaz-shared。 */
+/** 任务完成 / goal 结束时的紧凑复盘指引（方向1）：语义/文本已解耦到 kaz-shared。 */
 export { reviewGuidanceText, skillReviewGuidanceText };
 
 /** 设置 schema（同时驱动设置页 UI）。 */
@@ -362,31 +359,6 @@ function hasToolCall(agent) {
     const events = agent?.session?.events;
     if (!Array.isArray(events)) return false;
     return events.some((event) => event !== null && typeof event === "object" && event.type === "tool/call");
-  } catch {
-    return false;
-  }
-}
-
-/** 该 agent 会话是否处于 plan 模式：以 session.events 里最后一个 plan/mode
- *  事件的 active 为准（与 kaz-mode 的 planModeActive 同源；不依赖隔离服务）。 */
-export function planModeActiveOf(agent) {
-  try {
-    const events = agent?.session?.events;
-    if (!Array.isArray(events)) return false;
-    let active = false;
-    for (const event of events) {
-      if (
-        event !== null &&
-        typeof event === "object" &&
-        event.type === "plan/mode" &&
-        event.data !== null &&
-        typeof event.data === "object" &&
-        typeof event.data.active === "boolean"
-      ) {
-        active = event.data.active;
-      }
-    }
-    return active;
   } catch {
     return false;
   }
@@ -762,17 +734,19 @@ export function hasInjectedInTurn(agent, form, turn) {
 
 /** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）默认进入「任务重构」。
  *  非 complete goal 需要恢复确认时（context.goalRecovery 非空）先进入 goal-recovery；
- *  Plan/Goal 模式激活时（context.modeActive=true）保持 idle/done，不进入任务重构。 */
+ *  Goal 模式激活时（context.goalActive=true）保持 idle/done，不进入任务重构。
+ *  v0.8 Step B1：原生 Plan 已移除，不再有 plan mode 分支。 */
 export function nextStageOnUserMessage(current, _turn, context = {}) {
   if (context?.goalRecovery !== null && context?.goalRecovery !== undefined) {
     if (current === "idle" || current === "done" || current === GOAL_RECOVERY_STAGE) return GOAL_RECOVERY_STAGE;
   }
-  if (context?.modeActive === true && (current === "idle" || current === "done")) return current;
+  if (context?.goalActive === true && (current === "idle" || current === "done")) return current;
   return "reconstruction";
 }
 
-/** 检测 /plan 或 /goal 命令触发的消息：最后一个 turn/end 之后有成功的 command/run。
- *  返回 { commandId, name }；调用方负责消费（每个 commandId 只旁路一次）。 */
+/** 检测 /goal 命令触发的消息：最后一个 turn/end 之后有成功的 command/run。
+ *  返回 { commandId, name }；调用方负责消费（每个 commandId 只旁路一次）。
+ *  v0.8 Step B1：/plan 已随原生 Plan 移除，不再识别。 */
 export function manualCommandIdOf(agent) {
   try {
     const events = agent?.session?.events;
@@ -789,7 +763,6 @@ export function manualCommandIdOf(agent) {
       if (data === null || typeof data !== "object") continue;
       const name = data.name;
       if (typeof name !== "string" || !MANUAL_COMMAND_NAMES.includes(name)) continue;
-      if (name === "plan" && typeof data.args === "string" && data.args.trim() === "off") continue;
       found = { commandId: data.commandId, name };
     }
     if (found === null) return null;
@@ -1422,25 +1395,6 @@ export default {
     }
 
     /**
-     * 通过 create_plan 工具（planning isolate 组内）执行 plan 模式切换。
-     * whale_report 自身在 host 层解析不到 planMode 服务，必须借 create_plan
-     * 的 realm 执行上下文来调用 planMode.set。
-     */
-    function runPlanBridge(agent, exec, active) {
-      const tools = ctx.get("tools");
-      const tool =
-        tools !== undefined &&
-        tools !== null &&
-        typeof tools.get === "function"
-          ? tools.get(CREATE_PLAN_TOOL, agent)
-          : undefined;
-      if (tool === undefined || tool === null || typeof tool.execute !== "function") {
-        throw new Error(`create_plan bridge is unavailable; cannot ${active ? "enter" : "exit"} plan mode`);
-      }
-      return tool.execute({ active }, exec);
-    }
-
-    /**
      * C15 / 描述v0.4 §9.3：mode='goal' 的统一启动/恢复逻辑。
      *  - 无 goal 或 phase=complete → goals.create（必须给 objective）；
      *  - 已存在非 complete goal → 直接人类回合且轮次未耗尽时 goals.resume；
@@ -1499,12 +1453,12 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report workflow bookkeeping or mode to ka-whale-workflow. v0.8 Stable Main Surface keeps this tool constant; it no longer narrows the tool surface. Pass mode='goal' to create/resume a Goal, mode='plan' only while native Plan still exists (removal deferred), or no mode for normal completion. During goal continuation, pass mode='goal' only when a resume is actually needed; an already active+armed goal is a no-op.",
+        "Report workflow bookkeeping or mode to ka-whale-workflow. v0.8 Stable Main Surface keeps this tool constant; it no longer narrows the tool surface. Pass mode='goal' to create/resume a Goal, or no mode for normal completion. During goal continuation, pass mode='goal' only when a resume is actually needed; an already active+armed goal is a no-op. Native Plan was removed in v0.8 Step B1: mode='plan' is no longer accepted.",
       parameters: {
         mode: {
           type: "string",
           description:
-            "'normal' (default) finishes workflow bookkeeping; 'plan' enters native Plan (deferred removal); 'goal' creates a new Goal or resumes a non-complete one. During goal continuation, pass 'goal' only when a resume is required; omit mode only when starting a new task.",
+            "'normal' (default) finishes workflow bookkeeping; 'goal' creates a new Goal or resumes a non-complete one. During goal continuation, pass 'goal' only when a resume is required; omit mode only when starting a new task.",
         },
         objective: {
           type: "string",
@@ -1557,21 +1511,14 @@ export default {
           }
           return Promise.resolve({ ok: true, stage: "reconstruction", restarted: false });
         }
-        // v0.8 Step A：非 goal-recovery 状态下 whale_report 是一次性 bookkeeping；
-        // 可直接带 mode 完成 normal/plan/goal，不再经过 reconstruction/classification。
-        const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
+        // v0.8 Step A/B1：非 goal-recovery 状态下 whale_report 是一次性 bookkeeping；
+        // 原生 Plan 已移除，不再接受 mode='plan'，只完成 normal/goal。
+        if (args?.mode === "plan") {
+          return Promise.reject(new Error("whale_report mode='plan' is no longer supported: native Plan was removed in v0.8 Step B1"));
+        }
+        const mode = args?.mode === "goal" ? "goal" : "normal";
         const launches = [];
-        if (mode === "plan") {
-          try {
-            const result = await runPlanBridge(agent, exec, true);
-            if (result === null || typeof result !== "object" || result.ok !== true) {
-              throw new Error("unexpected create_plan result: " + JSON.stringify(result));
-            }
-            launches.push("plan");
-          } catch (error) {
-            return Promise.reject(new Error("failed to enter plan mode: " + (error instanceof Error ? error.message : String(error))));
-          }
-        } else if (mode === "goal") {
+        if (mode === "goal") {
           try {
             await launchGoalMode(agent, ctx.get("goals"), args);
             launches.push("goal");
@@ -1835,12 +1782,12 @@ export default {
 
     // -----------------------------------------------------------------------
     // 启动：真实用户消息被 inbox claim 后、assembly 之前进入对应阶段。
-    //   - /plan /goal 命令触发的消息：旁路鲸鱼工作流（不进入重构），
-    //     round-minimal 极简过滤仍照常生效。
+    //   - /goal 命令触发的消息：旁路鲸鱼工作流（不进入重构），
+    //     round-minimal 极简过滤仍照常生效。（v0.8 Step B1：/plan 已移除）
     //   - 用户插话不改变当前阶段；仅首轮/未开始且已解除极简时进入任务重构。
     // -----------------------------------------------------------------------
     const pendingStart = new Set();
-    /** 进程内已消费的 /plan /goal 命令 id（每个命令只旁路下一次 claim）。 */
+    /** 进程内已消费的 /goal 命令 id（每个命令只旁路下一次 claim）。 */
     const consumedManualCommands = new Set();
     /** 当前处于命令旁路的 session id 集合（assemble / pre-step 读取）。 */
     const manualBypassSessions = new Set();
@@ -1853,14 +1800,12 @@ export default {
     /** 技能自省（skill-review）task-run 状态：与 memory review 同构但独立，
      *  每 session { kinds, taskRunId, injectedRunId }；同一逻辑任务运行最多注入一次。 */
     const skillReviewRunState = new Map();
-    /** 技能自省用的 plan/goal 激活状态观察（与 memory review 相互独立）。 */
-    const skillLastPlanActive = new Map();
+    /** 技能自省用的 goal 激活状态观察（与 memory review 相互独立；v0.8 Step B1 无 plan）。 */
     const skillLastGoalActive = new Map();
-    /** 每 session 上一次观察到的 plan/goal 激活状态（用于检测结束节点）。 */
-    const lastPlanActive = new Map();
+    /** 每 session 上一次观察到的 goal 激活状态（用于检测结束节点）。 */
     const lastGoalActive = new Map();
 
-    /** 进入新的逻辑任务运行：进入 reconstruction 或新 plan/goal 激活时递增 taskRunId。 */
+    /** 进入新的逻辑任务运行：进入 reconstruction 或新 goal 激活时递增 taskRunId。 */
     function beginReviewTaskRun(sessionId) {
       let state = reviewRunState.get(sessionId);
       if (state === undefined) {
@@ -1922,11 +1867,11 @@ export default {
       if (!isUserMessage(message)) return;
       const sessionId = agent?.session?.id || agent?.id;
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      // /plan /goal 命令触发的消息：只跳过鲸鱼工作流，round-minimal 极简仍生效。
+      // /goal 命令触发的消息：只跳过鲸鱼工作流，round-minimal 极简仍生效。
       const manual = consumeManualCommand(agent);
       if (manual !== null) {
         manualBypassSessions.add(sessionId);
-        // 直接 /plan /goal 旁路 = 新逻辑任务运行且没有分类选择：清除旧任务工具状态，
+        // 直接 /goal 旁路 = 新逻辑任务运行且没有分类选择：清除旧任务工具状态，
         // 本轮 taskToolStateOf 因 manualBypassSessions 命中而返回 null（任务过滤关闭）。
         stageStore.removeTaskToolState(sessionId);
         reportRoundDisplay(agent, `检测到 /${manual.name} 指令：本消息跳过鲸鱼工作流，直接放行白名单工具。`, "工作流旁路");
@@ -1934,15 +1879,13 @@ export default {
       }
       manualBypassSessions.delete(sessionId);
       const current = stageOfAgent(agent);
-      const planActive = planModeActiveOf(agent);
       const goalActive = goalModeActive(agent);
-      const modeActive = planActive || goalActive;
       const recoveryGoal = goalRecoveryNeeded(agent);
       // 第 2、3、4……轮（turn>=2，模型不在运行）：有非 complete goal 时先进
-      // Goal 恢复确认；否则 Plan/Goal 模式激活时保持 idle/done，不进入任务重构；
+      // Goal 恢复确认；否则 Goal 模式激活时保持 idle/done，不进入任务重构；
       // 其余进入任务重构。
       if (typeof turn === "number" && turn >= 2) {
-        const next = nextStageOnUserMessage(current, turn, { modeActive, goalRecovery: recoveryGoal });
+        const next = nextStageOnUserMessage(current, turn, { goalActive, goalRecovery: recoveryGoal });
         if (setStageAgent(agent, next)) {
           reportRoundDisplay(
             agent,
@@ -1956,8 +1899,8 @@ export default {
       }
       // 插话（模型运行中）不改变当前工作流阶段；仅尚未开始（idle）时进入任务重构。
       if (current !== "idle") return;
-      // Plan/Goal 模式激活时不开启任务重构，保持在当前模式。
-      if (modeActive) return;
+      // Goal 模式激活时不开启任务重构，保持在当前模式。
+      if (goalActive) return;
       // 非 complete goal（如 blocked）在 idle 起手时也先进入 Goal 恢复确认。
       if (recoveryGoal !== null) {
         if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
@@ -2007,8 +1950,8 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
       if (current !== "idle") return;
-      // Plan/Goal 模式激活时不开启任务重构，保持在当前模式。
-      if (planModeActiveOf(agent) || goalModeActive(agent)) return;
+      // Goal 模式激活时不开启任务重构，保持在当前模式。
+      if (goalModeActive(agent)) return;
       // 非 complete goal（如 blocked）在 round-minimal 解除后也先进 Goal 恢复确认。
       if (goalRecoveryNeeded(agent) !== null) {
         if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
@@ -2022,9 +1965,10 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 任务完成 / plan-goal 结束节点：注入紧凑复盘指引（方向1）。
+    // 任务完成 / goal 结束节点：注入紧凑复盘指引（方向1）。
     //   只在 ka-whale-workflow 进入 done 后（任务被执行）且检测到结束节点时触发；
     //   每 session 每种类型最多注入一次；没有实质结论时模型应不写记忆。
+    //   v0.8 Step B1：原生 Plan 已移除，不再有 plan kind 复盘边界。
     // -----------------------------------------------------------------------
     ctx.on("agent/turn-stopping", ({ agent, signal }) => {
       if (agent === null || agent === undefined || typeof agent !== "object") return;
@@ -2036,17 +1980,10 @@ export default {
       if (stage !== "done") return;
       const sessionId = sessionIdOf(agent);
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      const planActive = planModeActiveOf(agent);
       const goalActive = goalModeActive(agent);
-      const prevPlan = lastPlanActive.get(sessionId);
       const prevGoal = lastGoalActive.get(sessionId);
-      lastPlanActive.set(sessionId, planActive);
       lastGoalActive.set(sessionId, goalActive);
-      // 新 plan/goal 激活 = 新的逻辑任务运行（例如 /plan、/goal 或分类后启动模式）。
-      if (prevPlan === false && planActive === true) {
-        beginReviewTaskRun(sessionId);
-        beginSkillReviewTaskRun(sessionId);
-      }
+      // 新 goal 激活 = 新的逻辑任务运行（例如 /goal 或 goal 模式启动）。
       if (prevGoal === false && goalActive === true) {
         beginReviewTaskRun(sessionId);
         beginSkillReviewTaskRun(sessionId);
@@ -2055,7 +1992,7 @@ export default {
       const inject = (kind) => {
         if (memorySaveCallable(agent) !== true) return false;
         const state = reviewRunStateOf(sessionId);
-        // session 级：每种 kind（normal/plan/goal）在整个 session 最多注入一次。
+        // session 级：每种 kind（normal/goal）在整个 session 最多注入一次。
         if (state.kinds.has(kind)) return false;
         // task-run 级：同一个逻辑任务运行内最多注入一次复盘，先到边界获胜。
         if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
@@ -2078,18 +2015,13 @@ export default {
         return true;
       };
 
-      // Plan 结束：上一次 active=true，当前 false。
-      if (prevPlan === true && planActive === false) {
-        inject("plan");
-        return;
-      }
       // Goal 结束：上一次 active，当前不再 active。
       if (prevGoal === true && goalActive === false) {
         inject("goal");
         return;
       }
-      // Normal 任务完成：done 且当前无 plan/goal 激活（每个 session 只注入一次 normal）。
-      if (!planActive && !goalActive) {
+      // Normal 任务完成：done 且当前无 goal 激活（每个 session 只注入一次 normal）。
+      if (!goalActive) {
         inject("normal");
       }
     });
@@ -2119,14 +2051,10 @@ export default {
       ) {
         return;
       }
-      const planActive = planModeActiveOf(agent);
       const goalActive = goalModeActive(agent);
-      const prevPlan = skillLastPlanActive.get(sessionId);
       const prevGoal = skillLastGoalActive.get(sessionId);
-      skillLastPlanActive.set(sessionId, planActive);
       skillLastGoalActive.set(sessionId, goalActive);
-      // 新 plan/goal 激活 = 新的逻辑任务运行（skill-review 独立 taskRunId）。
-      if (prevPlan === false && planActive === true) beginSkillReviewTaskRun(sessionId);
+      // 新 goal 激活 = 新的逻辑任务运行（skill-review 独立 taskRunId）。
       if (prevGoal === false && goalActive === true) beginSkillReviewTaskRun(sessionId);
 
       // 终案 E：在 [skill Review] 注入前跑一次真实审计（每边界最多 1 个自动动作），
@@ -2147,7 +2075,7 @@ export default {
 
       const injectSkill = (kind) => {
         const state = skillReviewRunStateOf(sessionId);
-        // session 级：每种 kind（normal/plan/goal）在整个 session 最多注入一次。
+        // session 级：每种 kind（normal/goal）在整个 session 最多注入一次。
         if (state.kinds.has(kind)) return false;
         // task-run 级：同一个逻辑任务运行内最多注入一次 skill-review，先到边界获胜。
         if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
@@ -2175,22 +2103,18 @@ export default {
         return true;
       };
 
-      // 与 memory review 相同的边界判定：Plan 结束 / Goal 结束 / Normal 完成。
-      if (prevPlan === true && planActive === false) {
-        injectSkill("plan");
-        return;
-      }
+      // 与 memory review 相同的边界判定：Goal 结束 / Normal 完成（无 Plan）。
       if (prevGoal === true && goalActive === false) {
         injectSkill("goal");
         return;
       }
-      if (!planActive && !goalActive) {
+      if (!goalActive) {
         injectSkill("normal");
       }
     });
 
     // -----------------------------------------------------------------------
-    // 上下文注入：重构/分类按 turn 去重注入一次。
+    // 上下文注入：主/子流程与 Goal 继续确认按 turn 去重注入一次。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
       const agent = payload?.agent;
@@ -2203,13 +2127,11 @@ export default {
         const bypassed = isBypassed(agent);
         if (live.enabled === true && !skipSubagent && !bypassed) {
           const stage = stageOfAgent(agent);
-          const planActive = planModeActiveOf(agent);
           const goalActive = goalModeActive(agent);
-          const modeActive = planActive || goalActive;
           const recoveryGoal = goalRecoveryNeeded(agent);
           if (hasRealUserMessage) {
             if (turn >= 2) {
-              const next = nextStageOnUserMessage(stage, turn, { modeActive, goalRecovery: recoveryGoal });
+              const next = nextStageOnUserMessage(stage, turn, { goalActive, goalRecovery: recoveryGoal });
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
                   agent,
@@ -2219,7 +2141,7 @@ export default {
                   "阶段切换",
                 );
               }
-            } else if (stage === "idle" && !isMinimal(agent) && !modeActive) {
+            } else if (stage === "idle" && !isMinimal(agent) && !goalActive) {
               const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
@@ -2231,7 +2153,7 @@ export default {
                 );
               }
             }
-          } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !modeActive) {
+          } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !goalActive) {
             const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
             if (setStageAgent(agent, next)) {
               reportRoundDisplay(

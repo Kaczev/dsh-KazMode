@@ -16,7 +16,6 @@ import plugin, {
   manualCommandIdOf,
   nextStageOnUserMessage,
   hasInjectedInTurn,
-  planModeActiveOf,
   goalModeActiveOf,
 } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -58,17 +57,8 @@ check("whaleReportReminderText 为空实现", typeof whaleReportReminderText("re
 check("初始阶段 idle", stageOf(agent, store) === "idle");
 check("第 2+ 轮直接回重构", nextStageOnUserMessage("reconstruction", 2) === "reconstruction" && nextStageOnUserMessage("classification", 3) === "reconstruction" && nextStageOnUserMessage("done", 2) === "reconstruction");
 check("首轮 → 重构", nextStageOnUserMessage("idle", 1) === "reconstruction");
-check("plan/goal 激活（modeActive=true）时保持 idle/done", nextStageOnUserMessage("done", 2, { modeActive: true }) === "done" && nextStageOnUserMessage("idle", 1, { modeActive: true }) === "idle" && nextStageOnUserMessage("reconstruction", 2, { modeActive: true }) === "reconstruction");
-check("plan/goal 未激活仍回重构", nextStageOnUserMessage("done", 2, { modeActive: false }) === "reconstruction");
-check("planModeActiveOf 折叠 plan/mode（最后一条生效）", (() => {
-  const planEvents = [
-    { type: "plan/mode", data: { active: true } },
-    { type: "plan/mode", data: { active: false } },
-    { type: "plan/mode", data: { active: true } },
-  ];
-  return planModeActiveOf({ session: { events: planEvents } }) === true;
-})() && planModeActiveOf({ session: { events: [{ type: "plan/mode", data: { active: false } }] } }) === false);
-check("planModeActiveOf 无 plan/mode 事件为 false", planModeActiveOf({ session: { events: [] } }) === false && planModeActiveOf({ session: { events: [{ type: "turn/start", data: { turn: 1 } }] } }) === false);
+check("goal 激活（goalActive=true）时保持 idle/done", nextStageOnUserMessage("done", 2, { goalActive: true }) === "done" && nextStageOnUserMessage("idle", 1, { goalActive: true }) === "idle" && nextStageOnUserMessage("reconstruction", 2, { goalActive: true }) === "reconstruction");
+check("goal 未激活仍回重构", nextStageOnUserMessage("done", 2, { goalActive: false }) === "reconstruction");
 check("goalModeActiveOf active/paused 为 true", goalModeActiveOf(agent, { get: () => ({ phase: "active" }) }) === true && goalModeActiveOf(agent, { get: () => ({ phase: "paused" }) }) === true);
 check("goalModeActiveOf complete/无 goal/无服务为 false", goalModeActiveOf(agent, { get: () => ({ phase: "complete" }) }) === false && goalModeActiveOf(agent, { get: () => undefined }) === false && goalModeActiveOf(agent, null) === false && goalModeActiveOf(agent, { get: () => { throw new Error("boom"); } }) === false);
 check("setStage 进入重构", setStage(agent, "reconstruction", store) === true && stageOf(agent, store) === "reconstruction");
@@ -123,32 +113,30 @@ check("goal/tool 消息判定为假", isUserMessage({ content: [], source: { kin
 }
 
 {
-  // /plan 命令：最后一个 turn/end 之后有 command/run + 成功 command/done。
+  // /goal 命令：最后一个 turn/end 之后有 command/run + 成功 command/done。
   const cmdEvents = [
     { type: "turn/start", data: { turn: 1 } },
     { type: "step/start", data: { turn: 1, step: 1 } },
     { type: "step/end", data: { turn: 1, step: 1 } },
     { type: "turn/end", data: { turn: 1 } },
-    { type: "command/run", data: { name: "plan", args: "设计一个方案", commandId: "cmd-1" } },
+    { type: "command/run", data: { name: "goal", args: "目标", commandId: "cmd-1" } },
     { type: "command/done", data: { commandId: "cmd-1", kind: "success" } },
   ];
   const cmdAgent = { id: "s-cmd", session: { id: "s-cmd", events: cmdEvents } };
   const hit = manualCommandIdOf(cmdAgent);
-  check("manualCommandIdOf 命中 /plan", hit !== null && hit.name === "plan" && hit.commandId === "cmd-1");
+  check("manualCommandIdOf 命中 /goal", hit !== null && hit.name === "goal" && hit.commandId === "cmd-1");
 }
 
 {
-  // /plan off 不旁路。
-  const offEvents = [
+  // /plan 已移除：即使有旧 command/run 也不识别。
+  const oldPlanEvents = [
     { type: "turn/start", data: { turn: 1 } },
-    { type: "step/start", data: { turn: 1, step: 1 } },
-    { type: "step/end", data: { turn: 1, step: 1 } },
     { type: "turn/end", data: { turn: 1 } },
-    { type: "command/run", data: { name: "plan", args: "off", commandId: "cmd-off" } },
-    { type: "command/done", data: { commandId: "cmd-off", kind: "success" } },
+    { type: "command/run", data: { name: "plan", args: "设计一个方案", commandId: "cmd-old" } },
+    { type: "command/done", data: { commandId: "cmd-old", kind: "success" } },
   ];
-  const offAgent = { id: "s-off", session: { id: "s-off", events: offEvents } };
-  check("manualCommandIdOf 忽略 /plan off", manualCommandIdOf(offAgent) === null);
+  const oldPlanAgent = { id: "s-old-plan", session: { id: "s-old-plan", events: oldPlanEvents } };
+  check("manualCommandIdOf 不再识别旧 /plan 命令", manualCommandIdOf(oldPlanAgent) === null);
 }
 
 {

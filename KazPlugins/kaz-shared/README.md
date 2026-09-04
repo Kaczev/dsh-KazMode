@@ -20,7 +20,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `resolveFirstRoundTools({ kazMemoryEnabled })` | round-minimal / kaz-mode / computeSurface | 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点） |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode 面板 | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
-| `KAZ_BASE_TOOLS` / `KAZ_GOAL_TOOLS` / `KAZ_STABLE_MAIN_TOOLS` / `KAZ_SUBAGENT_BASE_TOOLS` / `stableMainSurface` / `stableSubagentSurface` | kaz-mode / ka-whale-workflow（v0.8 Step A） | Stable Main Surface 固定集：12 Base + Goal 三件套 + `whale_report` + `subagent`；子代理保守 Base；Plan 例外与 assignedTools 由纯函数表达 |
+| `KAZ_BASE_TOOLS` / `KAZ_GOAL_TOOLS` / `KAZ_STABLE_MAIN_TOOLS` / `KAZ_SUBAGENT_BASE_TOOLS` / `stableMainSurface` / `stableSubagentSurface` | kaz-mode / ka-whale-workflow（v0.8 Step A/B1） | Stable Main Surface 固定集：12 Base + Goal 三件套 + `whale_report` + `subagent`；子代理保守 Base；v0.8 Step B1 后 stableMainSurface 不再含 Plan 例外；assignedTools 由纯函数表达 |
 | `TOOL_AUTO_ON_CONFIG` / `MODE_SCOPED_TOOL_PLUGIN_KEYS` / `PLAN_AUTO_ON_TOOLS` / `GOAL_AUTO_ON_TOOLS` / `defaultToolAutoOnState` / `normalizeToolList` / `normalizeAutoOnLayer` / `mergeAutoOnLayers` / `autoOnSettingsEqual` / `hasAutoOnLayerFields` | kaz-mode（kaz_tool_auto_on） | 模式工具自动启用参数单一事实源 + 三层单 JSON 设置模型：原设置（代码）→ 默认设置（用户 JSON）→ 专属设置（项目 JSON）的归一化 / 合并 / 生效计算 |
 | `reviewGuidanceText` / `toolCallable` | ka-whale-workflow / kaz-memory | 方向1 复盘指引（英文/第三人称/紧凑）与工具可用性判定 |
 | `BASE_TOOLS` / `MEMORY_READ_TOOLS` / `KAZ_MAINTENANCE_ONLY_TOOLS` / `baseToolNames` / `optionalToolPoolNames` / `validateOptionalToolCount` | kaz-mode / ka-whale-workflow | 任务分类工具面：主线基础面只含记忆**读**工具；记忆写工具（`memory_save/update/forget`）只进维护子代理白名单；可选池 >6 提醒、>8 拒绝 |
@@ -34,12 +34,14 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 
 > **官方/Kaz 分类修改点**：`lib/tool-plugin-catalog.js`。外置插件数据（手动添加）保存在用户目录 storages 的 `other-*.json`；项目专属开关调整：官方/Kaz 写项目 `tool-plugin.json` / `tool-plugin-catalog.json`，外置写项目 `other-*.json`，**不写在源码里**。
 >
-> **kaz_tool_auto_on 原设置修改点**：`lib/tool-auto-on.js`（plan/goal 模式临时放行工具的默认清单与默认开关）。
+> **kaz_tool_auto_on 原设置修改点（v0.8 Step B1 后仅 B2 退役前兼容读）**：
+> `lib/tool-auto-on.js`（plan/goal 模式临时放行工具的默认清单与默认开关）。
 > 默认设置 / 专属设置存 JSON（一层一个文件，不做插件封装）：
 > - 默认设置：`~/.dsh/storages/ka_tool_auto_on_setting.json`
 > - 专属设置：`<项目>/.dsh/storages/ka_tool_auto_on_setting.json`
 > - 形状：`{ "plan": { "enabled": true, "tools": ["exit_plan_mode"] }, "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] } }`
-> 生效值 = 专属覆盖默认、默认覆盖原设置（enabled / tools 逐项继承）。
+> 生效值 = 专属覆盖默认、默认覆盖原设置（enabled / tools 逐项继承）。B1 后 Plan 已从 Kaz
+> 移除，auto-on 不再放行任何主面工具；整体退役属 B2。
 
 ## 工具面语义（2026-08 统一）
 
@@ -53,7 +55,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
     `whale_report` + `subagent`（代码级固定集；用户 JSON false 不隐藏这些固定成员）；
   - 子代理稳定阶段 = `stableSubagentSurface()`（保守 Base；per-task assigned 工具待后续受控委派 Step）；
   - 首阶段（round-minimal 信号 `minimalPhase=true`）只保留 `firstRoundTools`；为空时按 `resolveFirstRoundTools({ kazMemoryEnabled })` 自动解析——kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`；
-  - 原生 Plan 是显式例外：`stableMainSurface({ planActive: true, planAutoOnTools })` 在 Plan 激活时追加 plan 控制工具。
+  - v0.8 Step B1：原生 Plan 已移除，`stableMainSurface()` 不再接受 Plan 自动放行参数，无 Plan 例外。
 - **记忆工具**：仍由 kaz-mode 按 agent 会话开关从工具面剔除（不依赖 JSON 开关）。
 - **非 Kaz 模式**：本模块不干预工具面（由标准模式决定）。
 

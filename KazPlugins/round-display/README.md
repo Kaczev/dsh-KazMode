@@ -19,8 +19,9 @@
   时静默跳过）。2026-08-21 起不再监听组装段（thinking-anchor / kaz-memory 已改为
   消息注入，且 Kaz 模式会滤掉非 persona 段），展示内容全部来自主动上报。
 - **系统提示词快照**：同一轮内 kaz-system-prompt 可能上报多份不同内容的真实系统提示词
-  （例如 ka-whale-workflow 重构 → 分类、plan/goal 模式变化）；round-display 会全部保留，
+  （例如 ka-whale-workflow 主/子流程段、goal 状态变化）；round-display 会全部保留，
   只按 `(plugin, content)` 去重，不再只留“最终一条”。
+  v0.8 Step B1 后 Kaz 不再上报 plan:policy / tool:goal 段或 plan-mode 通知。
 - **面板通道**：专用 RPC（`/round-display`，loopback）。客户端面板打开时每 2 秒轮询：
   `list` = 当前轮；`history` = 全部轮次。
 - **持久化（2026-08-21）**：记录按 agent × 轮次落盘到

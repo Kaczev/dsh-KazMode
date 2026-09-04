@@ -6,17 +6,17 @@
 //   deepseek-default-model（DeepSeek 采样参数）、ka-whale-memory（独立记忆组件）、
 //   并提供集中管理面板与头部开关按钮（客户端半）。
 //
-// Kaz 模式的语义（Kaz 5.0 Step 1 后）：
+// Kaz 模式的语义（Kaz 5.0 Step 1 后；v0.8 Step B1 移除原生 Plan）：
 //   1) 系统提示词由 kaz 预设的 kaz-system-prompt.mjs 收敛为 DeepSeek 基础提示词
-//      （逐字、最前；不再按记忆插件开关切换 persona 变体）+ 计划模式段（计划模式
-//      仍需生效）。角色特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS；本插件
+//      （逐字、最前；不再按记忆插件开关切换 persona 变体；不再注入 plan/goal
+//      system 段）。角色特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS；本插件
 //      不再负责系统提示词。
 //   2) 工具面两阶段（v0.8 Step A 固定集，工具清单由 kaz-shared 的 tool-lists.js 管理）：
 //        - 首次工具调用前（round-minimal）：仅保留首轮工具集（≤2）；
 //        - 首次工具调用后：Stable Main Surface = KAZ_BASE_TOOLS(12) + Goal 三件套
 //          + whale_report + subagent（子代理为 Stable Subagent Base）。
-//          不再恢复“工具面板 JSON 全量”；旧 JSON 只作兼容读。
-//          原生 Plan 是显式模式边界例外：Plan 激活时按 auto-on 追加 plan 控制工具。
+//          不再恢复“工具面板 JSON 全量”；旧 JSON 只作兼容读；纯
+//          minimal → Stable Main 一次变化（原生 Plan 例外已删除）。
 //        - 记忆工具是否真正出现仍兼容既有项目状态（记忆组件关时从固定面剔除）。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
@@ -56,7 +56,6 @@ import {
   TOOL_PLUGINS,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
-  MODE_SCOPED_TOOL_PLUGIN_KEYS,
   KAZ_STABLE_MAIN_TOOLS,
   KAZ_SUBAGENT_BASE_TOOLS,
   stableMainSurface,
@@ -1354,14 +1353,13 @@ export default {
     /**
      * 计算某 agent 此刻的 Kaz 工具面（Set）。
      *
-     * v0.8 Step A 语义：
+     * v0.8 Step A/B1 语义：
      *   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface
      *     （KAZ_BASE_TOOLS + Goal 三件套 + whale_report + subagent）；一次变化。
      *   - 子代理：minimal → Stable Subagent Base（Step A 尚无 per-task assigned
      *     工具通道，assignedTools 由后续受控委派 Step 接入）。
      *   - 代码级固定集优先：旧 tool-plugin JSON 只作兼容读，不决定固定成员是否可见。
-     *   - 原生 Plan 例外：Plan 模式激活时按 auto-on 追加 plan 控制工具；该例外在
-     *     原生 Plan 实际移除 Step 后删除，探针需能区分 Plan 边界与普通阶段抖动。
+     *   - v0.8 Step B1：原生 Plan 已移除，不再存在 Plan 自动放行例外。
      *   - taskToolSelection / enable_tool 不再参与主模型工具面。
      */
     function kazSurfaceFor(agent, current, states, options = {}) {
@@ -1369,18 +1367,11 @@ export default {
       try {
         const layers = loadExternalToolPluginLayers(workspaceOfAgent(agent), ctx.logger);
         whitelist = new Set(computeToolPluginSurfaceFromEffective(layers.effective));
-        for (const pluginKey of MODE_SCOPED_TOOL_PLUGIN_KEYS) {
-          const universe = layers.effective.T0?.[pluginKey] ?? {};
-          for (const tool of Object.keys(universe)) whitelist.delete(tool);
-        }
         whitelist = mergeAgentManagedToolsIntoSurface(whitelist, layers.agentManagedRegistry);
       } catch (error) {
         ctx.logger?.debug?.("[kaz-mode] 计算统一工具插件面失败：" + safeMessage(error));
         whitelist = new Set();
       }
-
-      // kaz_tool_auto_on（原生 Plan 移除前保留）：只用于 Plan 显式模式边界例外。
-      const autoOn = autoOnToolsFor(agent, states);
 
       const subagent = isSubagent(agent) === true;
       const minimalPhase = isMinimalAgent(agent) === true;
@@ -1415,12 +1406,7 @@ export default {
         // Step A：子代理 Stable Base（静态保守集）；主模型指定工作工具待后续受控委派 Step。
         allowed = stableSubagentSurface({ assignedTools: [] });
       } else {
-        const planActive = planModeActive(agent) === true;
-        allowed = stableMainSurface({
-          planActive,
-          // 原生 Plan 例外：仅 Plan 激活时把 auto-on 的 plan 控制工具并入可见面。
-          planAutoOnTools: planActive ? autoOn : [],
-        });
+        allowed = stableMainSurface();
       }
 
       // 兼容既有插件状态闸门（后续 Step 才做“Kaz 固定常开”清理）：

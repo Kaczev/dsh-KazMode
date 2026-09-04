@@ -108,10 +108,9 @@ export const MEMORY_READ_TOOLS = Object.freeze([
 ]);
 
 /** 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，这些工具不应出现在工具面。
- *  （whale_report 由 ka-whale-workflow 注册；create_plan 由 create-plan 注册。） */
+ *  v0.8 Step B1：create-plan/原生 Plan 已从 Kaz 移除，不再列入。 */
 export const MANAGED_CARRIER_TOOLS = {
   "ka-whale-workflow": ["whale_report"],
-  "create-plan": ["create_plan"],
 };
 
 /** Kaz 5.0 组件命名：ka-whale-memory 为新 id；kaz-memory 仅作旧键兼容读。 */
@@ -197,16 +196,10 @@ export const KAZ_SUBAGENT_BASE_TOOLS = Object.freeze([
   "web_search",
 ]);
 
-/** 计算主模型 stable surface（Set）。原生 Plan 例外：plan 模式激活时允许追加
- *  plan 自动放行工具；该例外在原生 Plan 实际移除 Step 后删除。 */
-export function stableMainSurface({ planActive = false, planAutoOnTools = [] } = {}) {
-  const tools = new Set(KAZ_STABLE_MAIN_TOOLS);
-  if (planActive === true && Array.isArray(planAutoOnTools)) {
-    for (const tool of planAutoOnTools) {
-      if (typeof tool === "string" && tool.trim().length > 0) tools.add(tool.trim());
-    }
-  }
-  return tools;
+/** 计算主模型 stable surface（Set）。v0.8 Step B1：原生 Plan 已移除，
+ *  固定集 = KAZ_STABLE_MAIN_TOOLS，不再接受 Plan 自动放行参数。 */
+export function stableMainSurface() {
+  return new Set(KAZ_STABLE_MAIN_TOOLS);
 }
 
 /** 计算子代理 stable surface（Set）：Stable Subagent Base + 主模型指定工作工具。

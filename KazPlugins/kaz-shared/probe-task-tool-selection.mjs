@@ -63,8 +63,8 @@ check(
 }
 
 check(
-  "MODE_SCOPED_TOOLS 从 auto-on 派生且含模式工具",
-  MODE_SCOPED_TOOLS.includes("exit_plan_mode") &&
+  "MODE_SCOPED_TOOLS 从 auto-on 派生且含模式工具（v0.8 Step B1 无 exit_plan_mode）",
+  !MODE_SCOPED_TOOLS.includes("exit_plan_mode") &&
     MODE_SCOPED_TOOLS.includes("get_goal") &&
     MODE_SCOPED_TOOLS.includes("update_goal") &&
     MODE_SCOPED_TOOLS.includes("whale_report"),
@@ -87,7 +87,6 @@ check(
 {
   const surface = [
     ...BASE_TOOLS,
-    "exit_plan_mode",
     "get_goal",
     "whale_report",
     "safe_json_write",
@@ -105,7 +104,6 @@ check(
       pool.includes("subagent") &&
       !pool.includes("enable_tool") &&
       !pool.includes("read") &&
-      !pool.includes("exit_plan_mode") &&
       !pool.includes("get_goal") &&
       !pool.includes("whale_report") &&
       !MEMORY_TOOLS.some((tool) => pool.includes(tool)),
@@ -115,7 +113,7 @@ check(
 }
 
 {
-  const surface = new Set(["safe_json_write", "read", "enable_tool", "exit_plan_mode", "memory_save", "memory_update", "memory_forget"]);
+  const surface = new Set(["safe_json_write", "read", "enable_tool", "memory_save", "memory_update", "memory_forget"]);
   const pool = optionalToolPoolNames(surface);
   check("optional 池接受 Set 且默认 memory off 不把 memory 当 base", JSON.stringify(pool) === JSON.stringify(["safe_json_write"]));
   check("可选池始终过滤 memory_save/update/forget", !pool.includes("memory_save") && !pool.includes("memory_update") && !pool.includes("memory_forget"));

@@ -49,19 +49,19 @@ const check = (label, ok) => {
 
   check(
     "nextStageOnUserMessage: blocked → goal-recovery",
-    nextStageOnUserMessage("done", 2, { modeActive: false, goalRecovery: blocked }) === GOAL_RECOVERY_STAGE,
+    nextStageOnUserMessage("done", 2, { goalActive: false, goalRecovery: blocked }) === GOAL_RECOVERY_STAGE,
   );
   check(
     "nextStageOnUserMessage: paused → goal-recovery",
-    nextStageOnUserMessage("done", 2, { modeActive: true, goalRecovery: paused }) === GOAL_RECOVERY_STAGE,
+    nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: paused }) === GOAL_RECOVERY_STAGE,
   );
   check(
     "nextStageOnUserMessage: armed active → stay done",
-    nextStageOnUserMessage("done", 2, { modeActive: true, goalRecovery: null }) === "done",
+    nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: null }) === "done",
   );
   check(
     "nextStageOnUserMessage: no goal → reconstruction",
-    nextStageOnUserMessage("done", 2, { modeActive: false, goalRecovery: null }) === "reconstruction",
+    nextStageOnUserMessage("done", 2, { goalActive: false, goalRecovery: null }) === "reconstruction",
   );
   check("GOAL_CONTINUATION_TEXT 含 ask_user_question 与继续/新任务/结束", GOAL_CONTINUATION_TEXT.includes("ask_user_question") && GOAL_CONTINUATION_TEXT.includes("Continue the original goal") && GOAL_CONTINUATION_TEXT.includes("Start a new task"));
   check("v0.8 Step A 提醒为空（不再有旧阶段提醒）", whaleReportReminderText(GOAL_RECOVERY_STAGE) === "");

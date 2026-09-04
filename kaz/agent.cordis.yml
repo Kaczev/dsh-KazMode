@@ -1,4 +1,4 @@
-# The `kaz` agent preset: Kaz 模式 —— Kaczev 的专属模式。
+﻿# The `kaz` agent preset: Kaz 模式 —— Kaczev 的专属模式。
 #
 # 组合基底 = shipped `cordis` 预设的完整副本（完整工具面），persona 行保留为
 # 默认兜底（complete: false、includeRuntimeContext: false——运行时上下文快照
@@ -119,35 +119,6 @@
 # session. What a preset chooses is whether its agent can call the goal tool.
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
-
-# ── plan mode ───────────────────────────────────────────────────────────────
-
-# Plan state is per-agent by nature, so an entry-local realm is not a
-# workaround here — it is the correct lifetime.
-- id: planning
-  name: cordis:group
-  group: true
-  isolate:
-    planMode: true
-  config:
-    - id: plan-mode
-      name: '@deepseek-ai/dsh-plan-mode'
-      config:
-        section: |
-              We are in plan mode. Stay in plan mode until exit_plan_mode succeeds or user switches mode. Plan the implementation — do not execute. User's conversational agreement is input, not approval; fold it into the plan and submit via exit_plan_mode.
-              
-              Explore first: use reads, searches, static analysis. Keep edits, writes, formatters, and commits for after approval. Prefer existing patterns. Tool catalog stays unchanged; mutation tools remain listed, but plan-mode rules override any guidance to use them. todo_write is for execution, not planning.
-              
-              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or ambiguity inspection cannot answer. Do not ask where code lives or how it works when you can find out.
-              
-              Make the plan decision-complete: goal, success criteria, grouped changes, API/data-flow changes, edge cases, tests, assumptions. Keep it concise but detailed enough for another engineer.
-              
-              When ready, submit the plan via exit_plan_mode with full markdown (starting with #). This must be the only and final tool call in the response. Do not output the plan as plain text or ask "should I proceed?" in prose. If rejected, incorporate feedback and resubmit. If review is unavailable, stay in plan mode and ask the user to switch manually — do not proceed without approval.
-
-    - id: create-plan
-      name: create-plan
-      config:
-        enabled: true
 
 # ── compaction ──────────────────────────────────────────────────────────────
 
