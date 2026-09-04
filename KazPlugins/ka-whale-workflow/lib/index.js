@@ -1,27 +1,23 @@
-// ka-whale-workflow —— 鲸鱼工作流（v0.8 Step A：主/子两套新流程 + 工具面稳定）
+// ka-whale-workflow —— 鲸鱼工作流（v0.9：主/受控子代理阶段机 + 工具面稳定）
 // ===========================================================================
 // 流程：
-//   1) 主模型注入 [ka-whale-workflow main flow]（一次/新会话），描述 v0.8 主线：
-//      Minimal → 简单/复杂判断 → 质疑并找最小方案 → 明确工具/子代理需求 →
-//      工作流 → Communication → 汇报候选记忆/技能建议。
-//   2) 子代理注入 [ka-whale-workflow subagent flow]（一次），描述 v0.8 子线：
-//      Minimal → 质疑委派 → 判断主模型指定工具是否足够 → Working/Communication →
-//      汇报候选经验/技能建议（不自写记忆/技能）。
-//   3) 非 complete goal 时按轮注入 [ka-whale-workflow goal continuation] 确认
-//      继续原 Goal / 新任务 / 结束。
-//   4) whale_report 在 Stable Main Surface 常驻，只做工作簿记/模式记录；不再触发
-//      “只剩 whale_report”的阶段级工具面切换。
+//   1) 主模型注入 [ka-whale-workflow main flow]（一次/新会话）与各 v0.9 阶段入口。
+//   2) 受控 v0.9 子代理注入 role 专属 stage；普通旧未知子代理（includeSubagents=true）
+//      注入旧通用 subagent-flow。
+//   3) whale_report 在 Stable Main Surface 常驻，是主模型 stage 推进与 task plan
+//      持久化的唯一 bookkeeping 入口。
+//   4) v0.9 Goal 由 whale_report({mode:'goal'}) 启动/恢复；goal-active 是外部模式。
 //
 // 工具面（由 kaz-mode + kaz-shared 执行）：
 //   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface（固定集）；
-//   - 子代理：minimal → Stable Subagent Base（Step A 静态保守集，assigned 待后续）；
+//   - 受控子代理：role Minimal → role Stable Base + assignedTools；
 //   - v0.8 Step B1：原生 Plan 已移除，纯 minimal → Stable Main 一次变化。
 //
-// 阶段状态（内部兼容）：
+// 阶段状态：
 //   写入插件自己的 JSON 存储（~/.dsh/storages/ka-whale-workflow-stage.json，
-//   按 session id 索引），重启/续接会话自然恢复。旧 reconstruction/classification
-//   值只作存储兼容与 review/skill-review 边界；旧阶段文案不再注入，也不再注册
-//   ka-whale-workflow:prompt system 段或做阶段工具过滤。
+//   按 session id 索引），重启/续接会话自然恢复。v0.9 B5 后只接受 v0.9 stage /
+//   goal-active / working-resumed 与 idle/done/end 状态壳，不再读写旧
+//   reconstruction / classification / goal-recovery 值。
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
@@ -29,14 +25,9 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import {
-  DEFAULT_RECONSTRUCTION_TOOLS,
   SKILL_BOUNDARY_MAX_CHANGES,
   SKILL_PRIVATE_DIR_NAME,
   SKILL_PROCESS_DIR_NAME,
-  ENABLE_TOOL,
-  normalizeOptionalTools,
-  compactOptionalToolDirectory,
-  validateOptionalToolCount,
   AGENT_MANAGED_STORAGE_FILE,
   normalizeAgentManagedRegistry,
   normalizeSkillLifecycle,
@@ -95,8 +86,6 @@ import {
   resolvePlanItemForDelegation,
 } from "./task-plan-store.js";
 
-export { DEFAULT_RECONSTRUCTION_TOOLS };
-
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
 
@@ -127,9 +116,6 @@ export const WORK_SUB_WHALE_REPORT_TOOL = "work_sub_whale_report";
 export const MEMORY_SUB_WHALE_REPORT_TOOL = "memory_sub_whale_report";
 export const PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL = "plugin_maintainer_sub_whale_report";
 export const PLUGIN_CREATOR_SUB_WHALE_REPORT_TOOL = "plugin_creator_sub_whale_report";
-
-/** 旧版 goal 恢复阶段名：保留兼容；v0.9 主流程不再把其作为普通 stage。 */
-export const GOAL_RECOVERY_STAGE = "goal-recovery";
 
 /** v0.9 stage 常量（再导出，便于探针/下游引用）。 */
 export { MAIN_ROLE, MAIN_STAGE_IDS, V09_SUBAGENT_ROLES, V09_STAGE_IDS };
@@ -174,34 +160,11 @@ export const V09_SUBAGENT_ROLE_INITIAL_STAGES = Object.freeze({
   pluginCreator: "assess-delegation",
 });
 
-/** 非 complete goal 时的继续/新任务/结束确认文案（替代旧 goal-recovery 提示）。 */
-export const GOAL_CONTINUATION_TEXT = `[ka-whale-workflow goal continuation]
->
-A non-complete goal already exists in this session. Before routing this human message as a new task, confirm Kaczev's intent with ask_user_question:
-- Continue the original goal: resume it through the stable Goal tools (or whale_report({mode:'goal'}) without a new objective when a resume is actually needed).
-- Start a new task: treat this message as a new main-flow task; do not silently modify or clear the existing goal.
-- End the current goal: do not resume or silently create; tell Kaczev to complete/clear it or choose another option.`;
-
-/** Goal 恢复阶段名：非 complete goal（blocked / paused / disarmed active）存在时使用。 */
-// (GOAL_RECOVERY_STAGE 已在文件头部导出，此处不再重复声明。)
-
-/** 同一 turn/stage 内最多自动提醒次数（v0.8 Step A 不再用于旧阶段提示，保留常量以免破坏旧探针导入）。 */
-export const MAX_WHALE_REMINDERS = 0;
-
-/** v0.8 Step A 后不再需要阶段级 whale_report 提醒；保留空实现以免旧调用报错。 */
-export function whaleReportReminderText(_stage) {
-  return "";
-}
-
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
   /** 子代理是否也走鲸鱼工作流；默认关（与 round-minimal 的语义一致）。 */
   includeSubagents: z.boolean().default(false),
-  /** 任务重构工具清单（配置面板代码框；白名单之上的过滤器）。 */
-  reconstructionTools: z.array(z.string()).default([...DEFAULT_RECONSTRUCTION_TOOLS]),
-  /** 第三次升级：任务分类工具选择总开关；关闭后回到旧“放行全量 Kaz 白名单”。 */
-  taskToolSelectionEnabled: z.boolean().default(true),
   /** 自主 skill 管理总开关；关闭后回到一阶段“按需自升级”。 */
   skillAutonomyEnabled: z.boolean().default(true),
   /** 每个安全边界允许的技能变更数上限（v2.0 硬上限为 1，设置值会被钳制到 1）。 */
@@ -220,8 +183,6 @@ const SETTINGS_SCHEMA = z.object({
 export const DEFAULT_SECTION = {
   enabled: true,
   includeSubagents: false,
-  reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
-  taskToolSelectionEnabled: true,
   skillAutonomyEnabled: true,
   skillAutonomyMaxChangesPerBoundary: 1,
   skillPrivateRoot: "",
@@ -273,7 +234,6 @@ function normalizeToolList(value) {
 /** 归一化任意来源（组合行 config / settings 解析值）的配置。 */
 function normalizeConfig(raw) {
   const value = raw && typeof raw === "object" ? raw : {};
-  const tools = normalizeToolList(value.reconstructionTools);
   const rawMaxChanges = value.skillAutonomyMaxChangesPerBoundary;
   const maxChanges =
     Number.isInteger(rawMaxChanges) && rawMaxChanges >= 1
@@ -284,8 +244,6 @@ function normalizeConfig(raw) {
   return {
     enabled: value.enabled !== false,
     includeSubagents: value.includeSubagents === true,
-    reconstructionTools: tools.length > 0 ? tools : [...DEFAULT_RECONSTRUCTION_TOOLS],
-    taskToolSelectionEnabled: value.taskToolSelectionEnabled !== false,
     skillAutonomyEnabled: value.skillAutonomyEnabled !== false,
     skillAutonomyMaxChangesPerBoundary: maxChanges,
     skillPrivateRoot:
@@ -475,16 +433,6 @@ export function hasDirectHumanInOpenTurn(agent) {
   }
 }
 
-/** 是否存在需要“Goal 恢复确认”的非 complete goal：blocked / paused / disarmed active。
- *  返回 goal view；无目标、complete、active+armed 或 activation 未知时返回 null。 */
-export function goalRecoveryNeededOf(agent, goals) {
-  const goal = currentGoalOf(agent, goals);
-  if (goal === null || goal.phase === "complete") return null;
-  if (goal.phase === "blocked" || goal.phase === "paused") return goal;
-  if (goal.phase === "active" && goal.activation === "disarmed") return goal;
-  return null;
-}
-
 /** 插件自己的阶段状态文件名（DSH_HOME/storages 下，按 session id 索引）。
  *  注意：不能再用 agent.session.append("ka-whale-workflow/stage", ...) 持久化——
  *  DSH 的会话日志会把未注册的自定义事件视为未知且不可忽略，重载时直接拒绝读取
@@ -504,35 +452,6 @@ export function sessionIdOf(agent) {
   } catch {
     return null;
   }
-}
-
-/** 任务工具状态允许的 mode。 */
-const TASK_TOOL_STATE_MODES = new Set(["normal", "plan", "goal"]);
-
-/** 归一化一条任务工具状态；损坏/字段形状错误返回 null（调用方按“feature off”处理）。 */
-export function normalizeTaskToolStateValue(raw) {
-  if (raw === null || raw === undefined || typeof raw !== "object") return null;
-  if (Object.prototype.hasOwnProperty.call(raw, "initialOptionalTools") && !Array.isArray(raw.initialOptionalTools)) return null;
-  if (Object.prototype.hasOwnProperty.call(raw, "jitEnabledTools") && !Array.isArray(raw.jitEnabledTools)) return null;
-  if (raw.taskRunId !== undefined && !(Number.isInteger(raw.taskRunId) && raw.taskRunId > 0)) return null;
-  if (raw.mode !== undefined && !TASK_TOOL_STATE_MODES.has(raw.mode)) return null;
-  const initialOptionalTools = normalizeToolList(raw.initialOptionalTools);
-  const jitEnabledTools = [];
-  for (const entry of Array.isArray(raw.jitEnabledTools) ? raw.jitEnabledTools : []) {
-    if (entry === null || typeof entry !== "object") continue;
-    if (typeof entry.tool !== "string" || entry.tool.trim().length === 0) continue;
-    jitEnabledTools.push({
-      tool: entry.tool.trim(),
-      reason: typeof entry.reason === "string" ? entry.reason : "",
-      at: typeof entry.at === "string" ? entry.at : "",
-    });
-  }
-  return {
-    taskRunId: Number.isInteger(raw.taskRunId) && raw.taskRunId > 0 ? raw.taskRunId : 0,
-    mode: TASK_TOOL_STATE_MODES.has(raw.mode) ? raw.mode : "normal",
-    initialOptionalTools,
-    jitEnabledTools,
-  };
 }
 
 /** 任务契约状态：pending = 模型已产出契约等待 ask_user_question；
@@ -566,7 +485,8 @@ export function normalizeSubagentRoleRecord(raw) {
   };
 }
 
-/** 存储可接受的所有 stage 值：v0.9 + goal-active 外部模式/working-resumed 边界 + 旧兼容值。 */
+/** 存储可接受的所有 stage 值：v0.9 + goal-active 外部模式/working-resumed 边界 + 状态壳。
+ *  B5 后已删除旧阶段字符串。 */
 const KNOWN_SESSION_STAGES = new Set([
   ...V09_STAGE_IDS,
   GOAL_ACTIVE_STAGE,
@@ -574,26 +494,21 @@ const KNOWN_SESSION_STAGES = new Set([
   "idle",
   "done",
   "end",
-  "goal-recovery",
-  "reconstruction",
-  "classification",
 ]);
 
 /**
  * 创建阶段状态存储（可注入文件路径，便于探针用临时文件）。
- * 结构：{ version: 5,
- *        sessions: { "<sessionId>": "<v0.9 stage or legacy stage>" },
- *        taskToolState: { "<sessionId>": {...} },
+ * 结构：{ version: 6,
+ *        sessions: { "<sessionId>": "<v0.9 stage>" },
  *        contractState: { "<sessionId>": {...} },
  *        workflowRuns: { "<sessionId>": { runId, enteredStages } },
  *        pendingStageInjection: { "<sessionId>": "<stage>" },
  *        subagentRoles: { "<childSessionId>": { planItemId, persona,
  *          assignedTools, finalTools, createdAt, updatedAt } } }
- * 旧文件缺少 taskToolState / contractState / workflowRuns 时仍按旧版读取。
+ * 旧文件缺少 contractState / workflowRuns 时仍按旧版读取；taskToolState 字段 B5 起不再读。
  */
 export function createStageStore(file) {
   const sessions = {};
-  const taskToolState = {};
   const contractState = {};
   const workflowRuns = {};
   const pendingStageInjection = {};
@@ -609,14 +524,6 @@ export function createStageStore(file) {
           if (id.length > 0 && typeof stage === "string" && KNOWN_SESSION_STAGES.has(stage)) {
             sessions[id] = stage;
           }
-        }
-      }
-      const rawStates = parsed !== null && typeof parsed === "object" ? parsed.taskToolState : undefined;
-      if (rawStates !== null && typeof rawStates === "object") {
-        for (const [id, rawState] of Object.entries(rawStates)) {
-          if (id.length === 0) continue;
-          const normalized = normalizeTaskToolStateValue(rawState);
-          if (normalized !== null) taskToolState[id] = normalized;
         }
       }
       const rawContracts = parsed !== null && typeof parsed === "object" ? parsed.contractState : undefined;
@@ -666,9 +573,8 @@ export function createStageStore(file) {
         file,
         JSON.stringify(
           {
-            version: 5,
+            version: 6,
             sessions,
-            taskToolState,
             contractState,
             workflowRuns,
             pendingStageInjection,
@@ -706,25 +612,6 @@ export function createStageStore(file) {
     remove(sessionId) {
       if (typeof sessionId === "string") delete sessions[sessionId];
       persist();
-    },
-    getTaskToolState(sessionId) {
-      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
-      const value = taskToolState[sessionId];
-      return value === undefined ? null : JSON.parse(JSON.stringify(value));
-    },
-    setTaskToolState(sessionId, value) {
-      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
-      const normalized = normalizeTaskToolStateValue(value);
-      if (normalized === null) return false;
-      taskToolState[sessionId] = normalized;
-      return persist();
-    },
-    removeTaskToolState(sessionId) {
-      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
-      if (!Object.prototype.hasOwnProperty.call(taskToolState, sessionId)) return false;
-      delete taskToolState[sessionId];
-      persist();
-      return true;
     },
     getContractState(sessionId) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return null;
@@ -812,31 +699,14 @@ export function createStageStore(file) {
   };
 }
 
-/** 从会话事件折叠旧版鲸鱼工作流阶段（兼容旧日志；只读，不再追加）。 */
-function legacyStageOf(agent) {
-  try {
-    const events = agent?.session?.events;
-    if (!Array.isArray(events)) return "idle";
-    let stage = "idle";
-    for (const event of events) {
-      if (event === null || typeof event !== "object" || event.type !== "ka-whale-workflow/stage") continue;
-      const value = event.data?.stage;
-      if (value === "reconstruction" || value === "classification" || value === "done") stage = value;
-    }
-    return stage;
-  } catch {
-    return "idle";
-  }
-}
-
-/** 读取当前阶段：插件 JSON 存储优先，旧会话事件兜底；无记录返回 "idle"。 */
+/** 读取当前阶段：插件 JSON 存储优先；无记录返回 "idle"。 */
 export function stageOf(agent, store = null) {
   const sessionId = sessionIdOf(agent);
   if (store !== null && store !== undefined && typeof store.get === "function") {
     const stored = store.get(sessionId);
     if (typeof stored === "string" && KNOWN_SESSION_STAGES.has(stored)) return stored;
   }
-  return legacyStageOf(agent);
+  return "idle";
 }
 
 /** 设置阶段（仅当与当前阶段不同）：写入插件自己的 JSON 存储，不再 append 会话事件。 */
@@ -953,26 +823,12 @@ export function hasInjectedInTurn(agent, form, turn) {
 
 /** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）的路由。
  *  v0.9 语义：
- *  - Goal 激活 / 非 complete Goal 存在时不重新开启 assess-complexity；
+ *  - Goal 激活时不重新开启 assess-complexity，保持 goal-active；
  *  - 普通新任务始终进入 assess-complexity（Minimal 不再重复，由 round-minimal
  *    按“会话第一次 tool/call”判定）；
  *  - 用户插话不改变当前阶段由调用方自行处理（此函数只处理新一轮消息）。
  */
 export function nextStageOnUserMessage(current, _turn, context = {}) {
-  const recovery =
-    context?.goalRecovery !== null && context?.goalRecovery !== undefined
-      ? context.goalRecovery
-      : null;
-  if (recovery !== null && recovery !== undefined) {
-    if (
-      current === "idle" ||
-      current === "done" ||
-      current === "end" ||
-      current === GOAL_RECOVERY_STAGE
-    ) {
-      return GOAL_RECOVERY_STAGE;
-    }
-  }
   if (context?.goalActive === true) {
     // v0.9：Goal 激活期间外部模式为 goal-active，不重新开启 assess-complexity。
     return GOAL_ACTIVE_STAGE;
@@ -981,7 +837,6 @@ export function nextStageOnUserMessage(current, _turn, context = {}) {
     // Goal 已结束且新一轮真实用户消息到来：等价于 working 结束后收到新消息，重入 assess。
     return "assess-complexity";
   }
-  // 普通新任务：重新进入 assess-complexity（不再进入旧 reconstruction）。
   return "assess-complexity";
 }
 
@@ -1155,12 +1010,12 @@ export default {
       lifecycleMemory.debounced = debounced;
       debounced();
     }
-    /** 当前会话的鲸鱼工作流阶段（JSON 存储优先，旧会话事件只读兜底）。 */
+    /** 当前会话的鲸鱼工作流阶段（JSON 存储优先）。 */
     function stageOfAgent(agent) {
       return stageOf(agent, stageStore);
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
-     *  v0.9：进入 assess-complexity = 新 workflow-run 开始，清除旧任务工具状态，
+     *  v0.9：进入 assess-complexity = 新 workflow-run 开始，清除旧契约状态，
      *  并记录该 run 的已进入 stage（pending injection 一次）。
      *  goal-active 是外部模式，也挂 pending 以便按边界注入 §3.1 文案。 */
     function setStageAgent(agent, stage) {
@@ -1169,7 +1024,6 @@ export default {
       const sessionId = sessionIdOf(agent);
       if (typeof sessionId === "string" && sessionId.length > 0) {
         if (stage === "assess-complexity") {
-          stageStore.removeTaskToolState(sessionId);
           stageStore.removeContractState(sessionId);
           stageStore.beginWorkflowRun(sessionId);
         }
@@ -1191,7 +1045,6 @@ export default {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       if (stageStore.get(sessionId) !== GOAL_ACTIVE_STAGE) return false;
       if (goalModeActive(agent)) return false;
-      if (goalRecoveryNeeded(agent) !== null) return false;
       if (stageStore.set(sessionId, "working") !== true) return false;
       stageStore.setPendingStageInjection(sessionId, WORKING_RESUMED_STAGE);
       stageStore.addWorkflowRunStage(sessionId, WORKING_RESUMED_STAGE);
@@ -1211,66 +1064,6 @@ export default {
         // fall through
       }
       return source();
-    }
-
-    /** 第三次升级：任务工具选择是否开启（插件 enabled 且字段缺失按默认 true）。 */
-    function taskToolSelectionEnabledFor(agent) {
-      const current = liveFor(agent);
-      return current?.enabled !== false && current?.taskToolSelectionEnabled !== false;
-    }
-
-    /** 从 kazMode 服务读取当前可选工具池；服务缺失/异常返回 null（视为特性不可用）。 */
-    function kazModeTaskToolPoolFor(agent) {
-      try {
-        const svc = ctx.get("kazMode");
-        if (svc !== undefined && svc !== null && typeof svc.taskToolPoolOf === "function") {
-          const pool = svc.taskToolPoolOf(agent);
-          return Array.isArray(pool) ? pool : null;
-        }
-      } catch {
-        // fall through
-      }
-      return null;
-    }
-
-    /** 任务工具状态：特性未开 / 插件关 / manual bypass / 非 done / 无状态 → null。 */
-    function taskToolStateOfAgent(agent) {
-      if (agent === null || agent === undefined || typeof agent !== "object") return null;
-      if (liveFor(agent).enabled !== true) return null;
-      if (taskToolSelectionEnabledFor(agent) !== true) return null;
-      if (isBypassed(agent)) return null;
-      const sessionId = sessionIdOf(agent);
-      if (sessionId === null) return null;
-      if (stageOfAgent(agent) !== "done") return null;
-      try {
-        return stageStore.getTaskToolState(sessionId);
-      } catch {
-        return null;
-      }
-    }
-
-    /** 分类阶段 compact optional-tool 目录：名字来自 kazMode 池，描述来自注册工具 schema。 */
-    function optionalToolDirectoryFor(agent) {
-      try {
-        if (taskToolSelectionEnabledFor(agent) !== true) return "";
-        const pool = kazModeTaskToolPoolFor(agent);
-        if (!Array.isArray(pool)) return "";
-        if (pool.length === 0) return "(no optional tools available)";
-        const tools = ctx.get("tools");
-        if (tools === undefined || tools === null || typeof tools.schemas !== "function") return "";
-        const schemas = tools.schemas(agent);
-        const byName = new Map();
-        for (const schema of Array.isArray(schemas) ? schemas : []) {
-          if (schema !== null && typeof schema === "object" && typeof schema.name === "string" && schema.name.length > 0) {
-            byName.set(schema.name, typeof schema.description === "string" ? schema.description : "");
-          }
-        }
-        return compactOptionalToolDirectory(
-          pool.map((name) => ({ name, description: byName.get(name) ?? "" })),
-        );
-      } catch {
-        return "";
-      }
     }
 
     /** 是否处于 round-minimal 极简阶段（服务缺失按 false 处理）。 */
@@ -1293,11 +1086,6 @@ export default {
       } catch {
         return false;
       }
-    }
-
-    /** 是否存在需要 Goal 恢复确认的非 complete goal（blocked / paused / disarmed active）。 */
-    function goalRecoveryNeeded(agent) {
-      return goalRecoveryNeededOf(agent, ctx.get("goals"));
     }
 
     /** 受控 v0.9 子代理检测：stageStore.subagentRoles 中存在该 session 的角色记录。
@@ -1727,7 +1515,7 @@ export default {
         );
       }
       // v0.8 Step A / active-armed no-op：Goal 已在 active+armed 时无需 resume；
-      // 防止“已自动续跑”的 paused goal 在 goal-recovery 残留阶段重复 resume 报错。
+      // 防止“已自动续跑”的 paused goal 重复 resume 报错。
       if (existing.phase === "active" && existing.activation === "armed") {
         return;
       }
@@ -1744,12 +1532,12 @@ export default {
     }
 
     // -----------------------------------------------------------------------
-    // whale_report 工具：重构/分类各调用一次，向插件汇报阶段完成。
+    // whale_report 工具：v0.9 主模型 stage 推进与 task plan 持久化。
     // -----------------------------------------------------------------------
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'. mode='plan' is not accepted.",
+        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'.",
       parameters: {
         mode: {
           type: "string",
@@ -1777,12 +1565,6 @@ export default {
         finalPlanPayload: {
           type: "json",
           description: "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, assignedTools }] } to persist/finalize the complete task plan (second persistence).",
-        },
-        optional_tools: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Deprecated in v0.8 Step A (main stable surface no longer uses task optional tools); retained only for old compatibility calls. Empty or omitted means deliberately use none.",
         },
       },
       output: {
@@ -1820,28 +1602,8 @@ export default {
           }
           return Promise.resolve({ ok: true, stage: GOAL_ACTIVE_STAGE, restarted: false });
         }
-        if (current === GOAL_RECOVERY_STAGE) {
-          // Goal 恢复：继续原 Goal → whale_report({mode:'goal'})；新任务 → whale_report()。
-          if (args?.mode === "goal") {
-            try {
-              await launchGoalMode(agent, ctx.get("goals"), args);
-            } catch (error) {
-              return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-            }
-            setStageAgent(agent, GOAL_ACTIVE_STAGE);
-            reportRoundDisplay(agent, "已确认继续原 Goal，进入 goal-active。", "工作流切换");
-            return Promise.resolve({ ok: true, stage: GOAL_ACTIVE_STAGE, restarted: false });
-          }
-          if (setStageAgent(agent, "assess-complexity")) {
-            reportRoundDisplay(agent, "已确认开始新任务，进入 assess-complexity。", "工作流切换");
-          }
-          return Promise.resolve({ ok: true, stage: "assess-complexity", restarted: false });
-        }
-        if (args?.mode === "plan") {
-          return Promise.reject(new Error("whale_report mode='plan' is no longer supported: native Plan was removed in v0.8 Step B1"));
-        }
         if (!isMainWorkflowStage(current)) {
-          // 非 v0.9 主 stage（idle/done/旧兼容值）：只接受明确 goal 恢复/新任务入口。
+          // 非 v0.9 主 stage（idle/done/end 等状态壳）：只接受明确 goal 启动/恢复入口。
           if (args?.mode === "goal") {
             try {
               await launchGoalMode(agent, ctx.get("goals"), args);
@@ -2232,107 +1994,6 @@ export default {
       subWhaleReportDefs.push(reportDef);
     }
 
-    // -----------------------------------------------------------------------
-    // enable_tool：任务内按需点亮 optional 工具（第三次升级 · 方案四 JIT escalation）。
-    // 只允许点亮“当前 Kaz 生效面内、非基础、非模式限定、且本任务尚未启用”的 optional
-    // 工具；reason 必填并持久化到 stage store 的 jitEnabledTools（审计即状态本身）。
-    // -----------------------------------------------------------------------
-    const enableToolDef = defineTool({
-      name: ENABLE_TOOL,
-      description:
-        "Enable an optional tool for the current task. Only tools in the current Kaz optional pool (non-base, non-mode-scoped, currently enabled in Kaz) can be enabled, and only if they are not already enabled for this task. The reason is recorded in the task audit trail.",
-      parameters: {
-        tool: {
-          type: "string",
-          required: true,
-          description: "Optional tool name to enable for this task.",
-        },
-        reason: {
-          type: "string",
-          required: true,
-          description: "Required reason; recorded in the task audit trail.",
-        },
-      },
-      output: {
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            ok: { type: "boolean", required: true },
-            tool: { type: "string", required: true },
-            reason: { type: "string", required: true },
-          },
-        },
-        render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
-      },
-      async execute(args, exec) {
-        const agent = exec?.agent;
-        if (agent === null || agent === undefined || typeof agent !== "object") {
-          return Promise.reject(new Error("enable_tool requires a calling agent"));
-        }
-        const sessionId = sessionIdOf(agent);
-        if (sessionId === null) {
-          return Promise.reject(new Error("enable_tool requires a session id"));
-        }
-        const state = taskToolStateOfAgent(agent);
-        if (state === null) {
-          const msg = "enable_tool denied: task tool filtering is inactive (feature disabled, no task tool state, or manual bypass)";
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        const tool = typeof args?.tool === "string" ? args.tool.trim() : "";
-        const reason = typeof args?.reason === "string" ? args.reason.trim() : "";
-        if (tool.length === 0) {
-          const msg = "enable_tool denied: missing tool";
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        if (reason.length === 0) {
-          const msg = "enable_tool denied: missing reason (reason is required and recorded)";
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        if (reason.length > 300) {
-          const msg = "enable_tool denied: reason exceeds 300 characters";
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        const pool = kazModeTaskToolPoolFor(agent);
-        if (!Array.isArray(pool) || pool.length === 0 || !pool.includes(tool)) {
-          const allowed = Array.isArray(pool) && pool.length > 0 ? pool.join(", ") : "(no optional tools available)";
-          const msg = `enable_tool denied: "${tool}" is not in the current optional tool pool (base/mode-scoped/unknown/not in Kaz surface). Allowed: ${allowed}`;
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        const initial = Array.isArray(state.initialOptionalTools) ? state.initialOptionalTools : [];
-        const jit = Array.isArray(state.jitEnabledTools) ? state.jitEnabledTools : [];
-        if (initial.includes(tool)) {
-          const msg = `enable_tool denied: "${tool}" is already enabled as an initial optional tool for this task`;
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        if (jit.some((entry) => entry !== null && typeof entry === "object" && entry.tool === tool)) {
-          const msg = `enable_tool denied: "${tool}" is already enabled for this task`;
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        const entry = { tool, reason, at: new Date().toISOString() };
-        const saved = stageStore.setTaskToolState(sessionId, {
-          ...state,
-          jitEnabledTools: [...jit, entry],
-        });
-        if (saved !== true) {
-          const msg = "enable_tool failed: could not persist task tool state";
-          ctx.logger.info(`[ka-whale-workflow] ${msg}`);
-          return Promise.reject(new Error(msg));
-        }
-        reportRoundDisplay(agent, `enable_tool: ${tool} (${reason})`, "任务工具面");
-        ctx.logger.info(`[ka-whale-workflow] enable_tool ok: ${tool} (${reason}) session=${sessionId}`);
-        return Promise.resolve({ ok: true, tool, reason });
-      },
-      presentCall: () => ({ card: "generic", title: "点亮任务工具", kind: "other" }),
-    });
-
     let toolDisposers = [];
     function installTools() {
       if (toolDisposers.length > 0) return;
@@ -2342,9 +2003,8 @@ export default {
         for (const reportDef of subWhaleReportDefs) {
           toolDisposers.push(ctx.tools.register(reportDef));
         }
-        toolDisposers.push(ctx.tools.register(enableToolDef));
       } catch (error) {
-        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL}/${KA_SUB_WHALE_TOOL}/sub-whale-report/${ENABLE_TOOL} 失败：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL}/${KA_SUB_WHALE_TOOL}/sub-whale-report 失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
     function uninstallTools() {
@@ -2370,7 +2030,6 @@ export default {
       version: 3,
       stageOf: (agent) => stageOfAgent(agent),
       enabledFor: (agent) => liveFor(agent).enabled === true,
-      taskToolStateOf: (agent) => taskToolStateOfAgent(agent),
       taskPlanStoreFile: taskPlanStore.file,
       lifecycleReferencePath,
       /** v0.9 B3：受控子代理角色记录 / 最终工具面（kaz-mode 组装时读取）。 */
@@ -2401,43 +2060,6 @@ export default {
         if (typeof disposeService === "function") disposeService();
       };
     }, "ka-whale-workflow: 发布 kaWhaleWorkflow 阶段服务");
-
-    // -----------------------------------------------------------------------
-    // 终案 E 运行时接线：tools/result 埋点 + 后台周期审计 + 启动 dry-run。
-    // 监听器内部都会再读总开关；timer 服务缺失时静默降级（离线探针兼容）。
-    // -----------------------------------------------------------------------
-
-    /** 从 ask_user_question 的结果推断用户对任务契约的选择，并写入 stage store。 */
-    function recordContractFromAskResult(exec, result) {
-      try {
-        if (exec === null || exec === undefined || typeof exec !== "object") return;
-        if (exec.name !== "ask_user_question") return;
-        const agent = exec.agent;
-        const sessionId = sessionIdOf(agent);
-        if (typeof sessionId !== "string" || sessionId.length === 0) return;
-        if (stageOfAgent(agent) !== "classification") return;
-        const text = JSON.stringify(result ?? {});
-        const lower = text.toLowerCase();
-        let status = null;
-        if (/(确认|confirm)/.test(lower)) status = "confirmed";
-        else if (/(修改|modify|调整)/.test(lower)) status = "modified";
-        else if (/(放弃|abandon|取消)/.test(lower)) status = "abandoned";
-        if (status === null) return;
-        const existing = stageStore.getContractState(sessionId) ?? { status: "none", contractText: "", confirmedAt: "" };
-        stageStore.setContractState(sessionId, {
-          ...existing,
-          status,
-          confirmedAt: status === "confirmed" ? new Date().toISOString() : existing.confirmedAt,
-        });
-        ctx.logger.info(
-          `[ka-whale-workflow] 任务契约 ask_user_question 结果写入 stage store：${status} (session=${sessionId})`,
-        );
-      } catch (error) {
-        ctx.logger?.debug?.(
-          `[ka-whale-workflow] 记录 ask_user_question 契约结果失败：${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
 
     // -----------------------------------------------------------------------
     // v0.9 tools/pre-execute 软闸门：主/受控子代理 stage 的 Allowed tools 约束。
@@ -2491,7 +2113,6 @@ export default {
     try {
       const disposer = ctx.on("tools/result", (exec, result) => {
         try {
-          recordContractFromAskResult(exec, result);
           recordToolUse(exec, result);
         } catch (error) {
           ctx.logger?.debug?.(
@@ -2588,30 +2209,24 @@ export default {
       const manual = consumeManualCommand(agent);
       if (manual !== null) {
         manualBypassSessions.add(sessionId);
-        // 直接 /goal 旁路 = 新逻辑任务运行且没有分类选择：清除旧任务工具状态，
-        // 本轮 taskToolStateOf 因 manualBypassSessions 命中而返回 null（任务过滤关闭）。
-        stageStore.removeTaskToolState(sessionId);
         reportRoundDisplay(agent, `检测到 /${manual.name} 指令：本消息跳过鲸鱼工作流，直接放行白名单工具。`, "工作流旁路");
         return;
       }
       manualBypassSessions.delete(sessionId);
       const current = stageOfAgent(agent);
       const goalActive = goalModeActive(agent);
-      const recoveryGoal = goalRecoveryNeeded(agent);
-      // 第 2、3、4……轮（turn>=2，模型不在运行）：Goal 规则优先；普通新任务
-      // 重新进入 assess-complexity（v0.9；不再进入旧 reconstruction）。
+      // 第 2、3、4……轮（turn>=2，模型不在运行）：Goal 激活保持外部模式；
+      // 普通新任务重新进入 assess-complexity（v0.9）。
       if (typeof turn === "number" && turn >= 2) {
-        const next = nextStageOnUserMessage(current, turn, { goalActive, goalRecovery: recoveryGoal });
+        const next = nextStageOnUserMessage(current, turn, { goalActive });
         if (setStageAgent(agent, next)) {
           reportRoundDisplay(
             agent,
-            next === GOAL_RECOVERY_STAGE
-              ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal。"
-              : next === GOAL_ACTIVE_STAGE
-                ? "收到新一轮消息：Goal active，保持 goal-active。"
-                : next === "working"
-                  ? "收到新一轮消息：Goal 存在，直接进入 working。"
-                  : "收到新一轮消息，重新进入 assess-complexity。",
+            next === GOAL_ACTIVE_STAGE
+              ? "收到新一轮消息：Goal active，保持 goal-active。"
+              : next === "working"
+                ? "收到新一轮消息：Goal 存在，直接进入 working。"
+                : "收到新一轮消息，重新进入 assess-complexity。",
             "阶段切换",
           );
         }
@@ -2623,13 +2238,6 @@ export default {
       if (goalActive) {
         if (setStageAgent(agent, GOAL_ACTIVE_STAGE)) {
           reportRoundDisplay(agent, "Goal 模式激活，直接进入 goal-active。", "阶段切换");
-        }
-        return;
-      }
-      // 非 complete goal（如 blocked）在 idle 起手时也先进入 Goal 恢复确认。
-      if (recoveryGoal !== null) {
-        if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
-          reportRoundDisplay(agent, "存在非 complete goal，先确认是否继续原 Goal。", "阶段切换");
         }
         return;
       }
@@ -2688,13 +2296,6 @@ export default {
         }
         return;
       }
-      // 非 complete goal（如 blocked）在 round-minimal 解除后也先进 Goal 恢复确认。
-      if (goalRecoveryNeeded(agent) !== null) {
-        if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
-          reportRoundDisplay(agent, "round-minimal 已解除：存在非 complete goal，先确认是否继续原 Goal。", "阶段切换");
-        }
-        return;
-      }
       if (setStageAgent(agent, "assess-complexity")) {
         reportRoundDisplay(agent, "round-minimal 已解除，进入 assess-complexity。", "阶段切换");
       }
@@ -2721,47 +2322,38 @@ export default {
         if (live.enabled === true && controlledRole === null && !skipSubagent && !bypassed) {
           const stage = stageOfAgent(agent);
           const goalActive = goalModeActive(agent);
-          const recoveryGoal = goalRecoveryNeeded(agent);
           // 无真实用户消息且 Goal 已结束：从 goal-active 进入 working-resumed 边界。
           if (!hasRealUserMessage && stage === GOAL_ACTIVE_STAGE && !goalActive) {
             transitionGoalActiveToWorkingResumed(agent);
           }
           if (hasRealUserMessage) {
             if (turn >= 2) {
-              const next = nextStageOnUserMessage(stage, turn, { goalActive, goalRecovery: recoveryGoal });
+              const next = nextStageOnUserMessage(stage, turn, { goalActive });
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
                   agent,
-                  next === GOAL_RECOVERY_STAGE
-                    ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal（pre-step 兜底）。"
-                    : next === GOAL_ACTIVE_STAGE
-                      ? "收到新一轮消息：Goal active，保持 goal-active（pre-step 兜底）。"
-                      : next === "working"
-                        ? "收到新一轮消息：Goal 存在，直接进入 working（pre-step 兜底）。"
-                        : "收到新一轮消息，重新进入 assess-complexity（pre-step 兜底）。",
+                  next === GOAL_ACTIVE_STAGE
+                    ? "收到新一轮消息：Goal active，保持 goal-active（pre-step 兜底）。"
+                    : next === "working"
+                      ? "收到新一轮消息：Goal 存在，直接进入 working（pre-step 兜底）。"
+                      : "收到新一轮消息，重新进入 assess-complexity（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
             } else if (stage === "idle" && !isMinimal(agent) && !goalActive) {
-              const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "assess-complexity";
-              if (setStageAgent(agent, next)) {
+              if (setStageAgent(agent, "assess-complexity")) {
                 reportRoundDisplay(
                   agent,
-                  next === GOAL_RECOVERY_STAGE
-                    ? "进入 Goal 恢复确认（pre-step 兜底）。"
-                    : "进入 assess-complexity（pre-step 兜底）。",
+                  "进入 assess-complexity（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
             }
           } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !goalActive) {
-            const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "assess-complexity";
-            if (setStageAgent(agent, next)) {
+            if (setStageAgent(agent, "assess-complexity")) {
               reportRoundDisplay(
                 agent,
-                next === GOAL_RECOVERY_STAGE
-                  ? "round-minimal 已解除，先确认是否继续原 Goal（pre-step 兜底）。"
-                  : "round-minimal 已解除，进入 assess-complexity（pre-step 兜底）。",
+                "round-minimal 已解除，进入 assess-complexity（pre-step 兜底）。",
                 "阶段切换",
               );
             }
@@ -2774,7 +2366,6 @@ export default {
       if (liveFor(agent).enabled !== true) return decision;
       if (isBypassed(agent)) return decision;
       // 上下文注入：
-      //   - goal-recovery 使用 Goal 继续确认；
       //   - 主模型 / 旧未知子代理（includeSubagents=true）的 flow Persona 首次注入一次；
       //   - 受控 v0.9 子代理只注入 role-specific stage，不注入旧通用 subagent-flow；
       //   - v0.9 stage 注入按 pendingStageInjection 精确一次（同一 run 内重新
@@ -2783,7 +2374,6 @@ export default {
       const controlledRoleNow = controlledSubagentRoleOfAgent(agent);
       const skipSubagentNow =
         controlledRoleNow === null && liveNow.includeSubagents !== true && isSubagent(agent);
-      const stageNow = stageOfAgent(agent);
       const subagentNow = isSubagent(agent);
       const sessionIdNow = sessionIdOf(agent);
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
@@ -2793,12 +2383,11 @@ export default {
         // 受控 v0.9 子代理的 Persona 已由 ka_sub_whale 带入对应 role flow；
         // 不再注入旧通用 SUBAGENT_FLOW_TEXT，只注入 role-specific pending stage。
         if (controlledRoleNow === null) {
-          const recoveryNow = stageNow === GOAL_RECOVERY_STAGE;
-          const form = recoveryNow ? "goal-continuation" : subagentNow ? "subagent-flow" : "main-flow";
+          const form = subagentNow ? "subagent-flow" : "main-flow";
           const alreadyInjectedTurn = hasInjectedInTurn(agent, form, turn);
-          const alreadyInjectedBefore = !recoveryNow && hasInjectedBefore(agent, form);
+          const alreadyInjectedBefore = hasInjectedBefore(agent, form);
           if (!alreadyInjectedTurn && !alreadyInjectedBefore) {
-            const text = recoveryNow ? GOAL_CONTINUATION_TEXT : subagentNow ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
+            const text = subagentNow ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
             try {
               const message = createUserMessage({
                 content: [{ type: "text", text }],
@@ -2809,7 +2398,7 @@ export default {
               reportRoundDisplay(
                 agent,
                 text,
-                recoveryNow ? "Goal 继续确认" : subagentNow ? "子代理流程" : "主流程",
+                subagentNow ? "子代理流程" : "主流程",
               );
             } catch (error) {
               ctx.logger.warn(

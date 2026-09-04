@@ -6,7 +6,6 @@
 //   - working-resumed 携带实际 taskPlanPath。
 // 运行：node KazPlugins/ka-whale-workflow/probe-goal-active.mjs
 import plugin, {
-  DEFAULT_RECONSTRUCTION_TOOLS,
   createStageStore,
   GOAL_ACTIVE_STAGE,
   GOAL_ACTIVE_CONTEXT_TEXT,
@@ -62,7 +61,7 @@ const settings = {
       update: (patch) => { current = { ...current, ...patch }; return Promise.resolve(); },
     };
   },
-  get: () => ({ enabled: true, includeSubagents: false, reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS] }),
+  get: () => ({ enabled: true, includeSubagents: false }),
   update: () => Promise.resolve(),
 };
 const toolsMock = {
@@ -78,7 +77,7 @@ const toolsMock = {
   },
 };
 const mockKazMode = {
-  pluginConfig: () => ({ enabled: true, includeSubagents: false, reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS] }),
+  pluginConfig: () => ({ enabled: true, includeSubagents: false }),
   toolVisible: () => true,
 };
 const base = {

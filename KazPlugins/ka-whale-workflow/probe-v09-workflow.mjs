@@ -1,7 +1,6 @@
 // ka-whale-workflow v0.9 探针：主/子 stage 机 + tools/pre-execute 软闸门 + 注入格式。
 // 运行：node KazPlugins/ka-whale-workflow/probe-v09-workflow.mjs
 import plugin, {
-  DEFAULT_RECONSTRUCTION_TOOLS,
   createStageStore,
   KA_SUB_WHALE_TOOL,
   WORK_SUB_WHALE_REPORT_TOOL,
@@ -48,7 +47,7 @@ const settings = {
       update: (patch) => { current = { ...current, ...patch }; return Promise.resolve(); },
     };
   },
-  get: () => ({ enabled: true, includeSubagents: false, reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS] }),
+  get: () => ({ enabled: true, includeSubagents: false }),
   update: () => Promise.resolve(),
 };
 const toolsMock = {
@@ -64,7 +63,7 @@ const toolsMock = {
   },
 };
 const mockKazMode = {
-  pluginConfig: () => ({ enabled: true, includeSubagents: false, reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS] }),
+  pluginConfig: () => ({ enabled: true, includeSubagents: false }),
   toolVisible: () => true,
 };
 const base = {

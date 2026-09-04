@@ -130,7 +130,7 @@ const settings = {
       update: (patch) => { current = { ...current, ...patch }; return Promise.resolve(); },
     };
   },
-  get: () => ({ enabled: true, includeSubagents: false, reconstructionTools: [] }),
+  get: () => ({ enabled: true, includeSubagents: false }),
   update: () => Promise.resolve(),
 };
 const toolsMock = {
@@ -146,7 +146,7 @@ const toolsMock = {
   },
 };
 const mockKazMode = {
-  pluginConfig: () => ({ enabled: true, includeSubagents: false, reconstructionTools: [] }),
+  pluginConfig: () => ({ enabled: true, includeSubagents: false }),
   toolVisible: () => true,
 };
 const base = {

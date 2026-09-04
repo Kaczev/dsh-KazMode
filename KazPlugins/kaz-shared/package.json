@@ -17,7 +17,6 @@
     "lib/tool-plugin-catalog.js",
     "lib/review-guidance.js",
     "lib/skill-guidance.js",
-    "lib/task-tool-selection.js",
     "lib/agent-managed-tools.js",
     "lib/skill-lifecycle.js",
     "lib/safe-json-file.js",

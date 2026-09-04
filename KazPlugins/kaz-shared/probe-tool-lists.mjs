@@ -11,8 +11,6 @@ import {
   KAZ_FIRST_ROUND_TOOLS,
   KAZ_TOOL_UNIVERSE,
   KAZ_BASE_TOOLS,
-  KAZ_GOAL_TOOLS,
-  KAZ_SUBAGENT_CONTROL_TOOLS,
   KAZ_STABLE_MAIN_TOOLS,
   KAZ_SUBAGENT_BASE_TOOLS,
   stableMainSurface,
@@ -51,20 +49,20 @@ check("① KAZ_TOOL_UNIVERSE 冻结且不被用户层扩写", Object.isFrozen(KA
 check("① v0.8 Step B1 原生 Plan 工具已移出固定全集", TOOL_PLUGIN_CATALOG["plan-mode"] === undefined && TOOL_PLUGIN_CATALOG["create_plan"] === undefined && KAZ_TOOL_UNIVERSE["plan-mode"] === undefined && KAZ_TOOL_UNIVERSE["create-plan"] === undefined);
 check("① 改名矩阵目录/catalog 新键生效且旧键不再作为白名单插件", TOOL_PLUGIN_CATALOG["ka-whale-memory"]?.memory_search === true && TOOL_PLUGIN_CATALOG["kaz-memory"] === undefined && TOOL_PLUGINS["ka-whale-memory"] === true && TOOL_PLUGINS["kaz-memory"] === undefined && MANAGED_PLUGINS.some((p) => p.id === "ka-whale-memory") && !MANAGED_PLUGINS.some((p) => p.id === "kaz-memory"));
 check("① KAZ_BASE_TOOLS 12 项初稿", Array.isArray(KAZ_BASE_TOOLS) && KAZ_BASE_TOOLS.length === 12 && ["ask_user_question","edit","glob","grep","memory_detail","memory_list","memory_search","pwsh","read","todo_write","web_search","write"].every((t) => KAZ_BASE_TOOLS.includes(t)));
-check("① KAZ_GOAL_TOOLS Goal 三件套", Array.isArray(KAZ_GOAL_TOOLS) && KAZ_GOAL_TOOLS.length === 3 && ["create_goal","get_goal","update_goal"].every((t) => KAZ_GOAL_TOOLS.includes(t)));
-check("① KAZ_SUBAGENT_CONTROL_TOOLS 旧兼容仍含 subagent", JSON.stringify(KAZ_SUBAGENT_CONTROL_TOOLS) === JSON.stringify(["subagent"]));
+check("① B5 不再保留旧 KAZ_GOAL_TOOLS / KAZ_SUBAGENT_CONTROL_TOOLS", !Object.prototype.hasOwnProperty.call(await import("./lib/tool-lists.js"), "KAZ_GOAL_TOOLS") && !Object.prototype.hasOwnProperty.call(await import("./lib/tool-lists.js"), "KAZ_SUBAGENT_CONTROL_TOOLS"));
 check("① v0.9 Stable Main Surface = 19（§1.1，无 create_goal/subagent）", KAZ_STABLE_MAIN_TOOLS.length === 19 && KAZ_STABLE_MAIN_TOOLS.every((t) => typeof t === "string") && KAZ_STABLE_MAIN_TOOLS.includes("whale_report") && KAZ_STABLE_MAIN_TOOLS.includes("ka_sub_whale") && KAZ_STABLE_MAIN_TOOLS.includes("list_agents") && KAZ_STABLE_MAIN_TOOLS.includes("send_message") && KAZ_STABLE_MAIN_TOOLS.includes("interrupt_agent") && !KAZ_STABLE_MAIN_TOOLS.includes("create_goal") && !KAZ_STABLE_MAIN_TOOLS.includes("subagent"));
 check("① stableMainSurface = v0.9 固定集 19", stableMainSurface().size === 19 && stableMainSurface().has("ka_sub_whale") && stableMainSurface().has("get_goal") && stableMainSurface().has("update_goal") && !stableMainSurface().has("exit_plan_mode") && !stableMainSurface().has("subagent") && !stableMainSurface().has("create_goal"));
 check("① KAZ_SUBAGENT_BASE_TOOLS 不含 safe_json_write / memory 写工具", !KAZ_SUBAGENT_BASE_TOOLS.includes("safe_json_write") && !KAZ_SUBAGENT_BASE_TOOLS.includes("memory_save") && !KAZ_SUBAGENT_BASE_TOOLS.includes("memory_update") && !KAZ_SUBAGENT_BASE_TOOLS.includes("memory_forget"));
 check("① stableSubagentSurface 支持 assignedTools 并入", stableSubagentSurface({ assignedTools: ["tool_jobs"] }).has("tool_jobs") && stableSubagentSurface({ baseTools: ["read"], assignedTools: ["write"] }).size === 2);
 check("① KAZ_EXTERNAL_CANDIDATES / KAZ_ROLE_PROMPTS 冻结", Object.isFrozen(KAZ_EXTERNAL_CANDIDATES) && Object.isFrozen(KAZ_ROLE_PROMPTS) && Object.isFrozen(KAZ_MAINTENANCE_ONLY_TOOLS));
 check("① KAZ_ROLE_PROMPTS.main Goal-active 最小同步", KAZ_ROLE_PROMPTS.main.includes("Start or resume Goal via whale_report") && KAZ_ROLE_PROMPTS.main.includes("do not use whale_report to advance ordinary stages") && KAZ_ROLE_PROMPTS.main.includes("get_goal/update_goal"));
+check("① KAZ_ROLE_PROMPTS 无旧 toolCreator/retriever 角色", KAZ_ROLE_PROMPTS.subagent?.toolCreator === undefined && KAZ_ROLE_PROMPTS.subagent?.retriever === undefined && KAZ_ROLE_PROMPTS.subagent?.memoryMaintainer !== undefined);
 check("① resolveFirstRoundTools kaz-memory 开", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: true })) === JSON.stringify(["memory_search"]));
 check("① resolveFirstRoundTools ka-whale-memory 开", JSON.stringify(resolveFirstRoundTools({ kaWhaleMemoryEnabled: true })) === JSON.stringify(["memory_search"]));
 check("① resolveFirstRoundTools kaz-memory 关", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: false })) === JSON.stringify(["read", "pwsh"]));
 check("① TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "glob", "grep", "web_search", "memory_search"].every((t) => TOOL_WHITELIST.includes(t)));
 check("① ka-whale-workflow 是被管理插件但不是工具白名单插件", MANAGED_PLUGINS.some((p) => p.id === "ka-whale-workflow") && TOOL_PLUGIN_CATALOG["ka-whale-workflow"] === undefined && TOOL_PLUGINS["ka-whale-workflow"] === undefined);
-check("① MANAGED_CARRIER_TOOLS 仅覆盖 whale_report，MANAGED_PLUGINS 无 create-plan", MANAGED_CARRIER_TOOLS["ka-whale-workflow"]?.includes("whale_report") === true && MANAGED_CARRIER_TOOLS["create-plan"] === undefined && !MANAGED_PLUGINS.some((p) => p.id === "create-plan"));
+check("① MANAGED_CARRIER_TOOLS 覆盖 v0.9 workflow 工具，MANAGED_PLUGINS 无 create-plan", MANAGED_CARRIER_TOOLS["ka-whale-workflow"]?.includes("whale_report") === true && MANAGED_CARRIER_TOOLS["ka-whale-workflow"]?.includes("ka_sub_whale") === true && MANAGED_CARRIER_TOOLS["create-plan"] === undefined && !MANAGED_PLUGINS.some((p) => p.id === "create-plan"));
 
 check("② normalizeExternalKey", normalizeExternalKey("Dsh_Pixel Art") === "dsh-pixel-art");
 check("② normalizeExternalKey 旧键 kaz-memory 归一化到 ka-whale-memory", normalizeExternalKey("kaz-memory") === "ka-whale-memory" && normalizeExternalKey("Kaz_Memory") === "ka-whale-memory");

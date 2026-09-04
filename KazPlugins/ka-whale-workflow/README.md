@@ -1,13 +1,13 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理）。
 
 ## 范围
 
 - 主/子阶段机：英文 stage id，Allowed tools / Can advance to / Task 与 v0.9
   表格一致；`decide-goal` 可推进 `working` 或外部模式 `goal-active`。
 - Goal-active 外部模式：`whale_report({mode:'goal', objective, max_goal_rounds?})`
-  从 decide-goal / goal-recovery / 非主 stage 进入 `goal-active`；该值写入 stage
+  从 decide-goal 或非主 stage（idle/done/end）进入 `goal-active`；该值写入 stage
   state，但不加入 `MAIN_STAGE_IDS`；goal-active 期间普通 `whale_report` 推进返回
   `workflow-stage-deny`。
 - §3.1 边界注入：进入 `goal-active` 注入 Goal-active 上下文；Goal 结束后（无
@@ -59,24 +59,27 @@
 ## 未做（留给后续世代）
 
 - B4 面板只读化由 34 世完成（见 `KazPlugins/kaz-mode/README.md`）。
-- 未做：B5 旧代码清理、B6 KAZ_ROLE_PROMPTS 全量终稿/round-display/paths/热重载。
+- B5 旧代码清理由 35 世完成：`enable_tool` / `reconstructionTools` /
+  `taskToolSelectionEnabled` / 旧 optional_tools 路径 / 旧 stage 字符串与旧
+  `subagent`/`create_goal`/旧角色常量已退役。
+- 未做：B6 KAZ_ROLE_PROMPTS 全量终稿/round-display/paths/热重载。
 - 33 世只做 `KAZ_ROLE_PROMPTS.main` 的 Goal-active 最小同步；全量 Persona 终稿留给 B6/36 世。
-- 不删除旧 `subagent` / `create_goal` / 旧角色常量（B5 处理）。
 
 ## 设置
 
 - `enabled`：总开关。
 - `includeSubagents`：旧/未知（非受控）子代理是否也走鲸鱼工作流，默认关。
   受控 v0.9 子代理恒受 ka-whale-workflow 治理，不受本开关限制。
-- 旧 `reconstructionTools` / `taskToolSelectionEnabled` / `enable_tool` 相关设置
-  保留为兼容读取，不再参与 v0.9 主模型 stage 面。
+- B5 起不再读取/展示旧 `reconstructionTools` / `taskToolSelectionEnabled` /
+  `enable_tool` 设置。
 
 ## 存储
 
-- 阶段状态：`~/.dsh/storages/ka-whale-workflow-stage.json`（version 5，
-  含 sessions / taskToolState / contractState / workflowRuns /
+- 阶段状态：`~/.dsh/storages/ka-whale-workflow-stage.json`（version 6，
+  含 sessions / contractState / workflowRuns /
   pendingStageInjection / subagentRoles；sessions 可存 `goal-active`，
-  pendingStageInjection 可挂 `goal-active` / `working-resumed` 边界）。
+  pendingStageInjection 可挂 `goal-active` / `working-resumed` 边界；
+  B5 起不再读写 taskToolState 与旧 reconstruction/classification/goal-recovery）。
 - Task plan：`~/.dsh/storages/ka-whale-workflow-task-plan.json`。
 - 生命周期参考：`KazPlugins/ka-whale-workflow/PLUGIN_LIFECYCLE.md`。
 - 私有插件候选注册表：`~/.dsh/storages/kaz-agent-managed-tools.json`

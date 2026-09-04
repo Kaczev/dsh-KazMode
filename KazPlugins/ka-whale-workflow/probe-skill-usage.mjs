@@ -4,7 +4,6 @@
 // debounce 缺省时立即落盘；未登记/嵌套调用不写文件。
 // 运行：node KazPlugins/ka-whale-workflow/probe-skill-usage.mjs
 import plugin, {
-  DEFAULT_RECONSTRUCTION_TOOLS,
   skillToolUseEvent,
   applySkillToolUse,
   createLifecycleRecord,
@@ -92,7 +91,6 @@ const mockKazMode = {
   pluginConfig: () => ({
     enabled: true,
     includeSubagents: false,
-    reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
     skillAutoLifecycleEnabled: true,
     skillLifecycleUnusedDays: 60,
     skillLifecyclePendingDays: 7,
@@ -100,7 +98,6 @@ const mockKazMode = {
     skillLifecycleMaxAutoActions: 1,
   }),
   toolVisible: () => true,
-  taskToolPoolOf: () => [TOOL],
 };
 const goalsMock = { get: () => undefined, create: () => undefined };
 const base = {

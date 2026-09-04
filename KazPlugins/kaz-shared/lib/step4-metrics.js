@@ -5,7 +5,7 @@
 //     （每 4 字符 1 token + 4 结构性 overhead），保证与 DSH 内部估计同源；
 //   - 工具面变化次数：以 DSH request/header 的“工具名集合连续去重序列”为准；
 //   - Task Surface 大小：展开后稳定请求头的工具数量；预算复审点对照
-//     KAZ_BASE_TOOLS（设计 12 项初稿）与运行时 BASE_TOOLS（enable_tool 兼容层）。
+//     KAZ_BASE_TOOLS（设计 12 项初稿）。B5 后旧运行时 BASE_TOOLS/enable_tool 层已删除。
 // 本模块只做纯计算，不读取会话文件；会话日志解析脚本位于 .dsh/step4/（不入库）。
 // ===========================================================================
 
@@ -80,7 +80,8 @@ export function surfaceTransitionCount(headers) {
 }
 
 /** Task Surface 大小与预算复审点（纯函数）。
- *  @param options { taskSurfaceTools, kazBaseTools=KAZ_BASE_TOOLS, runtimeBaseTools=BASE_TOOLS, memoryEnabled }
+ *  @param options { taskSurfaceTools, kazBaseTools=KAZ_BASE_TOOLS, runtimeBaseTools, memoryEnabled }
+ *  runtimeBaseTools 是历史兼容参数（B5 后不再有 enable_tool 运行时基础面）。
  *  返回 { taskSurfaceCount, kazBaseToolsCount, runtimeBaseToolsCount, reviewPoint }
  */
 export function budgetReviewPoint({ taskSurfaceTools, kazBaseTools, runtimeBaseTools, memoryEnabled = false } = {}) {
@@ -91,7 +92,7 @@ export function budgetReviewPoint({ taskSurfaceTools, kazBaseTools, runtimeBaseT
   const reviewPoint =
     `Task Surface=${taskSurfaceCount}; KAZ_BASE_TOOLS design=${kazBaseToolsCount}; ` +
     `runtime BASE_TOOLS=${runtimeBaseToolsCount}${memorySuffix}; ` +
-    `optional budget: >6 warn / >8 reject (Kaz 5.0 hard boundary 4)`;
+    `assigned budget: >6 warn / >8 reject (v0.9)`;
   return {
     taskSurfaceCount,
     kazBaseToolsCount,

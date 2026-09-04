@@ -6,8 +6,8 @@
 //     agentManaged === true 的条目才算“Agent 管理工具”；
 //   - Agent 管理工具全局启用、跨项目生效，不受项目/用户 four-file JSON 或
 //     other-* 删除影响；
-//   - 它们不是模式自动启用工具；进入 Kaz 白名单后由 round-13 任务分类
-//     optional_tools / enable_tool 决定是否进入当前任务工具面。
+//   - 它们不是模式自动启用工具；只作为私有插件候选，经 v0.9 受控委派 /
+//     assignedTools 选择后进入子代理面。
 // v0.9 B3：同一文件升级为 schema version 2——顶层新增 `candidates` 私有插件
 // 候选注册表（tool/description/source/available）。旧文件缺 candidates 时兼容
 // 读为空；plugins 内容保持不变。

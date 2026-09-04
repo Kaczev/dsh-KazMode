@@ -129,11 +129,8 @@ const goalsByAgent = new Map();
 goalsByAgent.set("s-kaz-goal", { phase: "active" });
 const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search"];
 
-/** 鲸鱼工作流阶段 mock：由 ka-whale-workflow 插件在真实环境提供的服务。 */
-const whaleStages = {
-  "s-kaz-whale-rec": "reconstruction",
-  "s-kaz-whale-cls": "classification",
-};
+/** 鲸鱼工作流 stage mock：kaz-mode 不再消费旧 stage，统一返回 null 即可。 */
+const whaleStages = {};
 
 const settings = makeSettings();
 const mockTools = {
@@ -216,7 +213,7 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   const onSurface = kazMode.surfaceOf(sKazMin);
   const offSurface = kazMode.surfaceOf(sKazMinNomem);
   check("①.11 首轮极简（记忆开）工具面 ≤2 且仅 memory_search", onSurface !== null && onSurface.size <= 2 && onSurface.has("memory_search") && onSurface.size === 1);
-  check("①.11 首轮极简（记忆关）工具面 ≤2 且 read/pwsh", offSurface !== null && offSurface.size <= 2 && offSurface.has("read") && offSurface.has("pwsh") && offSurface.size === 2);
+  check("①.11 首轮极简（记忆关状态被 Kaz 恒开覆盖）仍 memory_search", offSurface !== null && offSurface.size <= 2 && offSurface.has("memory_search") && offSurface.size === 1);
   check("①.11 首轮极简不放行 edit/write/web_search", kazMode.toolVisible(sKazMin, "edit") === false && kazMode.toolVisible(sKazMin, "write") === false && kazMode.toolVisible(sKazMin, "web_search") === false && kazMode.toolVisible(sKazMinNomem, "edit") === false);
 }
 
@@ -231,7 +228,7 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   check("②.5 主面含 whale_report/ka_sub_whale/controls，不含旧 subagent", kazMode.toolVisible(sKaz, "whale_report") === true && kazMode.toolVisible(sKaz, "ka_sub_whale") === true && kazMode.toolVisible(sKaz, "list_agents") === true && kazMode.toolVisible(sKaz, "send_message") === true && kazMode.toolVisible(sKaz, "interrupt_agent") === true && kazMode.toolVisible(sKaz, "subagent") === false);
   check("②.5 主面不含 enable_tool/workflow/subagent_fork", kazMode.toolVisible(sKaz, "enable_tool") === false && kazMode.toolVisible(sKaz, "workflow") === false && kazMode.toolVisible(sKaz, "subagent_fork") === false);
   check("②.5 主面不含 exit_plan_mode（v0.8 Step B1：原生 Plan 已移除）", kazMode.toolVisible(sKaz, "exit_plan_mode") === false);
-  check("②.5 记忆关稳定主面=19 剔除记忆读三件", nomem !== null && nomem.size === 16 && !nomem.has("memory_search") && nomem.has("get_goal"));
+  check("②.5 Kaz 恒开：记忆关旧状态不再影响固定主面（仍 19 含记忆读）", nomem !== null && nomem.size === 19 && nomem.has("memory_search") && nomem.has("memory_list") && nomem.has("memory_detail") && nomem.has("get_goal"));
   check("②.5 子代理稳定面 = 保守 Subagent Base 11", sub !== null && sub.size === 11 && sub.has("read") && sub.has("web_search") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
   check("②.5 子代理 minimal = memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
 }
@@ -300,7 +297,7 @@ check("① pluginEnabled(s-kaz-nomem, ka-whale-memory)=false", kazMode.pluginEna
 check("① pluginEnabled(s-kaz-legacy, ka-whale-memory)=true（旧键兼容读）", kazMode.pluginEnabled(sKazLegacy, "ka-whale-memory") === true);
 check("① toolVisible(s-kaz-legacy, memory_search)=true（旧键兼容读）", kazMode.toolVisible(sKazLegacy, "memory_search") === true);
 check("① toolVisible(s-kaz, memory_search)=true（记忆开）", kazMode.toolVisible(sKaz, "memory_search") === true);
-check("① toolVisible(s-kaz-nomem, memory_search)=false（记忆关）", kazMode.toolVisible(sKazNomem, "memory_search") === false);
+check("① toolVisible(s-kaz-nomem, memory_search)=true（Kaz 恒开覆盖记忆关状态）", kazMode.toolVisible(sKazNomem, "memory_search") === true);
 check("① toolVisible(s-plain, memory_search)=false（非 Kaz 记忆关）", kazMode.toolVisible(sPlain, "memory_search") === false);
 check("① toolVisible(s-plain-mem, memory_search)=true（非 Kaz 记忆开）", kazMode.toolVisible(sPlainMem, "memory_search") === true);
 check("① toolVisible(s-plain, web_search)=true（非 Kaz 其它工具放行）", kazMode.toolVisible(sPlain, "web_search") === true);
@@ -322,7 +319,7 @@ const kazNames = await runAssemble(sKaz, ALL_TOOLS);
 check("② Kaz 会话：白名单外工具被移除（workflow/subagent_fork/enable_tool/exit_plan_mode）", !kazNames.includes("workflow") && !kazNames.includes("subagent_fork") && !kazNames.includes("enable_tool") && !kazNames.includes("exit_plan_mode"));
 check("② Kaz 会话：v0.9 Stable Main 固定工具保留", kazNames.includes("read") && kazNames.includes("memory_search") && kazNames.includes("web_search") && kazNames.includes("ka_sub_whale") && kazNames.includes("list_agents") && kazNames.includes("send_message") && kazNames.includes("interrupt_agent") && kazNames.includes("whale_report") && !kazNames.includes("subagent") && !kazNames.includes("create_goal"));
 const kazNomemNames = await runAssemble(sKazNomem, ALL_TOOLS);
-check("② Kaz 会话（记忆关）：记忆工具被过滤，Goal 工具仍常驻", !kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save") && kazNomemNames.includes("get_goal"));
+check("② Kaz 会话（记忆关旧状态）：记忆读恒在、写工具不进、Goal 工具常驻", kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save") && kazNomemNames.includes("get_goal"));
 
 // ③ 组装层：非 Kaz 会话
 const plainNames = await runAssemble(sPlain, ALL_TOOLS);

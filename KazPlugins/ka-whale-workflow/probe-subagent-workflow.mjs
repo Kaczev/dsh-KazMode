@@ -39,7 +39,7 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
         update: (patch) => { current = { ...current, ...patch }; return Promise.resolve(); },
       };
     },
-    get: () => ({ enabled: true, includeSubagents, reconstructionTools: [] }),
+    get: () => ({ enabled: true, includeSubagents }),
     update: () => Promise.resolve(),
   };
   const toolsMock = {
@@ -56,7 +56,7 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
   };
   const capturedReports = [];
   const mockKazMode = {
-    pluginConfig: () => ({ enabled: true, includeSubagents, reconstructionTools: [] }),
+    pluginConfig: () => ({ enabled: true, includeSubagents }),
     toolVisible: () => true,
   };
   const base = {

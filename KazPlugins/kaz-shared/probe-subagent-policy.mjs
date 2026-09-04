@@ -1,21 +1,27 @@
-// kaz-shared 探针：Kaz 6.0 Step 2 子代理 toolFilter 白名单投影。
+// kaz-shared 探针：v0.9 B3 子代理四角色层。
 // 运行：node KazPlugins/kaz-shared/probe-subagent-policy.mjs
 // 验证：
-//   - toolFilter 来自角色固定白名单（工具实例/provider request 层）；
-//   - 主线全量面 vs 子代理受限子集：子代理面 ⊆ 主线全量面；
-//   - 记忆写工具只进入 memoryMaintainer，不进 retriever / toolCreator；
-//   - 模型不可通过 toolFilterForRole 传入任意允许清单。
+//   - 角色常量只含 worker / memoryMaintainer / pluginMaintainer / pluginCreator；
+//   - 每个角色有 Minimal、Stable Base、personaRef、toolFilter；
+//   - 旧 toolCreator / retriever 不再被接受；
+//   - assignedTools 来源 = tool-jobs + 可用私有插件候选，>6 提醒、>8 拒绝；
+//   - 最终面 = role Stable Base + assignedTools；记忆写工具只进 memoryMaintainer。
 import {
-  SUBAGENT_ROLE_IDS,
-  SUBAGENT_ROLE_INSTANCES,
-  SUBAGENT_ROLE_TOOL_FILTERS,
-  SUBAGENT_ROLE_MEMORY_READ_TOOLS,
+  V09_SUBAGENT_ROLE_IDS,
+  V09_SUBAGENT_ROLE_MINIMAL_TOOLS,
+  V09_SUBAGENT_ROLE_STABLE_BASE,
+  V09_SUBAGENT_ROLE_PERSONA_REFS,
+  V09_SUBAGENT_ROLE_TOOL_FILTERS,
+  V09_TOOL_JOBS,
+  normalizeV09Role,
+  v09MinimalToolsForRole,
+  v09StableBaseForRole,
+  v09ToolFilterForRole,
+  computeV09FinalSurface,
+  resolveV09AssignedTools,
+  v09AssignedToolsSubsetOfMain,
+  assertV09RoleWriteToolRestrictions,
   SUBAGENT_MAINTENANCE_MEMORY_WRITE_TOOLS,
-  normalizeToolNameList,
-  normalizeSubagentRole,
-  toolFilterForRole,
-  projectTaskWhitelist,
-  assertSubsetOf,
 } from "./lib/subagent-policy.js";
 
 let failures = 0;
@@ -24,70 +30,47 @@ function check(label, ok) {
   if (!ok) failures += 1;
 }
 
-const MAINTENANCE_WRITES = SUBAGENT_MAINTENANCE_MEMORY_WRITE_TOOLS;
-const MEMORY_READS = SUBAGENT_ROLE_MEMORY_READ_TOOLS;
+const V09_ROLES = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
 
-// ---------- 角色常量 ----------
-check("角色常量齐全且冻结", Array.isArray(SUBAGENT_ROLE_IDS) && Object.isFrozen(SUBAGENT_ROLE_IDS) && SUBAGENT_ROLE_INSTANCES !== undefined && Object.isFrozen(SUBAGENT_ROLE_INSTANCES));
-check("三个角色均有独立 toolName", SUBAGENT_ROLE_IDS.every((role) => typeof SUBAGENT_ROLE_INSTANCES[role]?.toolName === "string" && SUBAGENT_ROLE_INSTANCES[role].toolName.length > 0));
-check("memoryMaintainer toolName = maintenance_subagent", SUBAGENT_ROLE_INSTANCES.memoryMaintainer.toolName === "maintenance_subagent");
-check("toolFilter 映射冻结且 allow 均为数组", SUBAGENT_ROLE_IDS.every((role) => Object.isFrozen(SUBAGENT_ROLE_TOOL_FILTERS[role]) && Array.isArray(SUBAGENT_ROLE_TOOL_FILTERS[role].allow) && Object.isFrozen(SUBAGENT_ROLE_TOOL_FILTERS[role].allow)));
-check("模型不可扩展角色", normalizeSubagentRole("attackerRole") === null);
+// ---------- v0.9 角色常量 ----------
+check("角色常量只含 v0.9 四值且冻结", Array.isArray(V09_SUBAGENT_ROLE_IDS) && Object.isFrozen(V09_SUBAGENT_ROLE_IDS) && JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(V09_ROLES));
+check("每个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_ROLES.every((role) => Array.isArray(V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role]) && Array.isArray(V09_SUBAGENT_ROLE_STABLE_BASE[role]) && typeof V09_SUBAGENT_ROLE_PERSONA_REFS[role] === "string" && Array.isArray(V09_SUBAGENT_ROLE_TOOL_FILTERS[role].allow)));
+check("旧 toolCreator/retriever 被拒绝", normalizeV09Role("toolCreator") === null && normalizeV09Role("retriever") === null);
+check("未知角色被拒绝", normalizeV09Role("attackerRole") === null);
 
-// ---------- 主线全量面 vs 子代理受限子集 ----------
-const MAIN_FULL_SURFACE = normalizeToolNameList([
-  "ask_user_question",
-  "read",
-  "write",
-  "edit",
-  "glob",
-  "grep",
-  "pwsh",
-  "todo_write",
-  "web_search",
-  "safe_json_write",
-  ...MEMORY_READS,
-  ...MAINTENANCE_WRITES,
-]);
-const RETRIEVER_FILTER = toolFilterForRole("retriever");
-const subset = assertSubsetOf(MAIN_FULL_SURFACE, RETRIEVER_FILTER.allow);
-check("retriever 子代理面是主线全量面子集", subset.ok === true);
-check("retriever 白名单只含记忆读工具", RETRIEVER_FILTER.allow.length === 3 && MEMORY_READS.every((tool) => RETRIEVER_FILTER.allow.includes(tool)));
-check("retriever 不含任何记忆写工具", !MAINTENANCE_WRITES.some((tool) => RETRIEVER_FILTER.allow.includes(tool)));
-check("toolCreator 不含任何记忆工具", !toolFilterForRole("toolCreator").allow.some((tool) => [...MEMORY_READS, ...MAINTENANCE_WRITES].includes(tool)));
-check("memoryMaintainer 含全部记忆写工具", MAINTENANCE_WRITES.every((tool) => toolFilterForRole("memoryMaintainer").allow.includes(tool)));
-check("memoryMaintainer 含 safe_json_write 等维护能力", ["safe_json_write", "read", "pwsh"].every((tool) => toolFilterForRole("memoryMaintainer").allow.includes(tool)));
+// ---------- 深拷贝与投影 ----------
+const stableWorker = v09StableBaseForRole("worker");
+check("v09StableBaseForRole 返回深拷贝", stableWorker !== V09_SUBAGENT_ROLE_STABLE_BASE.worker);
+const filter = v09ToolFilterForRole("memoryMaintainer");
+check("v09ToolFilterForRole 返回深拷贝", filter.allow !== V09_SUBAGENT_ROLE_TOOL_FILTERS.memoryMaintainer.allow);
 
-// ---------- 固定 toolFilter 不是模型可随意填写的参数 ----------
-let rejectedUnknownRole = false;
-try {
-  toolFilterForRole("modelSuppliedRole");
-} catch {
-  rejectedUnknownRole = true;
-}
-check("未知角色抛错（配置层错误，不是模型输入通道）", rejectedUnknownRole === true);
-const first = toolFilterForRole("memoryMaintainer");
-const second = toolFilterForRole("memoryMaintainer");
-check("toolFilterForRole 返回深拷贝（防调用方改共享冻结面）", first !== second && first.allow !== second.allow);
-first.allow.push("__hack__");
-check("改返回副本不影响下一次读取", !toolFilterForRole("memoryMaintainer").allow.includes("__hack__"));
+const final = computeV09FinalSurface({ role: "worker", assignedTools: ["job_list", "job_output", "job_list"] });
+check("computeV09FinalSurface = Base + assignedTools（去重保留顺序）", final.includes("work_sub_whale_report") && final.includes("job_list") && final.includes("job_output") && final.filter((x) => x === "job_list").length === 1);
 
-// ---------- 任务允许子集投影 ----------
-const projected = projectTaskWhitelist({
-  role: "memoryMaintainer",
-  taskAllowedTools: ["memory_search", "memory_save", "read", "pwsh", "unknown_tool"],
-});
-check("projectTaskWhitelist 只保留任务允许 ∩ 角色白名单", projected.allow.length === 4 && ["memory_search", "memory_save", "read", "pwsh"].every((tool) => projected.allow.includes(tool)));
-check("projectTaskWhitelist 不含任务外/未知工具", !projected.allow.includes("unknown_tool") && !projected.allow.includes("memory_update"));
-const unprojected = projectTaskWhitelist({ role: "retriever" });
-check("未给 taskAllowedTools 时返回角色全量（受控编排层专用）", unprojected.allow.length === 3 && unprojected.allow.includes("memory_search"));
-let rejectedBadProjection = false;
-try {
-  projectTaskWhitelist({ role: "bad", taskAllowedTools: ["memory_search"] });
-} catch {
-  rejectedBadProjection = true;
-}
-check("非法角色投影抛错", rejectedBadProjection === true);
+// ---------- assignedTools 来源 / 数量 / 角色限制 ----------
+const candidateRegistry = {
+  version: 2,
+  candidates: [
+    { tool: "safe_json_write", description: "safe write", source: "KazPrivatePlugins", available: true },
+    { tool: "old_plugin_tool", description: "unavailable", source: "KazPrivatePlugins", available: false },
+  ],
+};
+const okResolve = resolveV09AssignedTools({ role: "worker", assignedTools: ["safe_json_write", "job_list"], candidateRegistry });
+check("assignedTools 接受 tool-jobs + 可用私有候选", okResolve.ok === true && okResolve.tools.includes("safe_json_write") && okResolve.tools.includes("job_list"));
+const badSource = resolveV09AssignedTools({ role: "worker", assignedTools: ["old_plugin_tool"], candidateRegistry });
+check("assignedTools 拒绝不可用/未知来源", badSource.ok === false && badSource.code === "assigned-tools-source-denied");
+const over = resolveV09AssignedTools({ role: "worker", assignedTools: Array.from({ length: 9 }, (_, i) => `job_${i}`), candidateRegistry });
+check("assignedTools >8 拒绝", over.ok === false && over.code === "assigned-tools-over-limit");
+const manyTools = Array.from({ length: 7 }, (_, i) => (i === 0 ? "safe_json_write" : `cand_${i}`));
+const warn = resolveV09AssignedTools({ role: "worker", assignedTools: manyTools, candidateRegistry, candidateTools: manyTools });
+check("assignedTools >6 提醒、≤8 接受", warn.ok === true && warn.tools.length === 7 && typeof warn.warning === "string" && warn.warning.length > 0);
+
+const subset = v09AssignedToolsSubsetOfMain(["read", "job_list", "safe_json_write"], ["job_list"]);
+check("assignedTools 是主模型面子集", subset.ok === true && subset.extra.length === 0);
+const writeDenied = assertV09RoleWriteToolRestrictions("worker", ["memory_search", "memory_save"]);
+check("worker 不能持有记忆写工具", writeDenied.ok === false && writeDenied.denied.includes("memory_save"));
+const writeAllowed = assertV09RoleWriteToolRestrictions("memoryMaintainer", [...V09_TOOL_JOBS, ...SUBAGENT_MAINTENANCE_MEMORY_WRITE_TOOLS]);
+check("memoryMaintainer 可持有全部记忆写工具", writeAllowed.ok === true && writeAllowed.denied.length === 0);
 
 if (failures === 0) {
   console.log("\nSUBAGENT-POLICY PROBE OK");

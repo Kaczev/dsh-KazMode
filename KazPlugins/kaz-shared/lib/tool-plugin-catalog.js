@@ -57,10 +57,6 @@ export const TOOL_PLUGIN_CATALOG = {
   "tool-str-replace-editor": {
     "str_replace_editor" : false
   },
-  "tool-subagent": {
-    "subagent" : false,
-    "subagent_fork" : false
-  },
   "tool-subagent-control": {
     "send_message" : false,
     "interrupt_agent" : false
@@ -75,7 +71,6 @@ export const TOOL_PLUGIN_CATALOG = {
     "workflow" : false
   },
   "goal": {
-    "create_goal" : false,
     "get_goal" : false,
     "update_goal" : false
   }
@@ -94,7 +89,6 @@ export const TOOL_PLUGINS = {
   "tool-bash" : false,
   "tool-ralph" : false,
   "tool-str-replace-editor" : false,
-  "tool-subagent" : false,
   "tool-subagent-control" : false,
   "tool-subagent-list-agents" : false,
   "tool-subagent-report" : false,
@@ -114,7 +108,6 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
   "tool-pwsh",
   "tool-ralph",
   "tool-str-replace-editor",
-  "tool-subagent",
   "tool-subagent-control",
   "tool-subagent-list-agents",
   "tool-subagent-report",

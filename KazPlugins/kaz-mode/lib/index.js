@@ -13,11 +13,12 @@
 //      不再负责系统提示词。
 //   2) 工具面两阶段（v0.8 Step A 固定集，工具清单由 kaz-shared 的 tool-lists.js 管理）：
 //        - 首次工具调用前（round-minimal）：仅保留首轮工具集（≤2）；
-//        - 首次工具调用后：Stable Main Surface = KAZ_BASE_TOOLS(12) + Goal 三件套
-//          + whale_report + subagent（子代理为 Stable Subagent Base）。
+//        - 首次工具调用后：Stable Main Surface = KAZ_STABLE_MAIN_TOOLS（v0.9
+//          §1.1 固定 19 项，不含旧 subagent/create_goal）。
 //          不再恢复“工具面板 JSON 全量”；旧 JSON 只作兼容读；纯
 //          minimal → Stable Main 一次变化（原生 Plan 例外已删除）。
-//        - 记忆工具是否真正出现仍兼容既有项目状态（记忆组件关时从固定面剔除）。
+//        - v0.9 B5：ka-whale-memory / ka-whale-workflow 在 Kaz 恒开，固定面完整；
+//          非 Kaz 模式仍按项目状态决定这些组件是否启用。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
 //      再按项目/默认状态应用（同一项目内所有会话共享）。变为 false（关闭 / 切走）
@@ -38,7 +39,6 @@ import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
   DEFAULT_DISABLED_TOOLS,
-  DEFAULT_RECONSTRUCTION_TOOLS,
   MANAGED_PLUGINS,
   MEMORY_TOOLS,
   MANAGED_CARRIER_TOOLS,
@@ -60,10 +60,6 @@ import {
   KAZ_SUBAGENT_BASE_TOOLS,
   stableMainSurface,
   stableSubagentSurface,
-  ENABLE_TOOL,
-  baseToolNames,
-  normalizeOptionalTools,
-  optionalToolPoolNames,
   AGENT_MANAGED_STORAGE_FILE,
   PRIVATE_PLUGIN_CANDIDATE_VERSION,
   normalizeAgentManagedCandidateRegistry,
@@ -120,8 +116,6 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   "ka-whale-workflow": {
     enabled: false,
     includeSubagents: false,
-    reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
-    taskToolSelectionEnabled: true,
     skillPrivateRoot: "",
     skillAutoLifecycleEnabled: true,
     skillLifecycleUnusedDays: 60,
@@ -1185,12 +1179,12 @@ export default {
      *
      * v0.8 Step A/B1 语义：
      *   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface
-     *     （KAZ_BASE_TOOLS + Goal 三件套 + whale_report + subagent）；一次变化。
+     *     （KAZ_STABLE_MAIN_TOOLS v0.9 固定 19 项）；一次变化。
      *   - 子代理：minimal → Stable Subagent Base（Step A 尚无 per-task assigned
      *     工具通道，assignedTools 由后续受控委派 Step 接入）。
      *   - 代码级固定集优先：旧 tool-plugin JSON 只作兼容读，不决定固定成员是否可见。
      *   - v0.8 Step B1：原生 Plan 已移除，不再存在 Plan 自动放行例外。
-     *   - taskToolSelection / enable_tool 不再参与主模型工具面。
+     *   - v0.9 B5：enable_tool / taskToolSelection 已整体退役，不再参与工具面。
      */
     function kazSurfaceFor(agent, current, states, options = {}) {
       let whitelist;
@@ -1239,7 +1233,8 @@ export default {
           toolWhitelist: [...whitelist],
           minimalPhase: true,
           firstRoundTools,
-          kazMemoryEnabled: states["ka-whale-memory"]?.enabled === true,
+          // v0.9 B5：Kaz 模式下 ka-whale-memory 恒开，首轮固定按记忆开解析。
+          kazMemoryEnabled: true,
         });
       }
 
@@ -1256,17 +1251,8 @@ export default {
       } else {
         allowed = stableMainSurface();
       }
-
-      // 兼容既有插件状态闸门（后续 Step 才做“Kaz 固定常开”清理）：
-      // 记忆组件关 → 记忆读工具从固定面剔除；ka-whale-workflow 关 → whale_report 不出现。
-      if (states["ka-whale-memory"]?.enabled !== true) {
-        for (const tool of MEMORY_TOOLS) allowed.delete(tool);
-      }
-      for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
-        if (states[pluginId]?.enabled !== true) {
-          for (const tool of tools) allowed.delete(tool);
-        }
-      }
+      // v0.9 B5：Kaz 模式下 ka-whale-memory / ka-whale-workflow 恒开，
+      // 不再根据旧项目状态从固定面剔除工具（非 Kaz 仍由 nonKazToolVisible 管理）。
       return allowed;
     }
 
@@ -1296,10 +1282,6 @@ export default {
      *     无会话/无覆盖时返回 null，调用方回落到插件自身 settings.yaml。
      *   - toolVisible(agent, name)    该 agent 会话里某工具是否在工具面内；
      *   - surfaceOf(agent)            Kaz 会话的完整工具面（Set）；非 Kaz 返回 null。
-     *   - unfilteredSurfaceOf(agent)  未应用任务过滤的完整当前 Kaz 面（Set）；供分类
-     *                                 目录与 enable_tool 判定“可点亮池”；非 Kaz 返回 null。
-     *   - taskToolPoolOf(agent)       可选池 = unfilteredSurfaceOf 中非基础、非模式限定的
-     *                                 工具名数组（排序去重）；非 Kaz 返回 []。
      */
     const kazModeService = {
       kazEnabled: (agent) => agentKazEnabled(agent),
@@ -1329,18 +1311,6 @@ export default {
         if (agent === null || agent === undefined || typeof agent !== "object") return null;
         if (!agentKazEnabled(agent)) return null;
         return kazSurfaceFor(agent, source(), agentEffectiveStates(agent));
-      },
-      unfilteredSurfaceOf: (agent) => {
-        if (agent === null || agent === undefined || typeof agent !== "object") return null;
-        if (!agentKazEnabled(agent)) return null;
-        return kazSurfaceFor(agent, source(), agentEffectiveStates(agent), { taskFilter: false });
-      },
-      taskToolPoolOf: (agent) => {
-        if (agent === null || agent === undefined || typeof agent !== "object") return [];
-        if (!agentKazEnabled(agent)) return [];
-        const states = agentEffectiveStates(agent);
-        const surface = kazSurfaceFor(agent, source(), states, { taskFilter: false });
-        return optionalToolPoolNames(surface, { memoryEnabled: states["ka-whale-memory"]?.enabled === true });
       },
     };
     ctx.effect(() => {

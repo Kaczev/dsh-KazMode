@@ -93,18 +93,6 @@ export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = ["read", "pwsh"];
 /** 兜底默认（kaz-memory 状态未知时）：read + pwsh（≤2）。 */
 export const DEFAULT_FIRST_ROUND_TOOLS = DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF;
 
-/** ka-whale-workflow 任务重构阶段的默认工具清单（配置面板黑底白字框展示/编辑）。 */
-export const DEFAULT_RECONSTRUCTION_TOOLS = [
-  "ask_user_question",
-  "read",
-  "glob",
-  "grep",
-  "web_search",
-  "memory_search",
-  "memory_list",
-  "memory_detail",
-];
-
 const FIRST_ROUND_TOOL_RULES = [
   {
     id: "ka-whale-memory",
@@ -189,9 +177,8 @@ for (const [plugin, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
 }
 export const KAZ_TOOL_UNIVERSE = Object.freeze(_toolUniverse);
 
-/** Kaz 5.0 基础工具面初稿（v0.4 K2 冻结的 12 项；允许 >8，Step 4 复审）。
- *  注意：任务工具选择的运行时 BASE_TOOLS 在 Step 4 前保留 enable_tool 兼容层；
- *  本常量是设计基准面，作为 schema-token 指标复审的对照。 */
+/** Kaz 5.0 基础工具面（v0.4 K2 冻结的 12 项；用于 schema-token 指标复审的对照）。
+ *  v0.9 B5：enable_tool / optional 任务过滤已退役，运行时 Stable Main 见 KAZ_V09_MAIN_TOOLS。 */
 export const KAZ_BASE_TOOLS = Object.freeze([
   "ask_user_question",
   "edit",
@@ -214,16 +201,6 @@ export const KAZ_EXTERNAL_CANDIDATES = Object.freeze({
   storageHint: "user other-*.json / project other-*.json（面板添加通道）",
 });
 
-/** v0.8 Goal 三件套（旧兼容常量；B5 前不删除，v0.9 主面已不再放行 create_goal）。 */
-export const KAZ_GOAL_TOOLS = Object.freeze([
-  "create_goal",
-  "get_goal",
-  "update_goal",
-]);
-
-/** v0.8 子代理控制工具（旧兼容常量；B5 前不删除）。 */
-export const KAZ_SUBAGENT_CONTROL_TOOLS = Object.freeze(["subagent"]);
-
 /** v0.9 受控委派/子代理控制工具（新增到 Stable Main Surface）。 */
 export const KAZ_V09_SUBAGENT_CONTROL_TOOLS = Object.freeze([
   "ka_sub_whale",
@@ -240,7 +217,7 @@ export const KAZ_V09_SUB_WHALE_REPORT_TOOLS = Object.freeze([
   "plugin_creator_sub_whale_report",
 ]);
 
-/** v0.9 Stable Main Surface（§1.1，19 个；不含 create_goal/subagent，B5 再做旧面清理）。 */
+/** v0.9 Stable Main Surface（§1.1，19 个；不含 create_goal/subagent）。 */
 export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "ask_user_question",
   "edit",
@@ -265,7 +242,7 @@ export const KAZ_V09_MAIN_TOOLS = Object.freeze([
 
 /**
  * Stable Main Surface = v0.9 固定 19 项。
- * 旧 subagent / create_goal 的代码常量仍保留给 B5 清理，但不再进入活动主面。
+ * B5 后不再保留旧 subagent / create_goal 常量。
  */
 export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([...KAZ_V09_MAIN_TOOLS]);
 
@@ -362,15 +339,14 @@ export function stableSubagentSurface({ baseTools = KAZ_SUBAGENT_BASE_TOOLS, ass
 }
 
 /** Kaz 5.0 角色特化段（初稿）：只按角色/任务类型固定，禁止按任务实例动态生成。
- *  33 世仅做 Goal-active 最小同步（v0.9 §9.1 Goal 语义）；全量终稿留给 B6/36 世。 */
+ *  33 世仅做 Goal-active 最小同步（v0.9 §9.1 Goal 语义）；全量终稿留给 B6/36 世。
+ *  B5 起旧 toolCreator/retriever 条目已退役；memoryMaintainer 条目保留待 B6 终稿。 */
 export const KAZ_ROLE_PROMPTS = Object.freeze({
   main: Object.freeze(
     "We are the main-line driver of the confirmed task contract. Start or resume Goal via whale_report({mode:'goal'}); while goal-active, do not use whale_report to advance ordinary stages and rely on official Goal context with get_goal/update_goal; after Goal ends, proceed as if working ended. Keep gray reasoning concise; use memory read tools at task start when relevant; stay in Step scope.",
   ),
   subagent: Object.freeze({
-    toolCreator: Object.freeze("We are a tool creator subagent. Create tools only within the delegated whitelist and report evidence."),
     memoryMaintainer: Object.freeze("We are the memory maintenance subagent. Write concise memories with evidence; deletion requires main-model approval."),
-    retriever: Object.freeze("We are the retrieval subagent. Return id+summary, keep budgets, avoid dumping full contents."),
   }),
 });
 
@@ -591,22 +567,6 @@ export {
   skillLifecycleCallable,
 } from "./skill-guidance.js";
 
-/** 第三次升级 任务分类工具选择：基础面 / optional 池 / enable_tool（见 task-tool-selection.js）。 */
-export {
-  ENABLE_TOOL,
-  BASE_TOOLS,
-  MODE_SCOPED_TOOLS,
-  baseToolNames,
-  normalizeOptionalTools,
-  optionalToolPoolNames,
-  compactOptionalToolDirectory,
-  OPTIONAL_TOOLS_WARN_THRESHOLD,
-  OPTIONAL_TOOLS_MAX,
-  OPTIONAL_TOOLS_WARN_MESSAGE,
-  OPTIONAL_TOOLS_REJECT_MESSAGE,
-  validateOptionalToolCount,
-} from "./task-tool-selection.js";
-
 /** 第14次更新 Agent 管理「自写工具」层：registry 校验 / agent 组 / 全局合并（见 agent-managed-tools.js）。 */
 export {
   AGENT_MANAGED_PLUGIN_PREFIX,
@@ -650,18 +610,10 @@ export {
   newDeletionAudit,
 } from "./maintenance-report.js";
 
-/** Kaz 6.0 Step 2 子代理 toolFilter 白名单投影 + v0.9 B3 四角色层（见 subagent-policy.js）。 */
+/** v0.9 B3 子代理四角色层（见 subagent-policy.js）。 */
 export {
-  SUBAGENT_ROLE_IDS,
-  SUBAGENT_ROLE_INSTANCES,
-  SUBAGENT_ROLE_TOOL_FILTERS,
-  SUBAGENT_ROLE_MEMORY_READ_TOOLS,
   SUBAGENT_MAINTENANCE_MEMORY_WRITE_TOOLS,
   normalizeToolNameList,
-  normalizeSubagentRole,
-  toolFilterForRole,
-  projectTaskWhitelist,
-  assertSubsetOf,
   V09_TOOL_JOBS,
   V09_SUBAGENT_ROLE_IDS,
   V09_SUBAGENT_ROLE_MINIMAL_TOOLS,

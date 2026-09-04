@@ -10,13 +10,13 @@ Kaz 模式同时具备两个入口，双向同步：
 | 插件 | 角色 |
 | --- | --- |
 | `thinking-anchor` | 思考锚点（**消息注入**）：新对话开始时把完整思考协议作为一条合成用户消息注入，此后每轮开头注入短提醒；不触碰系统提示词 |
-| `round-minimal` | 首阶段极简：**首次工具调用前**按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`/`read`/`edit`），首次工具调用后恢复 Stable Main Surface（固定集） |
+| `round-minimal` | 首阶段极简：**首次工具调用前**按 kaz-memory 自动暴露（Kaz 恒开=`memory_search`；非 Kaz 且记忆关=`pwsh`/`read`/`edit`），首次工具调用后恢复 Stable Main Surface（固定集） |
 | `plugin-filter`（原 tool-filter） | 工具过滤：按名单移除 / 禁用指定工具 |
 | `output-beep` | 输出完成提示音：模型输出完毕时响提示音（可配频率/时长/子代理） |
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
 | `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
-| `ka-whale-workflow` | 鲸鱼工作流（v0.8 Step A/B1/B2）：主/子两套新流程上下文 + `whale_report` 常驻工作簿记；不再有 reconstruction/classification 阶段收窄工具面 |
+| `ka-whale-workflow` | 鲸鱼工作流（v0.9）：主/子阶段机 + `whale_report` 常驻 bookkeeping；B5 后无旧 reconstruction/classification/goal-recovery 阶段 |
 
 **Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
 
@@ -27,14 +27,16 @@ Kaz 模式同时具备两个入口，双向同步：
    tool:* 指导段 / 运行时上下文…）一律过滤。**kaz-mode 插件不再控制系统提示词。**
 2. **工具面两阶段（v0.8 Step A/B1 固定集）**：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
-     （为空时自动：kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；
+     （为空时自动：Kaz 下 `ka-whale-memory` 恒开 → `memory_search`；
+     非 Kaz 记忆关 → `pwsh` + `read` + `edit`）；
    - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 19 项，含
      `get_goal/update_goal/whale_report/ka_sub_whale/list_agents/send_message/
      interrupt_agent`，不含旧 `create_goal/subagent`）。
      代码级固定集不受旧 tool-plugin JSON 的 false 开关影响；外部/自创建工具不进主面。
    - 纯 `minimal → Stable Main` 一次变化；原生 Plan 已实际移除，不再有 Plan 例外。
-3. **记忆工具按项目生效**：`kaz-memory` 关闭时，其六工具从该项目所有会话的工具面
-   移出、调用被拒。
+3. **记忆工具按项目生效（仅非 Kaz）**：v0.9 B5 起 `ka-whale-memory` 在 Kaz 恒开，
+   旧项目状态把它关掉也不影响 Kaz 固定面；非 Kaz 模式关闭时，其六工具从该项目所有
+   会话的工具面移出、调用被拒。
 4. **skill 已整体移除**（2026-08，Kaczev）：`skill` 工具、技能发现行与技能目录已从
    kaz 预设删除，白名单里也没有 `skill`。
 5. **配置不写 settings.yaml（纯方案 A）**：被管理插件的生效配置 =
@@ -59,8 +61,7 @@ Kaz 工具面由代码级固定面（`KAZ_STABLE_MAIN_TOOLS` / workflow 面）�
   3. 外置插件候选：查看 / 添加（沿用用户 `other-*` 四文件作为候选层；
      不直接进主面）。
 - 旧写 RPC（`setExternalToolPlugin` 的开关/删除、`resetExternalToolPlugins`、
-  `setExternalToolPluginsAsDefault`）保留入口但返回 `read-only` 拒绝语义，
-  由 B5 再做入口清理。
+  `setExternalToolPluginsAsDefault`）保留入口但返回 `read-only` 拒绝语义。
 
 ```jsonc
 // 插件启用字典（tool-plugin.json / other-tool-plugin.json）——兼容读
@@ -119,16 +120,17 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   - `tool-jobs` 固定集合查看；
   - 外置插件候选（查看/添加，仍写用户 `other-*` 候选层）；
 - 添加候选**不会直接进入 Stable Main/Sub Surface**，后续经受控委派/任务计划选择；
-- 旧写 RPC 返回 `read-only` 拒绝语义；B5 再做入口清理。
-- `kaz-memory` 关闭 → 六工具自动移出。
+- 旧写 RPC 返回 `read-only` 拒绝语义；
+- `ka-whale-memory`/`ka-whale-workflow` 在 Kaz 恒开，旧项目关闭状态不再从固定面剔除；
+  非 Kaz 仍按项目状态过滤。
 - v0.8 Step B2：`kaz_tool_auto_on` 已退役，工具自动启用区块/RPC/JSON 读写已删除。
 
 ### 5. round-minimal 信号（首阶段极简）
 
 round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件。kaz-mode
 据此在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集（为空时自动：
-kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；首次工具调用后
-恢复 Stable Main Surface（v0.8 Step A 固定集，不由工具控制面板 JSON 决定）。
+Kaz 下 `ka-whale-memory` 恒开 → `memory_search`；非 Kaz 记忆关 → `pwsh` + `read` + `edit`）；
+首次工具调用后恢复 Stable Main Surface（v0.8 Step A 固定集，不由工具控制面板 JSON 决定）。
 
 ### 6. 设置（`~/.dsh/settings.yaml`，热重载）
 
@@ -177,9 +179,10 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
 1. 选择 `kaz` 预设后：新建对话的系统提示词由 `kaz/kaz-system-prompt.mjs` 收敛；
    真实 system = persona + ka-whale-workflow 段（v0.8 Step B1 后不再含
    plan:policy / tool:goal）；
-2. 首次工具调用前工具面：kaz-memory 开 = `memory_search`；关 = `pwsh` + `read` + `edit`；
+2. 首次工具调用前工具面：Kaz = `memory_search`（ka-whale-memory 恒开）；
+   非 Kaz 记忆关 = `pwsh` + `read` + `edit`；
    第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 19 项，
-   不含旧 `create_goal/subagent`；记忆组件关时记忆读工具从该固定面剔除）；
+   不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +
    assignedTools 显示，旧/未知子代理回落到保守 Base；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；

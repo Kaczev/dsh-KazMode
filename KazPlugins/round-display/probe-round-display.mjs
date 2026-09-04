@@ -1,4 +1,4 @@
-﻿// round-display + kaz-system-prompt 探针（2026-08-28；v0.8 Step B1 移除 Plan/tool:goal 段）
+// round-display + kaz-system-prompt 探针（2026-08-28；v0.8 Step B1 移除 Plan/tool:goal 段）
 // 覆盖：
 //   ① kaz-system-prompt.mjs：system-prompt/assemble 后上报“真实系统提示词”
 //     （persona + ka-whale-workflow 段；plan:policy 与 tool:goal 一律丢弃；"\n\n" 连接，
@@ -378,11 +378,11 @@ function makeSettings() {
   let nowTick = 2000000;
   Date.now = () => nowTick++;
   try {
-    // 同一轮内系统提示词发生变化（例如 ka-whale-workflow 重构 → 分类）：
+    // 同一轮内系统提示词发生变化（例如 ka-whale-workflow assess → working）：
     // 两个不同内容的快照都应保留；完全相同的重复上报只保留一条。
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "reconstruction prompt" });
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "classification prompt" });
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "classification prompt" });
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "assess-complexity prompt" });
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "working prompt" });
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "working prompt" });
   } finally {
     Date.now = realNow;
   }
@@ -393,7 +393,7 @@ function makeSettings() {
   check(
     "④ 同轮保留所有不同系统提示词快照（新在上、重复去重）",
     listEntries.length === 2 &&
-      JSON.stringify(listContents) === JSON.stringify(["classification prompt", "reconstruction prompt"]),
+      JSON.stringify(listContents) === JSON.stringify(["working prompt", "assess-complexity prompt"]),
   );
 }
 

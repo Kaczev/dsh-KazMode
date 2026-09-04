@@ -4,7 +4,6 @@
 // 生命周期损坏 → featureOff（无动作）。
 // 运行：node KazPlugins/ka-whale-workflow/probe-skill-audit-runner.mjs
 import plugin, {
-  DEFAULT_RECONSTRUCTION_TOOLS,
   createLifecycleRecord,
 } from "./lib/index.js";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
@@ -95,7 +94,6 @@ const mockKazMode = {
     return {
       enabled: true,
       includeSubagents: false,
-      reconstructionTools: [...DEFAULT_RECONSTRUCTION_TOOLS],
       skillAutoLifecycleEnabled: off ? false : true,
       skillLifecycleUnusedDays: 60,
       skillLifecyclePendingDays: 7,
@@ -104,7 +102,6 @@ const mockKazMode = {
     };
   },
   toolVisible: () => true,
-  taskToolPoolOf: () => [TOOL_A, TOOL_B],
 };
 const goalsMock = { get: () => undefined, create: () => undefined };
 const base = {
