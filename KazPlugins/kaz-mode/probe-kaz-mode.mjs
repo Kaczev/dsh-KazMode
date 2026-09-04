@@ -358,26 +358,14 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "other:policy"));
 }
 
-// ⑦ v0.8 Step A/B1：Goal 三件套常驻；原生 Plan 已移除，旧 plan/mode 事件不再追加工具
+// ⑦ v0.8 Step A/B1/B2：Goal 三件套常驻；原生 Plan 与 kaz_tool_auto_on 均已移除
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const sKazPlan = agentOf("s-kaz-plan");
   const sKazGoal = agentOf("s-kaz-goal");
   const sKazBase = agentOf("s-kaz");
 
-  // 预置用户默认 auto-on JSON + 工具控制 JSON（旧 JSON 只作兼容读；B1 后 Plan 不生效）。
-  writeFileSync(
-    join(TMP, "dsh-storages", "ka_tool_auto_on_setting.json"),
-    JSON.stringify(
-      {
-        plan: { enabled: true, tools: ["exit_plan_mode"] },
-        goal: { enabled: true, tools: ["get_goal", "update_goal"] },
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
+  // 工具控制 JSON 仍可写旧 plan-mode/goal 键，用于验证固定主面不受这些 JSON 影响。
   writeFileSync(
     join(TMP, "dsh-storages", "tool-plugin.json"),
     JSON.stringify({ "plan-mode": true, goal: true }, null, 2),
@@ -402,7 +390,7 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑦ whale_report 常驻主面（不再依赖工作流阶段）", kazMode.toolVisible(sKazBase, "whale_report") === true && kazMode.toolVisible(sKazGoal, "whale_report") === true && kazMode.toolVisible(sKazPlan, "whale_report") === true);
 
   const snap = await rpc("getToolAutoOn", { sessionId: "s-kaz-plan" });
-  check("⑦ getToolAutoOn 旧 JSON 仍只读兼容（UI/RPC 退役属 B2）", snap?.ok === true && snap.value?.effective?.plan?.enabled === true && Array.isArray(snap.value?.effective?.plan?.tools) && snap.value.effective.plan.tools.includes("exit_plan_mode"));
+  check("⑦ getToolAutoOn 已退役（RPC unknown endpoint）", snap !== null && snap.ok === false);
 }
 
 rmSync(TMP, { recursive: true, force: true });

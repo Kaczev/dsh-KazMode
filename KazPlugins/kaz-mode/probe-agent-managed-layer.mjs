@@ -1,7 +1,7 @@
 // kaz-mode 探针：Agent 管理「自写工具」层（第14次更新）。
 // 覆盖：agent 工具进入 unfilteredSurfaceOf/taskToolPoolOf（每个项目）；
 // RPC 返回 catalog.agent 与 agentManagedRegistry；用户 set/reset 不能触碰 agent 层；
-// 分类 optional_tools / jit 可点亮 agent 工具；setToolAutoOn 拒绝 agent 工具。
+// 分类 optional_tools / jit 可点亮 agent 工具；v0.8 Step B2 后 auto-on RPC 已退役。
 // 运行：node KazPlugins/kaz-mode/probe-agent-managed-layer.mjs
 import plugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/kaz-mode/lib/index.js";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -263,10 +263,10 @@ for (const agent of [sSel, sEmpty, sNoState]) {
   check("surfaceOf(无任务状态) 仍为固定主面，不含 safe_json_write", noStateSurface !== null && !noStateSurface.has("safe_json_write"));
 }
 
-// ⑥ auto-on 防护：不能把 agent 工具加入任何自动启用列表
+// ⑥ v0.8 Step B2：auto-on RPC 已退役，setToolAutoOn 不再存在
 {
   const res = await rpc("setToolAutoOn", { cwd: PROJECT_A, feature: "plan", layer: "project", tools: ["exit_plan_mode", "safe_json_write"] });
-  check("setToolAutoOn 拒绝 agent 工具", res?.ok === false && /自动启用/.test(res.error?.message ?? ""));
+  check("setToolAutoOn 已退役（unknown endpoint）", res !== null && res.ok === false);
 }
 
 rmSync(TMP, { recursive: true, force: true });

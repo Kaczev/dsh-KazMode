@@ -1,7 +1,7 @@
 {
   "name": "ka-whale-workflow",
   "version": "0.1.0",
-  "description": "鲸鱼工作流（v0.8 Step A/B1）：主/子两套新流程上下文 + whale_report 常驻工作簿记；支持 mode=goal / normal，原生 Plan 已移除。",
+  "description": "鲸鱼工作流（v0.8 Step A/B1/B2）：主/子两套新流程上下文 + whale_report 常驻工作簿记；支持 mode=goal / normal，原生 Plan 与 kaz_tool_auto_on 均已退役。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

@@ -1503,11 +1503,11 @@ export default {
               return Promise.reject(error instanceof Error ? error : new Error(String(error)));
             }
             setStageAgent(agent, "done");
-            reportRoundDisplay(agent, "Goal 恢复确认：继续原 Goal，已恢复目标模式。", "阶段切换");
+            reportRoundDisplay(agent, "已确认继续原 Goal，目标模式已恢复。", "工作流切换");
             return Promise.resolve({ ok: true, stage: "done", restarted: false });
           }
           if (setStageAgent(agent, "reconstruction")) {
-            reportRoundDisplay(agent, "Goal 恢复确认：开始新任务，进入任务重构。", "阶段切换");
+            reportRoundDisplay(agent, "已确认开始新任务，进入新一轮主工作流。", "工作流切换");
           }
           return Promise.resolve({ ok: true, stage: "reconstruction", restarted: false });
         }
@@ -1665,7 +1665,7 @@ export default {
     }
 
     // -----------------------------------------------------------------------
-    // 对外信号：kaWhaleWorkflow 服务（供 kaz-mode 的 auto-on 读取阶段）。
+    // 对外信号：kaWhaleWorkflow 服务（供 kaz-mode / round-display / 探针读取状态）。
     // -----------------------------------------------------------------------
     const kaWhaleWorkflowService = {
       version: 1,
@@ -1890,8 +1890,8 @@ export default {
           reportRoundDisplay(
             agent,
             next === GOAL_RECOVERY_STAGE
-              ? "收到新一轮消息：存在非 complete goal，进入 Goal 恢复确认。"
-              : "收到新一轮消息，重新进入任务重构。",
+              ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal。"
+              : "收到新一轮消息，重新进入主工作流。",
             "阶段切换",
           );
         }
@@ -1904,7 +1904,7 @@ export default {
       // 非 complete goal（如 blocked）在 idle 起手时也先进入 Goal 恢复确认。
       if (recoveryGoal !== null) {
         if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
-          reportRoundDisplay(agent, "存在非 complete goal，进入 Goal 恢复确认。", "阶段切换");
+          reportRoundDisplay(agent, "存在非 complete goal，先确认是否继续原 Goal。", "阶段切换");
         }
         return;
       }
@@ -1913,7 +1913,7 @@ export default {
         return;
       }
       if (setStageAgent(agent, "reconstruction")) {
-        reportRoundDisplay(agent, "进入任务重构。", "阶段切换");
+        reportRoundDisplay(agent, "进入新一轮主工作流。", "阶段切换");
       }
     });
 
@@ -1955,12 +1955,12 @@ export default {
       // 非 complete goal（如 blocked）在 round-minimal 解除后也先进 Goal 恢复确认。
       if (goalRecoveryNeeded(agent) !== null) {
         if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
-          reportRoundDisplay(agent, "round-minimal 已解除：存在非 complete goal，进入 Goal 恢复确认。", "阶段切换");
+          reportRoundDisplay(agent, "round-minimal 已解除：存在非 complete goal，先确认是否继续原 Goal。", "阶段切换");
         }
         return;
       }
       if (setStageAgent(agent, "reconstruction")) {
-        reportRoundDisplay(agent, "round-minimal 已解除，进入任务重构。", "阶段切换");
+        reportRoundDisplay(agent, "round-minimal 已解除，进入新一轮主工作流。", "阶段切换");
       }
     });
 
@@ -2136,8 +2136,8 @@ export default {
                 reportRoundDisplay(
                   agent,
                   next === GOAL_RECOVERY_STAGE
-                    ? "收到新一轮消息：存在非 complete goal，进入 Goal 恢复确认（pre-step 兜底）。"
-                    : "收到新一轮消息，重新进入任务重构（pre-step 兜底）。",
+                    ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal（pre-step 兜底）。"
+                    : "收到新一轮消息，重新进入主工作流（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
@@ -2148,7 +2148,7 @@ export default {
                   agent,
                   next === GOAL_RECOVERY_STAGE
                     ? "进入 Goal 恢复确认（pre-step 兜底）。"
-                    : "进入任务重构（pre-step 兜底）。",
+                    : "进入新一轮主工作流（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
@@ -2159,8 +2159,8 @@ export default {
               reportRoundDisplay(
                 agent,
                 next === GOAL_RECOVERY_STAGE
-                  ? "round-minimal 已解除，进入 Goal 恢复确认（pre-step 兜底）。"
-                  : "round-minimal 已解除，进入任务重构（pre-step 兜底）。",
+                  ? "round-minimal 已解除，先确认是否继续原 Goal（pre-step 兜底）。"
+                  : "round-minimal 已解除，进入新一轮主工作流（pre-step 兜底）。",
                 "阶段切换",
               );
             }

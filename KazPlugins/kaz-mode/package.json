@@ -1,7 +1,7 @@
 {
   "name": "kaz-mode",
   "version": "4.4.8",
-  "description": "kaz-mode 超级模式插件：Kaz 模式 agent preset + 会话头部开关按钮 + 集中管理面板，面板只显示 output-beep / deepseek-default-model / kaz-agent-preset-display / round-display + 外置工具添加通道，内部联动 ka-whale-memory / ka-whale-workflow / round-minimal / plugin-filter。v0.8 Step A/B1：Stable Main Surface 固定集，原生 Plan 已移除，kaz_tool_auto_on 不再放行主面工具（B2 退役）。",
+  "description": "kaz-mode 超级模式插件：Kaz 模式 agent preset + 会话头部开关按钮 + 集中管理面板，面板只显示 output-beep / deepseek-default-model / kaz-agent-preset-display / round-display + 外置工具添加通道，内部联动 ka-whale-memory / ka-whale-workflow / round-minimal / plugin-filter。v0.8 Step A/B1/B2：Stable Main Surface 固定集，原生 Plan 与 kaz_tool_auto_on 均已退役，create-plan 插件目录已删除。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

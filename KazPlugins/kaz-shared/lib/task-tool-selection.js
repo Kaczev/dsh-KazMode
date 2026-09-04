@@ -1,24 +1,21 @@
-// kaz-shared —— 任务分类工具选择：基础面 / 模式限定面 / optional 池 / 目录排版（纯 ESM）
+// kaz-shared —— 任务分类工具选择：基础面 / 固定常驻面 / optional 池 / 目录排版（纯 ESM）
 // ===========================================================================
 // 第三次升级（任务分类阶段决定工具面）的单一事实源纯函数模块：
 //   - BASE_TOOLS          基础工具名（不含 memory；memory 是否进基础面由
 //                         baseToolNames({ memoryEnabled }) 表达）；
-//   - MODE_SCOPED_TOOLS   模式限定工具（从 tool-auto-on 派生，不在这里硬编码
-//                         第二份），它们永不进入 optional 目录；
+//   - MODE_SCOPED_TOOLS   固定常驻主面中不属于旧基础面的工具（Goal 三件套 /
+//                         whale_report / subagent），永不进入 optional 池；
 //   - normalizeOptionalTools         分类 whale_report 传参的清洗；
 //   - optionalToolPoolNames          从某 Kaz 面算出“可选池”；
 //   - compactOptionalToolDirectory   把 { name, description } 排成一行目录。
 // 本文件不依赖 cordis / dsh 服务，供 kaz-mode / ka-whale-workflow / 探针共用。
+// v0.8 Step B2：不再依赖 kaz_tool_auto_on；模式限定工具改由固定主面口径表达。
 // ===========================================================================
 
 import {
   MEMORY_READ_TOOLS,
   KAZ_MAINTENANCE_ONLY_TOOLS,
 } from "./tool-lists.js";
-import {
-  GOAL_AUTO_ON_TOOLS,
-  TOOL_AUTO_ON_CONFIG,
-} from "./tool-auto-on.js";
 
 /** enable_tool：任务内按需点亮 optional 工具的基础工具（由 ka-whale-workflow 注册）。 */
 export const ENABLE_TOOL = "enable_tool";
@@ -37,13 +34,14 @@ export const BASE_TOOLS = Object.freeze([
   ENABLE_TOOL,
 ]);
 
-/** 模式限定工具：从 kaz_tool_auto_on 派生，默认仅模式激活/鲸鱼阶段临时放行。
- *  v0.8 Step B1：Plan 已从 Kaz 移除，不再含 exit_plan_mode。 */
+/** 固定常驻主面中不属于 BASE_TOOLS 的工具：Goal 三件套 + whale_report + subagent。
+ *  v0.8 Step B2：由 Stable Main Surface 固定口径表达，不再从 auto-on 动态派生。 */
 export const MODE_SCOPED_TOOLS = Object.freeze([
-  ...new Set([
-    ...GOAL_AUTO_ON_TOOLS,
-    ...TOOL_AUTO_ON_CONFIG.whale.tools,
-  ]),
+  "create_goal",
+  "get_goal",
+  "update_goal",
+  "whale_report",
+  "subagent",
 ]);
 
 /** 基础工具名：kaz-memory 启用时把记忆**读**工具并入基础面；
@@ -69,7 +67,7 @@ export function normalizeOptionalTools(value) {
   return out;
 }
 
-/** 由 surface（Set/数组）计算可选池：不在基础面、也不在模式限定面的工具名。
+/** 由 surface（Set/数组）计算可选池：不在基础面、也不在固定常驻面的工具名。
  *  记忆写工具只进维护子代理白名单，绝不进入主线可选池（Kaz 5.0 硬边界 7/8）。 */
 export function optionalToolPoolNames(surface, { memoryEnabled = false } = {}) {
   const base = new Set(baseToolNames({ memoryEnabled }));
@@ -105,7 +103,7 @@ export function compactOptionalToolDirectory(entries) {
 
 // ---------------------------------------------------------------------------
 // Kaz 5.0 可选工具规则（唯一触发点：契约生成 / whale_report({optional_tools})）
-//   >6 提醒收敛；>8 拒绝。计数口径 = 任务可选工具数（不含基础面与模式限定面）。
+//   >6 提醒收敛；>8 拒绝。计数口径 = 任务可选工具数（不含基础面与固定常驻面）。
 // ---------------------------------------------------------------------------
 
 /** 提醒阈值：可选工具超过 6 个时提醒收敛。 */

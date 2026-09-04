@@ -108,7 +108,7 @@ export const MEMORY_READ_TOOLS = Object.freeze([
 ]);
 
 /** 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，这些工具不应出现在工具面。
- *  v0.8 Step B1：create-plan/原生 Plan 已从 Kaz 移除，不再列入。 */
+ *  v0.8 Step B1/B2：create-plan/原生 Plan 已从 Kaz 移除并删除插件目录。 */
 export const MANAGED_CARRIER_TOOLS = {
   "ka-whale-workflow": ["whale_report"],
 };
@@ -234,9 +234,10 @@ export const KAZ_MAINTENANCE_ONLY_TOOLS = Object.freeze([
 /** Kaz 模式默认系统提示词。 */
 export const FIXED_PERSONA = "You are a helpful software engineer assistant.";
 
-/** 被管理插件目录（Kaz 5.0：两个旧首轮提示组件已删除；面板只显示 4 个组件，
- *  但内部状态模型仍保留 ka-whale-workflow / ka-whale-memory / create-plan / round-minimal /
- *  plugin-filter 等隐藏组件，供状态联动与回滚）。 */
+/** 被管理插件目录（Kaz 5.0：两个旧首轮提示组件已删除；面板只显示 3 个组件，
+ *  但内部状态模型仍保留 ka-whale-workflow / ka-whale-memory / round-minimal /
+ *  plugin-filter 等隐藏组件，供状态联动与回滚）。
+ *  v0.8 Step B2：create-plan 插件目录已删除，不再列入。 */
 export const MANAGED_PLUGINS = [
   { id: "round-minimal", label: "round-minimal（首阶段极简 · 已收编进核心机制，面板隐藏）" },
   { id: "plugin-filter", label: "plugin-filter（工具过滤 · 已收编进 kaz-shared/preset，面板隐藏）" },
@@ -244,8 +245,7 @@ export const MANAGED_PLUGINS = [
   { id: "round-display", label: "round-display（每轮注入显示）" },
   { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 采样参数）" },
   { id: "ka-whale-memory", label: "ka-whale-memory（独立记忆组件，原 kaz-memory 改名）" },
-  { id: "ka-whale-workflow", label: "ka-whale-workflow（鲸鱼工作流：任务重构→任务分类）" },
-  { id: "create-plan", label: "create-plan（create_plan 工具：鲸鱼自己启用 plan 模式）" },
+  { id: "ka-whale-workflow", label: "ka-whale-workflow（鲸鱼工作流）" },
 ];
 
 /** 由 TOOL_PLUGIN_CATALOG + TOOL_PLUGINS 派生的旧版兼容白名单。 */
@@ -426,23 +426,6 @@ export function computeToolPluginSurface(inputs = {}) {
 
 /** 官方 / Kaz 分类目录（源码修改点，见 tool-plugin-catalog.js）。 */
 export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS, TOOL_PLUGIN_CATALOG, TOOL_PLUGINS } from "./tool-plugin-catalog.js";
-
-/** kaz_tool_auto_on（模式工具自动启用）参数单一事实源（见 tool-auto-on.js）。 */
-export {
-  TOOL_AUTO_ON_CONFIG,
-  MODE_SCOPED_TOOL_PLUGIN_KEYS,
-  PLAN_AUTO_ON_TOOLS,
-  GOAL_AUTO_ON_TOOLS,
-  PLAN_AUTO_ON_DEFAULT_ENABLED,
-  GOAL_AUTO_ON_DEFAULT_ENABLED,
-  defaultToolAutoOnState,
-  normalizeToolList,
-  normalizeToolAutoOnState,
-  normalizeAutoOnLayer,
-  mergeAutoOnLayers,
-  autoOnSettingsEqual,
-  hasAutoOnLayerFields,
-} from "./tool-auto-on.js";
 
 /** 方向1 复盘指引：语义 + 文本 + 工具可用性判断（见 review-guidance.js）。 */
 export {

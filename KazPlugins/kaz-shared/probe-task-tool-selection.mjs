@@ -1,6 +1,7 @@
 // kaz-shared 探针：任务分类工具选择纯函数（第三次升级）。
-// 覆盖：BASE_TOOLS 内容；memory 开/关时 base 集合；MODE_SCOPED_TOOLS 派生；
+// 覆盖：BASE_TOOLS 内容；memory 开/关时 base 集合；MODE_SCOPED_TOOLS 固定口径；
 // normalizeOptionalTools；optional 池排除 base/mode-scoped；目录排版。
+// v0.8 Step B2：MODE_SCOPED_TOOLS 不再由 kaz_tool_auto_on 派生。
 // 运行：node KazPlugins/kaz-shared/probe-task-tool-selection.mjs
 import {
   ENABLE_TOOL,
@@ -63,11 +64,13 @@ check(
 }
 
 check(
-  "MODE_SCOPED_TOOLS 从 auto-on 派生且含模式工具（v0.8 Step B1 无 exit_plan_mode）",
+  "MODE_SCOPED_TOOLS 固定为 Stable Main 中非 BASE_TOOLS 成员（无 exit_plan_mode）",
   !MODE_SCOPED_TOOLS.includes("exit_plan_mode") &&
+    MODE_SCOPED_TOOLS.includes("create_goal") &&
     MODE_SCOPED_TOOLS.includes("get_goal") &&
     MODE_SCOPED_TOOLS.includes("update_goal") &&
-    MODE_SCOPED_TOOLS.includes("whale_report"),
+    MODE_SCOPED_TOOLS.includes("whale_report") &&
+    MODE_SCOPED_TOOLS.includes("subagent"),
 );
 
 check(
@@ -101,11 +104,11 @@ check(
     pool.includes("safe_json_write") &&
       pool.includes("read_image") &&
       pool.includes("job_list") &&
-      pool.includes("subagent") &&
       !pool.includes("enable_tool") &&
       !pool.includes("read") &&
       !pool.includes("get_goal") &&
       !pool.includes("whale_report") &&
+      !pool.includes("subagent") &&
       !MEMORY_TOOLS.some((tool) => pool.includes(tool)),
   );
   check("optional 池去重且排序", JSON.stringify(pool) === JSON.stringify([...new Set(pool)].sort()));

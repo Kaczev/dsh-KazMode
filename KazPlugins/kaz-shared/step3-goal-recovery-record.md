@@ -1,5 +1,9 @@
 # Kaz 6.0 Step 3 — Goal 恢复修复记录
 
+> **历史记录提示（v0.8 Step B2 后）**：本文记录的是 Step 3 当时的实现快照。
+> `kaz_tool_auto_on` / `whaleStageOf` / “whale auto-on”已随 v0.8 Step B2 整体退役，
+> 该节描述不再代表当前 Kaz 运行机制，仅作历史上下文保留。
+>
 > Step 3 target from `不入库文件/Kaz5.0与6.0更新规划/描述v0.4.md` §9.3 / §13 Step 3
 > and bug/rollback context `BUG-20260903-001` (already fixed in `039f7dd`).
 > Backup root: `.dsh/backups/kaz50-step3-20260903-235046`.

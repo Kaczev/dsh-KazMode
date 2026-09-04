@@ -60,10 +60,6 @@ import {
   KAZ_SUBAGENT_BASE_TOOLS,
   stableMainSurface,
   stableSubagentSurface,
-  defaultToolAutoOnState,
-  normalizeAutoOnLayer,
-  mergeAutoOnLayers,
-  autoOnSettingsEqual,
   ENABLE_TOOL,
   baseToolNames,
   normalizeOptionalTools,
@@ -128,7 +124,6 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     skillLifecycleAuditIntervalHours: 24,
     skillLifecycleMaxAutoActions: 1,
   },
-  "create-plan": { enabled: false },
 };
 
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
@@ -168,8 +163,6 @@ const PROJECT_ENABLE_TOOL_PLUGIN_FILE = USER_ENABLE_TOOL_PLUGIN_FILE;
 const PROJECT_TOOL_PLUGIN_CATALOG_FILE = USER_TOOL_PLUGIN_CATALOG_FILE;
 const PROJECT_OTHER_ENABLE_TOOL_PLUGIN_FILE = USER_OTHER_ENABLE_TOOL_PLUGIN_FILE;
 const PROJECT_OTHER_TOOL_PLUGIN_CATALOG_FILE = USER_OTHER_TOOL_PLUGIN_CATALOG_FILE;
-/** kaz_tool_auto_on：用户默认 / 项目专属设置的单 JSON 文件名（一层一个文件）。 */
-const AUTO_ON_SETTING_FILE = "ka_tool_auto_on_setting.json";
 
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/kaz-mode";
@@ -523,66 +516,6 @@ function saveProjectOtherCatalog(cwd, value, logger) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// kaz_tool_auto_on 单 JSON 三层模型（2026-08-27）
-//   原设置   = 代码 TOOL_AUTO_ON_CONFIG（kaz-shared/lib/tool-auto-on.js，只读）
-//   默认设置 = 用户 ~/.dsh/storages/ka_tool_auto_on_setting.json
-//   专属设置 = 项目 <cwd>/.dsh/storages/ka_tool_auto_on_setting.json
-//   生效值   = 专属覆盖默认、默认覆盖原设置（按 plan/goal 的 enabled/tools 逐项继承）。
-// 与工具控制面板四文件模型不同：这里一层只有一个 JSON 文件，工具保持扁平清单，
-// 不做插件封装。文件形状：
-//   { "plan": { "enabled": true, "tools": ["exit_plan_mode"] },
-//     "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] } }
-// ---------------------------------------------------------------------------
-
-function userAutoOnPath() {
-  return join(STORAGE_DIR, AUTO_ON_SETTING_FILE);
-}
-
-function projectAutoOnPath(cwd) {
-  return join(cwd, ".dsh", "storages", AUTO_ON_SETTING_FILE);
-}
-
-/** 读取一层 auto-on JSON；缺失/损坏回退 {}（即全部继承下层）。 */
-function loadAutoOnLayerFile(file, logger) {
-  return readJsonFile(file, {}, normalizeAutoOnLayer, logger);
-}
-
-/** 写回一层 auto-on JSON（自动归一化；传 {} 即清空该层覆盖）。 */
-function saveAutoOnLayerFile(file, value, logger) {
-  try {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, JSON.stringify(normalizeAutoOnLayer(value), null, 2) + "\n", "utf8");
-  } catch (error) {
-    logger?.warn?.("[kaz-mode] 写入 kaz_tool_auto_on JSON 失败（" + file + "）：" + safeMessage(error));
-  }
-}
-
-/** 读取某项目完整的 auto-on 三层状态并算好生效值。 */
-function loadAutoOnLayers(cwd, logger) {
-  const safeCwd = typeof cwd === "string" && cwd.trim().length > 0 ? cwd.trim() : process.cwd();
-  const user = loadAutoOnLayerFile(userAutoOnPath(), logger);
-  const project = loadAutoOnLayerFile(projectAutoOnPath(safeCwd), logger);
-  const original = defaultToolAutoOnState();
-  const defaults = mergeAutoOnLayers(original, user, {});
-  const effective = mergeAutoOnLayers(original, user, project);
-  const projectDiffers = !autoOnSettingsEqual(effective, defaults);
-  const userDiffersFactory = !autoOnSettingsEqual(defaults, original);
-  return {
-    cwd: safeCwd,
-    user,
-    project,
-    original,
-    defaults,
-    effective,
-    projectDiffers,
-    userDiffersFactory,
-    effectiveEqualsFactory: !projectDiffers && !userDiffersFactory,
-    effectiveEqualsUser: !projectDiffers,
-    hasProjectOverrides: projectDiffers,
-  };
-}
-
 function enableEquals(a, b) {
   return JSON.stringify(normalizePluginEnableDict(a)) === JSON.stringify(normalizePluginEnableDict(b));
 }
@@ -807,12 +740,7 @@ export default {
     let activeSession = null;
 
     // -----------------------------------------------------------------------
-    // kaz_tool_auto_on（模式工具自动启用）：三层单 JSON 设置 + 运行时临时放行。
-    //   - 设置：原设置（代码）→ 用户默认（~/.dsh/storages/ka_tool_auto_on_setting.json）
-    //           → 项目专属（<项目>/.dsh/storages/ka_tool_auto_on_setting.json）。
-    //   - 运行时：按 agent 所在项目读取生效状态；只有该会话 plan/goal 模式激活
-    //     时才把对应工具临时加进工具面，模式结束自动移除（同一项目所有对话共享设置）。
-    //   - 不再维护按会话的内存 Map。
+    // 联动工具函数
     // -----------------------------------------------------------------------
 
     /**
@@ -820,10 +748,6 @@ export default {
      * 所有跨命名空间读写都在调用时解析，避免 apply 阶段一次性捕获到 undefined。
      */
     const getSettings = () => ctx.get("settings");
-
-    // -----------------------------------------------------------------------
-    // 联动工具函数
-    // -----------------------------------------------------------------------
 
     /** 当前生效的被管理插件清单（id + 展示名）。 */
     function managedList() {
@@ -1119,173 +1043,6 @@ export default {
       }
       if (typeof agent?.id === "string" && agent.id.trim().length > 0) return agent.id;
       return "";
-    }
-
-    /** 该 agent 会话是否处于 plan 模式：以 session.events 里最后一个 plan/mode
-     *  事件的 active 为准（与 kaz-system-prompt.mjs 的兜底检测同源）。 */
-    function planModeActive(agent) {
-      try {
-        const events = agent?.session?.events;
-        if (!Array.isArray(events)) return false;
-        let active = false;
-        for (const event of events) {
-          if (
-            event !== null &&
-            typeof event === "object" &&
-            event.type === "plan/mode" &&
-            event.data !== null &&
-            typeof event.data === "object" &&
-            typeof event.data.active === "boolean"
-          ) {
-            active = event.data.active;
-          }
-        }
-        return active;
-      } catch {
-        return false;
-      }
-    }
-
-    /** 该 agent 会话是否处于 goal 模式：存在 active/paused 目标。
-     *  注意：这里不依赖 update_goal 是否可见，避免“先放行工具才能判定模式”的死结。 */
-    function goalModeActive(agent) {
-      try {
-        const goals = ctx.get("goals");
-        if (goals === undefined || goals === null || typeof goals.get !== "function" || agent === null || agent === undefined) {
-          return false;
-        }
-        const goal = goals.get(agent);
-        if (goal === null || goal === undefined || typeof goal !== "object") return false;
-        return goal.phase === "active" || goal.phase === "paused";
-      } catch {
-        return false;
-      }
-    }
-
-    /** 当前会话 kaz_tool_auto_on 命中的工具：按 agent 所在项目的三层生效状态，
-     *  仅当对应功能开关打开、且该会话 plan/goal/鲸鱼工作流阶段命中时返回配置的工具清单。 */
-    function whaleStageOf(agent) {
-      try {
-        const svc = ctx.get("kaWhaleWorkflow");
-        if (svc !== undefined && svc !== null && typeof svc.stageOf === "function") {
-          const stage = svc.stageOf(agent);
-          if (stage === "reconstruction" || stage === "goal-recovery" || stage === "classification" || stage === "done") return stage;
-        }
-      } catch {
-        // fall through
-      }
-      return null;
-    }
-
-    function pushTool(out, tool) {
-      if (typeof tool === "string" && tool.length > 0 && !out.includes(tool)) out.push(tool);
-    }
-
-    function autoOnToolsFor(agent, states) {
-      if (agent === null || agent === undefined || typeof agent !== "object") return [];
-      const layers = loadAutoOnLayers(workspaceOfAgent(agent), ctx.logger);
-      const effective = layers.effective;
-      const out = [];
-      if (effective.plan?.enabled === true && planModeActive(agent)) {
-        for (const tool of Array.isArray(effective.plan.tools) ? effective.plan.tools : []) pushTool(out, tool);
-      }
-      if (effective.goal?.enabled === true && goalModeActive(agent)) {
-        for (const tool of Array.isArray(effective.goal.tools) ? effective.goal.tools : []) pushTool(out, tool);
-      }
-      // 鲸鱼工作流：whale_report 在重构/分类临时放行；模式启动由 whale_report 统一完成。
-      if (effective.whale?.enabled === true && states?.["ka-whale-workflow"]?.enabled === true) {
-        const stage = whaleStageOf(agent);
-        if (stage === "reconstruction" || stage === "goal-recovery" || stage === "classification") {
-          for (const tool of Array.isArray(effective.whale.tools) ? effective.whale.tools : []) pushTool(out, tool);
-        }
-      }
-      return out;
-    }
-
-    /** 按会话 id 取 agent 对象（RPC / 面板状态用）；读不到返回 null。 */
-    function agentOfSession(sessionId) {
-      try {
-        const agents = ctx.get("agents");
-        if (agents !== undefined && agents !== null && typeof agents.get === "function" && typeof sessionId === "string" && sessionId.length > 0) {
-          const agent = agents.get(sessionId);
-          return agent !== null && agent !== undefined && typeof agent === "object" ? agent : null;
-        }
-      } catch {
-        // fall through
-      }
-      return null;
-    }
-
-    /** kaz_tool_auto_on 面板快照：包含三层状态、生效状态、模式激活与专属标记。 */
-    function toolAutoOnSnapshot(sessionId, cwd) {
-      const safeCwd =
-        typeof cwd === "string" && cwd.trim().length > 0
-          ? cwd.trim()
-          : typeof sessionId === "string" && sessionId.length > 0
-            ? resolveSessionCwd(sessionId)
-            : activeSession !== null && activeSession !== undefined
-              ? activeSession.cwd
-              : process.cwd();
-      const layers = loadAutoOnLayers(safeCwd, ctx.logger);
-      const agent = agentOfSession(sessionId);
-      return {
-        sessionId,
-        cwd: layers.cwd,
-        user: layers.user,
-        project: layers.project,
-        original: layers.original,
-        defaults: layers.defaults,
-        effective: layers.effective,
-        projectDiffers: layers.projectDiffers,
-        userDiffersFactory: layers.userDiffersFactory,
-        effectiveEqualsFactory: layers.effectiveEqualsFactory,
-        effectiveEqualsUser: layers.effectiveEqualsUser,
-        hasProjectOverrides: layers.hasProjectOverrides,
-        active: {
-          plan: agent !== null ? planModeActive(agent) : false,
-          goal: agent !== null ? goalModeActive(agent) : false,
-          whale: agent !== null ? whaleStageOf(agent) : null,
-        },
-        features: {
-          plan: {
-            enabled: layers.effective.plan.enabled,
-            tools: [...layers.effective.plan.tools],
-            // “专属”只看是否真的与默认设置不同；项目 JSON 里写了相同的值不算专属。
-            overridden: !autoOnSettingsEqual(
-              { plan: layers.effective.plan },
-              { plan: layers.defaults.plan },
-            ),
-            defaultDrifted: !autoOnSettingsEqual(
-              { plan: layers.defaults.plan },
-              { plan: layers.original.plan },
-            ),
-          },
-          goal: {
-            enabled: layers.effective.goal.enabled,
-            tools: [...layers.effective.goal.tools],
-            overridden: !autoOnSettingsEqual(
-              { goal: layers.effective.goal },
-              { goal: layers.defaults.goal },
-            ),
-            defaultDrifted: !autoOnSettingsEqual(
-              { goal: layers.defaults.goal },
-              { goal: layers.original.goal },
-            ),
-          },
-          whale: {
-            enabled: layers.effective.whale.enabled,
-            tools: [...layers.effective.whale.tools],
-            overridden: !autoOnSettingsEqual(
-              { whale: layers.effective.whale },
-              { whale: layers.defaults.whale },
-            ),
-            defaultDrifted: !autoOnSettingsEqual(
-              { whale: layers.defaults.whale },
-              { whale: layers.original.whale },
-            ),
-          },
-        },
-      };
     }
 
     /** 从 agent 会话解析当前生效的 agent preset id（与官方 resolveSessionPreset
@@ -1714,10 +1471,6 @@ export default {
           endpoint !== "setExternalToolPlugin" &&
           endpoint !== "resetExternalToolPlugins" &&
           endpoint !== "setExternalToolPluginsAsDefault" &&
-          endpoint !== "getToolAutoOn" &&
-          endpoint !== "setToolAutoOn" &&
-          endpoint !== "resetToolAutoOn" &&
-          endpoint !== "setToolAutoOnAsDefault" &&
           endpoint !== "setProjectPlugin" &&
           endpoint !== "clearProject" &&
           endpoint !== "clearProjectPlugin"
@@ -1735,14 +1488,6 @@ export default {
 
         /** 项目状态端点统一解析项目 cwd（与工具面板同规则）。 */
         const resolveStateCwd = () => {
-          if (typeof input.cwd === "string" && input.cwd.trim().length > 0) return input.cwd.trim();
-          if (sessionId.length > 0) return resolveSessionCwd(sessionId);
-          if (activeSession !== null && activeSession !== undefined) return activeSession.cwd;
-          return process.cwd();
-        };
-
-        /** kaz_tool_auto_on 端点统一解析项目 cwd（与工具面板同规则）。 */
-        const resolveAutoOnCwd = () => {
           if (typeof input.cwd === "string" && input.cwd.trim().length > 0) return input.cwd.trim();
           if (sessionId.length > 0) return resolveSessionCwd(sessionId);
           if (activeSession !== null && activeSession !== undefined) return activeSession.cwd;
@@ -1949,8 +1694,8 @@ export default {
         }
 
         if (endpoint === "applySession") {
-          // 纯方案 A：只需记录活跃会话；插件与 kaz_tool_auto_on 在使用时刻经
-          // kazMode.pluginConfig / loadAutoOnLayers 按 agent 项目实时读取生效状态，
+          // 纯方案 A：只需记录活跃会话；插件配置在使用时刻经
+          // kazMode.pluginConfig 按 agent 项目实时读取生效状态，
           // 无需写任何插件 settings.yaml，也无需初始化会话内存态。
           const { cwd, data } = loadSessionData(sessionId);
           activeSession = { sessionId, cwd };
@@ -2065,73 +1810,6 @@ export default {
           }
           if (sessionId.length > 0) activeSession = { sessionId, cwd };
           return { ok: true, value: { project: data.project ?? null } };
-        }
-
-        if (endpoint === "getToolAutoOn") {
-          return { ok: true, value: toolAutoOnSnapshot(sessionId, typeof input.cwd === "string" ? input.cwd : "") };
-        }
-
-        if (endpoint === "setToolAutoOn") {
-          const feature = input.feature === "plan" || input.feature === "goal" || input.feature === "whale" ? input.feature : null;
-          if (feature === null) return rpcFail("feature 必须是 plan、goal 或 whale");
-          // 第14次更新：Agent 管理的自写工具绝不能进入任何模式自动启用列表。
-          if (Array.isArray(input.tools)) {
-            const agentTools = new Set(agentManagedToolNames(loadAgentManagedRegistry(ctx.logger)));
-            const requested = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature]?.tools ?? [];
-            if (requested.some((tool) => agentTools.has(tool))) {
-              return rpcFail("Agent 管理的自写工具不能加入模式自动启用列表");
-            }
-          }
-          const layer = input.layer === "user" || input.layer === "project" ? input.layer : "project";
-          const cwd = resolveAutoOnCwd();
-          const file = layer === "user" ? userAutoOnPath() : projectAutoOnPath(cwd);
-          const layerData = loadAutoOnLayerFile(file, ctx.logger);
-          if (input.reset === true) {
-            delete layerData[feature];
-          } else {
-            const entry = layerData[feature] ?? {};
-            if (typeof input.enabled === "boolean") entry.enabled = input.enabled;
-            if (Array.isArray(input.tools)) {
-              const normalized = normalizeAutoOnLayer({ [feature]: { tools: input.tools } })[feature];
-              if (normalized !== undefined && Array.isArray(normalized.tools)) entry.tools = normalized.tools;
-              else delete entry.tools;
-            }
-            if (Object.keys(entry).length > 0) layerData[feature] = entry;
-            else delete layerData[feature];
-          }
-          saveAutoOnLayerFile(file, layerData, ctx.logger);
-          if (sessionId.length > 0) activeSession = { sessionId, cwd };
-          return { ok: true, value: toolAutoOnSnapshot(sessionId, cwd) };
-        }
-
-        if (endpoint === "resetToolAutoOn") {
-          const layer = input.layer === "user" || input.layer === "project" ? input.layer : null;
-          if (layer === null) return rpcFail("layer 必须是 user 或 project");
-          const cwd = resolveAutoOnCwd();
-          if (layer === "user") {
-            saveAutoOnLayerFile(userAutoOnPath(), defaultToolAutoOnState(), ctx.logger);
-          } else {
-            saveAutoOnLayerFile(projectAutoOnPath(cwd), {}, ctx.logger);
-          }
-          if (sessionId.length > 0) activeSession = { sessionId, cwd };
-          return { ok: true, value: toolAutoOnSnapshot(sessionId, cwd) };
-        }
-
-        if (endpoint === "setToolAutoOnAsDefault") {
-          const cwd = resolveAutoOnCwd();
-          const layers = loadAutoOnLayers(cwd, ctx.logger);
-          if (!layers.hasProjectOverrides) return rpcFail("当前没有项目专属设置可设为默认");
-          // 第14次更新：防止把残留的 Agent 管理工具随项目专属设置复制进用户默认 auto-on。
-          const agentTools = new Set(agentManagedToolNames(loadAgentManagedRegistry(ctx.logger)));
-          for (const feature of ["plan", "goal", "whale"]) {
-            const tools = layers.effective?.[feature]?.tools ?? [];
-            if (tools.some((tool) => agentTools.has(tool))) {
-              return rpcFail("Agent 管理的自写工具不能进入模式自动启用设置");
-            }
-          }
-          saveAutoOnLayerFile(userAutoOnPath(), layers.effective, ctx.logger);
-          if (sessionId.length > 0) activeSession = { sessionId, cwd };
-          return { ok: true, value: toolAutoOnSnapshot(sessionId, cwd) };
         }
 
         return rpcFail("unknown endpoint '" + String(endpoint) + "'");

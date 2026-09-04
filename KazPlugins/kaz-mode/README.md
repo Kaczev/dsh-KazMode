@@ -16,8 +16,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
 | `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
-| `ka-whale-workflow` | 鲸鱼工作流（v0.8 Step A/B1）：主/子两套新流程上下文 + `whale_report` 常驻工作簿记；不再有 reconstruction/classification 阶段收窄工具面 |
-| `create-plan` | 已随 v0.8 Step B1 从 Kaz 预设移除（原生 Plan 退役）；插件目录/内部状态留待 B2/B5 清理 |
+| `ka-whale-workflow` | 鲸鱼工作流（v0.8 Step A/B1/B2）：主/子两套新流程上下文 + `whale_report` 常驻工作簿记；不再有 reconstruction/classification 阶段收窄工具面 |
 
 **Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
 
@@ -76,22 +75,13 @@ Kaz 面板的「工具控制面板」区块是唯一白名单管理器：插件�
 拒绝工具面外的调用。**host 平面监听器对所有 agent 生效——子代理会话（subagent /
 workflow / ralph 派生）同样是 Kaz 工具面。**
 
-### Kaz 模式工具自动启用
+### kaz_tool_auto_on（已退役）
 
-> v0.8 Step B1 状态：原生 Plan 已从 Kaz 移除，`kaz_tool_auto_on` 不再参与任何工具面；
-> 本区块及其 UI/RPC/JSON 属 B2 退役范围，退役前仅作旧数据兼容展示，不再放行任何工具。
-
-kaz-mode 配置区内的临时工具放行区块，位于「工具控制面板」下方、与之同级，
-常驻展开（不做收起）。它曾是“进入 plan / goal 模式时临时放行控制工具”的旧机制；
-Goal 三件套与 `whale_report` 自 v0.8 Step A 起已常驻 Stable Main Surface，Plan 自
-B1 起已移除，因此该区块当前不改变工具面。
-
-- 旧三层设置仍可读（`kaz-shared/lib/tool-auto-on.js` 原设置 →
-  `~/.dsh/storages/ka_tool_auto_on_setting.json` →
-  `<项目>/.dsh/storages/ka_tool_auto_on_setting.json`），仅作 B2 退役前的兼容读。
-- **Goal 工具**：常驻 Stable Main Surface，不再由 auto-on 临时放行。
-- **鲸鱼工作流**：`whale_report` 常驻 Stable Main Surface，不再由阶段临时放行。
-- 面板与 RPC 在 auto-on 退役（B2）前保留展示；其 plan/goal 工具清单已不再影响主面。
+> v0.8 Step B2 状态：`kaz_tool_auto_on` 已整体退役。
+> - UI/RPC/JSON 运行时读写已删除；`kaz-shared/lib/tool-auto-on.js` 已删除；
+> - `ka_tool_auto_on_setting.json` 不再被 Kaz 读取或写入。旧文件如需保留只作历史
+>   归档（备份区 `.dsh/backups/` 内已有完整改动前副本）；
+> - Goal 三件套与 `whale_report` 固定常驻 Stable Main Surface；原生 Plan 已移除。
 
 ---
 
@@ -130,7 +120,7 @@ B1 起已移除，因此该区块当前不改变工具面。
   - 不做自动检测；新插件/新工具只能手动添加，写入用户 `other-*` 文件（共享所有项目）；
     开关调整写项目对应文件，可经「设为默认设置」把项目四个文件复制为用户默认。
 - `kaz-memory` 关闭 → 六工具自动移出。
-- 「Kaz 模式工具自动启用」在 B1 后已不参与工具面；B2 将整体退役其 UI/RPC/JSON。
+- v0.8 Step B2：`kaz_tool_auto_on` 已退役，工具自动启用区块/RPC/JSON 读写已删除。
 
 ### 5. round-minimal 信号（首阶段极简）
 

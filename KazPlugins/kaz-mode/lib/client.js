@@ -167,26 +167,16 @@ window.__ModuleLoader__.load({
 				namespace: "ka-whale-workflow",
 				name: "ka-whale-workflow",
 				tag: "鲸鱼工作流 · 任务重构→任务分类",
-				note: "首轮消息先任务重构→任务分类；后续轮次重新进入任务重构；/plan /goal 指令消息跳过鲸鱼工作流；whale_report 由「工具自动启用」面板临时放行，分类时由 whale_report 统一启动 plan/goal；任务重构工具清单在下方代码框中编辑（白名单之上的过滤器）。",
+				note: "首轮消息先任务重构→任务分类；后续轮次重新进入任务重构；/goal 指令消息跳过鲸鱼工作流；whale_report 已固定常驻 Stable Main Surface，分类时由 whale_report 统一完成 goal 启动/记录；任务重构工具清单在下方代码框中编辑（仅兼容展示，不再用于主模型工具面过滤）。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不进入鲸鱼工作流）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走鲸鱼工作流；默认关）" },
-					{ key: "reconstructionTools", kind: "codebox", label: "reconstructionTools（任务重构工具，逗号分隔）" },
+					{ key: "reconstructionTools", kind: "codebox", label: "reconstructionTools（旧任务重构工具，仅兼容展示）" },
 					{ key: "skillAutoLifecycleEnabled", kind: "boolean", label: "skillAutoLifecycleEnabled（Skill 全自动生命周期总开关；默认开）" },
 					{ key: "skillLifecycleUnusedDays", kind: "number", min: 1, step: 1, label: "skillLifecycleUnusedDays（未用多少天进入 retire-pending；默认 60）" },
 					{ key: "skillLifecyclePendingDays", kind: "number", min: 1, step: 1, label: "skillLifecyclePendingDays（retire-pending 宽限天数；默认 7）" },
 					{ key: "skillLifecycleAuditIntervalHours", kind: "number", min: 1, step: 1, label: "skillLifecycleAuditIntervalHours（后台周期审计小时数；默认 24）" },
 					{ key: "skillLifecycleMaxAutoActions", kind: "number", min: 1, max: 1, step: 1, label: "skillLifecycleMaxAutoActions（每周期自动动作数；恒钳制为 1）" },
-				],
-			},
-			{
-				id: "create-plan",
-				namespace: "create-plan",
-				name: "create-plan",
-				tag: "create_plan 工具 · 启用 plan 模式",
-				note: "挂在 Kaz 预设 planning isolate 组，作为 whale_report 启动/退出 plan 模式的 realm 桥（create_plan 支持 active 进入/退出）；create_plan 不再由鲸鱼工作流自动放行，如需直接使用可在工具控制面板手动启用。",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后 create_plan 不进入工具面）" },
 				],
 			},
 		];
@@ -227,7 +217,7 @@ window.__ModuleLoader__.load({
 			"plan-mode-controller",
 		]);
 		/** Kaz 模式自家插件，排序时位于官方之上、外置之下。 */
-		const KAZ_TOOL_PLUGIN_KEYS = new Set(["ka-whale-memory", "create-plan"]);
+		const KAZ_TOOL_PLUGIN_KEYS = new Set(["ka-whale-memory"]);
 
 		/** 面板专用 RPC 通道（宿主 /kaz-mode，loopback）。 */
 		const RPC_CHANNEL = "/kaz-mode";
@@ -336,8 +326,6 @@ window.__ModuleLoader__.load({
 .kzm-tp-group-title{font-size:11px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:8px 0 4px;text-transform:uppercase;letter-spacing:.04em}
 .kzm-tp-tools{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3,var(--dsw-alias-bg-base));border-radius:8px;padding:6px 8px;margin:4px 0 2px;display:flex;flex-direction:column;gap:4px}
 .kzm-tp-tools-title{font-size:10px;font-weight:600;color:var(--dsw-alias-label-tertiary);margin:0}
-.kzm-auto-on-status{display:inline-flex;align-items:center;font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);color:var(--dsw-alias-label-tertiary);background:transparent;flex:none;white-space:nowrap}
-.kzm-auto-on-status[data-on="true"]{color:#a855f7;border-color:rgba(168,85,247,.55);background:rgba(168,85,247,.12)}
 `;
 			const tagId = "kaz-mode/styles";
 			if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
@@ -836,12 +824,6 @@ window.__ModuleLoader__.load({
 							KAZ_FIELDS.map((field) => createElement(FieldEditor, { key: field.key, field, scope: kazScope })),
 							createElement(ToolPluginsSection, {
 								key: "tool-plugins",
-								sessionId: sessionId || "",
-								cwd,
-								writable,
-							}),
-							createElement(ToolAutoOnSection, {
-								key: "tool-auto-on",
 								sessionId: sessionId || "",
 								cwd,
 								writable,
@@ -1482,7 +1464,7 @@ window.__ModuleLoader__.load({
 							{ key: group.id },
 							createElement("p", { className: "kzm-tp-group-title" }, group.title),
 							group.id === "agent" &&
-								createElement("p", { className: "kzm-note" }, "这些自写工具由 Agent/自升级流程管理：跨项目全局启用，任务分类时由 Agent 决定是否选入本任务（不在「模式工具自动启用」内）；面板不提供开关/删除/恢复等操作。"),
+								createElement("p", { className: "kzm-note" }, "这些自写工具由 Agent/自升级流程管理：跨项目全局启用，任务分类时由 Agent 决定是否选入本任务；面板不提供开关/删除/恢复等操作。"),
 							group.keys.map((key) => renderPluginRow(key)),
 						),
 					),
@@ -1490,265 +1472,6 @@ window.__ModuleLoader__.load({
 				);
 			}
 
-			/** kaz_tool_auto_on（模式工具自动启用）：kaz-mode 配置区内的临时工具放行区块，
-			 *  位于工具控制面板下方；三层设置（原设置/默认设置/专属设置）与工具控制面板同款，
-			 *  但工具保持扁平清单、一层只用一个 JSON 文件。 */
-			function ToolAutoOnSection({ sessionId, cwd, writable }) {
-				const [data, setData] = useState(null);
-				const [busy, setBusy] = useState(false);
-				const [drafts, setDrafts] = useState({ plan: null, goal: null, whale: null });
-
-				const refresh = useCallback(async () => {
-					// 轮询只刷新数据，不进入 busy 态，避免“正在同步”闪烁并锁住输入框。
-					const res = await rpcCall("getToolAutoOn", { sessionId: sessionId || "", cwd: cwd || "" });
-					if (res !== null) setData(res);
-				}, [sessionId, cwd]);
-
-				useEffect(() => {
-					setDrafts({ plan: null, goal: null, whale: null });
-					void refresh();
-					// 面板打开时轮询：模型调用 exit_plan_mode / goal 结束等状态变化会实时反映。
-					const timer = setInterval(() => void refresh(), 1500);
-					return () => clearInterval(timer);
-				}, [refresh]);
-
-				const targetCwd = () => (data !== null && typeof data.cwd === "string" && data.cwd.length > 0 ? data.cwd : cwd || "");
-
-				const withBusy = async (task) => {
-					setBusy(true);
-					try {
-						await task();
-					} finally {
-						setBusy(false);
-					}
-				};
-
-				const applyPatch = (patch) =>
-					withBusy(async () => {
-						if (!writable) return;
-						const res = await rpcCall("setToolAutoOn", { sessionId: sessionId || "", cwd: targetCwd(), layer: "project", ...patch });
-						if (res !== null) setData(res);
-					});
-
-				const applyResetLayer = (target) =>
-					withBusy(async () => {
-						if (!writable) return;
-						const res = await rpcCall("resetToolAutoOn", { sessionId: sessionId || "", cwd: targetCwd(), layer: target });
-						if (res !== null) setData(res);
-					});
-
-				const applySetAsDefault = () =>
-					withBusy(async () => {
-						if (!writable) return;
-						if (typeof window !== "undefined" && !window.confirm("确定把当前项目专属设置覆盖到用户默认设置吗？")) return;
-						const res = await rpcCall("setToolAutoOnAsDefault", { sessionId: sessionId || "", cwd: targetCwd() });
-						if (res !== null) setData(res);
-					});
-
-				if (data === null) {
-					return createElement("div", { className: "kzm-state-section" }, createElement("p", { className: "kzm-note" }, "Kaz 模式工具自动启用（当前项目）加载中…"));
-				}
-
-				const effective = data.effective !== null && typeof data.effective === "object" ? data.effective : {};
-				const featureFlags = data.features !== null && typeof data.features === "object" ? data.features : {};
-				const active = data.active !== null && typeof data.active === "object" ? data.active : { plan: false, goal: false, whale: null };
-
-				const hasProjectOverrides = data.hasProjectOverrides === true;
-				const effectiveEqualsFactory = data.effectiveEqualsFactory === true;
-				const effectiveEqualsUser = data.effectiveEqualsUser === true;
-
-				let restoreLabel = null;
-				let restoreOrange = false;
-				let restoreAction = null;
-				if (effectiveEqualsFactory) {
-					restoreLabel = "恢复原设置";
-					restoreOrange = false;
-					restoreAction = async () => {
-						if (typeof window !== "undefined" && !window.confirm("确定恢复为代码内出厂设置吗？")) return;
-						await applyResetLayer("user");
-						await applyResetLayer("project");
-					};
-				} else if (effectiveEqualsUser) {
-					restoreLabel = "恢复原设置";
-					restoreOrange = true;
-					restoreAction = async () => {
-						if (typeof window !== "undefined" && !window.confirm("确定把用户默认设置恢复为原设置吗？")) return;
-						await applyResetLayer("project");
-						await applyResetLayer("user");
-					};
-				} else {
-					restoreLabel = "恢复默认设置";
-					restoreOrange = false;
-					restoreAction = async () => {
-						if (typeof window !== "undefined" && !window.confirm("确定清除当前项目专属设置，恢复为用户默认设置吗？")) return;
-						await applyResetLayer("project");
-					};
-				}
-
-				const FEATURE_META = [
-					{ id: "plan", label: "plan 模式", toolsLabel: "plan 临时放行工具", placeholder: "exit_plan_mode", description: "进入 plan 模式时临时放行这些工具；plan 模式结束自动移除。" },
-					{ id: "goal", label: "goal 模式", toolsLabel: "goal 临时放行工具", placeholder: "get_goal, update_goal", description: "存在 active/paused 目标时临时放行这些工具；goal 模式结束自动移除。" },
-				];
-
-				const whaleFeature = effective.whale !== null && typeof effective.whale === "object" ? effective.whale : { enabled: false, tools: [] };
-				const whaleFlags = featureFlags.whale !== null && typeof featureFlags.whale === "object" ? featureFlags.whale : {};
-				const whaleActive = active.whale === "reconstruction" || active.whale === "classification";
-				const whaleDraft = drafts.whale;
-				const whaleText = whaleDraft !== null ? whaleDraft : Array.isArray(whaleFeature.tools) ? whaleFeature.tools.join(", ") : "";
-				const renderWhaleItem = () =>
-					createElement(
-						"div",
-						{ key: "whale", className: "kzm-state-item" },
-						createElement(
-							"div",
-							{ className: "kzm-state-row" },
-							createElement("span", { className: "kzm-state-name", title: "鲸鱼工作流：whale_report 在重构/分类临时放行；模式启动由 whale_report 统一完成。" }, "鲸鱼工作流"),
-							createElement("span", { className: "kzm-auto-on-status", "data-on": whaleActive ? "true" : "false" }, whaleActive ? "启用中" : "未启用"),
-							whaleFlags.overridden === true && createElement("span", { className: "kzm-override-badge" }, "专属"),
-							whaleFlags.overridden === true &&
-								createElement(
-									"button",
-									{
-										type: "button",
-										className: "kzm-reset-btn",
-										title: "清除鲸鱼工作流的项目专属设置，恢复为用户默认设置",
-										disabled: !writable || busy,
-										onClick: () => void applyPatch({ feature: "whale", reset: true }),
-									},
-									"恢复默认",
-								),
-							createElement(Toggle, {
-								checked: whaleFeature.enabled === true,
-								disabled: !writable || busy,
-								title: "鲸鱼工作流自动启用开关",
-								onChange: (next) => void applyPatch({ feature: "whale", enabled: next }),
-							}),
-						),
-						createElement(
-							"div",
-							{ className: "kzm-field" },
-							createElement("label", null, "whale_report（重构/分类临时放行，逗号分隔）"),
-							createElement("input", {
-								className: "kzm-input",
-								type: "text",
-								value: whaleText,
-								disabled: !writable || busy,
-								placeholder: "whale_report",
-								spellCheck: false,
-								onChange: (event) => setDrafts((prev) => ({ ...prev, whale: event.target.value })),
-								onBlur: () => {
-									if (whaleDraft === null) return;
-									const parsed = whaleDraft
-										.split(",")
-										.map((part) => part.trim())
-										.filter((part) => part.length > 0);
-									setDrafts((prev) => ({ ...prev, whale: null }));
-									void applyPatch({ feature: "whale", tools: parsed });
-								},
-							}),
-						),
-					);
-
-				return createElement(
-					"div",
-					{ className: "kzm-state-section" },
-					createElement(
-						"div",
-						{ className: "kzm-state-head" },
-						createElement("span", { className: "kzm-state-title" }, "Kaz 模式工具自动启用"),
-						restoreLabel !== null &&
-							createElement(
-								"button",
-								{
-									type: "button",
-									className: "kzm-reset-btn",
-									"data-drifted": restoreOrange ? "true" : "false",
-									disabled: !writable || busy,
-									onClick: restoreAction,
-								},
-								restoreLabel,
-							),
-						hasProjectOverrides &&
-							createElement(
-								"button",
-								{
-									type: "button",
-									className: "kzm-set-default-btn",
-									disabled: !writable || busy,
-									onClick: () => void applySetAsDefault(),
-								},
-								"设为默认设置",
-							),
-					),
-					createElement(
-						"p",
-						{ className: "kzm-state-desc" },
-						"三层设置：原设置（代码出厂）→ 默认设置（用户 ka_tool_auto_on_setting.json）→ 专属设置（项目 ka_tool_auto_on_setting.json），同一项目所有对话共享；plan/goal 模式激活、鲸鱼工作流阶段命中时把生效清单临时加入该会话工具面，模式/阶段结束自动移除。仅 Kaz 会话生效。当前项目：" + (targetCwd() || "（未知）"),
-					),
-					FEATURE_META.map((meta) => {
-						const feature = effective[meta.id] !== null && typeof effective[meta.id] === "object" ? effective[meta.id] : { enabled: false, tools: [] };
-						const flags = featureFlags[meta.id] !== null && typeof featureFlags[meta.id] === "object" ? featureFlags[meta.id] : {};
-						const isOn = feature.enabled === true && active[meta.id] === true;
-						const overridden = flags.overridden === true;
-						const draft = drafts[meta.id];
-						const text = draft !== null ? draft : Array.isArray(feature.tools) ? feature.tools.join(", ") : "";
-						return createElement(
-							"div",
-							{ key: meta.id, className: "kzm-state-item" },
-							createElement(
-								"div",
-								{ className: "kzm-state-row" },
-								createElement("span", { className: "kzm-state-name", title: meta.description }, meta.label),
-								createElement("span", { className: "kzm-auto-on-status", "data-on": isOn ? "true" : "false" }, isOn ? "启用中" : "未启用"),
-								overridden && createElement("span", { className: "kzm-override-badge" }, "专属"),
-								overridden &&
-									createElement(
-										"button",
-										{
-											type: "button",
-											className: "kzm-reset-btn",
-											title: "清除该功能的项目专属设置，恢复为用户默认设置",
-											disabled: !writable || busy,
-											onClick: () => void applyPatch({ feature: meta.id, reset: true }),
-										},
-										"恢复默认",
-									),
-								createElement(Toggle, {
-									checked: feature.enabled === true,
-									disabled: !writable || busy,
-									title: meta.label + " 自动启用开关",
-									onChange: (next) => void applyPatch({ feature: meta.id, enabled: next }),
-								}),
-							),
-							createElement(
-								"div",
-								{ className: "kzm-field" },
-								createElement("label", null, meta.toolsLabel + "（逗号分隔，仅模式激活时临时放行）"),
-								createElement("input", {
-									className: "kzm-input",
-									type: "text",
-									value: text,
-									disabled: !writable || busy,
-									placeholder: meta.placeholder,
-									spellCheck: false,
-									onChange: (event) => setDrafts((prev) => ({ ...prev, [meta.id]: event.target.value })),
-									onBlur: () => {
-										if (draft === null) return;
-										const parsed = draft
-											.split(",")
-											.map((part) => part.trim())
-											.filter((part) => part.length > 0);
-										setDrafts((prev) => ({ ...prev, [meta.id]: null }));
-										void applyPatch({ feature: meta.id, tools: parsed });
-									},
-								}),
-							),
-						);
-					}),
-					renderWhaleItem(),
-					busy && createElement("p", { className: "kzm-saving" }, "正在同步…"),
-				);
-			}
 
 			function KazPanel() {
 				const kazSnap = useScope(kazScope);
@@ -2049,7 +1772,7 @@ window.__ModuleLoader__.load({
 
 			/**
 			 * Kaz 按钮：常驻侧边栏底部工具栏（root 作用域——未开始对话时同样
-			 * 可见，首轮之前就能开关 / 配置八个插件，避免 Kaz 首轮极简干扰
+			 * 可见，首轮之前就能开关 / 配置相关插件，避免 Kaz 首轮极简干扰
 			 * 原生极简模式）。状态圆点与文案跟随 kaz-mode.enabled（真正的开关
 			 * 状态）；点击展开 / 收起 Kaz 模式详细设置面板。
 			 * 侧边栏折叠（wide=false）时只显示圆点，文案经悬停标题查看。
@@ -2257,7 +1980,7 @@ window.__ModuleLoader__.load({
 
 			// ---- 注册 ----
 			// Kaz 按钮：注册进侧边栏底部工具栏（sidebar.footer.action，root 作用域、
-			// 常驻可见——未开始对话时也能管理八个插件）；记忆按钮在其左侧（order -2）。
+			// 常驻可见——未开始对话时也能管理相关插件）；记忆按钮在其左侧（order -2）。
 			ctx.slots.inject("sidebar.footer.action", () =>
 				ctx.slots.register({ name: "sidebar.footer.action", id: "kaz-mode", order: -1 }, KazModeHeaderButton),
 			);
