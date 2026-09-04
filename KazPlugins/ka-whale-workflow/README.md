@@ -14,8 +14,17 @@
   active/paused goal）从 `goal-active` 自动切到 `working` 并注入
   `working-resumed`，携带实际 `taskPlanPath`。两类注入都作为插件 user message，
   按边界各一次。
-- `tools/pre-execute` 软闸门：主模型在当前 v0.9 stage 调用非 Allowed tools 返回
-  `workflow-stage-deny`，不视为模型失败惩罚。
+- `tools/pre-execute` 软闸门：主模型与受控 v0.9 子代理在当前 stage 调用非
+  Allowed tools 返回 `workflow-stage-deny`，不视为模型失败惩罚。
+- 受控 v0.9 子代理：`ka_sub_whale` 创建的
+  `worker`/`memoryMaintainer`/`pluginMaintainer`/`pluginCreator` 不受
+  `includeSubagents=false` 跳过。idle 时自动进入 role 首阶段
+  （`worker=assess-complexity`，其余 `=assess-delegation`），按 pending stage
+  注入 role 专属 `[ka-whale-workflow <role-stage>]` 文本，并由 `tools/pre-execute`
+  按该 role/stage 的 Allowed tools 软闸门约束；plugin 的 create/update/retire
+  阶段注入携带实际 `lifecyclePath`。受控角色不再注入旧通用 `SUBAGENT_FLOW_TEXT`
+  （role Persona 已由 ka_sub_whale 提供）；旧/未知子代理仍仅在
+  `includeSubagents=true` 时使用通用 subagent-flow。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/working/maintenance 阶段携带
   `taskPlanPath`，在 create/update/retire-plugin 阶段携带 `lifecyclePath`，
@@ -23,6 +32,9 @@
 - B2.5 重启语义：Minimal 只在整段 session 第一次 tool/call 前发生；后续
   workflow-run 重新进入 `assess-complexity` 但不重复 Minimal；Goal 存在时不重复
   assess；`assess-complexity -> communication (no-tool-call)` 是合法路径。
+- 子代理回传不触发新一轮：DSH `subagent-report` / `subagent-settled` 等内部消息
+  不是真实用户消息，`isUserMessage` 返回 false，不会把主模型 working 重置成
+  `assess-complexity`。
 - Task plan：独立 `ka-whale-workflow-task-plan.json`；
   `decide-tools` 通过 `whale_report(draftPlanItems)` 第一次持久化（draft）；
   `write-plan` 通过 `whale_report(finalPlanPayload)` 第二次定稿（finalized）；
@@ -52,7 +64,8 @@
 ## 设置
 
 - `enabled`：总开关。
-- `includeSubagents`：子代理是否也走鲸鱼工作流，默认关。
+- `includeSubagents`：旧/未知（非受控）子代理是否也走鲸鱼工作流，默认关。
+  受控 v0.9 子代理恒受 ka-whale-workflow 治理，不受本开关限制。
 - 旧 `reconstructionTools` / `taskToolSelectionEnabled` / `enable_tool` 相关设置
   保留为兼容读取，不再参与 v0.9 主模型 stage 面。
 

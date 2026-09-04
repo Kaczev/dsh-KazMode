@@ -165,6 +165,14 @@ Do not write memories or private plugins yourself.
 
 The final white response should be crisp and to the point, and only appear after reasoning and working.`;
 
+/** v0.9 受控子代理 role → 首个 workflow stage（§4 worker；§5–§7 其它 role）。 */
+export const V09_SUBAGENT_ROLE_INITIAL_STAGES = Object.freeze({
+  worker: "assess-complexity",
+  memoryMaintainer: "assess-delegation",
+  pluginMaintainer: "assess-delegation",
+  pluginCreator: "assess-delegation",
+});
+
 /** 非 complete goal 时的继续/新任务/结束确认文案（替代旧 goal-recovery 提示）。 */
 export const GOAL_CONTINUATION_TEXT = `[ka-whale-workflow goal continuation]
 >
@@ -848,6 +856,16 @@ export function isUserMessage(message) {
   const source = message.source;
   if (source === null || source === undefined || typeof source !== "object") return true;
   if (source.kind === "plugin" || source.kind === "goal" || source.kind === "tool") return false;
+  // DSH continuable-subagent 消息不是真实用户：report / settlement / child / diagnostic
+  // 都不应触发主模型“新一轮任务”或“真实用户消息”路由。
+  if (
+    source.kind === "subagent-report" ||
+    source.kind === "subagent-settled" ||
+    source.kind === "diagnostic" ||
+    source.kind === "child"
+  ) {
+    return false;
+  }
   if (typeof source.plugin === "string" && source.plugin.length > 0) return false;
   return true;
 }
@@ -1279,6 +1297,43 @@ export default {
     /** 是否存在需要 Goal 恢复确认的非 complete goal（blocked / paused / disarmed active）。 */
     function goalRecoveryNeeded(agent) {
       return goalRecoveryNeededOf(agent, ctx.get("goals"));
+    }
+
+    /** 受控 v0.9 子代理检测：stageStore.subagentRoles 中存在该 session 的角色记录。
+     *  这类子代理即使 includeSubagents=false 也必须走 ka-whale-workflow。 */
+    function controlledSubagentRoleOfAgent(agent) {
+      if (agent === null || agent === undefined || typeof agent !== "object") return null;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      try {
+        const record = stageStore.getSubagentRole(sessionId);
+        return record !== null && V09_SUBAGENT_ROLES.includes(record.persona)
+          ? record.persona
+          : null;
+      } catch {
+        return null;
+      }
+    }
+
+    /** 受控 v0.9 子代理 idle 时初始化其 role 专属首阶段：
+     *  worker=assess-complexity；memoryMaintainer/pluginMaintainer/pluginCreator=assess-delegation。 */
+    function ensureControlledSubagentStarted(agent) {
+      const role = controlledSubagentRoleOfAgent(agent);
+      if (role === null) return null;
+      if (liveFor(agent).enabled !== true) return role;
+      const current = stageOfAgent(agent);
+      const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role] ?? null;
+      if (initial === null) return role;
+      const alreadyInRoleFlow =
+        current !== "idle" &&
+        current !== "done" &&
+        current !== "end" &&
+        stageDefinitionFor(role, current) !== null;
+      if (alreadyInRoleFlow) return role;
+      if (setStageAgent(agent, initial)) {
+        reportRoundDisplay(agent, `受控 ${role} 子代理进入 ${initial}。`, "阶段切换");
+      }
+      return role;
     }
 
     /** 终案 E：全自动 Skill 生命周期生效配置（总开关 + 阈值；max 恒钳制到 1）。 */
@@ -2327,13 +2382,35 @@ export default {
     }
 
     // -----------------------------------------------------------------------
-    // v0.9 tools/pre-execute 软闸门：主模型 stage 的 Allowed tools 约束。
+    // v0.9 tools/pre-execute 软闸门：主/受控子代理 stage 的 Allowed tools 约束。
     // 返回统一 workflow-stage-deny；不改变 schema，也不视为模型失败惩罚。
     // -----------------------------------------------------------------------
     ctx.on("tools/pre-execute", (exec, next) => {
       const agent = exec?.agent;
       if (agent === null || agent === undefined || typeof agent !== "object") return next();
       if (liveFor(agent).enabled !== true) return next();
+      const controlledRole = controlledSubagentRoleOfAgent(agent);
+      if (controlledRole !== null) {
+        ensureControlledSubagentStarted(agent);
+        const current = stageOfAgent(agent);
+        const def = stageDefinitionFor(controlledRole, current);
+        if (def === null) return next();
+        const name = exec?.name;
+        if (typeof name !== "string" || def.allowedTools.includes(name)) return next();
+        ctx.logger.info(
+          `[ka-whale-workflow] workflow-stage-deny: "${name}" not allowed in ${controlledRole} stage "${current}"`,
+        );
+        return {
+          kind: "deny",
+          reason:
+            `workflow-stage-deny: "${name}" is not allowed in current ka-whale-workflow stage "${current}" ` +
+            `(role "${controlledRole}"). Allowed tools: [${def.allowedTools.join(", ")}]. ` +
+            `Can advance to: [${def.canAdvance.join(", ")}]. ` +
+            `Suggested: use one of the allowed tools, or call ${
+              V09_ROLE_REPORT_TOOLS[controlledRole] ?? "the role report tool"
+            } to advance/report from "${current}".`,
+        };
+      }
       if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return next();
       const current = stageOfAgent(agent);
       if (!isMainWorkflowStage(current)) return next();
@@ -2439,6 +2516,12 @@ export default {
     ctx.on("agent/inbox/claimed", ({ agent, message, turn }) => {
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
+      // 受控 v0.9 子代理不受 includeSubagents=false 跳过：idle 时先进入其 role 首阶段。
+      const controlledRole = controlledSubagentRoleOfAgent(agent);
+      if (controlledRole !== null) {
+        ensureControlledSubagentStarted(agent);
+        return;
+      }
       if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
       if (!isUserMessage(message)) return;
       const sessionId = agent?.session?.id || agent?.id;
@@ -2531,6 +2614,12 @@ export default {
       const agent = sessionAgentOf(session);
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
+      // 受控 v0.9 子代理同样在 round-minimal 解除后进入 role 专属首阶段。
+      const controlledRole = controlledSubagentRoleOfAgent(agent);
+      if (controlledRole !== null) {
+        ensureControlledSubagentStarted(agent);
+        return;
+      }
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
       if (current !== "idle") return;
@@ -2560,12 +2649,18 @@ export default {
       const agent = payload?.agent;
       if (agent !== null && agent !== undefined && typeof agent === "object") {
         const live = liveFor(agent);
-        const skipSubagent = live.includeSubagents !== true && isSubagent(agent);
+        const controlledRole = controlledSubagentRoleOfAgent(agent);
+        // 受控 v0.9 子代理：先确保其 role 专属首阶段已初始化，不走主模型 Goal/新任务路由。
+        if (controlledRole !== null && live.enabled === true) {
+          ensureControlledSubagentStarted(agent);
+        }
+        const skipSubagent =
+          controlledRole === null && live.includeSubagents !== true && isSubagent(agent);
         const messages = Array.isArray(payload?.messages) ? payload.messages : [];
         const hasRealUserMessage = messages.some((message) => isUserMessage(message));
         const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
         const bypassed = isBypassed(agent);
-        if (live.enabled === true && !skipSubagent && !bypassed) {
+        if (live.enabled === true && controlledRole === null && !skipSubagent && !bypassed) {
           const stage = stageOfAgent(agent);
           const goalActive = goalModeActive(agent);
           const recoveryGoal = goalRecoveryNeeded(agent);
@@ -2622,11 +2717,14 @@ export default {
       if (isBypassed(agent)) return decision;
       // 上下文注入：
       //   - goal-recovery 使用 Goal 继续确认；
-      //   - 其余首次仍可注入 v0.9 主/子流程 Persona（session 一次）；
+      //   - 主模型 / 旧未知子代理（includeSubagents=true）的 flow Persona 首次注入一次；
+      //   - 受控 v0.9 子代理只注入 role-specific stage，不注入旧通用 subagent-flow；
       //   - v0.9 stage 注入按 pendingStageInjection 精确一次（同一 run 内重新
       //     进入某 stage 会再次 pending，因此会再次注入）。
       const liveNow = liveFor(agent);
-      const skipSubagentNow = liveNow.includeSubagents !== true && isSubagent(agent);
+      const controlledRoleNow = controlledSubagentRoleOfAgent(agent);
+      const skipSubagentNow =
+        controlledRoleNow === null && liveNow.includeSubagents !== true && isSubagent(agent);
       const stageNow = stageOfAgent(agent);
       const subagentNow = isSubagent(agent);
       const sessionIdNow = sessionIdOf(agent);
@@ -2634,28 +2732,32 @@ export default {
       const messages = Array.isArray(decision.messages) ? decision.messages : [];
       let appended = false;
       if (liveNow.enabled === true && !skipSubagentNow && !isBypassed(agent)) {
-        const recoveryNow = stageNow === GOAL_RECOVERY_STAGE;
-        const form = recoveryNow ? "goal-continuation" : subagentNow ? "subagent-flow" : "main-flow";
-        const alreadyInjectedTurn = hasInjectedInTurn(agent, form, turn);
-        const alreadyInjectedBefore = !recoveryNow && hasInjectedBefore(agent, form);
-        if (!alreadyInjectedTurn && !alreadyInjectedBefore) {
-          const text = recoveryNow ? GOAL_CONTINUATION_TEXT : subagentNow ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
-          try {
-            const message = createUserMessage({
-              content: [{ type: "text", text }],
-              source: { kind: "plugin", plugin: "ka-whale-workflow", form },
-            });
-            messages.push(message);
-            appended = true;
-            reportRoundDisplay(
-              agent,
-              text,
-              recoveryNow ? "Goal 继续确认" : subagentNow ? "子代理流程" : "主流程",
-            );
-          } catch (error) {
-            ctx.logger.warn(
-              `[ka-whale-workflow] 构造主/子流程上下文消息失败：${error instanceof Error ? error.message : String(error)}`,
-            );
+        // 受控 v0.9 子代理的 Persona 已由 ka_sub_whale 带入对应 role flow；
+        // 不再注入旧通用 SUBAGENT_FLOW_TEXT，只注入 role-specific pending stage。
+        if (controlledRoleNow === null) {
+          const recoveryNow = stageNow === GOAL_RECOVERY_STAGE;
+          const form = recoveryNow ? "goal-continuation" : subagentNow ? "subagent-flow" : "main-flow";
+          const alreadyInjectedTurn = hasInjectedInTurn(agent, form, turn);
+          const alreadyInjectedBefore = !recoveryNow && hasInjectedBefore(agent, form);
+          if (!alreadyInjectedTurn && !alreadyInjectedBefore) {
+            const text = recoveryNow ? GOAL_CONTINUATION_TEXT : subagentNow ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
+            try {
+              const message = createUserMessage({
+                content: [{ type: "text", text }],
+                source: { kind: "plugin", plugin: "ka-whale-workflow", form },
+              });
+              messages.push(message);
+              appended = true;
+              reportRoundDisplay(
+                agent,
+                text,
+                recoveryNow ? "Goal 继续确认" : subagentNow ? "子代理流程" : "主流程",
+              );
+            } catch (error) {
+              ctx.logger.warn(
+                `[ka-whale-workflow] 构造主/子流程上下文消息失败：${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
           }
         }
 
@@ -2687,6 +2789,32 @@ export default {
               ctx.logger.warn(
                 `[ka-whale-workflow] 构造 ${pendingStage} 边界注入消息失败：${error instanceof Error ? error.message : String(error)}`,
               );
+            }
+          } else if (pendingStage !== null && controlledRoleNow !== null) {
+            // 受控子代理：注入 role 专属 stage 文本；plugin 生命周期阶段附实际 lifecyclePath。
+            const options = stageNeedsLifecyclePath(pendingStage)
+              ? { lifecyclePath: lifecycleReferencePath }
+              : {};
+            const text = stageInjectionText(controlledRoleNow, pendingStage, options);
+            if (text.length > 0) {
+              try {
+                const message = createUserMessage({
+                  content: [{ type: "text", text }],
+                  source: {
+                    kind: "plugin",
+                    plugin: "ka-whale-workflow",
+                    form: `stage:${pendingStage}`,
+                  },
+                });
+                messages.push(message);
+                appended = true;
+                stageStore.clearPendingStageInjection(sessionIdNow);
+                reportRoundDisplay(agent, text, `阶段 ${pendingStage}`);
+              } catch (error) {
+                ctx.logger.warn(
+                  `[ka-whale-workflow] 构造 ${controlledRoleNow} 阶段注入消息失败：${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
             }
           } else if (
             pendingStage !== null &&

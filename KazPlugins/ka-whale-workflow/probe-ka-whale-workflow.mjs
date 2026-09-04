@@ -121,6 +121,7 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
 check("真实用户消息判定", isUserMessage({ content: [], source: { kind: "user" } }) === true && isUserMessage({ content: [] }) === true);
 check("插件消息判定为假", isUserMessage({ content: [], source: { kind: "plugin", plugin: "ka-whale-workflow", form: "reconstruction" } }) === false);
 check("goal/tool 消息判定为假", isUserMessage({ content: [], source: { kind: "goal" } }) === false && isUserMessage({ content: [], source: { kind: "tool" } }) === false);
+check("subagent-report/subagent-settled 消息判定为假（不触发新一轮）", isUserMessage({ content: [], source: { kind: "subagent-report", form: "relay", senderSessionId: "child" } }) === false && isUserMessage({ content: [], source: { kind: "subagent-settled", form: "notice", senderSessionId: "child" } }) === false);
 
 {
   // 重构重入：turn 1 注入过 TaskReconstruction，turn 2 仍应允许重新注入。
