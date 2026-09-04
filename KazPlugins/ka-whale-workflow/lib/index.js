@@ -48,11 +48,35 @@ import {
   projectRegistryFromLifecycle,
   transitionAllowed,
   skillKeyOf,
+  KAZ_TASK_PLAN_STORE_PATH,
+  KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH,
+  KAZ_V09_MAIN_TOOLS,
+  KAZ_V09_SUB_WHALE_REPORT_TOOLS,
+  KAZ_V09_SUBAGENT_ROLE_TOOLS,
 } from "kaz-shared";
 import { readJsonFileSafe, writeJsonFileSafe } from "kaz-shared/lib/safe-json-file.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import {
+  MAIN_ROLE,
+  MAIN_STAGE_IDS,
+  V09_SUBAGENT_ROLES,
+  V09_STAGE_IDS,
+  V09_ROLE_PERSONAS,
+  V09_ROLE_REPORT_TOOLS,
+  stageDefinitionFor,
+  stageInjectionText,
+  canAdvance,
+  isMainWorkflowStage,
+  isSubagentWorkflowStage,
+  stageNeedsLifecyclePath,
+  stageNeedsTaskPlanPath,
+} from "./stage-defs.js";
+import {
+  createTaskPlanStore,
+  resolvePlanItemForDelegation,
+} from "./task-plan-store.js";
 
 export { DEFAULT_RECONSTRUCTION_TOOLS };
 
@@ -75,34 +99,47 @@ function defaultAgentManagedRegistryFile() {
   return join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", AGENT_MANAGED_STORAGE_FILE);
 }
 
-/** whale_report：v0.8 Step A 后为 Stable Main Surface 常驻工具（不再由阶段临时放行）。 */
+/** whale_report：v0.9 主模型 stage 推进/任务计划持久化工具。 */
 export const WHALE_REPORT_TOOL = "whale_report";
+
+/** v0.9 受控委派工具名（31 世基础骨架）。 */
+export const KA_SUB_WHALE_TOOL = "ka_sub_whale";
+
+/** v0.9 子代理 report 工具名（ka-whale-workflow 注册并包装子代理 report 能力）。 */
+export const WORK_SUB_WHALE_REPORT_TOOL = "work_sub_whale_report";
+export const MEMORY_SUB_WHALE_REPORT_TOOL = "memory_sub_whale_report";
+export const PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL = "plugin_maintainer_sub_whale_report";
+export const PLUGIN_CREATOR_SUB_WHALE_REPORT_TOOL = "plugin_creator_sub_whale_report";
+
+/** 旧版 goal 恢复阶段名：保留兼容；v0.9 主流程不再把其作为普通 stage。 */
+export const GOAL_RECOVERY_STAGE = "goal-recovery";
+
+/** v0.9 stage 常量（再导出，便于探针/下游引用）。 */
+export { MAIN_ROLE, MAIN_STAGE_IDS, V09_SUBAGENT_ROLES, V09_STAGE_IDS };
+
+/** 任务计划独立存储路径常量（由 kaz-shared 定义，这里再导出便于探针）。 */
+export { KAZ_TASK_PLAN_STORE_PATH, KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH };
 
 /** 用户手动指令开启模式的命令名（v0.8 Step B1：/plan 已移除，仅剩 /goal）。 */
 const MANUAL_COMMAND_NAMES = ["goal"];
 
-/** v0.8 Step A 主流程上下文注入文案（不再有 TaskReconstruction/Classification）。 */
+/** v0.9 主流程上下文文案（v0.9 §9.1 Persona 口径；阶段注入另行按 run 追加）。 */
 export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
 >
-This session uses the v0.8 main-line workflow:
-- Minimal (before the first tool call): judge whether the task is simple or complex using only the few visible tools.
-- Simple: communicate the answer; do not expand the surface.
-- Complex: challenge the user's proposed approach when needed, find the smallest-workable solution, decide what tools are required, and decide whether a subagent should create tools. Write the working plan with per-item subagent and tool assignments.
-- If the task should be a Goal, start or resume it via the stable Goal tools (create_goal/get_goal/update_goal) or whale_report once; otherwise continue Working with the stable surface.
-- During Working, keep gray reasoning concise; delegate specialized subtasks to subagent instead of expanding your own tool surface.
-- Communicate results to Kaczev, then report candidate memory/skill suggestions. Memory/skill write tools belong to maintenance subagents only.
-The tool surface is fixed after the first tool call: KAZ_BASE_TOOLS + Goal tools + whale_report + subagent. Old reconstruction/classification stage prompts no longer exist; do not wait for them.`;
+Follow the ka-whale-workflow in order: assess-complexity, challenge-plan, decide-tools, write-plan, decide-goal, working, memory-maintenance, plugin-maintenance, communication. Use whale_report to advance only to a legal next stage; direct no-tool communication is a legal exception. Start or resume Goal via whale_report({mode:'goal'}); do not use create_goal directly. Delegate specialized subtasks to subagents instead of expanding your own tool surface. Persist the task plan during write-plan and review it whenever needed in later stages. If working reveals that the task plan must change, advance back to write-plan for explicit amendment, then return to working. Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
 
-/** v0.8 Step A 子代理流程上下文注入文案。 */
+During working, execute the main line and verify subagent reports. During memory-maintenance and plugin-maintenance, delegate writes to maintenance subagents; you never hold memory/plugin write tools.
+
+The final white response should be crisp and to the point, and only appear after reasoning and working.`;
+
+/** v0.9 worker 子代理流程上下文文案（§9.2；其它 role 由各自 stage 注入覆盖）。 */
 export const SUBAGENT_FLOW_TEXT = `[ka-whale-workflow subagent flow]
 >
-This session uses the v0.8 subagent workflow:
-- Minimal (before the first tool call): judge whether the delegated task is simple or complex.
-- If the delegation is ambiguous or complex: challenge it with the main model, find the minimal solution, and check whether the tools the main model specified are sufficient.
-- Sufficient tools: go to Working.
-- Insufficient tools: report to the main model (Communication) and ask for another delegation; do not explore or create tools on your own.
-- Do not create a new subagent that carries tools. Do not write memory or skills yourself.
-- At the end, report candidate experience/skill suggestions to the main model; actual writes are done by maintenance subagents.`;
+Follow the ka-whale-workflow in order: assess-complexity, challenge-plan, check-tools, working, communication. Use work_sub_whale_report to advance. Work as a delegated worker subagent: assess the delegation, challenge it when needed, verify assigned tools, then work and report. Do not start goals and do not ask the user directly. If assigned tools are insufficient, report to the parent main agent. Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the parent main agent and stop the work immediately.
+
+Do not write memories or private plugins yourself.
+
+The final white response should be crisp and to the point, and only appear after reasoning and working.`;
 
 /** 非 complete goal 时的继续/新任务/结束确认文案（替代旧 goal-recovery 提示）。 */
 export const GOAL_CONTINUATION_TEXT = `[ka-whale-workflow goal continuation]
@@ -113,7 +150,7 @@ A non-complete goal already exists in this session. Before routing this human me
 - End the current goal: do not resume or silently create; tell Kaczev to complete/clear it or choose another option.`;
 
 /** Goal 恢复阶段名：非 complete goal（blocked / paused / disarmed active）存在时使用。 */
-export const GOAL_RECOVERY_STAGE = "goal-recovery";
+// (GOAL_RECOVERY_STAGE 已在文件头部导出，此处不再重复声明。)
 
 /** 同一 turn/stage 内最多自动提醒次数（v0.8 Step A 不再用于旧阶段提示，保留常量以免破坏旧探针导入）。 */
 export const MAX_WHALE_REMINDERS = 0;
@@ -494,17 +531,33 @@ export function normalizeContractStateValue(raw) {
   };
 }
 
+/** 存储可接受的所有 stage 值：v0.9 + 旧兼容值。 */
+const KNOWN_SESSION_STAGES = new Set([
+  ...V09_STAGE_IDS,
+  "idle",
+  "done",
+  "end",
+  "goal-recovery",
+  "reconstruction",
+  "classification",
+]);
+
 /**
  * 创建阶段状态存储（可注入文件路径，便于探针用临时文件）。
- * 结构：{ version: 3, sessions: { "<sessionId>": "reconstruction"|"goal-recovery"|"classification"|"done" },
- *        taskToolState: { "<sessionId>": { taskRunId, mode, initialOptionalTools, jitEnabledTools } },
- *        contractState: { "<sessionId>": { status, contractText, confirmedAt } } }
- * 旧文件缺少 taskToolState / contractState 时仍按旧版读取；损坏 JSON / 损坏状态一律丢弃。
+ * 结构：{ version: 4,
+ *        sessions: { "<sessionId>": "<v0.9 stage or legacy stage>" },
+ *        taskToolState: { "<sessionId>": {...} },
+ *        contractState: { "<sessionId>": {...} },
+ *        workflowRuns: { "<sessionId>": { runId, enteredStages } },
+ *        pendingStageInjection: { "<sessionId>": "<stage>" } }
+ * 旧文件缺少 taskToolState / contractState / workflowRuns 时仍按旧版读取。
  */
 export function createStageStore(file) {
   const sessions = {};
   const taskToolState = {};
   const contractState = {};
+  const workflowRuns = {};
+  const pendingStageInjection = {};
   try {
     if (file !== undefined && file !== null && existsSync(file)) {
       let raw = readFileSync(file, "utf8");
@@ -513,7 +566,7 @@ export function createStageStore(file) {
       const data = parsed !== null && typeof parsed === "object" ? parsed.sessions : undefined;
       if (data !== null && typeof data === "object") {
         for (const [id, stage] of Object.entries(data)) {
-          if (id.length > 0 && (stage === "reconstruction" || stage === "goal-recovery" || stage === "classification" || stage === "done")) {
+          if (id.length > 0 && typeof stage === "string" && KNOWN_SESSION_STAGES.has(stage)) {
             sessions[id] = stage;
           }
         }
@@ -534,6 +587,24 @@ export function createStageStore(file) {
           if (normalized !== null) contractState[id] = normalized;
         }
       }
+      const rawRuns = parsed !== null && typeof parsed === "object" ? parsed.workflowRuns : undefined;
+      if (rawRuns !== null && typeof rawRuns === "object") {
+        for (const [id, rawRun] of Object.entries(rawRuns)) {
+          if (id.length === 0 || rawRun === null || typeof rawRun !== "object") continue;
+          const runId = Number.isSafeInteger(rawRun.runId) && rawRun.runId > 0 ? rawRun.runId : 0;
+          const enteredStages = Array.isArray(rawRun.enteredStages)
+            ? rawRun.enteredStages.filter((item) => typeof item === "string")
+            : [];
+          workflowRuns[id] = { runId, enteredStages };
+        }
+      }
+      const rawPending = parsed !== null && typeof parsed === "object" ? parsed.pendingStageInjection : undefined;
+      if (rawPending !== null && typeof rawPending === "object") {
+        for (const [id, stage] of Object.entries(rawPending)) {
+          if (id.length === 0 || typeof stage !== "string") continue;
+          if (KNOWN_SESSION_STAGES.has(stage)) pendingStageInjection[id] = stage;
+        }
+      }
     }
   } catch {
     // 存储损坏时从空状态开始，不影响主流程
@@ -542,12 +613,35 @@ export function createStageStore(file) {
     if (typeof file !== "string" || file.length === 0) return true;
     try {
       mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(file, JSON.stringify({ version: 3, sessions, taskToolState, contractState }, null, 2) + String.fromCharCode(10), "utf8");
+      writeFileSync(
+        file,
+        JSON.stringify(
+          {
+            version: 4,
+            sessions,
+            taskToolState,
+            contractState,
+            workflowRuns,
+            pendingStageInjection,
+          },
+          null,
+          2,
+        ) + String.fromCharCode(10),
+        "utf8",
+      );
       return true;
     } catch {
       return false;
     }
   }
+  const runStateOf = (sessionId) => {
+    let state = workflowRuns[sessionId];
+    if (state === undefined) {
+      state = { runId: 0, enteredStages: [] };
+      workflowRuns[sessionId] = state;
+    }
+    return state;
+  };
   return {
     file,
     get(sessionId) {
@@ -555,6 +649,7 @@ export function createStageStore(file) {
     },
     set(sessionId, stage) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (typeof stage !== "string" || !KNOWN_SESSION_STAGES.has(stage)) return false;
       sessions[sessionId] = stage;
       return persist();
     },
@@ -600,6 +695,45 @@ export function createStageStore(file) {
       persist();
       return true;
     },
+    /** workflow-run 状态：{ runId, enteredStages }。 */
+    getWorkflowRun(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      return JSON.parse(JSON.stringify(runStateOf(sessionId)));
+    },
+    beginWorkflowRun(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const state = runStateOf(sessionId);
+      state.runId = Number.isSafeInteger(state.runId) ? state.runId + 1 : 1;
+      state.enteredStages = [];
+      return persist();
+    },
+    addWorkflowRunStage(sessionId, stage) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const state = runStateOf(sessionId);
+      state.enteredStages.push(stage);
+      return persist();
+    },
+    hasWorkflowRunStage(sessionId, stage) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      return runStateOf(sessionId).enteredStages.includes(stage);
+    },
+    getPendingStageInjection(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      return pendingStageInjection[sessionId] ?? null;
+    },
+    setPendingStageInjection(sessionId, stage) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (typeof stage !== "string" || !KNOWN_SESSION_STAGES.has(stage)) return false;
+      pendingStageInjection[sessionId] = stage;
+      return persist();
+    },
+    clearPendingStageInjection(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (!Object.prototype.hasOwnProperty.call(pendingStageInjection, sessionId)) return false;
+      delete pendingStageInjection[sessionId];
+      persist();
+      return true;
+    },
   };
 }
 
@@ -625,7 +759,7 @@ export function stageOf(agent, store = null) {
   const sessionId = sessionIdOf(agent);
   if (store !== null && store !== undefined && typeof store.get === "function") {
     const stored = store.get(sessionId);
-    if (stored === "reconstruction" || stored === "goal-recovery" || stored === "classification" || stored === "done") return stored;
+    if (typeof stored === "string" && KNOWN_SESSION_STAGES.has(stored)) return stored;
   }
   return legacyStageOf(agent);
 }
@@ -732,16 +866,38 @@ export function hasInjectedInTurn(agent, form, turn) {
   }
 }
 
-/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）默认进入「任务重构」。
- *  非 complete goal 需要恢复确认时（context.goalRecovery 非空）先进入 goal-recovery；
- *  Goal 模式激活时（context.goalActive=true）保持 idle/done，不进入任务重构。
- *  v0.8 Step B1：原生 Plan 已移除，不再有 plan mode 分支。 */
+/** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）的路由。
+ *  v0.9 语义：
+ *  - Goal 激活 / 非 complete Goal 存在时不重新开启 assess-complexity；
+ *  - 普通新任务始终进入 assess-complexity（Minimal 不再重复，由 round-minimal
+ *    按“会话第一次 tool/call”判定）；
+ *  - 用户插话不改变当前阶段由调用方自行处理（此函数只处理新一轮消息）。
+ */
 export function nextStageOnUserMessage(current, _turn, context = {}) {
-  if (context?.goalRecovery !== null && context?.goalRecovery !== undefined) {
-    if (current === "idle" || current === "done" || current === GOAL_RECOVERY_STAGE) return GOAL_RECOVERY_STAGE;
+  const recovery =
+    context?.goalRecovery !== null && context?.goalRecovery !== undefined
+      ? context.goalRecovery
+      : null;
+  if (recovery !== null && recovery !== undefined) {
+    if (
+      current === "idle" ||
+      current === "done" ||
+      current === "end" ||
+      current === GOAL_RECOVERY_STAGE
+    ) {
+      return GOAL_RECOVERY_STAGE;
+    }
   }
-  if (context?.goalActive === true && (current === "idle" || current === "done")) return current;
-  return "reconstruction";
+  if (context?.goalActive === true) {
+    // v0.9：Goal 存在时直接进入/保持 working，不重新开启 assess-complexity。
+    if (current === "working") return "working";
+    if (current === "idle" || current === "done" || current === "end") return "working";
+    return isMainWorkflowStage(current) || current === "reconstruction" || current === "classification"
+      ? "working"
+      : "working";
+  }
+  // 普通新任务：重新进入 assess-complexity（不再进入旧 reconstruction）。
+  return "assess-complexity";
 }
 
 /** 检测 /goal 命令触发的消息：最后一个 turn/end 之后有成功的 command/run。
@@ -822,6 +978,19 @@ export default {
         ? config.stageStore.trim()
         : defaultStageFile(),
     );
+
+    /** v0.9 task plan 独立存储（config.taskPlanStore 可覆盖，探针用临时文件）。 */
+    const taskPlanStore = createTaskPlanStore(
+      typeof config.taskPlanStore === "string" && config.taskPlanStore.trim().length > 0
+        ? config.taskPlanStore.trim()
+        : KAZ_TASK_PLAN_STORE_PATH,
+    );
+
+    /** 生命周期参考文件实际路径（config.lifecyclePath 可覆盖，探针用临时文件）。 */
+    const lifecycleReferencePath =
+      typeof config.lifecyclePath === "string" && config.lifecyclePath.trim().length > 0
+        ? config.lifecyclePath.trim()
+        : KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH;
 
     // -----------------------------------------------------------------------
     // 终案 E：lifecycle / registry / audit 文件路径（config 覆盖仅供离线探针）。
@@ -906,18 +1075,24 @@ export default {
       return stageOf(agent, stageStore);
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
-     *  进入 reconstruction = 新逻辑任务运行开始，递增 [ka-whale-memory Review] 与
-     *  skill-review 各自的 taskRunId，并清除该 session 的旧任务工具状态
-     *  （第三次升级：新一轮任务重新分类选择）。 */
+     *  v0.9：进入 assess-complexity = 新 workflow-run 开始，递增
+     *  [ka-whale-memory Review] 与 skill-review 各自的 taskRunId、清除旧任务工具状态，
+     *  并记录该 run 的已进入 stage（pending injection 一次）。 */
     function setStageAgent(agent, stage) {
       const changed = setStage(agent, stage, stageStore);
-      if (changed === true && stage === "reconstruction") {
-        const sessionId = sessionIdOf(agent);
-        if (typeof sessionId === "string" && sessionId.length > 0) {
+      if (changed !== true) return changed;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId === "string" && sessionId.length > 0) {
+        if (stage === "assess-complexity") {
           beginReviewTaskRun(sessionId);
           beginSkillReviewTaskRun(sessionId);
           stageStore.removeTaskToolState(sessionId);
           stageStore.removeContractState(sessionId);
+          stageStore.beginWorkflowRun(sessionId);
+        }
+        if (V09_STAGE_IDS.includes(stage)) {
+          stageStore.setPendingStageInjection(sessionId, stage);
+          stageStore.addWorkflowRunStage(sessionId, stage);
         }
       }
       return changed;
@@ -1453,12 +1628,17 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report workflow bookkeeping or mode to ka-whale-workflow. v0.8 Stable Main Surface keeps this tool constant; it no longer narrows the tool surface. Pass mode='goal' to create/resume a Goal, or no mode for normal completion. During goal continuation, pass mode='goal' only when a resume is actually needed; an already active+armed goal is a no-op. Native Plan was removed in v0.8 Step B1: mode='plan' is no longer accepted.",
+        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for second persistence. Pass mode='goal' to create/resume a Goal; normal/default advances a non-goal task. mode='plan' is not accepted.",
       parameters: {
         mode: {
           type: "string",
           description:
-            "'normal' (default) finishes workflow bookkeeping; 'goal' creates a new Goal or resumes a non-complete one. During goal continuation, pass 'goal' only when a resume is required; omit mode only when starting a new task.",
+            "'normal' (default) for non-goal bookkeeping; 'goal' creates a new Goal or resumes a non-complete one through whale_report. During goal continuation, pass 'goal' only when a resume is required; omit mode only when starting a new task.",
+        },
+        nextStage: {
+          type: "string",
+          description:
+            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, write-plan, decide-goal, working, memory-maintenance, plugin-maintenance. In decide-tools/write-plan it may be omitted when the payload implies the only/default transition.",
         },
         objective: {
           type: "string",
@@ -1467,6 +1647,15 @@ export default {
         max_goal_rounds: {
           type: "number",
           description: "Optional positive integer for mode='goal': automatic continuation round cap.",
+        },
+        draftPlanItems: {
+          type: "array",
+          items: { type: "json" },
+          description: "Used in decide-tools: array of { planItemId, persona, task, assignedTools } to persist as draft task plan items (first persistence).",
+        },
+        finalPlanPayload: {
+          type: "json",
+          description: "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, assignedTools }] } to persist/finalize the complete task plan (second persistence).",
         },
         optional_tools: {
           type: "array",
@@ -1502,40 +1691,232 @@ export default {
             } catch (error) {
               return Promise.reject(error instanceof Error ? error : new Error(String(error)));
             }
-            setStageAgent(agent, "done");
-            reportRoundDisplay(agent, "已确认继续原 Goal，目标模式已恢复。", "工作流切换");
-            return Promise.resolve({ ok: true, stage: "done", restarted: false });
+            setStageAgent(agent, "working");
+            reportRoundDisplay(agent, "已确认继续原 Goal，进入 working。", "工作流切换");
+            return Promise.resolve({ ok: true, stage: "working", restarted: false });
           }
-          if (setStageAgent(agent, "reconstruction")) {
-            reportRoundDisplay(agent, "已确认开始新任务，进入新一轮主工作流。", "工作流切换");
+          if (setStageAgent(agent, "assess-complexity")) {
+            reportRoundDisplay(agent, "已确认开始新任务，进入 assess-complexity。", "工作流切换");
           }
-          return Promise.resolve({ ok: true, stage: "reconstruction", restarted: false });
+          return Promise.resolve({ ok: true, stage: "assess-complexity", restarted: false });
         }
-        // v0.8 Step A/B1：非 goal-recovery 状态下 whale_report 是一次性 bookkeeping；
-        // 原生 Plan 已移除，不再接受 mode='plan'，只完成 normal/goal。
         if (args?.mode === "plan") {
           return Promise.reject(new Error("whale_report mode='plan' is no longer supported: native Plan was removed in v0.8 Step B1"));
         }
-        const mode = args?.mode === "goal" ? "goal" : "normal";
-        const launches = [];
-        if (mode === "goal") {
+        if (!isMainWorkflowStage(current)) {
+          // 非 v0.9 主 stage（idle/done/旧兼容值）：只接受明确 goal 恢复/新任务入口。
+          if (args?.mode === "goal") {
+            try {
+              await launchGoalMode(agent, ctx.get("goals"), args);
+            } catch (error) {
+              return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+            }
+            setStageAgent(agent, "working");
+            return Promise.resolve({ ok: true, stage: "working", restarted: false });
+          }
+          const def = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
+          const reason =
+            `workflow-stage-deny: whale_report cannot advance from outside the v0.9 main stage machine ` +
+            `(current="${current}"). Current allowed tools: ${def.allowedTools.join(", ")}. ` +
+            `Suggested: start a new task through assess-complexity or resume an existing Goal with mode='goal'.`;
+          return Promise.reject(new Error(reason));
+        }
+
+        // v0.9 task plan persistence at decide-tools / write-plan.
+        if (current === "decide-tools" && Array.isArray(args?.draftPlanItems)) {
+          const persisted = taskPlanStore.persistDraftItems(args.draftPlanItems);
+          if (persisted.ok !== true) {
+            return Promise.reject(new Error("whale_report failed to persist draft task plan items; task plan store write failed."));
+          }
+        }
+        if (current === "write-plan") {
+          const payload = args?.finalPlanPayload;
+          if (payload === null || payload === undefined || typeof payload !== "object") {
+            const def = stageDefinitionFor(MAIN_ROLE, "write-plan");
+            return Promise.reject(
+              new Error(
+                `workflow-stage-deny: write-plan requires whale_report(finalPlanPayload) with { status: 'finalized', items: [...] }; ` +
+                  `current allowed tools: [${def.allowedTools.join(", ")}].`,
+              ),
+            );
+          }
+          const persisted = taskPlanStore.persistFinalPayload(payload);
+          if (persisted.ok !== true) {
+            return Promise.reject(new Error("whale_report failed to persist finalized task plan; task plan store write failed."));
+          }
+        }
+
+        const def = stageDefinitionFor(MAIN_ROLE, current);
+        const defaultNext =
+          current === "assess-complexity" || current === "communication"
+            ? null
+            : current === "challenge-plan"
+              ? "decide-tools"
+              : current === "decide-tools"
+                ? "write-plan"
+                : current === "write-plan"
+                  ? "decide-goal"
+                  : current === "decide-goal"
+                    ? "working"
+                    : "communication";
+        const requested =
+          typeof args?.nextStage === "string" && args.nextStage.trim().length > 0
+            ? args.nextStage.trim()
+            : null;
+        const target = requested !== null ? requested : defaultNext;
+
+        if (target === null || !canAdvance(MAIN_ROLE, current, target)) {
+          const reason =
+            `workflow-stage-deny: whale_report cannot advance from "${current}" to "${String(target)}". ` +
+            `Current allowed tools: [${def.allowedTools.join(", ")}]. Can advance to: [${def.canAdvance.join(", ")}]. ` +
+            `Suggested: call whale_report with a legal nextStage from the Can advance to list.`;
+          return Promise.reject(new Error(reason));
+        }
+
+        if (args?.mode === "goal") {
           try {
             await launchGoalMode(agent, ctx.get("goals"), args);
-            launches.push("goal");
           } catch (error) {
             return Promise.reject(error instanceof Error ? error : new Error(String(error)));
           }
         }
-        setStageAgent(agent, "done");
+        if (target !== "end") {
+          setStageAgent(agent, target);
+        } else {
+          setStageAgent(agent, "done");
+        }
         reportRoundDisplay(
           agent,
-          "whale_report（模式：" + mode + (launches.length > 0 ? "，已启动 " + launches.join("、") : "") + "）：工作流记录完成，Stable Main Surface 不变。",
+          `whale_report：${current} → ${target}（mode=${args?.mode ?? "normal"}）`,
           "鲸鱼工作流",
         );
-        return Promise.resolve({ ok: true, stage: "done", restarted: false });
+        return Promise.resolve({ ok: true, stage: target === "end" ? "done" : target, restarted: false });
       },
       presentCall: () => ({ card: "generic", title: "鲸鱼工作流汇报", kind: "other" }),
     });
+
+    // -----------------------------------------------------------------------
+    // ka_sub_whale：v0.9 受控委派基础骨架（31 世只做 planItemId 解析/拒绝；
+    // 完整 toolFilter/assignedTools 投影由 32 世 B3 实现）。
+    // -----------------------------------------------------------------------
+    const kaSubWhaleDef = defineTool({
+      name: KA_SUB_WHALE_TOOL,
+      description:
+        "Kaz controlled delegation tool: create a subagent by a finalized task-plan planItemId. The persona/task/assignedTools are bound from the persisted task plan; pass only planItemId. Draft, missing, or not-yet-persisted ids are rejected with a structured refusal. In v0.9 31-session scope this is the registered parsing skeleton; full dynamic toolFilter projection lands in the next generation.",
+      parameters: {
+        planItemId: {
+          type: "string",
+          required: true,
+          description: "planItemId of a finalized item in the persisted task plan.",
+        },
+      },
+      output: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            ok: { type: "boolean", required: true },
+            code: { type: "string" },
+            reason: { type: "string" },
+            status: { type: "string" },
+            planItemId: { type: "string" },
+            persona: { type: "string" },
+            task: { type: "string" },
+            assignedTools: { type: "array", items: { type: "string" } },
+            note: { type: "string" },
+          },
+        },
+        render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
+      },
+      async execute(args, exec) {
+        const agent = exec?.agent;
+        if (agent === null || agent === undefined || typeof agent !== "object") {
+          return Promise.resolve({
+            ok: false,
+            code: "agent-unavailable",
+            reason: "ka_sub_whale requires a calling agent.",
+          });
+        }
+        const resolved = resolvePlanItemForDelegation(taskPlanStore, args?.planItemId);
+        if (resolved.ok !== true) {
+          return Promise.resolve({
+            ok: false,
+            code: resolved.code,
+            reason: resolved.reason,
+          });
+        }
+        const item = resolved.item;
+        const baseTools = Array.isArray(KAZ_V09_SUBAGENT_ROLE_TOOLS[item.persona])
+          ? KAZ_V09_SUBAGENT_ROLE_TOOLS[item.persona]
+          : [];
+        const finalTools = [...new Set([...baseTools, ...item.assignedTools])];
+        return Promise.resolve({
+          ok: true,
+          code: "plan-item-resolved",
+          status: "skeleton-resolved",
+          planItemId: item.planItemId,
+          persona: item.persona,
+          task: item.task,
+          assignedTools: finalTools,
+          note: "31-session ka_sub_whale skeleton: planItemId parsed and finalized; actual dynamic subagent projection is implemented by generation 32 (B3).",
+        });
+      },
+      presentCall: () => ({ card: "generic", title: "受控委派 ka_sub_whale", kind: "other" }),
+    });
+
+    // -----------------------------------------------------------------------
+    // *_sub_whale_report：子代理作用域的 v0.9 report 包装。
+    // 注册为全局工具，但只在子代理的 role Stable Surface / toolFilter 中放行；
+    // 主模型 Stable Main Surface 不放行。
+    // -----------------------------------------------------------------------
+    const subWhaleReportDefs = [];
+    for (const reportTool of KAZ_V09_SUB_WHALE_REPORT_TOOLS) {
+      const reportDef = defineTool({
+        name: reportTool,
+        description:
+          `Advance/report through the v0.9 ${reportTool.replace("_sub_whale_report", "")} subagent workflow. ` +
+          `This tool is available only inside the matching v0.9 subagent role and wraps the DSH subagent report capability. ` +
+          `Call it with the self-contained result/advance payload before finishing.`,
+        parameters: {
+          output: {
+            type: "string",
+            required: true,
+            description: "Self-contained report/advance content for the parent main agent.",
+          },
+        },
+        output: {
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: { messageId: { type: "string" } },
+          },
+          render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
+        },
+        async execute(args, exec) {
+          const agent = exec?.agent;
+          if (agent === null || agent === undefined || typeof agent !== "object") {
+            return Promise.reject(new Error(`${reportTool} requires a calling subagent`));
+          }
+          const subagents = ctx.get("subagents");
+          if (
+            subagents === undefined ||
+            subagents === null ||
+            typeof subagents.reportFrom !== "function"
+          ) {
+            return Promise.reject(
+              new Error(`${reportTool} is unavailable: DSH subagent report service is not present.`),
+            );
+          }
+          const output = typeof args?.output === "string" ? args.output : "";
+          if (output.trim().length === 0) {
+            return Promise.reject(new Error(`${reportTool} requires a non-empty output.`));
+          }
+          const content = [{ type: "text", text: output }];
+          return { messageId: await subagents.reportFrom(agent, content, { signal: exec.signal }) };
+        },
+      });
+      subWhaleReportDefs.push(reportDef);
+    }
 
     // -----------------------------------------------------------------------
     // enable_tool：任务内按需点亮 optional 工具（第三次升级 · 方案四 JIT escalation）。
@@ -1643,9 +2024,13 @@ export default {
       if (toolDisposers.length > 0) return;
       try {
         toolDisposers.push(ctx.tools.register(whaleReportDef));
+        toolDisposers.push(ctx.tools.register(kaSubWhaleDef));
+        for (const reportDef of subWhaleReportDefs) {
+          toolDisposers.push(ctx.tools.register(reportDef));
+        }
         toolDisposers.push(ctx.tools.register(enableToolDef));
       } catch (error) {
-        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL}/${ENABLE_TOOL} 失败：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL}/${KA_SUB_WHALE_TOOL}/sub-whale-report/${ENABLE_TOOL} 失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
     function uninstallTools() {
@@ -1653,7 +2038,7 @@ export default {
         try {
           dispose();
         } catch (error) {
-          ctx.logger.warn(`[ka-whale-workflow] 注销 ${WHALE_REPORT_TOOL} 失败：${error instanceof Error ? error.message : String(error)}`);
+          ctx.logger.warn(`[ka-whale-workflow] 注销工具失败：${error instanceof Error ? error.message : String(error)}`);
         }
       }
       toolDisposers = [];
@@ -1668,10 +2053,12 @@ export default {
     // 对外信号：kaWhaleWorkflow 服务（供 kaz-mode / round-display / 探针读取状态）。
     // -----------------------------------------------------------------------
     const kaWhaleWorkflowService = {
-      version: 1,
+      version: 2,
       stageOf: (agent) => stageOfAgent(agent),
       enabledFor: (agent) => liveFor(agent).enabled === true,
       taskToolStateOf: (agent) => taskToolStateOfAgent(agent),
+      taskPlanStoreFile: taskPlanStore.file,
+      lifecycleReferencePath,
       // 终案 E：内部执行器入口（探针/定时器/边界共用；不是用户可见工具）。
       runLifecycleAudit,
       recordToolUse,
@@ -1722,6 +2109,33 @@ export default {
         );
       }
     }
+
+    // -----------------------------------------------------------------------
+    // v0.9 tools/pre-execute 软闸门：主模型 stage 的 Allowed tools 约束。
+    // 返回统一 workflow-stage-deny；不改变 schema，也不视为模型失败惩罚。
+    // -----------------------------------------------------------------------
+    ctx.on("tools/pre-execute", (exec, next) => {
+      const agent = exec?.agent;
+      if (agent === null || agent === undefined || typeof agent !== "object") return next();
+      if (liveFor(agent).enabled !== true) return next();
+      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return next();
+      const current = stageOfAgent(agent);
+      if (!isMainWorkflowStage(current)) return next();
+      const def = stageDefinitionFor(MAIN_ROLE, current);
+      if (def === null) return next();
+      const name = exec?.name;
+      if (typeof name !== "string" || def.allowedTools.includes(name)) return next();
+      ctx.logger.info(
+        `[ka-whale-workflow] workflow-stage-deny: "${name}" not allowed in stage "${current}"`,
+      );
+      return {
+        kind: "deny",
+        reason:
+          `workflow-stage-deny: "${name}" is not allowed in current ka-whale-workflow stage "${current}". ` +
+          `Allowed tools: [${def.allowedTools.join(", ")}]. Can advance to: [${def.canAdvance.join(", ")}]. ` +
+          `Suggested: use one of the allowed tools, or call whale_report with a legal nextStage to advance.`,
+      };
+    });
 
     try {
       const disposer = ctx.on("tools/result", (exec, result) => {
@@ -1881,9 +2295,8 @@ export default {
       const current = stageOfAgent(agent);
       const goalActive = goalModeActive(agent);
       const recoveryGoal = goalRecoveryNeeded(agent);
-      // 第 2、3、4……轮（turn>=2，模型不在运行）：有非 complete goal 时先进
-      // Goal 恢复确认；否则 Goal 模式激活时保持 idle/done，不进入任务重构；
-      // 其余进入任务重构。
+      // 第 2、3、4……轮（turn>=2，模型不在运行）：Goal 规则优先；普通新任务
+      // 重新进入 assess-complexity（v0.9；不再进入旧 reconstruction）。
       if (typeof turn === "number" && turn >= 2) {
         const next = nextStageOnUserMessage(current, turn, { goalActive, goalRecovery: recoveryGoal });
         if (setStageAgent(agent, next)) {
@@ -1891,16 +2304,23 @@ export default {
             agent,
             next === GOAL_RECOVERY_STAGE
               ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal。"
-              : "收到新一轮消息，重新进入主工作流。",
+              : next === "working"
+                ? "收到新一轮消息：Goal 存在，直接进入 working。"
+                : "收到新一轮消息，重新进入 assess-complexity。",
             "阶段切换",
           );
         }
         return;
       }
-      // 插话（模型运行中）不改变当前工作流阶段；仅尚未开始（idle）时进入任务重构。
+      // 插话（模型运行中）不改变当前工作流阶段；仅尚未开始（idle）时进入 assess-complexity。
       if (current !== "idle") return;
-      // Goal 模式激活时不开启任务重构，保持在当前模式。
-      if (goalActive) return;
+      // Goal 模式激活时不开启任务重构，直接进入 working（保持当前模式）。
+      if (goalActive) {
+        if (setStageAgent(agent, "working")) {
+          reportRoundDisplay(agent, "Goal 模式激活，直接进入 working。", "阶段切换");
+        }
+        return;
+      }
       // 非 complete goal（如 blocked）在 idle 起手时也先进入 Goal 恢复确认。
       if (recoveryGoal !== null) {
         if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
@@ -1912,8 +2332,8 @@ export default {
         pendingStart.add(sessionId);
         return;
       }
-      if (setStageAgent(agent, "reconstruction")) {
-        reportRoundDisplay(agent, "进入新一轮主工作流。", "阶段切换");
+      if (setStageAgent(agent, "assess-complexity")) {
+        reportRoundDisplay(agent, "进入 assess-complexity。", "阶段切换");
       }
     });
 
@@ -1950,8 +2370,13 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
       if (current !== "idle") return;
-      // Goal 模式激活时不开启任务重构，保持在当前模式。
-      if (goalModeActive(agent)) return;
+      // Goal 模式激活时直接进入 working（不开启 assess-complexity）。
+      if (goalModeActive(agent)) {
+        if (setStageAgent(agent, "working")) {
+          reportRoundDisplay(agent, "round-minimal 已解除：Goal 模式激活，直接进入 working。", "阶段切换");
+        }
+        return;
+      }
       // 非 complete goal（如 blocked）在 round-minimal 解除后也先进 Goal 恢复确认。
       if (goalRecoveryNeeded(agent) !== null) {
         if (setStageAgent(agent, GOAL_RECOVERY_STAGE)) {
@@ -1959,8 +2384,8 @@ export default {
         }
         return;
       }
-      if (setStageAgent(agent, "reconstruction")) {
-        reportRoundDisplay(agent, "round-minimal 已解除，进入新一轮主工作流。", "阶段切换");
+      if (setStageAgent(agent, "assess-complexity")) {
+        reportRoundDisplay(agent, "round-minimal 已解除，进入 assess-complexity。", "阶段切换");
       }
     });
 
@@ -1977,7 +2402,7 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
       if (isBypassed(agent)) return;
       const stage = stageOfAgent(agent);
-      if (stage !== "done") return;
+      if (stage !== "done" && stage !== "communication" && stage !== "end") return;
       const sessionId = sessionIdOf(agent);
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
       const goalActive = goalModeActive(agent);
@@ -1992,8 +2417,8 @@ export default {
       const inject = (kind) => {
         if (memorySaveCallable(agent) !== true) return false;
         const state = reviewRunStateOf(sessionId);
-        // session 级：每种 kind（normal/goal）在整个 session 最多注入一次。
-        if (state.kinds.has(kind)) return false;
+        // goal 复盘 session 级最多一次；normal 复盘允许每个 workflow-run 一次。
+        if (kind !== "normal" && state.kinds.has(kind)) return false;
         // task-run 级：同一个逻辑任务运行内最多注入一次复盘，先到边界获胜。
         if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
         const text = reviewGuidanceText(kind);
@@ -2038,7 +2463,7 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
       if (isBypassed(agent)) return;
       const stage = stageOfAgent(agent);
-      if (stage !== "done") return;
+      if (stage !== "done" && stage !== "communication" && stage !== "end") return;
       const sessionId = sessionIdOf(agent);
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
       const autonomy = skillAutonomyFor(agent);
@@ -2075,8 +2500,8 @@ export default {
 
       const injectSkill = (kind) => {
         const state = skillReviewRunStateOf(sessionId);
-        // session 级：每种 kind（normal/goal）在整个 session 最多注入一次。
-        if (state.kinds.has(kind)) return false;
+        // goal 复盘 session 级最多一次；normal 复盘允许每个 workflow-run 一次。
+        if (kind !== "normal" && state.kinds.has(kind)) return false;
         // task-run 级：同一个逻辑任务运行内最多注入一次 skill-review，先到边界获胜。
         if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
         const text = skillReviewGuidanceText(
@@ -2137,30 +2562,32 @@ export default {
                   agent,
                   next === GOAL_RECOVERY_STAGE
                     ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal（pre-step 兜底）。"
-                    : "收到新一轮消息，重新进入主工作流（pre-step 兜底）。",
+                    : next === "working"
+                      ? "收到新一轮消息：Goal 存在，直接进入 working（pre-step 兜底）。"
+                      : "收到新一轮消息，重新进入 assess-complexity（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
             } else if (stage === "idle" && !isMinimal(agent) && !goalActive) {
-              const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
+              const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "assess-complexity";
               if (setStageAgent(agent, next)) {
                 reportRoundDisplay(
                   agent,
                   next === GOAL_RECOVERY_STAGE
                     ? "进入 Goal 恢复确认（pre-step 兜底）。"
-                    : "进入新一轮主工作流（pre-step 兜底）。",
+                    : "进入 assess-complexity（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
             }
           } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent) && !goalActive) {
-            const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
+            const next = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "assess-complexity";
             if (setStageAgent(agent, next)) {
               reportRoundDisplay(
                 agent,
                 next === GOAL_RECOVERY_STAGE
                   ? "round-minimal 已解除，先确认是否继续原 Goal（pre-step 兜底）。"
-                  : "round-minimal 已解除，进入新一轮主工作流（pre-step 兜底）。",
+                  : "round-minimal 已解除，进入 assess-complexity（pre-step 兜底）。",
                 "阶段切换",
               );
             }
@@ -2172,13 +2599,19 @@ export default {
       if (agent === null || agent === undefined || typeof agent !== "object") return decision;
       if (liveFor(agent).enabled !== true) return decision;
       if (isBypassed(agent)) return decision;
-      // v0.8 Step A：主/子流程上下文只以追加历史消息注入一次；Goal 继续确认在
-      // goal-recovery 时按轮注入。不再注入 TaskReconstruction/TaskClassification。
+      // 上下文注入：
+      //   - goal-recovery 使用 Goal 继续确认；
+      //   - 其余首次仍可注入 v0.9 主/子流程 Persona（session 一次）；
+      //   - v0.9 stage 注入按 pendingStageInjection 精确一次（同一 run 内重新
+      //     进入某 stage 会再次 pending，因此会再次注入）。
       const liveNow = liveFor(agent);
       const skipSubagentNow = liveNow.includeSubagents !== true && isSubagent(agent);
       const stageNow = stageOfAgent(agent);
       const subagentNow = isSubagent(agent);
+      const sessionIdNow = sessionIdOf(agent);
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
+      const messages = Array.isArray(decision.messages) ? decision.messages : [];
+      let appended = false;
       if (liveNow.enabled === true && !skipSubagentNow && !isBypassed(agent)) {
         const recoveryNow = stageNow === GOAL_RECOVERY_STAGE;
         const form = recoveryNow ? "goal-continuation" : subagentNow ? "subagent-flow" : "main-flow";
@@ -2186,28 +2619,70 @@ export default {
         const alreadyInjectedBefore = !recoveryNow && hasInjectedBefore(agent, form);
         if (!alreadyInjectedTurn && !alreadyInjectedBefore) {
           const text = recoveryNow ? GOAL_CONTINUATION_TEXT : subagentNow ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
-          let message;
           try {
-            message = createUserMessage({
+            const message = createUserMessage({
               content: [{ type: "text", text }],
               source: { kind: "plugin", plugin: "ka-whale-workflow", form },
             });
+            messages.push(message);
+            appended = true;
+            reportRoundDisplay(
+              agent,
+              text,
+              recoveryNow ? "Goal 继续确认" : subagentNow ? "子代理流程" : "主流程",
+            );
           } catch (error) {
             ctx.logger.warn(
               `[ka-whale-workflow] 构造主/子流程上下文消息失败：${error instanceof Error ? error.message : String(error)}`,
             );
-            return decision;
           }
-          reportRoundDisplay(
-            agent,
-            text,
-            recoveryNow ? "Goal 继续确认" : subagentNow ? "子代理流程" : "主流程",
-          );
-          return {
-            ...decision,
-            messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages,
-          };
         }
+
+        // v0.9 阶段入口注入：每次进入一个 v0.9 stage 时 pending 一次。
+        if (typeof sessionIdNow === "string" && sessionIdNow.length > 0) {
+          const pendingStage = stageStore.getPendingStageInjection(sessionIdNow);
+          if (
+            pendingStage !== null &&
+            isMainWorkflowStage(pendingStage) &&
+            !subagentNow
+          ) {
+            const options = {
+              ...(stageNeedsTaskPlanPath(pendingStage)
+                ? { taskPlanPath: taskPlanStore.file }
+                : {}),
+              ...(stageNeedsLifecyclePath(pendingStage)
+                ? { lifecyclePath: lifecycleReferencePath }
+                : {}),
+            };
+            const text = stageInjectionText(MAIN_ROLE, pendingStage, options);
+            if (text.length > 0) {
+              try {
+                const message = createUserMessage({
+                  content: [{ type: "text", text }],
+                  source: {
+                    kind: "plugin",
+                    plugin: "ka-whale-workflow",
+                    form: `stage:${pendingStage}`,
+                  },
+                });
+                messages.push(message);
+                appended = true;
+                stageStore.clearPendingStageInjection(sessionIdNow);
+                reportRoundDisplay(agent, text, `阶段 ${pendingStage}`);
+              } catch (error) {
+                ctx.logger.warn(
+                  `[ka-whale-workflow] 构造阶段注入消息失败：${error instanceof Error ? error.message : String(error)}`,
+                );
+              }
+            }
+          }
+        }
+      }
+      if (appended) {
+        return {
+          ...decision,
+          messages,
+        };
       }
       return decision;
     });

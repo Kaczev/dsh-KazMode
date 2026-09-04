@@ -18,12 +18,39 @@
 //   - 工具在生效 catalog 里为 true。
 // ===========================================================================
 
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import {
   TOOL_PLUGIN_CATALOG,
   TOOL_PLUGINS,
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
 } from "./tool-plugin-catalog.js";
+
+/** kaz-shared 所在目录：KazPlugins/kaz-shared/lib（与 KazPlugins 同级，便于解析仓库内路径）。 */
+const KAZ_SHARED_LIB_DIR = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * v0.9 私有插件生命周期参考文件路径常量。
+ * 目标：<repo>/KazPlugins/ka-whale-workflow/PLUGIN_LIFECYCLE.md。
+ * 在 dsh 的本地安装中 KazPlugins 是指向 profile 的 Junction，因此该绝对路径
+ * 同时是仓库跟踪文件与运行时可读文件。
+ */
+export const KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH = join(
+  KAZ_SHARED_LIB_DIR,
+  "..",
+  "..",
+  "ka-whale-workflow",
+  "PLUGIN_LIFECYCLE.md",
+);
+
+/** v0.9 task plan 独立存储文件路径常量（与 stage store 同目录）。 */
+export const KAZ_TASK_PLAN_STORE_PATH = join(
+  process.env.DSH_HOME || join(homedir(), ".dsh"),
+  "storages",
+  "ka-whale-workflow-task-plan.json",
+);
 
 /** 首轮工具面常量（Kaz 5.0 设计）：所有插件状态下 ≤2。
  *  - "ka-whale-memory" / legacy "kaz-memory" 开 → memory_search（1 个）；
@@ -108,9 +135,17 @@ export const MEMORY_READ_TOOLS = Object.freeze([
 ]);
 
 /** 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，这些工具不应出现在工具面。
- *  v0.8 Step B1/B2：create-plan/原生 Plan 已从 Kaz 移除并删除插件目录。 */
+ *  v0.8 Step B1/B2：create-plan/原生 Plan 已从 Kaz 移除并删除插件目录。
+ *  v0.9：ka-whale-workflow 还携带 ka_sub_whale 与四个子代理 report 工具。 */
 export const MANAGED_CARRIER_TOOLS = {
-  "ka-whale-workflow": ["whale_report"],
+  "ka-whale-workflow": [
+    "whale_report",
+    "ka_sub_whale",
+    "work_sub_whale_report",
+    "memory_sub_whale_report",
+    "plugin_maintainer_sub_whale_report",
+    "plugin_creator_sub_whale_report",
+  ],
 };
 
 /** Kaz 5.0 组件命名：ka-whale-memory 为新 id；kaz-memory 仅作旧键兼容读。 */
@@ -157,31 +192,62 @@ export const KAZ_EXTERNAL_CANDIDATES = Object.freeze({
   storageHint: "user other-*.json / project other-*.json（面板添加通道）",
 });
 
-/** v0.8 Step A：Goal 三件套 = create_goal / get_goal / update_goal，常驻 Stable Main Surface。 */
+/** v0.8 Goal 三件套（旧兼容常量；B5 前不删除，v0.9 主面已不再放行 create_goal）。 */
 export const KAZ_GOAL_TOOLS = Object.freeze([
   "create_goal",
   "get_goal",
   "update_goal",
 ]);
 
-/** v0.8 Step A：Stable Main Surface 的子代理控制工具。
- *  20/21 裁决：先用现有 DSH `subagent` 入主面，不新造 delegate_subagent；
- *  send_message / list_agents 暂不默认加入（后续有 continuable/后台需求再加）。 */
+/** v0.8 子代理控制工具（旧兼容常量；B5 前不删除）。 */
 export const KAZ_SUBAGENT_CONTROL_TOOLS = Object.freeze(["subagent"]);
 
-/** v0.8 Step A：Stable Main Surface = KAZ_BASE_TOOLS(12) + Goal 三件套 +
- *  whale_report + subagent（20/21 裁决后的固定集）。 */
-export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([
-  ...new Set([
-    ...KAZ_BASE_TOOLS,
-    ...KAZ_GOAL_TOOLS,
-    "whale_report",
-    ...KAZ_SUBAGENT_CONTROL_TOOLS,
-  ]),
+/** v0.9 受控委派/子代理控制工具（新增到 Stable Main Surface）。 */
+export const KAZ_V09_SUBAGENT_CONTROL_TOOLS = Object.freeze([
+  "ka_sub_whale",
+  "list_agents",
+  "send_message",
+  "interrupt_agent",
 ]);
 
-/** v0.8 Step A：保守子代理 Stable Base（不含 safe_json_write、不含记忆写工具；
- *  自创建工具由后续受控委派 Step 作为“主模型指定工具”加入）。 */
+/** v0.9 子代理 report 工具（由 ka-whale-workflow 注册，按角色可见）。 */
+export const KAZ_V09_SUB_WHALE_REPORT_TOOLS = Object.freeze([
+  "work_sub_whale_report",
+  "memory_sub_whale_report",
+  "plugin_maintainer_sub_whale_report",
+  "plugin_creator_sub_whale_report",
+]);
+
+/** v0.9 Stable Main Surface（§1.1，19 个；不含 create_goal/subagent，B5 再做旧面清理）。 */
+export const KAZ_V09_MAIN_TOOLS = Object.freeze([
+  "ask_user_question",
+  "edit",
+  "get_goal",
+  "glob",
+  "grep",
+  "memory_detail",
+  "memory_list",
+  "memory_search",
+  "pwsh",
+  "read",
+  "ka_sub_whale",
+  "list_agents",
+  "send_message",
+  "interrupt_agent",
+  "todo_write",
+  "update_goal",
+  "web_search",
+  "whale_report",
+  "write",
+]);
+
+/**
+ * Stable Main Surface = v0.9 固定 19 项。
+ * 旧 subagent / create_goal 的代码常量仍保留给 B5 清理，但不再进入活动主面。
+ */
+export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([...KAZ_V09_MAIN_TOOLS]);
+
+/** v0.8 保守子代理 Stable Base（旧兼容常量；B5 前不删除）。 */
 export const KAZ_SUBAGENT_BASE_TOOLS = Object.freeze([
   "read",
   "write",
@@ -196,8 +262,69 @@ export const KAZ_SUBAGENT_BASE_TOOLS = Object.freeze([
   "web_search",
 ]);
 
-/** 计算主模型 stable surface（Set）。v0.8 Step B1：原生 Plan 已移除，
- *  固定集 = KAZ_STABLE_MAIN_TOOLS，不再接受 Plan 自动放行参数。 */
+/** v0.9 普通子代理（worker）Stable Surface 基础（§1.2）。 */
+export const KAZ_V09_WORKER_BASE_TOOLS = Object.freeze([
+  "edit",
+  "glob",
+  "grep",
+  "memory_detail",
+  "memory_list",
+  "memory_search",
+  "pwsh",
+  "read",
+  "todo_write",
+  "web_search",
+  "write",
+  "work_sub_whale_report",
+]);
+
+/** v0.9 记忆管理子代理（memoryMaintainer）Stable Surface（§1.3）。 */
+export const KAZ_V09_MEMORY_MAINTAINER_TOOLS = Object.freeze([
+  "memory_detail",
+  "memory_search",
+  "memory_list",
+  "memory_save",
+  "memory_update",
+  "memory_forget",
+  "read",
+  "glob",
+  "grep",
+  "memory_sub_whale_report",
+]);
+
+/** v0.9 插件维护子代理（pluginMaintainer）Stable Surface（§1.4）。 */
+export const KAZ_V09_PLUGIN_MAINTAINER_TOOLS = Object.freeze([
+  "read",
+  "write",
+  "edit",
+  "glob",
+  "grep",
+  "pwsh",
+  "todo_write",
+  "plugin_maintainer_sub_whale_report",
+]);
+
+/** v0.9 插件创建子代理（pluginCreator）Stable Surface（§1.5）。 */
+export const KAZ_V09_PLUGIN_CREATOR_TOOLS = Object.freeze([
+  "read",
+  "write",
+  "edit",
+  "glob",
+  "grep",
+  "pwsh",
+  "todo_write",
+  "plugin_creator_sub_whale_report",
+]);
+
+/** v0.9 角色 → 子代理 Stable Surface 映射。 */
+export const KAZ_V09_SUBAGENT_ROLE_TOOLS = Object.freeze({
+  worker: KAZ_V09_WORKER_BASE_TOOLS,
+  memoryMaintainer: KAZ_V09_MEMORY_MAINTAINER_TOOLS,
+  pluginMaintainer: KAZ_V09_PLUGIN_MAINTAINER_TOOLS,
+  pluginCreator: KAZ_V09_PLUGIN_CREATOR_TOOLS,
+});
+
+/** 计算主模型 stable surface（Set）。固定集 = KAZ_V09_MAIN_TOOLS。 */
 export function stableMainSurface() {
   return new Set(KAZ_STABLE_MAIN_TOOLS);
 }

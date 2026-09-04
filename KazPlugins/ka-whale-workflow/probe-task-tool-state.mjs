@@ -53,7 +53,7 @@ const STORE_FILE = join(TMP, "ka-whale-workflow-stage.json");
   );
   const fileText = readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, "");
   const parsed = JSON.parse(fileText);
-  check("stage JSON version=3 且持久化 taskToolState", parsed?.version === 3 && parsed?.taskToolState?.["s-roundtrip"]?.mode === "plan");
+  check("stage JSON version=4 且持久化 taskToolState", parsed?.version === 4 && parsed?.taskToolState?.["s-roundtrip"]?.mode === "plan");
   check("removeTaskToolState 删除后返回 null", store.removeTaskToolState("s-roundtrip") === true && store.getTaskToolState("s-roundtrip") === null);
   check("removeTaskToolState 再删返回 false", store.removeTaskToolState("s-roundtrip") === false);
 
@@ -204,36 +204,37 @@ const whaleReport = () => registeredTools.get("whale_report");
 const execute = async (def, args, agent) => def.execute(args, { agent });
 const claimedHandler = listeners.get("agent/inbox/claimed")[0];
 const userMessage = { content: [{ type: "text", text: "新任务" }], source: { kind: "user" } };
-/** 插件内部阶段推进到 reconstruction（外部 store 与插件实例不同步，必须走 handler）。 */
-const enterReconstruction = async (agent) => {
+/** 插件内部阶段推进到 assess-complexity（外部 store 与插件实例不同步，必须走 handler）。 */
+const enterAssess = async (agent) => {
   await claimedHandler({ agent, message: userMessage, turn: 2 });
   return workflowService.stageOf(agent);
 };
 /** 每次从文件新建 store 读取持久化真相（避免外部实例内存陈旧）。 */
 const storeNow = () => createStageStore(STORE_FILE);
 
-// 进入 reconstruction 清旧状态
+// 进入 assess-complexity 清旧状态
 {
   const agent = makeAgent("s-clear");
-  const stage = await enterReconstruction(agent);
-  check("新一轮真实消息进入 reconstruction", stage === "reconstruction");
-  check("进入 reconstruction 清除旧 taskToolState", storeNow().getTaskToolState("s-clear") === null);
-  check("reconstruction 阶段 taskToolStateOf=null（非 done）", workflowService.taskToolStateOf(agent) === null);
+  const stage = await enterAssess(agent);
+  check("新一轮真实消息进入 assess-complexity", stage === "assess-complexity");
+  check("进入 assess-complexity 清除旧 taskToolState", storeNow().getTaskToolState("s-clear") === null);
+  check("assess-complexity 阶段 taskToolStateOf=null（非 done）", workflowService.taskToolStateOf(agent) === null);
 }
 
-// v0.8 Step A：whale_report 直接从稳定状态 bookkeeping，不再写任务工具状态
+// v0.9 whale_report 从 assess-complexity 走 legal 推进，不再写任务工具状态
 {
   const agent = makeAgent("s-classify");
-  await enterReconstruction(agent);
-  check("whale_report 无参从稳定状态直接 done", (await execute(whaleReport(), {}, agent)).stage === "done");
-  check("whale_report normal 后 stage=done 且不写 taskToolState", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-classify") === null);
-  check("done 阶段 taskToolStateOf=null（任务过滤已退役）", workflowService.taskToolStateOf(agent) === null);
+  await enterAssess(agent);
+  const result = await execute(whaleReport(), { nextStage: "communication" }, agent);
+  check("whale_report nextStage=communication 从 assess 到 communication", result.stage === "communication");
+  check("whale_report communication 后 stage=communication 且不写 taskToolState", workflowService.stageOf(agent) === "communication" && storeNow().getTaskToolState("s-classify") === null);
+  check("communication 阶段 taskToolStateOf=null（任务过滤已退役）", workflowService.taskToolStateOf(agent) === null);
 }
 
 // whale_report mode=plan：v0.8 Step B1 已拒绝（原生 Plan 移除）
 {
   const agent = makeAgent("s-plan");
-  await enterReconstruction(agent);
+  await enterAssess(agent);
   let rejected = false;
   try {
     await execute(whaleReport(), { mode: "plan" }, agent);
@@ -243,21 +244,19 @@ const storeNow = () => createStageStore(STORE_FILE);
   check("whale_report mode=plan → 拒绝（原生 Plan 已移除）", rejected === true && storeNow().getTaskToolState("s-plan") === null);
 }
 
-// whale_report mode=goal：创建 goal，不写任务工具状态
+// whale_report mode=goal：从非 v0.9 stage 创建 goal，不写任务工具状态
 {
   const agent = makeAgent("s-goal");
-  await enterReconstruction(agent);
   const result = await execute(whaleReport(), { mode: "goal", objective: "test goal" }, agent);
-  check("whale_report mode=goal → done 并创建 goal", result.stage === "done" && goalsMock.created.some((item) => item.agent === "s-goal" && item.payload.objective === "test goal"));
-  check("goal 创建后不写 taskToolState", storeNow().getTaskToolState("s-goal") === null);
+  check("whale_report mode=goal → working 并创建 goal", result.stage === "working" && goalsMock.created.some((item) => item.agent === "s-goal" && item.payload.objective === "test goal"));
 }
 
-// legacy optional_tools 参数在 Step A 被忽略，不校验不阻塞
+// legacy optional_tools 参数在 v0.9 被忽略，不校验不阻塞
 {
   const agent = makeAgent("s-invalid");
-  await enterReconstruction(agent);
-  const result = await execute(whaleReport(), { mode: "normal", optional_tools: ["pwsh"] }, agent);
-  check("legacy optional_tools 忽略：仍 done 且不报池校验", result.stage === "done" && workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-invalid") === null);
+  await enterAssess(agent);
+  const result = await execute(whaleReport(), { mode: "normal", nextStage: "communication", optional_tools: ["pwsh"] }, agent);
+  check("legacy optional_tools 忽略：仍 communication 且不报池校验", result.stage === "communication" && workflowService.stageOf(agent) === "communication" && storeNow().getTaskToolState("s-invalid") === null);
 }
 
 // 直接 /goal 旁路清状态且 taskToolStateOf=null
@@ -279,10 +278,9 @@ const storeNow = () => createStageStore(STORE_FILE);
 // 特性关闭不写状态
 {
   const agent = makeAgent("s-off");
-  await enterReconstruction(agent);
-  await execute(whaleReport(), {}, agent);
-  await execute(whaleReport(), { mode: "normal", optional_tools: ["safe_json_write"] }, agent);
-  check("特性关闭：done 后不写 taskToolState", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-off") === null);
+  await enterAssess(agent);
+  await execute(whaleReport(), { mode: "normal", nextStage: "communication", optional_tools: ["safe_json_write"] }, agent);
+  check("特性关闭：communication 后不写 taskToolState", workflowService.stageOf(agent) === "communication" && storeNow().getTaskToolState("s-off") === null);
   check("特性关闭：taskToolStateOf=null", workflowService.taskToolStateOf(agent) === null);
 }
 

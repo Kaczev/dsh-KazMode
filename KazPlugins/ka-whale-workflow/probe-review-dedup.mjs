@@ -128,11 +128,11 @@ async function runInbox(agent, turn) {
   }
 }
 
-/** 用 whale_report 把内部阶段推进到 done（reconstruction → done）。 */
+/** 用 whale_report 把内部阶段推进到 communication（v0.9 终态，触发复盘边界）。 */
 async function classifyToDone(agent) {
   const def = registeredTools.get("whale_report");
   if (def === undefined || def === null || typeof def.execute !== "function") return false;
-  await def.execute({}, { agent });
+  await def.execute({ nextStage: "communication" }, { agent });
   return true;
 }
 

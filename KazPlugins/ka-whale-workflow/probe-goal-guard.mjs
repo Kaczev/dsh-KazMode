@@ -105,7 +105,7 @@ function userMessage() {
 const claimedHandlers = listeners.get("agent/inbox/claimed") ?? [];
 const preStepHandlers = listeners.get("agent/pre-step") ?? [];
 
-// 1) active goal：done 阶段 + 新轮真实用户消息 → 保持 done，不进入任务重构。
+// 1) active goal：done 阶段 + 新轮真实用户消息 → 直接进入 working，不重复 assess。
 goalPhase = "active";
 const claimAgent = {
   id: "s-claim",
@@ -115,14 +115,14 @@ const claimAgent = {
 for (const handler of claimedHandlers) {
   await handler({ agent: claimAgent, message: userMessage(), turn: 2 });
 }
-check("goal active 时新轮消息不进入任务重构（保持 done）", stageFromFile("s-claim") === "done");
+check("goal active 时新轮消息直接进入 working（不重复 assess）", stageFromFile("s-claim") === "working");
 
-// 2) goal 结束（无 goal）后，新轮消息恢复进入任务重构。
+// 2) goal 结束（无 goal）后，新轮消息恢复进入 assess-complexity。
 goalPhase = undefined;
 for (const handler of claimedHandlers) {
   await handler({ agent: claimAgent, message: userMessage(), turn: 3 });
 }
-check("goal 结束后新轮消息恢复任务重构", stageFromFile("s-claim") === "reconstruction");
+check("goal 结束后新轮消息恢复 assess-complexity", stageFromFile("s-claim") === "assess-complexity");
 
 // 3) paused goal：非 complete goal 需要恢复确认，进入 goal-recovery，不直接任务重构。
 store.set("s-paused", "done");
@@ -166,7 +166,7 @@ for (const handler of preStepHandlers) {
     check("pre-step handler 正常返回 decision", false);
   }
 }
-check("pre-step：goal active 时新轮消息不进入任务重构", stageFromFile("s-pre") === "done");
+check("pre-step：goal active 时新轮消息进入 working（不重复 assess）", stageFromFile("s-pre") === "working");
 
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures === 0 ? "\nGOAL-GUARD PROBE OK" : `\nGOAL-GUARD PROBE FAILED (${failures} 项失败)`);

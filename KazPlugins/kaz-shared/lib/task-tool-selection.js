@@ -34,14 +34,19 @@ export const BASE_TOOLS = Object.freeze([
   ENABLE_TOOL,
 ]);
 
-/** 固定常驻主面中不属于 BASE_TOOLS 的工具：Goal 三件套 + whale_report + subagent。
- *  v0.8 Step B2：由 Stable Main Surface 固定口径表达，不再从 auto-on 动态派生。 */
+/** 固定常驻主面中不属于 BASE_TOOLS 的工具。
+ *  保留旧 create_goal/subagent 兼容项（B5 清理），并加入 v0.9 固定控制工具，
+ *  避免它们被误判为可选池。 */
 export const MODE_SCOPED_TOOLS = Object.freeze([
   "create_goal",
   "get_goal",
   "update_goal",
   "whale_report",
   "subagent",
+  "ka_sub_whale",
+  "list_agents",
+  "send_message",
+  "interrupt_agent",
 ]);
 
 /** 基础工具名：kaz-memory 启用时把记忆**读**工具并入基础面；

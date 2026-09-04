@@ -215,7 +215,7 @@ const sNomem = agentOf("s-nomem");
 {
   const unfiltered = kazMode.unfilteredSurfaceOf(sSel);
   check("unfilteredSurfaceOf 返回 Stable Main（无 read_image/job_list/enable_tool）", unfiltered !== null && !unfiltered.has("read_image") && !unfiltered.has("job_list") && !unfiltered.has("enable_tool"));
-  check("unfilteredSurfaceOf 含固定工具（read/subagent/create_goal/whale_report）", unfiltered !== null && unfiltered.has("read") && unfiltered.has("subagent") && unfiltered.has("create_goal") && unfiltered.has("whale_report"));
+  check("unfilteredSurfaceOf 含 v0.9 固定工具（read/ka_sub_whale/controls/whale_report）", unfiltered !== null && unfiltered.has("read") && unfiltered.has("ka_sub_whale") && unfiltered.has("list_agents") && unfiltered.has("send_message") && unfiltered.has("interrupt_agent") && unfiltered.has("whale_report") && !unfiltered.has("subagent") && !unfiltered.has("create_goal"));
   const pool = kazMode.taskToolPoolOf(sSel);
   check("taskToolPoolOf 不含外部候选 read_image/job_list/enable_tool/模式工具", !pool.includes("read_image") && !pool.includes("job_list") && !pool.includes("enable_tool") && !pool.includes("exit_plan_mode"));
   const unfilteredNomem = kazMode.unfilteredSurfaceOf(sNomem);
@@ -229,13 +229,14 @@ const sNomem = agentOf("s-nomem");
   check("surfaceOf(selected) 含基础工具", surface.has("read") && surface.has("pwsh") && surface.has("web_search"));
   check("surfaceOf(selected) 不含初始 optional（read_image）", !surface.has("read_image"));
   check("surfaceOf(selected) 不含 JIT 已点亮（job_list）", !surface.has("job_list"));
-  check("surfaceOf(selected) 含固定 subagent/create_goal", surface.has("subagent") && surface.has("create_goal"));
+  check("surfaceOf(selected) 含 v0.9 固定控制工具", surface.has("ka_sub_whale") && surface.has("list_agents") && surface.has("send_message") && surface.has("interrupt_agent"));
+  check("surfaceOf(selected) 不含旧 subagent/create_goal", !surface.has("subagent") && !surface.has("create_goal"));
   check("surfaceOf(selected) 不含 enable_tool", !surface.has("enable_tool"));
   check("surfaceOf(selected, memory on) 读记忆进面、写记忆不进", surface.has("memory_search") && surface.has("memory_list") && surface.has("memory_detail") && !surface.has("memory_save") && !surface.has("memory_update") && !surface.has("memory_forget"));
   const emptySurface = kazMode.surfaceOf(sEmpty);
   check("空 optional 列表与 selected 相同（固定主面）", emptySurface.has("read") && !emptySurface.has("read_image") && !emptySurface.has("job_list") && !emptySurface.has("enable_tool"));
   const noStateSurface = kazMode.surfaceOf(sNoState);
-  check("无任务状态 = 固定主面（不回退旧全量、不加 enable_tool）", noStateSurface.has("read") && noStateSurface.has("subagent") && !noStateSurface.has("read_image") && !noStateSurface.has("job_list") && !noStateSurface.has("enable_tool"));
+  check("无任务状态 = 固定主面（不回退旧全量、不加 enable_tool）", noStateSurface.has("read") && noStateSurface.has("ka_sub_whale") && !noStateSurface.has("subagent") && !noStateSurface.has("read_image") && !noStateSurface.has("job_list") && !noStateSurface.has("enable_tool"));
 }
 
 // ③ v0.8 Step A/B1：Goal 三件套常驻；原生 Plan 已移除，旧 plan/mode 事件不再例外
@@ -244,7 +245,7 @@ const sNomem = agentOf("s-nomem");
   check("旧 plan/mode 事件不再加入 exit_plan_mode（B1 移除 Plan 例外）", !planSurface.has("exit_plan_mode"));
   check("旧 plan/mode 事件下外部 optional 仍不进面", !planSurface.has("read_image") && !planSurface.has("job_list"));
   const goalSurface = kazMode.surfaceOf(sGoal);
-  check("goal 激活：get_goal/update_goal 常驻（非动态）", goalSurface.has("get_goal") && goalSurface.has("update_goal") && goalSurface.has("create_goal"));
+  check("goal 激活：get_goal/update_goal 常驻，create_goal 不放行（非动态）", goalSurface.has("get_goal") && goalSurface.has("update_goal") && !goalSurface.has("create_goal"));
   check("goal 激活：外部 optional 仍不进面", !goalSurface.has("job_list") && !goalSurface.has("read_image"));
 }
 
@@ -258,7 +259,7 @@ const sNomem = agentOf("s-nomem");
 }
 
 // ⑤ assemble 与 pre-execute 使用同一稳定主面
-const ALL_TOOLS = ["read", "pwsh", "web_search", "read_image", "job_list", "subagent", "enable_tool", "exit_plan_mode", "create_goal", "get_goal", "update_goal", "whale_report", "memory_search", "memory_save"];
+const ALL_TOOLS = ["read", "pwsh", "web_search", "read_image", "job_list", "subagent", "enable_tool", "exit_plan_mode", "create_goal", "get_goal", "update_goal", "whale_report", "ka_sub_whale", "list_agents", "send_message", "interrupt_agent", "memory_search", "memory_save"];
 const runAssemble = async (agent) => {
   const listener = listeners.get("system-prompt/assemble")[0];
   const assembly = { tools: ALL_TOOLS.map((name) => ({ name })), sections: [], contexts: [], variables: {} };
@@ -266,11 +267,11 @@ const runAssemble = async (agent) => {
   return new Set(assembly.tools.map((t) => t.name));
 };
 const assembledSel = await runAssemble(sSel);
-check("assemble(selected)：固定主面保留 subagent/create_goal/whale_report，移除外部/可选", assembledSel.has("read") && assembledSel.has("subagent") && assembledSel.has("create_goal") && assembledSel.has("whale_report") && !assembledSel.has("read_image") && !assembledSel.has("job_list") && !assembledSel.has("enable_tool"));
+check("assemble(selected)：v0.9 固定主面保留控制/whale_report，移除旧 subagent/create_goal/外部/可选", assembledSel.has("read") && assembledSel.has("ka_sub_whale") && assembledSel.has("get_goal") && assembledSel.has("update_goal") && assembledSel.has("whale_report") && !assembledSel.has("subagent") && !assembledSel.has("create_goal") && !assembledSel.has("read_image") && !assembledSel.has("job_list") && !assembledSel.has("enable_tool"));
 const gate = listeners.get("tools/pre-execute")[0];
 const runGate = async (agent, name) => gate({ name, agent }, async () => ({ kind: "allow" }));
-check("pre-execute 放行固定工具", (await runGate(sSel, "subagent")).kind === "allow" && (await runGate(sSel, "create_goal")).kind === "allow");
-check("pre-execute 拒绝外部候选/enable_tool", (await runGate(sSel, "read_image")).kind === "deny" && (await runGate(sSel, "job_list")).kind === "deny" && (await runGate(sSel, "enable_tool")).kind === "deny");
+check("pre-execute 放行固定工具", (await runGate(sSel, "ka_sub_whale")).kind === "allow" && (await runGate(sSel, "whale_report")).kind === "allow" && (await runGate(sSel, "get_goal")).kind === "allow");
+check("pre-execute 拒绝外部候选/enable_tool/旧委派", (await runGate(sSel, "read_image")).kind === "deny" && (await runGate(sSel, "job_list")).kind === "deny" && (await runGate(sSel, "enable_tool")).kind === "deny" && (await runGate(sSel, "subagent")).kind === "deny");
 check("pre-execute 拒绝记忆写工具", (await runGate(sSel, "memory_save")).kind === "deny");
 
 rmSync(TMP, { recursive: true, force: true });

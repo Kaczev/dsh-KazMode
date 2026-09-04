@@ -56,12 +56,12 @@ const check = (label, ok) => {
     nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: paused }) === GOAL_RECOVERY_STAGE,
   );
   check(
-    "nextStageOnUserMessage: armed active → stay done",
-    nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: null }) === "done",
+    "nextStageOnUserMessage: armed active → working（不重复 assess）",
+    nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: null }) === "working",
   );
   check(
-    "nextStageOnUserMessage: no goal → reconstruction",
-    nextStageOnUserMessage("done", 2, { goalActive: false, goalRecovery: null }) === "reconstruction",
+    "nextStageOnUserMessage: no goal → assess-complexity",
+    nextStageOnUserMessage("done", 2, { goalActive: false, goalRecovery: null }) === "assess-complexity",
   );
   check("GOAL_CONTINUATION_TEXT 含 ask_user_question 与继续/新任务/结束", GOAL_CONTINUATION_TEXT.includes("ask_user_question") && GOAL_CONTINUATION_TEXT.includes("Continue the original goal") && GOAL_CONTINUATION_TEXT.includes("Start a new task"));
   check("v0.8 Step A 提醒为空（不再有旧阶段提醒）", whaleReportReminderText(GOAL_RECOVERY_STAGE) === "");
@@ -233,7 +233,7 @@ const toClassification = async (agent) => {
   await claimedHandler({ agent, message: userMessage(), turn: 2 });
   const before = stageFromFile("s-recover");
   const result = await execute(whaleReport(), { mode: "goal" }, agent);
-  check("goal-recovery mode=goal → done", before === GOAL_RECOVERY_STAGE && result.stage === "done" && stageFromFile("s-recover") === "done");
+  check("goal-recovery mode=goal → working", before === GOAL_RECOVERY_STAGE && result.stage === "working" && stageFromFile("s-recover") === "working");
   check("goal-recovery resume 调用 goals.resume 且不 create", calls.some((c) => c.op === "resume" && c.agent === "s-recover") && !calls.some((c) => c.op === "create"));
 }
 
@@ -244,7 +244,7 @@ const toClassification = async (agent) => {
   const agent = makeAgent("s-newtask");
   await claimedHandler({ agent, message: userMessage(), turn: 2 });
   const result = await execute(whaleReport(), {}, agent);
-  check("goal-recovery 无 mode → reconstruction（新任务）", result.stage === "reconstruction" && stageFromFile("s-newtask") === "reconstruction");
+  check("goal-recovery 无 mode → assess-complexity（新任务）", result.stage === "assess-complexity" && stageFromFile("s-newtask") === "assess-complexity");
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +257,7 @@ const toClassification = async (agent) => {
   const agent = makeAgent("s-classify-create", openHumanEvents(2));
   await toClassification(agent);
   const result = await execute(whaleReport(), { mode: "goal", objective: "brand new", max_goal_rounds: 12 }, agent);
-  check("无既有 goal：mode=goal create 成功且 done", result.stage === "done" && calls.some((c) => c.op === "create" && c.agent === "s-classify-create" && c.payload.objective === "brand new"));
+  check("无既有 goal：mode=goal create 成功且进入 working", result.stage === "working" && calls.some((c) => c.op === "create" && c.agent === "s-classify-create" && c.payload.objective === "brand new"));
 }
 
 // 3.2 既有 blocked、轮次未耗尽 → resume（不带 objective）
@@ -267,7 +267,7 @@ const toClassification = async (agent) => {
   const agent = makeAgent("s-classify-resume", openHumanEvents(2));
   await toClassification(agent);
   const result = await execute(whaleReport(), { mode: "goal" }, agent);
-  check("既有 blocked：分类 mode=goal resume 成功且 done", result.stage === "done" && calls.some((c) => c.op === "resume" && c.agent === "s-classify-resume"));
+  check("既有 blocked：分类 mode=goal resume 成功且进入 working", result.stage === "working" && calls.some((c) => c.op === "resume" && c.agent === "s-classify-resume"));
   check("既有 blocked：不 create", !calls.some((c) => c.op === "create"));
 }
 

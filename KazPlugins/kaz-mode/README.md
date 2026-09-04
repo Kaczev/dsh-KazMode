@@ -28,8 +28,9 @@ Kaz 模式同时具备两个入口，双向同步：
 2. **工具面两阶段（v0.8 Step A/B1 固定集）**：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
      （为空时自动：kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；
-   - 首次工具调用后：恢复 **Stable Main Surface** = `KAZ_BASE_TOOLS`(12) +
-     Goal 三件套（`create_goal/get_goal/update_goal`）+ `whale_report` + `subagent`。
+   - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 19 项，含
+     `get_goal/update_goal/whale_report/ka_sub_whale/list_agents/send_message/
+     interrupt_agent`，不含旧 `create_goal/subagent`）。
      代码级固定集不受旧 tool-plugin JSON 的 false 开关影响；外部/自创建工具不进主面。
    - 纯 `minimal → Stable Main` 一次变化；原生 Plan 已实际移除，不再有 Plan 例外。
 3. **记忆工具按项目生效**：`kaz-memory` 关闭时，其六工具从该项目所有会话的工具面
@@ -176,8 +177,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    真实 system = persona + ka-whale-workflow 段（v0.8 Step B1 后不再含
    plan:policy / tool:goal）；
 2. 首次工具调用前工具面：kaz-memory 开 = `memory_search`；关 = `pwsh` + `read` + `edit`；
-   第一次工具调用后恢复 Stable Main Surface = `KAZ_BASE_TOOLS`(12) + Goal 三件套 +
-   `whale_report` + `subagent`（记忆组件关时记忆读工具从该固定面剔除）；
+   第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 19 项，
+   不含旧 `create_goal/subagent`；记忆组件关时记忆读工具从该固定面剔除）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
 5. Kaz 面板「工具控制面板」区块只作为旧 JSON 兼容读/外置候选展示；Step A 主面不受
@@ -185,6 +186,6 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
 6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「项目专属设置/默认设置」——settings.yaml
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
    `kaz-defaults.json`、`kaz-project-states.json` 与工具控制面板 JSON。
-7. v0.8 Step B1：原生 Plan 已移除，纯 `minimal → Stable Main` 一次变化；
-   `exit_plan_mode` 永不出现在 Kaz 主面；Goal 三件套与 `whale_report` 常驻，
-   不再因 plan/goal/工作流阶段出现工具面抖动。
+7. v0.9：纯 `minimal → Stable Main` 一次变化；`exit_plan_mode` / 旧
+   `create_goal/subagent` 永不出现在 Kaz v0.9 主面；Goal 读工具与 `whale_report`
+   常驻，不再因 plan/goal/工作流阶段出现工具面抖动。
