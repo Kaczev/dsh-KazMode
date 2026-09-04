@@ -27,6 +27,7 @@ import {
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
 } from "./tool-plugin-catalog.js";
+import { AGENT_MANAGED_STORAGE_FILE } from "./agent-managed-tools.js";
 
 /** kaz-shared 所在目录：KazPlugins/kaz-shared/lib（与 KazPlugins 同级，便于解析仓库内路径）。 */
 const KAZ_SHARED_LIB_DIR = dirname(fileURLToPath(import.meta.url));
@@ -51,6 +52,27 @@ export const KAZ_TASK_PLAN_STORE_PATH = join(
   "storages",
   "ka-whale-workflow-task-plan.json",
 );
+
+/**
+ * v0.9 私有插件候选注册表路径常量（B3）。
+ * 与 agent-managed 全局 registry 同源文件；文件名为 AGENT_MANAGED_STORAGE_FILE。
+ */
+export const KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH = join(
+  process.env.DSH_HOME || join(homedir(), ".dsh"),
+  "storages",
+  AGENT_MANAGED_STORAGE_FILE,
+);
+
+/** v0.9 assignedTools 固定集合：tool-jobs。 */
+export const KAZ_V09_TOOL_JOBS = Object.freeze([
+  "job_list",
+  "job_output",
+  "job_kill",
+]);
+
+/** v0.9 assignedTools 数量护栏。 */
+export const V09_ASSIGNED_TOOLS_WARN_THRESHOLD = 6;
+export const V09_ASSIGNED_TOOLS_MAX = 8;
 
 /** 首轮工具面常量（Kaz 5.0 设计）：所有插件状态下 ≤2。
  *  - "ka-whale-memory" / legacy "kaz-memory" 开 → memory_search（1 个）；
@@ -554,23 +576,17 @@ export function computeToolPluginSurface(inputs = {}) {
 /** 官方 / Kaz 分类目录（源码修改点，见 tool-plugin-catalog.js）。 */
 export { OFFICIAL_TOOL_PLUGIN_KEYS, KAZ_TOOL_PLUGIN_KEYS, TOOL_PLUGIN_CATALOG, TOOL_PLUGINS } from "./tool-plugin-catalog.js";
 
-/** 方向1 复盘指引：语义 + 文本 + 工具可用性判断（见 review-guidance.js）。 */
+/** 工具可用性判断（见 review-guidance.js；v0.9 B3.5 已移除 Review 文案）。 */
 export {
-  MEMORY_REVIEW_MAX_ITEMS,
-  MEMORY_REVIEW_DEFAULT_LIFECYCLE_STATUS,
-  MEMORY_REVIEW_FIELDS,
-  reviewGuidanceText,
   toolCallable,
 } from "./review-guidance.js";
 
-/** 二阶段 技能自省：常量 + 文本 + 技能闭环可用性判断（见 skill-guidance.js）。 */
+/** 私有插件生命周期常量 + 技能闭环能力判断（见 skill-guidance.js）。 */
 export {
   SKILL_PRIVATE_DIR_NAME,
   SKILL_PROCESS_DIR_NAME,
   SKILL_BOUNDARY_MAX_CHANGES,
-  SKILL_EVIDENCE_MIN,
   SKILL_LIFECYCLE_TOOLS,
-  skillReviewGuidanceText,
   skillLifecycleCallable,
 } from "./skill-guidance.js";
 
@@ -595,11 +611,19 @@ export {
   AGENT_MANAGED_PLUGIN_PREFIX,
   AGENT_MANAGED_CATALOG_GROUP_ID,
   AGENT_MANAGED_STORAGE_FILE,
+  PRIVATE_PLUGIN_CANDIDATE_VERSION,
   normalizeAgentManagedRegistry,
+  normalizeAgentManagedCandidateRegistry,
   agentManagedPluginKeys,
   agentManagedToolNames,
   agentManagedCatalogEntries,
   agentManagedRegistryHasPlugin,
+  normalizePrivatePluginCandidate,
+  normalizePrivatePluginCandidates,
+  privatePluginCandidateToolNames,
+  availablePrivatePluginCandidateToolNames,
+  upsertPrivatePluginCandidate,
+  removePrivatePluginCandidate,
   mergeAgentManagedToolsIntoSurface,
 } from "./agent-managed-tools.js";
 
@@ -625,7 +649,7 @@ export {
   newDeletionAudit,
 } from "./maintenance-report.js";
 
-/** Kaz 6.0 Step 2 子代理 toolFilter 白名单投影（见 subagent-policy.js）。 */
+/** Kaz 6.0 Step 2 子代理 toolFilter 白名单投影 + v0.9 B3 四角色层（见 subagent-policy.js）。 */
 export {
   SUBAGENT_ROLE_IDS,
   SUBAGENT_ROLE_INSTANCES,
@@ -637,6 +661,20 @@ export {
   toolFilterForRole,
   projectTaskWhitelist,
   assertSubsetOf,
+  V09_TOOL_JOBS,
+  V09_SUBAGENT_ROLE_IDS,
+  V09_SUBAGENT_ROLE_MINIMAL_TOOLS,
+  V09_SUBAGENT_ROLE_STABLE_BASE,
+  V09_SUBAGENT_ROLE_PERSONA_REFS,
+  V09_SUBAGENT_ROLE_TOOL_FILTERS,
+  normalizeV09Role,
+  v09MinimalToolsForRole,
+  v09StableBaseForRole,
+  v09ToolFilterForRole,
+  computeV09FinalSurface,
+  resolveV09AssignedTools,
+  v09AssignedToolsSubsetOfMain,
+  assertV09RoleWriteToolRestrictions,
 } from "./subagent-policy.js";
 
 /** 终案 E 全自动 Skill 生命周期：纯函数（归一化 / audit 建议 / registry 投影 / 状态机，见 skill-lifecycle.js）。 */

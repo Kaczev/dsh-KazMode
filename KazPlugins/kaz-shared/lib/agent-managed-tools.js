@@ -8,9 +8,16 @@
 //     other-* 删除影响；
 //   - 它们不是模式自动启用工具；进入 Kaz 白名单后由 round-13 任务分类
 //     optional_tools / enable_tool 决定是否进入当前任务工具面。
+// v0.9 B3：同一文件升级为 schema version 2——顶层新增 `candidates` 私有插件
+// 候选注册表（tool/description/source/available）。旧文件缺 candidates 时兼容
+// 读为空；plugins 内容保持不变。
 // 本文件只负责纯数据归一化 / 校验 / 表面合并；registry 文件的读写由
-// kaz-mode 负责（文件放在全局 storages，不在项目 four-file 模型内）。
+// kaz-mode / 插件生命周期流程负责（文件放在全局 storages，不在项目 four-file
+// 模型内）。
 // ===========================================================================
+
+/** v0.9 私有插件候选注册表 schema version。 */
+export const PRIVATE_PLUGIN_CANDIDATE_VERSION = 2;
 
 /** kaz-skill-* 前缀：自写 skill/插件命名约定（识别规则条件一）。 */
 export const AGENT_MANAGED_PLUGIN_PREFIX = "kaz-skill-";
@@ -80,7 +87,10 @@ export function normalizeAgentManagedRegistry(raw) {
       tools: cleanAgentToolNames(entry.tools),
     };
   }
-  return { version: 1, plugins };
+  return {
+    version: value.version === PRIVATE_PLUGIN_CANDIDATE_VERSION ? PRIVATE_PLUGIN_CANDIDATE_VERSION : 1,
+    plugins,
+  };
 }
 
 /** 归一化后的 plugin key 列表（排序）。 */
@@ -116,6 +126,85 @@ export function agentManagedRegistryHasPlugin(registry, pluginName) {
   const key = normalizeAgentPluginKey(pluginName);
   if (key.length === 0) return false;
   return agentManagedPluginKeys(registry).includes(key);
+}
+
+// ---------------------------------------------------------------------------
+// v0.9 B3：私有插件候选注册表（schema version 2 顶层 candidates）
+// ---------------------------------------------------------------------------
+
+/** 归一化一条候选：要求 tool 为字符串；description/source 为空串兼容；
+ *  available 只有显式 true 才算可用。返回深拷贝或 null。 */
+export function normalizePrivatePluginCandidate(raw) {
+  if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const tool = typeof raw.tool === "string" ? raw.tool.trim() : "";
+  if (tool.length === 0) return null;
+  return {
+    tool,
+    description: typeof raw.description === "string" ? raw.description.trim() : "",
+    source: typeof raw.source === "string" ? raw.source.trim() : "",
+    available: raw.available === true,
+  };
+}
+
+/** 归一化候选数组：按 tool 去重（首个胜出）、保留顺序、过滤非法。 */
+export function normalizePrivatePluginCandidates(value) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(value) ? value : []) {
+    const candidate = normalizePrivatePluginCandidate(raw);
+    if (candidate === null || seen.has(candidate.tool)) continue;
+    seen.add(candidate.tool);
+    out.push(candidate);
+  }
+  return out;
+}
+
+/** 归一化完整 registry：保留 plugins + candidates（v0.9 B3 读取入口）。 */
+export function normalizeAgentManagedCandidateRegistry(raw) {
+  const base = normalizeAgentManagedRegistry(raw);
+  const container =
+    raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const candidates = normalizePrivatePluginCandidates(container.candidates);
+  return {
+    version: candidates.length > 0 ? PRIVATE_PLUGIN_CANDIDATE_VERSION : base.version,
+    plugins: base.plugins,
+    candidates,
+  };
+}
+
+/** 全部候选 tool 名（去重、保留顺序）。 */
+export function privatePluginCandidateToolNames(registry) {
+  return normalizeAgentManagedCandidateRegistry(registry).candidates.map((candidate) => candidate.tool);
+}
+
+/** 仅 available === true 的候选 tool 名。 */
+export function availablePrivatePluginCandidateToolNames(registry) {
+  return normalizeAgentManagedCandidateRegistry(registry)
+    .candidates.filter((candidate) => candidate.available === true)
+    .map((candidate) => candidate.tool);
+}
+
+/** 新增/更新一条候选；返回新 registry，不改入参。 */
+export function upsertPrivatePluginCandidate(registry, candidate) {
+  const current = normalizeAgentManagedCandidateRegistry(registry);
+  const normalized = normalizePrivatePluginCandidate(candidate);
+  if (normalized === null) return current;
+  const existed = current.candidates.some((item) => item.tool === normalized.tool);
+  const candidates = existed
+    ? current.candidates.map((item) =>
+        item.tool === normalized.tool ? { ...normalized } : item,
+      )
+    : [...current.candidates, { ...normalized }];
+  return { version: PRIVATE_PLUGIN_CANDIDATE_VERSION, plugins: current.plugins, candidates };
+}
+
+/** 按 tool 删除一条候选；返回新 registry，不改入参。 */
+export function removePrivatePluginCandidate(registry, tool) {
+  const current = normalizeAgentManagedCandidateRegistry(registry);
+  const name = typeof tool === "string" ? tool.trim() : "";
+  const candidates = current.candidates.filter((item) => item.tool !== name);
+  if (candidates.length === current.candidates.length) return current;
+  return { version: PRIVATE_PLUGIN_CANDIDATE_VERSION, plugins: current.plugins, candidates };
 }
 
 /**

@@ -1,14 +1,9 @@
-// kaz-shared —— 二阶段：技能自省指引（常量 + 文本 + 闭环能力可用性判断；纯 ESM）
+// kaz-shared —— 私有插件生命周期常量 + 技能闭环能力可用性判断（纯 ESM）
 // ===========================================================================
-// 说明：
-//   * 与 lib/review-guidance.js 平行的独立模块：memory review 管“写记忆”，
-//     skill review 管“是否值得 Create / Update / Retire 一个可执行 skill”；
-//   * 文本为英文、第三人称（We 集体口吻）、紧凑，避免把技能决策混进记忆文本；
-//   * 过程目录固定为用户 profile 的私有目录
-//     KazPrivatePlugins/process（SKILL_PRIVATE_DIR_NAME/SKILL_PROCESS_DIR_NAME），
-//     不再依赖“当前工作目录 / project process folder”这类不可定位占位词；
-//   * skillLifecycleCallable 仿 toolCallable：只判断当前环境是否具备走技能闭环
-//     的基础工具（write / edit / pwsh / safe_json_write 至少一项可见）。
+// v0.9 B3.5：skill Review 复盘文案已移除；本文件继续保留生命周期与私有目录
+// 常量，以及 skillLifecycleCallable（供内部执行器判断闭环基础工具是否可见）。
+// 私有过程目录固定为用户 profile 的私有目录
+// KazPrivatePlugins/process（SKILL_PRIVATE_DIR_NAME/SKILL_PROCESS_DIR_NAME）。
 // ===========================================================================
 
 import { toolCallable } from "./review-guidance.js";
@@ -22,45 +17,8 @@ export const SKILL_PROCESS_DIR_NAME = "process";
 /** 每个安全边界最多落地的技能变更数（硬上限，禁止批量提取/落地）。 */
 export const SKILL_BOUNDARY_MAX_CHANGES = 1;
 
-/** 新建/更新技能的最低具体证据条数。 */
-export const SKILL_EVIDENCE_MIN = 2;
-
-/** 技能闭环的基础工具：任一可见即可注入技能自省；完整闭环还需 pwsh 跑验证。 */
+/** 技能闭环的基础工具：任一可见即可判断具备闭环能力；完整闭环还需 pwsh 跑验证。 */
 export const SKILL_LIFECYCLE_TOOLS = Object.freeze(["write", "edit", "pwsh", "safe_json_write"]);
-
-/**
- * 生成技能自省指引文本。
- * @param {"normal"|"plan"|"goal"} kind 安全边界场景
- * @param {string} [processFolder] 私有过程目录绝对路径（例如 .../KazPrivatePlugins/process）
- * @param {string} [pluginRoot] 私有插件根目录绝对路径（例如 .../KazPrivatePlugins）
- * @param {string} [summary] 可选生命周期摘要（自动 Retire / 待确认 / 需更新）；为空时保持旧文案
- */
-export function skillReviewGuidanceText(kind = "normal", processFolder = "", pluginRoot = "", summary = "") {
-  const label =
-    kind === "plan"
-      ? "The Plan has ended."
-      : kind === "goal"
-        ? "The Goal has ended."
-        : "The task has completed.";
-  const hasPaths =
-    typeof processFolder === "string" && processFolder.trim().length > 0 &&
-    typeof pluginRoot === "string" && pluginRoot.trim().length > 0;
-  const createTarget = hasPaths
-    ? `write CANDIDATE.md under ${processFolder.trim()}/<candidate-name>/CANDIDATE.md (create the folder when missing), then implement the private plugin under ${pluginRoot.trim()}/<plugin>/ (package.json + lib/index.js + skills/<skill>/ + probe), add it as a file: dependency in the profile package.json and an insert in the profile cordis.patch.yml, register it in kaz-agent-managed-tools.json, and verify ALL probes before restart/versioning.`
-    : `write CANDIDATE.md under the private Kaz process folder (KazPrivatePlugins/process/<skill-name>/CANDIDATE.md; create the folder when missing), then implement the private plugin under KazPrivatePlugins/<plugin>/ (package.json + lib/index.js + skills/<skill>/ + probe), add it as a file: dependency in the profile package.json and an insert in the profile cordis.patch.yml, register it in kaz-agent-managed-tools.json, and verify ALL probes before restart/versioning.`;
-  const createLine = `- Create (one full skill lifecycle when justified): ${createTarget} Create is justified only when: the procedure can be encoded as an executable module + offline probe; AND it is not already covered by an active skill; AND it adds a tool/module an agent can actually call (or Kaczev explicitly asked for full implementation). Pure knowledge/runbook/config procedures: write memory only, do NOT create a CANDIDATE skill. CANDIDATE.md is process trace only and does NOT complete self-update; if you stop after CANDIDATE (e.g. implementation must wait for a later boundary), say explicitly "self-update is NOT complete yet" and keep a next-stage entry. CANDIDATE-only does not consume the at-most-1 skill-change budget; one Create = full lifecycle (CANDIDATE + implementation + probe + registration) in one boundary when justified.`;
-  const summaryText =
-    typeof summary === "string" && summary.trim().length > 0 ? summary.trim() : "";
-  const summaryLine = summaryText.length > 0 ? `${summaryText}\n` : "";
-  return `[skill Review]
->
-${summaryLine}${label} If this run produced a reusable, low-risk, offline-verifiable procedure with at least ${SKILL_EVIDENCE_MIN} concrete evidence items (memory id, file path, error record, or repeated action), we may run at most ${SKILL_BOUNDARY_MAX_CHANGES} skill change at this safe boundary:
-${createLine}
-- Update: record the observed defect/fix evidence and draft the version bump; do not change switch/version silently.
-- Retire: only if a documented trigger exists (superseded, broken after repair attempts, or long unused).
-No batch extraction, no skill market, no generic skill runner. With insufficient evidence, write memory only and do nothing else.
-<`;
-}
 
 /**
  * 当前代理环境是否具备走技能闭环的基础能力。

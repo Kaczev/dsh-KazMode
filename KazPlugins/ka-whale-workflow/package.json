@@ -1,7 +1,7 @@
 {
   "name": "ka-whale-workflow",
   "version": "0.1.0",
-  "description": "鲸鱼工作流（v0.9 31 世）：主/子阶段机 + tools/pre-execute 软闸门 + task plan 持久化 + ka_sub_whale 基础骨架 + 子代理 report 包装。旧 v0.8 skill/lifecycle 执行器保留，B3-B6 后续世代处理。",
+  "description": "鲸鱼工作流（v0.9 31/32 世）：主/子阶段机 + tools/pre-execute 软闸门 + task plan 持久化 + ka_sub_whale 实际受控委派（continuable + toolFilter 投影）+ 子代理 report + B3.5 Review 边界移除。旧 v0.8 skill/lifecycle 执行器保留，B4-B6 后续世代处理。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

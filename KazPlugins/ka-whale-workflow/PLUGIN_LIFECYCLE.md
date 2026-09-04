@@ -76,6 +76,11 @@ Rules:
 - `plugins` content from the legacy agent-managed registry remains untouched.
 - `description` is one sentence in English.
 - `available` is true only after probes pass.
+- Use a safe JSON write tool/pwsh to update only the `candidates` array and
+  keep the file valid JSON. `kaz-shared` exposes pure helpers
+  (`normalizeAgentManagedCandidateRegistry`, `availablePrivatePluginCandidateToolNames`,
+  `upsertPrivatePluginCandidate`, `removePrivatePluginCandidate`) for verification;
+  prefer them when running an offline probe/script.
 
 ## 6. Versioning
 

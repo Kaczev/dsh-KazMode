@@ -53,7 +53,7 @@ const STORE_FILE = join(TMP, "ka-whale-workflow-stage.json");
   );
   const fileText = readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, "");
   const parsed = JSON.parse(fileText);
-  check("stage JSON version=4 且持久化 taskToolState", parsed?.version === 4 && parsed?.taskToolState?.["s-roundtrip"]?.mode === "plan");
+  check("stage JSON version=5 且持久化 taskToolState", parsed?.version === 5 && parsed?.taskToolState?.["s-roundtrip"]?.mode === "plan");
   check("removeTaskToolState 删除后返回 null", store.removeTaskToolState("s-roundtrip") === true && store.getTaskToolState("s-roundtrip") === null);
   check("removeTaskToolState 再删返回 false", store.removeTaskToolState("s-roundtrip") === false);
 

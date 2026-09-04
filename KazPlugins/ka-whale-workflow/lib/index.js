@@ -30,10 +30,6 @@ import { settingsNamespace } from "@deepseek-ai/dsh-settings";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import {
   DEFAULT_RECONSTRUCTION_TOOLS,
-  reviewGuidanceText,
-  toolCallable,
-  skillLifecycleCallable,
-  skillReviewGuidanceText,
   SKILL_BOUNDARY_MAX_CHANGES,
   SKILL_PRIVATE_DIR_NAME,
   SKILL_PROCESS_DIR_NAME,
@@ -50,9 +46,25 @@ import {
   skillKeyOf,
   KAZ_TASK_PLAN_STORE_PATH,
   KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH,
+  KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH,
   KAZ_V09_MAIN_TOOLS,
   KAZ_V09_SUB_WHALE_REPORT_TOOLS,
   KAZ_V09_SUBAGENT_ROLE_TOOLS,
+  V09_SUBAGENT_ROLE_IDS,
+  V09_SUBAGENT_ROLE_MINIMAL_TOOLS,
+  V09_SUBAGENT_ROLE_STABLE_BASE,
+  V09_SUBAGENT_ROLE_PERSONA_REFS,
+  V09_SUBAGENT_ROLE_TOOL_FILTERS,
+  V09_TOOL_JOBS,
+  V09_ASSIGNED_TOOLS_WARN_THRESHOLD,
+  V09_ASSIGNED_TOOLS_MAX,
+  normalizeV09Role,
+  v09ToolFilterForRole,
+  computeV09FinalSurface,
+  resolveV09AssignedTools,
+  normalizeAgentManagedCandidateRegistry,
+  availablePrivatePluginCandidateToolNames,
+  privatePluginCandidateToolNames,
 } from "kaz-shared";
 import { readJsonFileSafe, writeJsonFileSafe } from "kaz-shared/lib/safe-json-file.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
@@ -102,7 +114,7 @@ function defaultAgentManagedRegistryFile() {
 /** whale_report：v0.9 主模型 stage 推进/任务计划持久化工具。 */
 export const WHALE_REPORT_TOOL = "whale_report";
 
-/** v0.9 受控委派工具名（31 世基础骨架）。 */
+/** v0.9 受控委派工具名（32 世实际 continuable 委派层）。 */
 export const KA_SUB_WHALE_TOOL = "ka_sub_whale";
 
 /** v0.9 子代理 report 工具名（ka-whale-workflow 注册并包装子代理 report 能力）。 */
@@ -159,9 +171,6 @@ export const MAX_WHALE_REMINDERS = 0;
 export function whaleReportReminderText(_stage) {
   return "";
 }
-
-/** 任务完成 / goal 结束时的紧凑复盘指引（方向1）：语义/文本已解耦到 kaz-shared。 */
-export { reviewGuidanceText, skillReviewGuidanceText };
 
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
@@ -351,17 +360,6 @@ export function createLifecycleRecord(plugin, tool, nowIso = new Date().toISOStr
   };
 }
 
-/** 由 audit 建议动作生成给 [skill Review] 的英文摘要；无动作返回空串。 */
-export function lifecycleSummaryText(actions) {
-  const list = Array.isArray(actions) ? actions : [];
-  const autoRetired = list.filter((a) => a?.type === "retire").length;
-  const pending = list.filter((a) => a?.type === "retire-pending").length;
-  const needsUpdate = list.filter((a) => a?.type === "update-needed" || a?.type === "commit-update").length;
-  const reconcile = list.filter((a) => a?.type === "reconcile-registry" || a?.type === "bootstrap-active").length;
-  if (list.length === 0) return "";
-  return `Lifecycle summary: auto-retired: ${autoRetired}; retire-pending: ${pending}; update-needed: ${needsUpdate}; reconcile/bootstrap: ${reconcile}.`;
-}
-
 /** 是否为会话型子代理（含 workflow / ralph 派生的子会话）。 */
 function isSubagent(agent) {
   try {
@@ -531,6 +529,22 @@ export function normalizeContractStateValue(raw) {
   };
 }
 
+/** 归一化一条受控子代理角色记录（v0.9 B3）。 */
+export function normalizeSubagentRoleRecord(raw) {
+  if (raw === null || raw === undefined || typeof raw !== "object") return null;
+  const planItemId = typeof raw.planItemId === "string" ? raw.planItemId.trim() : "";
+  const persona = typeof raw.persona === "string" ? raw.persona.trim() : "";
+  if (planItemId.length === 0 || persona.length === 0 || !V09_SUBAGENT_ROLES.includes(persona)) return null;
+  return {
+    planItemId,
+    persona,
+    assignedTools: normalizeToolList(raw.assignedTools),
+    finalTools: normalizeToolList(raw.finalTools),
+    createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
+    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+  };
+}
+
 /** 存储可接受的所有 stage 值：v0.9 + 旧兼容值。 */
 const KNOWN_SESSION_STAGES = new Set([
   ...V09_STAGE_IDS,
@@ -544,12 +558,14 @@ const KNOWN_SESSION_STAGES = new Set([
 
 /**
  * 创建阶段状态存储（可注入文件路径，便于探针用临时文件）。
- * 结构：{ version: 4,
+ * 结构：{ version: 5,
  *        sessions: { "<sessionId>": "<v0.9 stage or legacy stage>" },
  *        taskToolState: { "<sessionId>": {...} },
  *        contractState: { "<sessionId>": {...} },
  *        workflowRuns: { "<sessionId>": { runId, enteredStages } },
- *        pendingStageInjection: { "<sessionId>": "<stage>" } }
+ *        pendingStageInjection: { "<sessionId>": "<stage>" },
+ *        subagentRoles: { "<childSessionId>": { planItemId, persona,
+ *          assignedTools, finalTools, createdAt, updatedAt } } }
  * 旧文件缺少 taskToolState / contractState / workflowRuns 时仍按旧版读取。
  */
 export function createStageStore(file) {
@@ -558,6 +574,7 @@ export function createStageStore(file) {
   const contractState = {};
   const workflowRuns = {};
   const pendingStageInjection = {};
+  const subagentRoles = {};
   try {
     if (file !== undefined && file !== null && existsSync(file)) {
       let raw = readFileSync(file, "utf8");
@@ -605,6 +622,15 @@ export function createStageStore(file) {
           if (KNOWN_SESSION_STAGES.has(stage)) pendingStageInjection[id] = stage;
         }
       }
+      const rawSubagentRoles =
+        parsed !== null && typeof parsed === "object" ? parsed.subagentRoles : undefined;
+      if (rawSubagentRoles !== null && typeof rawSubagentRoles === "object") {
+        for (const [id, rawRole] of Object.entries(rawSubagentRoles)) {
+          if (id.length === 0) continue;
+          const normalized = normalizeSubagentRoleRecord(rawRole);
+          if (normalized !== null) subagentRoles[id] = normalized;
+        }
+      }
     }
   } catch {
     // 存储损坏时从空状态开始，不影响主流程
@@ -617,12 +643,13 @@ export function createStageStore(file) {
         file,
         JSON.stringify(
           {
-            version: 4,
+            version: 5,
             sessions,
             taskToolState,
             contractState,
             workflowRuns,
             pendingStageInjection,
+            subagentRoles,
           },
           null,
           2,
@@ -731,6 +758,31 @@ export function createStageStore(file) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       if (!Object.prototype.hasOwnProperty.call(pendingStageInjection, sessionId)) return false;
       delete pendingStageInjection[sessionId];
+      persist();
+      return true;
+    },
+    getSubagentRole(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const value = subagentRoles[sessionId];
+      return value === undefined ? null : JSON.parse(JSON.stringify(value));
+    },
+    setSubagentRole(sessionId, value) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const normalized = normalizeSubagentRoleRecord(value);
+      if (normalized === null) return false;
+      const previous = subagentRoles[sessionId];
+      const timestamp = new Date().toISOString();
+      subagentRoles[sessionId] = {
+        ...normalized,
+        createdAt: previous?.createdAt || timestamp,
+        updatedAt: timestamp,
+      };
+      return persist();
+    },
+    removeSubagentRole(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (!Object.prototype.hasOwnProperty.call(subagentRoles, sessionId)) return false;
+      delete subagentRoles[sessionId];
       persist();
       return true;
     },
@@ -1075,8 +1127,7 @@ export default {
       return stageOf(agent, stageStore);
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
-     *  v0.9：进入 assess-complexity = 新 workflow-run 开始，递增
-     *  [ka-whale-memory Review] 与 skill-review 各自的 taskRunId、清除旧任务工具状态，
+     *  v0.9：进入 assess-complexity = 新 workflow-run 开始，清除旧任务工具状态，
      *  并记录该 run 的已进入 stage（pending injection 一次）。 */
     function setStageAgent(agent, stage) {
       const changed = setStage(agent, stage, stageStore);
@@ -1084,8 +1135,6 @@ export default {
       const sessionId = sessionIdOf(agent);
       if (typeof sessionId === "string" && sessionId.length > 0) {
         if (stage === "assess-complexity") {
-          beginReviewTaskRun(sessionId);
-          beginSkillReviewTaskRun(sessionId);
           stageStore.removeTaskToolState(sessionId);
           stageStore.removeContractState(sessionId);
           stageStore.beginWorkflowRun(sessionId);
@@ -1197,23 +1246,6 @@ export default {
     /** 是否存在需要 Goal 恢复确认的非 complete goal（blocked / paused / disarmed active）。 */
     function goalRecoveryNeeded(agent) {
       return goalRecoveryNeededOf(agent, ctx.get("goals"));
-    }
-
-    /** memory_save 当前环境是否可调用（可用性判断已抽到 kaz-shared）。 */
-    function memorySaveCallable(agent) {
-      return toolCallable({ kazMode: ctx.get("kazMode"), tools: ctx.get("tools") }, agent, "memory_save");
-    }
-
-    /** 生效的自主 skill 管理配置（kazMode 面板优先；缺失时按默认开、每边界 1 个）。 */
-    function skillAutonomyFor(agent) {
-      const current = liveFor(agent);
-      const enabled = current?.skillAutonomyEnabled !== false;
-      const rawMax = current?.skillAutonomyMaxChangesPerBoundary;
-      const maxChanges =
-        Number.isInteger(rawMax) && rawMax >= 1
-          ? Math.min(rawMax, SKILL_BOUNDARY_MAX_CHANGES)
-          : SKILL_BOUNDARY_MAX_CHANGES;
-      return { enabled, maxChanges };
     }
 
     /** 终案 E：全自动 Skill 生命周期生效配置（总开关 + 阈值；max 恒钳制到 1）。 */
@@ -1796,13 +1828,15 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // ka_sub_whale：v0.9 受控委派基础骨架（31 世只做 planItemId 解析/拒绝；
-    // 完整 toolFilter/assignedTools 投影由 32 世 B3 实现）。
+    // ka_sub_whale：v0.9 B3 受控委派层。
+    // 模型只能传 planItemId；persona/task/assignedTools/toolFilter 全部由
+    // 已 finalized task plan + role Stable Surface 计算，再经
+    // ctx.subagents.startContinuable 创建 continuable child。
     // -----------------------------------------------------------------------
     const kaSubWhaleDef = defineTool({
       name: KA_SUB_WHALE_TOOL,
       description:
-        "Kaz controlled delegation tool: create a subagent by a finalized task-plan planItemId. The persona/task/assignedTools are bound from the persisted task plan; pass only planItemId. Draft, missing, or not-yet-persisted ids are rejected with a structured refusal. In v0.9 31-session scope this is the registered parsing skeleton; full dynamic toolFilter projection lands in the next generation.",
+        "Kaz controlled delegation tool: create a continuable subagent from a finalized task-plan planItemId. The persona, task, and assignedTools are bound from the persisted task plan; pass only planItemId. Draft, missing, or not-yet-persisted ids are rejected with a structured refusal.",
       parameters: {
         planItemId: {
           type: "string",
@@ -1823,7 +1857,9 @@ export default {
             persona: { type: "string" },
             task: { type: "string" },
             assignedTools: { type: "array", items: { type: "string" } },
-            note: { type: "string" },
+            finalSurface: { type: "array", items: { type: "string" } },
+            subagentId: { type: "string" },
+            warning: { type: "string" },
           },
         },
         render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
@@ -1837,6 +1873,14 @@ export default {
             reason: "ka_sub_whale requires a calling agent.",
           });
         }
+        // R-B3-7 单层委派：子代理不能通过 ka_sub_whale 创建带工具的新子代理。
+        if (isSubagent(agent)) {
+          return Promise.resolve({
+            ok: false,
+            code: "subagent-delegation-denied",
+            reason: "ka_sub_whale is available only to the main agent; subagents cannot create further delegated subagents.",
+          });
+        }
         const resolved = resolvePlanItemForDelegation(taskPlanStore, args?.planItemId);
         if (resolved.ok !== true) {
           return Promise.resolve({
@@ -1846,20 +1890,117 @@ export default {
           });
         }
         const item = resolved.item;
-        const baseTools = Array.isArray(KAZ_V09_SUBAGENT_ROLE_TOOLS[item.persona])
-          ? KAZ_V09_SUBAGENT_ROLE_TOOLS[item.persona]
-          : [];
-        const finalTools = [...new Set([...baseTools, ...item.assignedTools])];
-        return Promise.resolve({
-          ok: true,
-          code: "plan-item-resolved",
-          status: "skeleton-resolved",
-          planItemId: item.planItemId,
-          persona: item.persona,
-          task: item.task,
-          assignedTools: finalTools,
-          note: "31-session ka_sub_whale skeleton: planItemId parsed and finalized; actual dynamic subagent projection is implemented by generation 32 (B3).",
+        const role = normalizeV09Role(item.persona);
+        if (role === null) {
+          return Promise.resolve({
+            ok: false,
+            code: "unknown-v09-role",
+            reason: `ka_sub_whale rejected plan item "${item.planItemId}": persona "${item.persona}" is not in the v0.9 role set.`,
+          });
+        }
+
+        // R-B3-4/R-B3-5：assignedTools 来源 + 数量护栏。
+        const registryResult = readJsonFileSafe(agentManagedRegistryFile);
+        const candidateRegistry = normalizeAgentManagedCandidateRegistry(
+          registryResult.ok === true ? registryResult.data : null,
+        );
+        const assignedValidation = resolveV09AssignedTools({
+          role,
+          assignedTools: item.assignedTools,
+          candidateRegistry,
         });
+        if (assignedValidation.ok !== true) {
+          return Promise.resolve({
+            ok: false,
+            code: assignedValidation.code,
+            reason: assignedValidation.reason,
+          });
+        }
+
+        // R-B3-6/R-B3-9：最终角色面 = role Stable Base + assignedTools。
+        const finalSurface = computeV09FinalSurface({
+          role,
+          assignedTools: assignedValidation.tools,
+        });
+
+        const subagents = ctx.get("subagents");
+        if (
+          subagents === undefined ||
+          subagents === null ||
+          typeof subagents.startContinuable !== "function"
+        ) {
+          return Promise.resolve({
+            ok: false,
+            code: "subagent-service-unavailable",
+            reason:
+              "ka_sub_whale cannot create a subagent: DSH continuable subagent service is not present. Add @deepseek-ai/dsh-tool-subagent-report/subagent providers and restart.",
+          });
+        }
+
+        const personaText = V09_ROLE_PERSONAS[role] ?? role;
+        const lifecycleNote =
+          role === "pluginMaintainer" || role === "pluginCreator"
+            ? `\n\nlifecyclePath: ${lifecycleReferencePath}`
+            : "";
+        const promptText = `${item.task}${lifecycleNote}`;
+        try {
+          const started = await subagents.startContinuable({
+            provider: "spawn",
+            label: `kaz:${role}:${item.planItemId}`,
+            request: {
+              label: item.planItemId,
+              prompt: [{ type: "text", text: promptText }],
+              parent: agent,
+              persona: personaText,
+              toolFilter: { allow: finalSurface },
+              maxDepth: 1,
+            },
+            signal: exec.signal,
+          });
+          const subagentId =
+            started !== null && typeof started === "object" && typeof started.childId === "string"
+              ? started.childId
+              : "";
+          if (subagentId.length === 0) {
+            return Promise.resolve({
+              ok: false,
+              code: "subagent-start-failed",
+              reason: "ka_sub_whale started a continuable child but no subagentId was returned.",
+            });
+          }
+          const now = new Date().toISOString();
+          stageStore.setSubagentRole(subagentId, {
+            planItemId: item.planItemId,
+            persona: role,
+            assignedTools: assignedValidation.tools,
+            finalTools: finalSurface,
+            createdAt: now,
+            updatedAt: now,
+          });
+          reportRoundDisplay(
+            agent,
+            `ka_sub_whale created ${role} subagent ${subagentId} for plan item ${item.planItemId}.`,
+            "受控委派",
+          );
+          return Promise.resolve({
+            ok: true,
+            code: "subagent-created",
+            status: "created",
+            planItemId: item.planItemId,
+            persona: role,
+            task: item.task,
+            assignedTools: assignedValidation.tools,
+            finalSurface,
+            subagentId,
+            warning: assignedValidation.warning || undefined,
+          });
+        } catch (error) {
+          return Promise.resolve({
+            ok: false,
+            code: "subagent-start-failed",
+            reason: `ka_sub_whale could not start subagent: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
       },
       presentCall: () => ({ card: "generic", title: "受控委派 ka_sub_whale", kind: "other" }),
     });
@@ -1912,7 +2053,7 @@ export default {
             return Promise.reject(new Error(`${reportTool} requires a non-empty output.`));
           }
           const content = [{ type: "text", text: output }];
-          return { messageId: await subagents.reportFrom(agent, content, { signal: exec.signal }) };
+          return { messageId: await subagents.reportFrom(agent, content, { delivery: "next-step", signal: exec.signal }) };
         },
       });
       subWhaleReportDefs.push(reportDef);
@@ -2053,12 +2194,27 @@ export default {
     // 对外信号：kaWhaleWorkflow 服务（供 kaz-mode / round-display / 探针读取状态）。
     // -----------------------------------------------------------------------
     const kaWhaleWorkflowService = {
-      version: 2,
+      version: 3,
       stageOf: (agent) => stageOfAgent(agent),
       enabledFor: (agent) => liveFor(agent).enabled === true,
       taskToolStateOf: (agent) => taskToolStateOfAgent(agent),
       taskPlanStoreFile: taskPlanStore.file,
       lifecycleReferencePath,
+      /** v0.9 B3：受控子代理角色记录 / 最终工具面（kaz-mode 组装时读取）。 */
+      subagentRoleOf: (agent) => {
+        const sessionId = sessionIdOf(agent);
+        if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+        return stageStore.getSubagentRole(sessionId);
+      },
+      subagentSurfaceOf: (agent) => {
+        const record =
+          agent !== null && typeof agent === "object" ? kaWhaleWorkflowService.subagentRoleOf(agent) : null;
+        return record !== null && Array.isArray(record.finalTools)
+          ? [...record.finalTools]
+          : null;
+      },
+      /** 当前读取的候选注册表文件路径（与 agent-managed registry 同源）。 */
+      candidateRegistryFile: agentManagedRegistryFile,
       // 终案 E：内部执行器入口（探针/定时器/边界共用；不是用户可见工具）。
       runLifecycleAudit,
       recordToolUse,
@@ -2205,60 +2361,6 @@ export default {
     const consumedManualCommands = new Set();
     /** 当前处于命令旁路的 session id 集合（assemble / pre-step 读取）。 */
     const manualBypassSessions = new Set();
-    /** 每个 session 在当前 turn/stage 已自动提醒过的次数（防止 steer 死循环）。 */
-    const turnReminderCounts = new Map();
-    /** [ka-whale-memory Review] task-run 状态：每 session { kinds, taskRunId, injectedRunId }。
-     *  kinds = session 级“每 kind 最多一次”；taskRunId = 逻辑任务运行标识；
-     *  injectedRunId = 上次注入所属的 taskRunId（同一任务运行最多注入一次复盘）。 */
-    const reviewRunState = new Map();
-    /** 技能自省（skill-review）task-run 状态：与 memory review 同构但独立，
-     *  每 session { kinds, taskRunId, injectedRunId }；同一逻辑任务运行最多注入一次。 */
-    const skillReviewRunState = new Map();
-    /** 技能自省用的 goal 激活状态观察（与 memory review 相互独立；v0.8 Step B1 无 plan）。 */
-    const skillLastGoalActive = new Map();
-    /** 每 session 上一次观察到的 goal 激活状态（用于检测结束节点）。 */
-    const lastGoalActive = new Map();
-
-    /** 进入新的逻辑任务运行：进入 reconstruction 或新 goal 激活时递增 taskRunId。 */
-    function beginReviewTaskRun(sessionId) {
-      let state = reviewRunState.get(sessionId);
-      if (state === undefined) {
-        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
-      }
-      state.taskRunId += 1;
-      reviewRunState.set(sessionId, state);
-    }
-
-    /** 读取（惰性创建）[ka-whale-memory Review] 运行状态。 */
-    function reviewRunStateOf(sessionId) {
-      let state = reviewRunState.get(sessionId);
-      if (state === undefined) {
-        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
-        reviewRunState.set(sessionId, state);
-      }
-      return state;
-    }
-
-    /** 进入新的逻辑任务运行：skill-review 的独立 taskRunId（与 memory review 同步递增点）。 */
-    function beginSkillReviewTaskRun(sessionId) {
-      let state = skillReviewRunState.get(sessionId);
-      if (state === undefined) {
-        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
-      }
-      state.taskRunId += 1;
-      skillReviewRunState.set(sessionId, state);
-    }
-
-    /** 读取（惰性创建）skill-review 运行状态。 */
-    function skillReviewRunStateOf(sessionId) {
-      let state = skillReviewRunState.get(sessionId);
-      if (state === undefined) {
-        state = { kinds: new Set(), taskRunId: 0, injectedRunId: null };
-        skillReviewRunState.set(sessionId, state);
-      }
-      return state;
-    }
-
     /** 当前会话是否处于命令旁路。 */
     function isBypassed(agent) {
       const sessionId = sessionIdOf(agent);
@@ -2390,155 +2492,6 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 任务完成 / goal 结束节点：注入紧凑复盘指引（方向1）。
-    //   只在 ka-whale-workflow 进入 done 后（任务被执行）且检测到结束节点时触发；
-    //   每 session 每种类型最多注入一次；没有实质结论时模型应不写记忆。
-    //   v0.8 Step B1：原生 Plan 已移除，不再有 plan kind 复盘边界。
-    // -----------------------------------------------------------------------
-    ctx.on("agent/turn-stopping", ({ agent, signal }) => {
-      if (agent === null || agent === undefined || typeof agent !== "object") return;
-      if (signal?.aborted === true) return;
-      if (liveFor(agent).enabled !== true) return;
-      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
-      if (isBypassed(agent)) return;
-      const stage = stageOfAgent(agent);
-      if (stage !== "done" && stage !== "communication" && stage !== "end") return;
-      const sessionId = sessionIdOf(agent);
-      if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      const goalActive = goalModeActive(agent);
-      const prevGoal = lastGoalActive.get(sessionId);
-      lastGoalActive.set(sessionId, goalActive);
-      // 新 goal 激活 = 新的逻辑任务运行（例如 /goal 或 goal 模式启动）。
-      if (prevGoal === false && goalActive === true) {
-        beginReviewTaskRun(sessionId);
-        beginSkillReviewTaskRun(sessionId);
-      }
-
-      const inject = (kind) => {
-        if (memorySaveCallable(agent) !== true) return false;
-        const state = reviewRunStateOf(sessionId);
-        // goal 复盘 session 级最多一次；normal 复盘允许每个 workflow-run 一次。
-        if (kind !== "normal" && state.kinds.has(kind)) return false;
-        // task-run 级：同一个逻辑任务运行内最多注入一次复盘，先到边界获胜。
-        if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
-        const text = reviewGuidanceText(kind);
-        let message;
-        try {
-          message = createUserMessage({
-            content: [{ type: "text", text }],
-            source: { kind: "plugin", plugin: "ka-whale-workflow", form: "review" },
-          });
-        } catch (error) {
-          ctx.logger.warn(`[ka-whale-workflow] 构造复盘指引消息失败：${error instanceof Error ? error.message : String(error)}`);
-          return false;
-        }
-        agent.steer(message);
-        state.kinds.add(kind);
-        state.injectedRunId = state.taskRunId;
-        reviewRunState.set(sessionId, state);
-        reportRoundDisplay(agent, text, "复盘指引");
-        return true;
-      };
-
-      // Goal 结束：上一次 active，当前不再 active。
-      if (prevGoal === true && goalActive === false) {
-        inject("goal");
-        return;
-      }
-      // Normal 任务完成：done 且当前无 goal 激活（每个 session 只注入一次 normal）。
-      if (!goalActive) {
-        inject("normal");
-      }
-    });
-
-    // -----------------------------------------------------------------------
-    // 二阶段技能自省（skill-review）：与 [ka-whale-memory Review] 同一批安全边界，
-    // 但使用独立 form、独立 per-session per-kind 去重、独立可用性守卫；
-    // 受 skillAutonomyEnabled 开关控制，且仅当技能闭环基础工具可用时注入。
-    // -----------------------------------------------------------------------
-    ctx.on("agent/turn-stopping", ({ agent, signal }) => {
-      if (agent === null || agent === undefined || typeof agent !== "object") return;
-      if (signal?.aborted === true) return;
-      if (liveFor(agent).enabled !== true) return;
-      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
-      if (isBypassed(agent)) return;
-      const stage = stageOfAgent(agent);
-      if (stage !== "done" && stage !== "communication" && stage !== "end") return;
-      const sessionId = sessionIdOf(agent);
-      if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      const autonomy = skillAutonomyFor(agent);
-      if (autonomy.enabled !== true) return;
-      if (
-        skillLifecycleCallable(
-          { kazMode: ctx.get("kazMode"), tools: ctx.get("tools") },
-          agent,
-        ) !== true
-      ) {
-        return;
-      }
-      const goalActive = goalModeActive(agent);
-      const prevGoal = skillLastGoalActive.get(sessionId);
-      skillLastGoalActive.set(sessionId, goalActive);
-      // 新 goal 激活 = 新的逻辑任务运行（skill-review 独立 taskRunId）。
-      if (prevGoal === false && goalActive === true) beginSkillReviewTaskRun(sessionId);
-
-      // 终案 E：在 [skill Review] 注入前跑一次真实审计（每边界最多 1 个自动动作），
-      // 并把 lifecycle 摘要注入自省文本。
-      let lifecycleSummary = "";
-      if (skillLifecycleFor(agent).enabled === true) {
-        try {
-          const auditResult = runLifecycleAudit({ source: "boundary", agent, dryRun: false });
-          lifecycleSummary = lifecycleSummaryText(
-            Array.isArray(auditResult?.suggested) ? auditResult.suggested : [],
-          );
-        } catch (error) {
-          ctx.logger?.debug?.(
-            `[ka-whale-workflow] boundary lifecycle audit 失败：${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }
-
-      const injectSkill = (kind) => {
-        const state = skillReviewRunStateOf(sessionId);
-        // goal 复盘 session 级最多一次；normal 复盘允许每个 workflow-run 一次。
-        if (kind !== "normal" && state.kinds.has(kind)) return false;
-        // task-run 级：同一个逻辑任务运行内最多注入一次 skill-review，先到边界获胜。
-        if (state.injectedRunId !== null && state.injectedRunId === state.taskRunId) return false;
-        const text = skillReviewGuidanceText(
-          kind,
-          skillProcessFolderOf(agent),
-          skillPrivateRootOf(agent),
-          lifecycleSummary,
-        );
-        let message;
-        try {
-          message = createUserMessage({
-            content: [{ type: "text", text }],
-            source: { kind: "plugin", plugin: "ka-whale-workflow", form: "skill-review" },
-          });
-        } catch (error) {
-          ctx.logger.warn(`[ka-whale-workflow] 构造技能自省指引消息失败：${error instanceof Error ? error.message : String(error)}`);
-          return false;
-        }
-        agent.steer(message);
-        state.kinds.add(kind);
-        state.injectedRunId = state.taskRunId;
-        skillReviewRunState.set(sessionId, state);
-        reportRoundDisplay(agent, text, "技能自省");
-        return true;
-      };
-
-      // 与 memory review 相同的边界判定：Goal 结束 / Normal 完成（无 Plan）。
-      if (prevGoal === true && goalActive === false) {
-        injectSkill("goal");
-        return;
-      }
-      if (!goalActive) {
-        injectSkill("normal");
-      }
-    });
-
-    // -----------------------------------------------------------------------
     // 上下文注入：主/子流程与 Goal 继续确认按 turn 去重注入一次。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
@@ -2652,6 +2605,26 @@ export default {
                 : {}),
               ...(stageNeedsLifecyclePath(pendingStage)
                 ? { lifecyclePath: lifecycleReferencePath }
+                : {}),
+              ...(pendingStage === "decide-tools"
+                ? {
+                    candidateToolDirectory: (() => {
+                      const fileResult = readJsonFileSafe(agentManagedRegistryFile);
+                      const registry = normalizeAgentManagedCandidateRegistry(
+                        fileResult.ok === true ? fileResult.data : null,
+                      );
+                      return registry.candidates.length > 0
+                        ? registry.candidates
+                            .map(
+                              (candidate) =>
+                                `${candidate.tool}: ${candidate.description}${
+                                  candidate.available ? "" : " (unavailable)"
+                                }`,
+                            )
+                            .join("\n")
+                        : "(no private-plugin candidates available; fixed tool-jobs: job_list, job_output, job_kill)";
+                    })(),
+                  }
                 : {}),
             };
             const text = stageInjectionText(MAIN_ROLE, pendingStage, options);

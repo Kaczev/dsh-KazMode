@@ -70,6 +70,7 @@ import {
   agentManagedToolNames,
   agentManagedRegistryHasPlugin,
   mergeAgentManagedToolsIntoSurface,
+  V09_SUBAGENT_ROLE_MINIMAL_TOOLS,
 } from "kaz-shared";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 kaz-mode: 段。 */
@@ -1018,6 +1019,30 @@ export default {
       return !hasToolCallEvent(agent);
     }
 
+    /** v0.9 B3：读取受控子代理角色记录（ka-whale-workflow stage store）。 */
+    function controlledSubagentRoleOf(agent) {
+      if (agent === null || agent === undefined || typeof agent !== "object") return null;
+      try {
+        const svc = ctx.get("kaWhaleWorkflow");
+        if (svc === undefined || svc === null || typeof svc.subagentRoleOf !== "function") return null;
+        return svc.subagentRoleOf(agent);
+      } catch {
+        return null;
+      }
+    }
+
+    /** v0.9 B3：读取受控子代理最终工具面数组；未知返回 null。 */
+    function controlledSubagentSurfaceOf(agent) {
+      if (agent === null || agent === undefined || typeof agent !== "object") return null;
+      try {
+        const svc = ctx.get("kaWhaleWorkflow");
+        if (svc === undefined || svc === null || typeof svc.subagentSurfaceOf !== "function") return null;
+        return svc.subagentSurfaceOf(agent);
+      } catch {
+        return null;
+      }
+    }
+
     // -----------------------------------------------------------------------
     // 项目级解析（方案 A：工具面按 agent 所在项目计算，不再全局注册/注销）。
     // kaz-memory 的工具常驻注册；本插件在每个请求的组装/执行层按 agent 所在
@@ -1148,7 +1173,19 @@ export default {
       if (minimalPhase) {
         const subagentMinimalTools = ["memory_search"];
         if (subagent) {
-          firstRoundTools = firstRoundTools.length > 0 ? firstRoundTools : subagentMinimalTools;
+          const roleRecord = controlledSubagentRoleOf(agent);
+          const roleMinimal =
+            roleRecord !== null &&
+            typeof roleRecord.persona === "string" &&
+            V09_SUBAGENT_ROLE_MINIMAL_TOOLS[roleRecord.persona] !== undefined
+              ? V09_SUBAGENT_ROLE_MINIMAL_TOOLS[roleRecord.persona]
+              : null;
+          firstRoundTools =
+            roleMinimal !== null
+              ? [...roleMinimal]
+              : firstRoundTools.length > 0
+                ? firstRoundTools
+                : subagentMinimalTools;
         }
         return computeSurface({
           toolWhitelist: [...whitelist],
@@ -1160,8 +1197,14 @@ export default {
 
       let allowed;
       if (subagent) {
-        // Step A：子代理 Stable Base（静态保守集）；主模型指定工作工具待后续受控委派 Step。
-        allowed = stableSubagentSurface({ assignedTools: [] });
+        // v0.9 B3：受控子代理使用 role Stable Base + assignedTools（由
+        // ka-whale-workflow 持久化）；旧/未知子代理回落到静态保守 Stable Base。
+        const controlledSurface = controlledSubagentSurfaceOf(agent);
+        if (Array.isArray(controlledSurface) && controlledSurface.length > 0) {
+          allowed = new Set(controlledSurface);
+        } else {
+          allowed = stableSubagentSurface({ assignedTools: [] });
+        }
       } else {
         allowed = stableMainSurface();
       }

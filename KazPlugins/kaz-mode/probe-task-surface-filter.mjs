@@ -61,6 +61,7 @@ const SESSIONS = {
   "s-plan": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-goal": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
+  "s-ctrl": { cwd: PROJECT_A, agentPreset: "kaz" },
 };
 
 const eventsOf = (id) => {
@@ -70,6 +71,11 @@ const eventsOf = (id) => {
 };
 const agentOf = (id) => ({
   id,
+  session: { header: { id, cwd: SESSIONS[id].cwd, agentPreset: SESSIONS[id].agentPreset }, events: eventsOf(id) },
+});
+const agentOfSubagent = (id) => ({
+  id,
+  options: { subagentDepth: 1 },
   session: { header: { id, cwd: SESSIONS[id].cwd, agentPreset: SESSIONS[id].agentPreset }, events: eventsOf(id) },
 });
 
@@ -86,9 +92,29 @@ const taskStates = {
   "s-goal": { taskRunId: 1, mode: "goal", initialOptionalTools: [], jitEnabledTools: [] },
   "s-nomem": { taskRunId: 1, mode: "normal", initialOptionalTools: [], jitEnabledTools: [] },
 };
+const CONTROLLED_WORKER_SURFACE = [
+  "edit",
+  "glob",
+  "grep",
+  "memory_detail",
+  "memory_list",
+  "memory_search",
+  "pwsh",
+  "read",
+  "todo_write",
+  "web_search",
+  "write",
+  "work_sub_whale_report",
+  "job_list",
+];
 const kaWhaleMock = {
   stageOf: (agent) => "done",
   taskToolStateOf: (agent) => (agent !== null && typeof agent === "object" ? taskStates[agent.id] ?? null : null),
+  subagentRoleOf: (agent) =>
+    agent?.id === "s-ctrl"
+      ? { persona: "worker", assignedTools: ["job_list"], finalTools: [...CONTROLLED_WORKER_SURFACE] }
+      : null,
+  subagentSurfaceOf: (agent) => (agent?.id === "s-ctrl" ? [...CONTROLLED_WORKER_SURFACE] : null),
 };
 
 const listeners = new Map();
@@ -258,7 +284,24 @@ const sNomem = agentOf("s-nomem");
   check("memory off：固定基础工具不受影响且无 enable_tool", nomemSurface.has("read") && !nomemSurface.has("enable_tool") && !nomemSurface.has("read_image"));
 }
 
-// ⑤ assemble 与 pre-execute 使用同一稳定主面
+// ⑤ v0.9 B3：受控 worker 子代理面 = role Stable Base + assignedTools
+{
+  const ctrl = agentOfSubagent("s-ctrl");
+  const ctrlSurface = kazMode.surfaceOf(ctrl);
+  check("受控 worker 子代理面含 role report + assigned tool-jobs", ctrlSurface.has("work_sub_whale_report") && ctrlSurface.has("job_list") && ctrlSurface.has("write"));
+  check("受控 worker 子代理面不含记忆写工具", !ctrlSurface.has("memory_save") && !ctrlSurface.has("memory_forget"));
+  const ctrlMinimal = {
+    ...agentOfSubagent("s-ctrl"),
+    session: {
+      header: SESSIONS["s-ctrl"],
+      events: [],
+    },
+  };
+  const ctrlMinimalSurface = kazMode.surfaceOf(ctrlMinimal);
+  check("受控 worker 子代理首轮 Minimal = §1.7", ctrlMinimalSurface.has("memory_search") && ctrlMinimalSurface.has("work_sub_whale_report") && ctrlMinimalSurface.size <= 2);
+}
+
+// ⑥ assemble 与 pre-execute 使用同一稳定主面
 const ALL_TOOLS = ["read", "pwsh", "web_search", "read_image", "job_list", "subagent", "enable_tool", "exit_plan_mode", "create_goal", "get_goal", "update_goal", "whale_report", "ka_sub_whale", "list_agents", "send_message", "interrupt_agent", "memory_search", "memory_save"];
 const runAssemble = async (agent) => {
   const listener = listeners.get("system-prompt/assemble")[0];
