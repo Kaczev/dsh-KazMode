@@ -1,11 +1,19 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 范围）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁）。
 
 ## 范围
 
 - 主/子阶段机：英文 stage id，Allowed tools / Can advance to / Task 与 v0.9
-  表格一致。
+  表格一致；`decide-goal` 可推进 `working` 或外部模式 `goal-active`。
+- Goal-active 外部模式：`whale_report({mode:'goal', objective, max_goal_rounds?})`
+  从 decide-goal / goal-recovery / 非主 stage 进入 `goal-active`；该值写入 stage
+  state，但不加入 `MAIN_STAGE_IDS`；goal-active 期间普通 `whale_report` 推进返回
+  `workflow-stage-deny`。
+- §3.1 边界注入：进入 `goal-active` 注入 Goal-active 上下文；Goal 结束后（无
+  active/paused goal）从 `goal-active` 自动切到 `working` 并注入
+  `working-resumed`，携带实际 `taskPlanPath`。两类注入都作为插件 user message，
+  按边界各一次。
 - `tools/pre-execute` 软闸门：主模型在当前 v0.9 stage 调用非 Allowed tools 返回
   `workflow-stage-deny`，不视为模型失败惩罚。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
@@ -37,7 +45,8 @@
 
 ## 未做（留给后续世代）
 
-- B4 面板只读化、B5 旧代码清理、B6 KAZ_ROLE_PROMPTS/round-display/paths/热重载。
+- B4 面板只读化、B5 旧代码清理、B6 KAZ_ROLE_PROMPTS 全量终稿/round-display/paths/热重载。
+- 33 世只做 `KAZ_ROLE_PROMPTS.main` 的 Goal-active 最小同步；全量 Persona 终稿留给 B6/36 世。
 - 不删除旧 `subagent` / `create_goal` / 旧角色常量（B5 处理）。
 
 ## 设置
@@ -51,7 +60,8 @@
 
 - 阶段状态：`~/.dsh/storages/ka-whale-workflow-stage.json`（version 5，
   含 sessions / taskToolState / contractState / workflowRuns /
-  pendingStageInjection / subagentRoles）。
+  pendingStageInjection / subagentRoles；sessions 可存 `goal-active`，
+  pendingStageInjection 可挂 `goal-active` / `working-resumed` 边界）。
 - Task plan：`~/.dsh/storages/ka-whale-workflow-task-plan.json`。
 - 生命周期参考：`KazPlugins/ka-whale-workflow/PLUGIN_LIFECYCLE.md`。
 - 私有插件候选注册表：`~/.dsh/storages/kaz-agent-managed-tools.json`

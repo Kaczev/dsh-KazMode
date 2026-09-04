@@ -13,6 +13,9 @@ import plugin, {
   SUBAGENT_FLOW_TEXT,
   GOAL_CONTINUATION_TEXT,
   GOAL_RECOVERY_STAGE,
+  GOAL_ACTIVE_STAGE,
+  GOAL_ACTIVE_CONTEXT_TEXT,
+  workingResumedContextText,
   whaleReportReminderText,
   stageOf,
   setStage,
@@ -62,18 +65,21 @@ check("插件默认导出存在", plugin !== null && typeof plugin === "object" 
 check("旧重构清单导出仍存在（兼容 import；不再用于阶段过滤）", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS) === JSON.stringify(["ask_user_question", "read", "glob", "grep", "web_search", "memory_search", "memory_list", "memory_detail"]));
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 check("主流程文案已导出且非空", typeof MAIN_FLOW_TEXT === "string" && MAIN_FLOW_TEXT.trim().length > 0);
-check("主流程文案含 v0.9 main flow 语义", MAIN_FLOW_TEXT.includes("ka-whale-workflow") && MAIN_FLOW_TEXT.includes("assess-complexity") && MAIN_FLOW_TEXT.includes("write-plan") && MAIN_FLOW_TEXT.includes("whale_report") && MAIN_FLOW_TEXT.includes("do not use create_goal directly"));
+check("主流程文案含 v0.9 §9.1 main flow Goal-active 语义", MAIN_FLOW_TEXT.includes("ka-whale-workflow") && MAIN_FLOW_TEXT.includes("working (or goal-active)") && MAIN_FLOW_TEXT.includes("do not use create_goal directly") && MAIN_FLOW_TEXT.includes("While goal-active, do not use whale_report to advance ordinary stages") && MAIN_FLOW_TEXT.includes("After Goal ends, proceed as if working ended"));
 check("主流程文案不再以旧 TaskReconstruction/TaskClassification 块注入", !MAIN_FLOW_TEXT.startsWith("Task reconstruction stage") && !MAIN_FLOW_TEXT.startsWith("We are now in the task classification stage"));
 check("子代理流程文案已导出且非空", typeof SUBAGENT_FLOW_TEXT === "string" && SUBAGENT_FLOW_TEXT.includes("work_sub_whale_report") && SUBAGENT_FLOW_TEXT.includes("subagent flow"));
 check("Goal 继续确认文案已导出且非空", typeof GOAL_CONTINUATION_TEXT === "string" && GOAL_CONTINUATION_TEXT.includes("non-complete goal"));
 check("GOAL_RECOVERY_STAGE 仍导出", GOAL_RECOVERY_STAGE === "goal-recovery");
+check("goal-active 外部模式常量导出且不在 MAIN_STAGE_IDS", GOAL_ACTIVE_STAGE === "goal-active" && !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE));
+check("goal-active/working-resumed 上下文文本导出", GOAL_ACTIVE_CONTEXT_TEXT.includes("[ka-whale-workflow goal-active]") && workingResumedContextText("C:/plan.json").includes("[ka-whale-workflow working-resumed]") && workingResumedContextText("C:/plan.json").includes("taskPlanPath: C:/plan.json"));
 check("提醒上限为 0（不再有旧阶段提醒）", MAX_WHALE_REMINDERS === 0);
 check("whaleReportReminderText 为空实现", typeof whaleReportReminderText("reconstruction") === "string" && whaleReportReminderText("reconstruction") === "" && whaleReportReminderText("classification") === "");
 
 check("初始阶段 idle", stageOf(agent, store) === "idle");
 check("第 2+ 轮普通新任务进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("assess-complexity", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity");
 check("首轮 → assess-complexity", nextStageOnUserMessage("idle", 1) === "assess-complexity");
-check("goal 激活时直接进入/保持 working（不重复 assess）", nextStageOnUserMessage("done", 2, { goalActive: true }) === "working" && nextStageOnUserMessage("idle", 1, { goalActive: true }) === "working" && nextStageOnUserMessage("working", 2, { goalActive: true }) === "working");
+check("goal 激活时进入/保持 goal-active（不重复 assess）", nextStageOnUserMessage("done", 2, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage("idle", 1, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage("working", 2, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2, { goalActive: true }) === GOAL_ACTIVE_STAGE);
+check("goal 结束后 goal-active 收到新消息回 assess", nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2, { goalActive: false }) === "assess-complexity");
 check("goal 未激活仍回 assess-complexity", nextStageOnUserMessage("done", 2, { goalActive: false }) === "assess-complexity");
 check("goalModeActiveOf active/paused 为 true", goalModeActiveOf(agent, { get: () => ({ phase: "active" }) }) === true && goalModeActiveOf(agent, { get: () => ({ phase: "paused" }) }) === true);
 check("goalModeActiveOf complete/无 goal/无服务为 false", goalModeActiveOf(agent, { get: () => ({ phase: "complete" }) }) === false && goalModeActiveOf(agent, { get: () => undefined }) === false && goalModeActiveOf(agent, null) === false && goalModeActiveOf(agent, { get: () => { throw new Error("boom"); } }) === false);
@@ -170,6 +176,7 @@ check("v0.9 stage 常量导出", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length =
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义允许工具/推进与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && assessDef?.canAdvance.includes("communication") && workingDef?.canAdvance.includes("write-plan"));
+check("decide-goal 定义含 working 与 goal-active", canAdvance(MAIN_ROLE, "decide-goal", "working") === true && canAdvance(MAIN_ROLE, "decide-goal", GOAL_ACTIVE_STAGE) === true && stageDefinitionFor(MAIN_ROLE, "decide-goal")?.task.includes("max_goal_rounds?"));
 check("主 stage 可推进校验", canAdvance(MAIN_ROLE, "assess-complexity", "challenge-plan") === true && canAdvance(MAIN_ROLE, "assess-complexity", "working") === false);
 check("子代理 role stage 定义齐全", ["worker","memoryMaintainer","pluginMaintainer","pluginCreator"].every((role) => stageIdsForRole(role).length >= 4));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });

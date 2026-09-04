@@ -73,6 +73,10 @@ import { homedir } from "node:os";
 import {
   MAIN_ROLE,
   MAIN_STAGE_IDS,
+  GOAL_ACTIVE_STAGE,
+  WORKING_RESUMED_STAGE,
+  GOAL_ACTIVE_CONTEXT_TEXT,
+  workingResumedContextText,
   V09_SUBAGENT_ROLES,
   V09_STAGE_IDS,
   V09_ROLE_PERSONAS,
@@ -129,16 +133,24 @@ export const GOAL_RECOVERY_STAGE = "goal-recovery";
 /** v0.9 stage 常量（再导出，便于探针/下游引用）。 */
 export { MAIN_ROLE, MAIN_STAGE_IDS, V09_SUBAGENT_ROLES, V09_STAGE_IDS };
 
+/** v0.9 Goal-active 外部模式/边界注入常量（再导出，便于探针/下游引用）。 */
+export {
+  GOAL_ACTIVE_STAGE,
+  WORKING_RESUMED_STAGE,
+  GOAL_ACTIVE_CONTEXT_TEXT,
+  workingResumedContextText,
+};
+
 /** 任务计划独立存储路径常量（由 kaz-shared 定义，这里再导出便于探针）。 */
 export { KAZ_TASK_PLAN_STORE_PATH, KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH };
 
 /** 用户手动指令开启模式的命令名（v0.8 Step B1：/plan 已移除，仅剩 /goal）。 */
 const MANUAL_COMMAND_NAMES = ["goal"];
 
-/** v0.9 主流程上下文文案（v0.9 §9.1 Persona 口径；阶段注入另行按 run 追加）。 */
+/** v0.9 主流程上下文文案（v0.9 §9.1 Persona Goal-active 口径；阶段注入另行按 run 追加）。 */
 export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
 >
-Follow the ka-whale-workflow in order: assess-complexity, challenge-plan, decide-tools, write-plan, decide-goal, working, memory-maintenance, plugin-maintenance, communication. Use whale_report to advance only to a legal next stage; direct no-tool communication is a legal exception. Start or resume Goal via whale_report({mode:'goal'}); do not use create_goal directly. Delegate specialized subtasks to subagents instead of expanding your own tool surface. Persist the task plan during write-plan and review it whenever needed in later stages. If working reveals that the task plan must change, advance back to write-plan for explicit amendment, then return to working. Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
+Follow the ka-whale-workflow in order: assess-complexity, challenge-plan, decide-tools, write-plan, decide-goal, working (or goal-active), memory-maintenance, plugin-maintenance, communication. Use whale_report to advance only to a legal next stage; direct no-tool communication is a legal exception. Start or resume Goal via whale_report({mode:'goal', objective}); do not use create_goal directly. While goal-active, do not use whale_report to advance ordinary stages; rely on official Goal context and get_goal/update_goal. After Goal ends, proceed as if working ended. Delegate specialized subtasks to subagents instead of expanding your own tool surface. Persist the task plan during write-plan and review it whenever needed in later stages. If working reveals that the task plan must change, advance back to write-plan for explicit amendment, then return to working. Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
 
 During working, execute the main line and verify subagent reports. During memory-maintenance and plugin-maintenance, delegate writes to maintenance subagents; you never hold memory/plugin write tools.
 
@@ -545,9 +557,11 @@ export function normalizeSubagentRoleRecord(raw) {
   };
 }
 
-/** 存储可接受的所有 stage 值：v0.9 + 旧兼容值。 */
+/** 存储可接受的所有 stage 值：v0.9 + goal-active 外部模式/working-resumed 边界 + 旧兼容值。 */
 const KNOWN_SESSION_STAGES = new Set([
   ...V09_STAGE_IDS,
+  GOAL_ACTIVE_STAGE,
+  WORKING_RESUMED_STAGE,
   "idle",
   "done",
   "end",
@@ -941,12 +955,12 @@ export function nextStageOnUserMessage(current, _turn, context = {}) {
     }
   }
   if (context?.goalActive === true) {
-    // v0.9：Goal 存在时直接进入/保持 working，不重新开启 assess-complexity。
-    if (current === "working") return "working";
-    if (current === "idle" || current === "done" || current === "end") return "working";
-    return isMainWorkflowStage(current) || current === "reconstruction" || current === "classification"
-      ? "working"
-      : "working";
+    // v0.9：Goal 激活期间外部模式为 goal-active，不重新开启 assess-complexity。
+    return GOAL_ACTIVE_STAGE;
+  }
+  if (current === GOAL_ACTIVE_STAGE) {
+    // Goal 已结束且新一轮真实用户消息到来：等价于 working 结束后收到新消息，重入 assess。
+    return "assess-complexity";
   }
   // 普通新任务：重新进入 assess-complexity（不再进入旧 reconstruction）。
   return "assess-complexity";
@@ -1128,7 +1142,8 @@ export default {
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
      *  v0.9：进入 assess-complexity = 新 workflow-run 开始，清除旧任务工具状态，
-     *  并记录该 run 的已进入 stage（pending injection 一次）。 */
+     *  并记录该 run 的已进入 stage（pending injection 一次）。
+     *  goal-active 是外部模式，也挂 pending 以便按边界注入 §3.1 文案。 */
     function setStageAgent(agent, stage) {
       const changed = setStage(agent, stage, stageStore);
       if (changed !== true) return changed;
@@ -1139,12 +1154,30 @@ export default {
           stageStore.removeContractState(sessionId);
           stageStore.beginWorkflowRun(sessionId);
         }
-        if (V09_STAGE_IDS.includes(stage)) {
+        if (V09_STAGE_IDS.includes(stage) || stage === GOAL_ACTIVE_STAGE) {
           stageStore.setPendingStageInjection(sessionId, stage);
           stageStore.addWorkflowRunStage(sessionId, stage);
         }
       }
       return changed;
+    }
+
+    /**
+     * Goal 结束边界：当前 stage 是 goal-active 但 goals 服务已无 active/paused goal。
+     * 把会话状态切到 working，并只挂 working-resumed 边界注入（不触发普通 working stage 注入）。
+     * @returns {boolean} 是否发生该边界转换。
+     */
+    function transitionGoalActiveToWorkingResumed(agent) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (stageStore.get(sessionId) !== GOAL_ACTIVE_STAGE) return false;
+      if (goalModeActive(agent)) return false;
+      if (goalRecoveryNeeded(agent) !== null) return false;
+      if (stageStore.set(sessionId, "working") !== true) return false;
+      stageStore.setPendingStageInjection(sessionId, WORKING_RESUMED_STAGE);
+      stageStore.addWorkflowRunStage(sessionId, WORKING_RESUMED_STAGE);
+      reportRoundDisplay(agent, "Goal 已结束：等价于 working 结束，进入 working-resumed 边界。", "工作流切换");
+      return true;
     }
 
     /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
@@ -1660,17 +1693,17 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for second persistence. Pass mode='goal' to create/resume a Goal; normal/default advances a non-goal task. mode='plan' is not accepted.",
+        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'. mode='plan' is not accepted.",
       parameters: {
         mode: {
           type: "string",
           description:
-            "'normal' (default) for non-goal bookkeeping; 'goal' creates a new Goal or resumes a non-complete one through whale_report. During goal continuation, pass 'goal' only when a resume is required; omit mode only when starting a new task.",
+            "'normal' (default) for non-goal bookkeeping; 'goal' creates a new Goal or resumes a non-complete one through whale_report and enters goal-active. During goal continuation, pass 'goal' only when a resume is required; omit mode only when starting a new task.",
         },
         nextStage: {
           type: "string",
           description:
-            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, write-plan, decide-goal, working, memory-maintenance, plugin-maintenance. In decide-tools/write-plan it may be omitted when the payload implies the only/default transition.",
+            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, write-plan, decide-goal, working, goal-active, memory-maintenance, plugin-maintenance. In decide-tools/write-plan it may be omitted when the payload implies the only/default transition.",
         },
         objective: {
           type: "string",
@@ -1715,6 +1748,22 @@ export default {
           return Promise.reject(new Error("whale_report requires a calling agent"));
         }
         const current = stageOfAgent(agent);
+        if (current === GOAL_ACTIVE_STAGE) {
+          // goal-active 是外部模式：不允许 whale_report 推进普通 stage。
+          if (args?.mode !== "goal") {
+            const reason =
+              `workflow-stage-deny: whale_report cannot advance ordinary stages from "${current}". ` +
+              `Goal is active; ka-whale-workflow ordinary stage progression is suspended. ` +
+              `Use get_goal/update_goal per official Goal rules, or wait for Goal to end.`;
+            return Promise.reject(new Error(reason));
+          }
+          try {
+            await launchGoalMode(agent, ctx.get("goals"), args);
+          } catch (error) {
+            return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+          }
+          return Promise.resolve({ ok: true, stage: GOAL_ACTIVE_STAGE, restarted: false });
+        }
         if (current === GOAL_RECOVERY_STAGE) {
           // Goal 恢复：继续原 Goal → whale_report({mode:'goal'})；新任务 → whale_report()。
           if (args?.mode === "goal") {
@@ -1723,9 +1772,9 @@ export default {
             } catch (error) {
               return Promise.reject(error instanceof Error ? error : new Error(String(error)));
             }
-            setStageAgent(agent, "working");
-            reportRoundDisplay(agent, "已确认继续原 Goal，进入 working。", "工作流切换");
-            return Promise.resolve({ ok: true, stage: "working", restarted: false });
+            setStageAgent(agent, GOAL_ACTIVE_STAGE);
+            reportRoundDisplay(agent, "已确认继续原 Goal，进入 goal-active。", "工作流切换");
+            return Promise.resolve({ ok: true, stage: GOAL_ACTIVE_STAGE, restarted: false });
           }
           if (setStageAgent(agent, "assess-complexity")) {
             reportRoundDisplay(agent, "已确认开始新任务，进入 assess-complexity。", "工作流切换");
@@ -1743,8 +1792,8 @@ export default {
             } catch (error) {
               return Promise.reject(error instanceof Error ? error : new Error(String(error)));
             }
-            setStageAgent(agent, "working");
-            return Promise.resolve({ ok: true, stage: "working", restarted: false });
+            setStageAgent(agent, GOAL_ACTIVE_STAGE);
+            return Promise.resolve({ ok: true, stage: GOAL_ACTIVE_STAGE, restarted: false });
           }
           const def = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
           const reason =
@@ -1789,13 +1838,22 @@ export default {
                 : current === "write-plan"
                   ? "decide-goal"
                   : current === "decide-goal"
-                    ? "working"
+                    ? args?.mode === "goal"
+                      ? GOAL_ACTIVE_STAGE
+                      : "working"
                     : "communication";
         const requested =
           typeof args?.nextStage === "string" && args.nextStage.trim().length > 0
             ? args.nextStage.trim()
             : null;
-        const target = requested !== null ? requested : defaultNext;
+        // mode='goal' from decide-goal always enters goal-active (v0.9 §3.2); the
+        // explicit nextStage is kept for the normal/default path.
+        const target =
+          current === "decide-goal" && args?.mode === "goal"
+            ? GOAL_ACTIVE_STAGE
+            : requested !== null
+              ? requested
+              : defaultNext;
 
         if (target === null || !canAdvance(MAIN_ROLE, current, target)) {
           const reason =
@@ -1992,7 +2050,9 @@ export default {
             assignedTools: assignedValidation.tools,
             finalSurface,
             subagentId,
-            warning: assignedValidation.warning || undefined,
+            ...(typeof assignedValidation.warning === "string" && assignedValidation.warning.length > 0
+              ? { warning: assignedValidation.warning }
+              : {}),
           });
         } catch (error) {
           return Promise.resolve({
@@ -2406,9 +2466,11 @@ export default {
             agent,
             next === GOAL_RECOVERY_STAGE
               ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal。"
-              : next === "working"
-                ? "收到新一轮消息：Goal 存在，直接进入 working。"
-                : "收到新一轮消息，重新进入 assess-complexity。",
+              : next === GOAL_ACTIVE_STAGE
+                ? "收到新一轮消息：Goal active，保持 goal-active。"
+                : next === "working"
+                  ? "收到新一轮消息：Goal 存在，直接进入 working。"
+                  : "收到新一轮消息，重新进入 assess-complexity。",
             "阶段切换",
           );
         }
@@ -2416,10 +2478,10 @@ export default {
       }
       // 插话（模型运行中）不改变当前工作流阶段；仅尚未开始（idle）时进入 assess-complexity。
       if (current !== "idle") return;
-      // Goal 模式激活时不开启任务重构，直接进入 working（保持当前模式）。
+      // Goal 模式激活时不开启任务重构，直接进入 goal-active 外部模式。
       if (goalActive) {
-        if (setStageAgent(agent, "working")) {
-          reportRoundDisplay(agent, "Goal 模式激活，直接进入 working。", "阶段切换");
+        if (setStageAgent(agent, GOAL_ACTIVE_STAGE)) {
+          reportRoundDisplay(agent, "Goal 模式激活，直接进入 goal-active。", "阶段切换");
         }
         return;
       }
@@ -2472,10 +2534,10 @@ export default {
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
       if (current !== "idle") return;
-      // Goal 模式激活时直接进入 working（不开启 assess-complexity）。
+      // Goal 模式激活时直接进入 goal-active（不开启 assess-complexity）。
       if (goalModeActive(agent)) {
-        if (setStageAgent(agent, "working")) {
-          reportRoundDisplay(agent, "round-minimal 已解除：Goal 模式激活，直接进入 working。", "阶段切换");
+        if (setStageAgent(agent, GOAL_ACTIVE_STAGE)) {
+          reportRoundDisplay(agent, "round-minimal 已解除：Goal 模式激活，直接进入 goal-active。", "阶段切换");
         }
         return;
       }
@@ -2507,6 +2569,10 @@ export default {
           const stage = stageOfAgent(agent);
           const goalActive = goalModeActive(agent);
           const recoveryGoal = goalRecoveryNeeded(agent);
+          // 无真实用户消息且 Goal 已结束：从 goal-active 进入 working-resumed 边界。
+          if (!hasRealUserMessage && stage === GOAL_ACTIVE_STAGE && !goalActive) {
+            transitionGoalActiveToWorkingResumed(agent);
+          }
           if (hasRealUserMessage) {
             if (turn >= 2) {
               const next = nextStageOnUserMessage(stage, turn, { goalActive, goalRecovery: recoveryGoal });
@@ -2515,9 +2581,11 @@ export default {
                   agent,
                   next === GOAL_RECOVERY_STAGE
                     ? "收到新一轮消息：存在非 complete goal，先确认是否继续原 Goal（pre-step 兜底）。"
-                    : next === "working"
-                      ? "收到新一轮消息：Goal 存在，直接进入 working（pre-step 兜底）。"
-                      : "收到新一轮消息，重新进入 assess-complexity（pre-step 兜底）。",
+                    : next === GOAL_ACTIVE_STAGE
+                      ? "收到新一轮消息：Goal active，保持 goal-active（pre-step 兜底）。"
+                      : next === "working"
+                        ? "收到新一轮消息：Goal 存在，直接进入 working（pre-step 兜底）。"
+                        : "收到新一轮消息，重新进入 assess-complexity（pre-step 兜底）。",
                   "阶段切换",
                 );
               }
@@ -2591,10 +2659,36 @@ export default {
           }
         }
 
-        // v0.9 阶段入口注入：每次进入一个 v0.9 stage 时 pending 一次。
+        // v0.9 阶段入口注入 + goal-active/working-resumed 边界注入：
+        // 每次进入 v0.9 stage 或跨越 Goal 边界时 pending 一次，注入后即清除。
         if (typeof sessionIdNow === "string" && sessionIdNow.length > 0) {
           const pendingStage = stageStore.getPendingStageInjection(sessionIdNow);
-          if (
+          let specialText = "";
+          if (pendingStage === GOAL_ACTIVE_STAGE && !subagentNow) {
+            specialText = GOAL_ACTIVE_CONTEXT_TEXT;
+          } else if (pendingStage === WORKING_RESUMED_STAGE && !subagentNow) {
+            specialText = workingResumedContextText(taskPlanStore.file);
+          }
+          if (specialText.length > 0) {
+            try {
+              const message = createUserMessage({
+                content: [{ type: "text", text: specialText }],
+                source: {
+                  kind: "plugin",
+                  plugin: "ka-whale-workflow",
+                  form: `stage:${pendingStage}`,
+                },
+              });
+              messages.push(message);
+              appended = true;
+              stageStore.clearPendingStageInjection(sessionIdNow);
+              reportRoundDisplay(agent, specialText, `阶段 ${pendingStage}`);
+            } catch (error) {
+              ctx.logger.warn(
+                `[ka-whale-workflow] 构造 ${pendingStage} 边界注入消息失败：${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          } else if (
             pendingStage !== null &&
             isMainWorkflowStage(pendingStage) &&
             !subagentNow

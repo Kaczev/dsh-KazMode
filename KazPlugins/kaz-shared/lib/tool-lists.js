@@ -361,10 +361,11 @@ export function stableSubagentSurface({ baseTools = KAZ_SUBAGENT_BASE_TOOLS, ass
   return tools;
 }
 
-/** Kaz 5.0 角色特化段（初稿）：只按角色/任务类型固定，禁止按任务实例动态生成。 */
+/** Kaz 5.0 角色特化段（初稿）：只按角色/任务类型固定，禁止按任务实例动态生成。
+ *  33 世仅做 Goal-active 最小同步（v0.9 §9.1 Goal 语义）；全量终稿留给 B6/36 世。 */
 export const KAZ_ROLE_PROMPTS = Object.freeze({
   main: Object.freeze(
-    "We are the main-line driver of the confirmed task contract. Keep gray reasoning concise; use memory read tools at task start when relevant; stay in Step scope.",
+    "We are the main-line driver of the confirmed task contract. Start or resume Goal via whale_report({mode:'goal'}); while goal-active, do not use whale_report to advance ordinary stages and rely on official Goal context with get_goal/update_goal; after Goal ends, proceed as if working ended. Keep gray reasoning concise; use memory read tools at task start when relevant; stay in Step scope.",
   ),
   subagent: Object.freeze({
     toolCreator: Object.freeze("We are a tool creator subagent. Create tools only within the delegated whitelist and report evidence."),

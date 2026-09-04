@@ -18,7 +18,7 @@ export const V09_SUBAGENT_ROLES = Object.freeze([
   "pluginCreator",
 ]);
 
-/** 主模型主流程 stage id（§3 表格顺序）。 */
+/** 主模型主流程 stage id（§3 表格顺序；goal-active 是外部模式，不列入这里）。 */
 export const MAIN_STAGE_IDS = Object.freeze([
   "assess-complexity",
   "challenge-plan",
@@ -30,6 +30,12 @@ export const MAIN_STAGE_IDS = Object.freeze([
   "plugin-maintenance",
   "communication",
 ]);
+
+/** Goal 驱动器作用期间的外部模式标记（v0.9 §3 补充；不是普通 stage，不加入 MAIN_STAGE_IDS）。 */
+export const GOAL_ACTIVE_STAGE = "goal-active";
+
+/** Goal 结束后回到 working 语义的边界注入 id（不是普通 stage，也不作为持久化主 stage）。 */
+export const WORKING_RESUMED_STAGE = "working-resumed";
 
 /** worker 普通子代理 stage id（§4）。 */
 export const WORKER_STAGE_IDS = Object.freeze([
@@ -116,9 +122,9 @@ const DEFINITIONS = {
     },
     "decide-goal": {
       allowedTools: ["whale_report"],
-      canAdvance: ["working"],
+      canAdvance: ["working", GOAL_ACTIVE_STAGE],
       task:
-        "Decide whether to start or resume Goal mode. If Goal is needed, use whale_report({mode:'goal'}). If not needed, call whale_report with normal/default mode to advance to working.",
+        "Decide whether to start or resume Goal mode. If Goal is needed, call whale_report({mode:'goal', objective, max_goal_rounds?}); that enters goal-active. If not needed, call whale_report with normal/default mode to advance to working.",
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
@@ -501,4 +507,31 @@ export function stageInjectionText(role, stage, options = {}) {
   }
   lines.push("<");
   return lines.join("\n");
+}
+
+/** v0.9 §3.1 goal-active 上下文注入（进入 goal-active 时追加一次）。 */
+export const GOAL_ACTIVE_CONTEXT_TEXT = `[ka-whale-workflow goal-active]
+>
+Mode: Goal is active; ka-whale-workflow ordinary stage progression is suspended.
+Allowed tools: [main stable surface minus whale_report progression usage]
+Use get_goal/update_goal per official Goal rules. Goal context and rounds are driven by the official Goal driver. Persona is unchanged.
+<`;
+
+/**
+ * v0.9 §3.1 working-resumed 上下文注入。
+ * @param {string} [taskPlanPath] 实际 task plan 路径；缺省时保留基准占位。
+ * @returns {string}
+ */
+export function workingResumedContextText(taskPlanPath) {
+  const path =
+    typeof taskPlanPath === "string" && taskPlanPath.trim().length > 0
+      ? taskPlanPath.trim()
+      : "{KAZ_TASK_PLAN_STORE_PATH}";
+  return `[ka-whale-workflow working-resumed]
+>
+Mode: Goal ended; workflow resumes as if working finished.
+Allowed tools: [main stable surface]
+Can advance to: [memory-maintenance, plugin-maintenance, communication, write-plan (amendment)]
+taskPlanPath: ${path}
+<`;
 }

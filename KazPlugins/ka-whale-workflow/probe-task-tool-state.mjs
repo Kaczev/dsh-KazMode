@@ -7,6 +7,7 @@
 import plugin, {
   DEFAULT_RECONSTRUCTION_TOOLS,
   createStageStore,
+  GOAL_ACTIVE_STAGE,
   normalizeTaskToolStateValue,
 } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
@@ -248,7 +249,7 @@ const storeNow = () => createStageStore(STORE_FILE);
 {
   const agent = makeAgent("s-goal");
   const result = await execute(whaleReport(), { mode: "goal", objective: "test goal" }, agent);
-  check("whale_report mode=goal → working 并创建 goal", result.stage === "working" && goalsMock.created.some((item) => item.agent === "s-goal" && item.payload.objective === "test goal"));
+  check("whale_report mode=goal → goal-active 并创建 goal", result.stage === GOAL_ACTIVE_STAGE && goalsMock.created.some((item) => item.agent === "s-goal" && item.payload.objective === "test goal"));
 }
 
 // legacy optional_tools 参数在 v0.9 被忽略，不校验不阻塞

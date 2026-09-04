@@ -2,7 +2,7 @@
 // 真实用户消息（新轮/断线重连后）不进入任务重构；blocked/paused/disarmed-active 的
 // 非 complete goal 进入 Goal 恢复确认；Goal 结束后恢复任务重构。
 // 运行：node KazPlugins/ka-whale-workflow/probe-goal-guard.mjs
-import plugin, { DEFAULT_RECONSTRUCTION_TOOLS, createStageStore, GOAL_RECOVERY_STAGE } from "./lib/index.js";
+import plugin, { DEFAULT_RECONSTRUCTION_TOOLS, createStageStore, GOAL_RECOVERY_STAGE, GOAL_ACTIVE_STAGE } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,7 +105,7 @@ function userMessage() {
 const claimedHandlers = listeners.get("agent/inbox/claimed") ?? [];
 const preStepHandlers = listeners.get("agent/pre-step") ?? [];
 
-// 1) active goal：done 阶段 + 新轮真实用户消息 → 直接进入 working，不重复 assess。
+// 1) active goal：done 阶段 + 新轮真实用户消息 → 直接进入 goal-active，不重复 assess。
 goalPhase = "active";
 const claimAgent = {
   id: "s-claim",
@@ -115,7 +115,7 @@ const claimAgent = {
 for (const handler of claimedHandlers) {
   await handler({ agent: claimAgent, message: userMessage(), turn: 2 });
 }
-check("goal active 时新轮消息直接进入 working（不重复 assess）", stageFromFile("s-claim") === "working");
+check("goal active 时新轮消息直接进入 goal-active（不重复 assess）", stageFromFile("s-claim") === GOAL_ACTIVE_STAGE);
 
 // 2) goal 结束（无 goal）后，新轮消息恢复进入 assess-complexity。
 goalPhase = undefined;
@@ -166,7 +166,7 @@ for (const handler of preStepHandlers) {
     check("pre-step handler 正常返回 decision", false);
   }
 }
-check("pre-step：goal active 时新轮消息进入 working（不重复 assess）", stageFromFile("s-pre") === "working");
+check("pre-step：goal active 时新轮消息进入 goal-active（不重复 assess）", stageFromFile("s-pre") === GOAL_ACTIVE_STAGE);
 
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures === 0 ? "\nGOAL-GUARD PROBE OK" : `\nGOAL-GUARD PROBE FAILED (${failures} 项失败)`);

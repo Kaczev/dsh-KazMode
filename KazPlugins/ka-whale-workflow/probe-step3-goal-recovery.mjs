@@ -12,6 +12,7 @@ import plugin, {
   DEFAULT_RECONSTRUCTION_TOOLS,
   createStageStore,
   GOAL_RECOVERY_STAGE,
+  GOAL_ACTIVE_STAGE,
   GOAL_CONTINUATION_TEXT,
   goalRecoveryNeededOf,
   nextStageOnUserMessage,
@@ -56,8 +57,8 @@ const check = (label, ok) => {
     nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: paused }) === GOAL_RECOVERY_STAGE,
   );
   check(
-    "nextStageOnUserMessage: armed active → working（不重复 assess）",
-    nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: null }) === "working",
+    "nextStageOnUserMessage: armed active → goal-active（不重复 assess）",
+    nextStageOnUserMessage("done", 2, { goalActive: true, goalRecovery: null }) === GOAL_ACTIVE_STAGE,
   );
   check(
     "nextStageOnUserMessage: no goal → assess-complexity",
@@ -233,7 +234,7 @@ const toClassification = async (agent) => {
   await claimedHandler({ agent, message: userMessage(), turn: 2 });
   const before = stageFromFile("s-recover");
   const result = await execute(whaleReport(), { mode: "goal" }, agent);
-  check("goal-recovery mode=goal → working", before === GOAL_RECOVERY_STAGE && result.stage === "working" && stageFromFile("s-recover") === "working");
+  check("goal-recovery mode=goal → goal-active", before === GOAL_RECOVERY_STAGE && result.stage === GOAL_ACTIVE_STAGE && stageFromFile("s-recover") === GOAL_ACTIVE_STAGE);
   check("goal-recovery resume 调用 goals.resume 且不 create", calls.some((c) => c.op === "resume" && c.agent === "s-recover") && !calls.some((c) => c.op === "create"));
 }
 
@@ -257,7 +258,7 @@ const toClassification = async (agent) => {
   const agent = makeAgent("s-classify-create", openHumanEvents(2));
   await toClassification(agent);
   const result = await execute(whaleReport(), { mode: "goal", objective: "brand new", max_goal_rounds: 12 }, agent);
-  check("无既有 goal：mode=goal create 成功且进入 working", result.stage === "working" && calls.some((c) => c.op === "create" && c.agent === "s-classify-create" && c.payload.objective === "brand new"));
+  check("无既有 goal：mode=goal create 成功且进入 goal-active", result.stage === GOAL_ACTIVE_STAGE && calls.some((c) => c.op === "create" && c.agent === "s-classify-create" && c.payload.objective === "brand new"));
 }
 
 // 3.2 既有 blocked、轮次未耗尽 → resume（不带 objective）
@@ -267,7 +268,7 @@ const toClassification = async (agent) => {
   const agent = makeAgent("s-classify-resume", openHumanEvents(2));
   await toClassification(agent);
   const result = await execute(whaleReport(), { mode: "goal" }, agent);
-  check("既有 blocked：分类 mode=goal resume 成功且进入 working", result.stage === "working" && calls.some((c) => c.op === "resume" && c.agent === "s-classify-resume"));
+  check("既有 blocked：分类 mode=goal resume 成功且进入 goal-active", result.stage === GOAL_ACTIVE_STAGE && calls.some((c) => c.op === "resume" && c.agent === "s-classify-resume"));
   check("既有 blocked：不 create", !calls.some((c) => c.op === "create"));
 }
 
