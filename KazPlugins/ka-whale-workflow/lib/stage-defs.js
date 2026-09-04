@@ -130,7 +130,7 @@ const DEFINITIONS = {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["write-plan", "memory-maintenance", "plugin-maintenance", "communication"],
       task:
-        "Execute the main line per the persisted task plan. Review the task plan whenever needed via taskPlanPath. If the plan must change, advance to write-plan for explicit amendment. Verify subagent reports, and ask only when a decision is needed.",
+        "For each planItem, delegate execution to a subagent via ka-sub-whale. The main line only monitors, verifies reports, and handles plan amendments via write-plan when needed. Ask the user only for decisions outside the plan.",
     },
     "memory-maintenance": {
       allowedTools: [
