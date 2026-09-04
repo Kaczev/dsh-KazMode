@@ -215,6 +215,21 @@
         provider: spawn
         toolName: subagent
         backgroundMode: continuable
+        # v0.8 Step A（20/21 裁决）：暴露 subagent 前先给静态保守 toolFilter，
+        # 防止子代理继承过宽工具面；per-task 角色/toolFilter 投影留给后续 Step。
+        toolFilter:
+          allow:
+            - read
+            - write
+            - edit
+            - glob
+            - grep
+            - pwsh
+            - todo_write
+            - memory_list
+            - memory_search
+            - memory_detail
+            - web_search
 
     - id: tool-subagent-fork
       name: '@deepseek-ai/dsh-tool-subagent'

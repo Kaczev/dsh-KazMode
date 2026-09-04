@@ -1,12 +1,13 @@
-// ka-whale-workflow 探针：验证阶段折叠 / 阶段转移 / 工具清单常量 / 不再写会话事件。
+// ka-whale-workflow 探针：验证 v0.8 Step A 主/子流程文案、阶段状态存储、不再注入旧阶段文案。
 // 运行：node KazPlugins/ka-whale-workflow/probe-ka-whale-workflow.mjs
 import plugin, {
   DEFAULT_RECONSTRUCTION_TOOLS,
   WHALE_REPORT_TOOL,
   MAX_WHALE_REMINDERS,
-  RECONSTRUCTION_PROMPT,
-  CLASSIFICATION_PROMPT,
-  FIRST_ROUND_OVERVIEW,
+  MAIN_FLOW_TEXT,
+  SUBAGENT_FLOW_TEXT,
+  GOAL_CONTINUATION_TEXT,
+  GOAL_RECOVERY_STAGE,
   whaleReportReminderText,
   stageOf,
   setStage,
@@ -43,17 +44,16 @@ const agent = { id: "s-whale", session };
 const store = createStageStore(STORE_FILE);
 
 check("插件默认导出存在", plugin !== null && typeof plugin === "object" && plugin.name === "ka-whale-workflow");
-check("重构八工具默认清单", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS) === JSON.stringify(["ask_user_question", "read", "glob", "grep", "web_search", "memory_search", "memory_list", "memory_detail"]));
+check("旧重构清单导出仍存在（兼容 import；不再用于阶段过滤）", JSON.stringify(DEFAULT_RECONSTRUCTION_TOOLS) === JSON.stringify(["ask_user_question", "read", "glob", "grep", "web_search", "memory_search", "memory_list", "memory_detail"]));
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
-check("重构 prompt 含终态句", RECONSTRUCTION_PROMPT.includes("Call whale_report before ending your turn"));
-check("分类 prompt 含终态句", CLASSIFICATION_PROMPT.includes("Call whale_report before ending your turn"));
-check("分类 prompt 不要求 ask_user_question 确认", !CLASSIFICATION_PROMPT.includes("ask_user_question (confirm") && !CLASSIFICATION_PROMPT.includes("Do not call whale_report until the user confirms"));
-check("首轮介绍常量已导出且非空", typeof FIRST_ROUND_OVERVIEW === "string" && FIRST_ROUND_OVERVIEW.trim().length > 0);
-check("首轮介绍覆盖三段流程", FIRST_ROUND_OVERVIEW.includes("Task reconstruction") && FIRST_ROUND_OVERVIEW.includes("Task classification") && FIRST_ROUND_OVERVIEW.includes("whale_report"));
-check("首轮介绍长度合理", FIRST_ROUND_OVERVIEW.length < 800);
-check("提醒上限为正", MAX_WHALE_REMINDERS >= 1);
-check("重构提醒文本含 whale_report", typeof whaleReportReminderText("reconstruction") === "string" && whaleReportReminderText("reconstruction").includes("whale_report"));
-check("分类提醒文本含 whale_report", typeof whaleReportReminderText("classification") === "string" && whaleReportReminderText("classification").includes("whale_report"));
+check("主流程文案已导出且非空", typeof MAIN_FLOW_TEXT === "string" && MAIN_FLOW_TEXT.trim().length > 0);
+check("主流程文案含 v0.8 main-line / stable surface", MAIN_FLOW_TEXT.includes("main-line workflow") && MAIN_FLOW_TEXT.includes("KAZ_BASE_TOOLS") && MAIN_FLOW_TEXT.includes("whale_report") && MAIN_FLOW_TEXT.includes("subagent"));
+check("主流程文案不再以旧 TaskReconstruction/TaskClassification 块注入", !MAIN_FLOW_TEXT.startsWith("Task reconstruction stage") && !MAIN_FLOW_TEXT.startsWith("We are now in the task classification stage"));
+check("子代理流程文案已导出且非空", typeof SUBAGENT_FLOW_TEXT === "string" && SUBAGENT_FLOW_TEXT.includes("subagent workflow"));
+check("Goal 继续确认文案已导出且非空", typeof GOAL_CONTINUATION_TEXT === "string" && GOAL_CONTINUATION_TEXT.includes("non-complete goal"));
+check("GOAL_RECOVERY_STAGE 仍导出", GOAL_RECOVERY_STAGE === "goal-recovery");
+check("提醒上限为 0（不再有旧阶段提醒）", MAX_WHALE_REMINDERS === 0);
+check("whaleReportReminderText 为空实现", typeof whaleReportReminderText("reconstruction") === "string" && whaleReportReminderText("reconstruction") === "" && whaleReportReminderText("classification") === "");
 
 check("初始阶段 idle", stageOf(agent, store) === "idle");
 check("第 2+ 轮直接回重构", nextStageOnUserMessage("reconstruction", 2) === "reconstruction" && nextStageOnUserMessage("classification", 3) === "reconstruction" && nextStageOnUserMessage("done", 2) === "reconstruction");

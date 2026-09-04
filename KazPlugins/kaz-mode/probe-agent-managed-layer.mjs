@@ -202,13 +202,13 @@ const sJit = agentOf("s-jit");
 const sEmpty = agentOf("s-empty");
 const sNoState = agentOf("s-nostate");
 
-// ① 全局跨项目：两个项目即使 four-file 关闭 kaz-skill-safe-json，agent 工具仍进 unfiltered 面与 optional 池
+// ① v0.8 Step A：Agent 管理「自写工具」只作候选，不进 Stable Main Surface / optional 池
 for (const agent of [sSel, sEmpty, sNoState]) {
   const unfiltered = kazMode.unfilteredSurfaceOf(agent);
   const pool = kazMode.taskToolPoolOf(agent);
-  check(`unfilteredSurfaceOf(${agent.id}) 含 safe_json_write`, unfiltered !== null && unfiltered.has("safe_json_write"));
-  check(`taskToolPoolOf(${agent.id}) 含 safe_json_write`, pool.includes("safe_json_write"));
-  check(`unfilteredSurfaceOf(${agent.id}) 不含模式限定工具`, !unfiltered.has("exit_plan_mode") && !unfiltered.has("get_goal") && !unfiltered.has("whale_report"));
+  check(`unfilteredSurfaceOf(${agent.id}) 不含 safe_json_write（固定主面）`, unfiltered !== null && !unfiltered.has("safe_json_write"));
+  check(`taskToolPoolOf(${agent.id}) 不含 safe_json_write`, !pool.includes("safe_json_write"));
+  check(`unfilteredSurfaceOf(${agent.id}) 含 Goal/whale 固定工具且不含 Plan 例外`, unfiltered.has("get_goal") && unfiltered.has("whale_report") && !unfiltered.has("exit_plan_mode"));
 }
 
 // ② RPC：listToolPlugins 返回 agent 组；getExternalToolPlugins 返回 registry
@@ -248,19 +248,19 @@ for (const agent of [sSel, sEmpty, sNoState]) {
   const resetProject = await rpc("resetExternalToolPlugins", { cwd: PROJECT_A, layer: "project" });
   check("resetExternalToolPlugins(project) 仍返回 agent registry", resetProject?.ok === true && resetProject.value?.agentManagedRegistry?.plugins?.["kaz-skill-safe-json"]?.tools?.includes("safe_json_write") === true);
   const unfiltered = kazMode.unfilteredSurfaceOf(sSel);
-  check("reset 后 agent 工具仍在 unfiltered 面", unfiltered?.has("safe_json_write") === true);
+  check("reset 后 agent 工具仍不进稳定主面（保持 Step A 固定面）", unfiltered?.has("safe_json_write") === false);
 }
 
-// ⑤ 分类 optional_tools / jit 点亮；未选不出现；无状态回到全量
+// ⑤ v0.8 Step A：任务状态/optional_tools 不再影响主面，agent 工具一律不进固定主面
 {
   const selSurface = kazMode.surfaceOf(sSel);
-  check("surfaceOf(selected initial optional) 含 safe_json_write", selSurface?.has("safe_json_write") === true);
+  check("surfaceOf(selected initial optional) 不含 safe_json_write", selSurface !== null && !selSurface.has("safe_json_write"));
   const jitSurface = kazMode.surfaceOf(sJit);
-  check("surfaceOf(jit enable_tool 点亮) 含 safe_json_write", jitSurface?.has("safe_json_write") === true);
+  check("surfaceOf(jit enable_tool 点亮) 不含 safe_json_write", jitSurface !== null && !jitSurface.has("safe_json_write"));
   const emptySurface = kazMode.surfaceOf(sEmpty);
   check("surfaceOf(未选 optional) 不含 safe_json_write", emptySurface !== null && !emptySurface.has("safe_json_write"));
   const noStateSurface = kazMode.surfaceOf(sNoState);
-  check("surfaceOf(无任务状态=feature off) 全量含 safe_json_write", noStateSurface?.has("safe_json_write") === true);
+  check("surfaceOf(无任务状态) 仍为固定主面，不含 safe_json_write", noStateSurface !== null && !noStateSurface.has("safe_json_write"));
 }
 
 // ⑥ auto-on 防护：不能把 agent 工具加入任何自动启用列表

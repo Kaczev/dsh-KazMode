@@ -20,6 +20,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `resolveFirstRoundTools({ kazMemoryEnabled })` | round-minimal / kaz-mode / computeSurface | 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点） |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode 面板 | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
+| `KAZ_BASE_TOOLS` / `KAZ_GOAL_TOOLS` / `KAZ_STABLE_MAIN_TOOLS` / `KAZ_SUBAGENT_BASE_TOOLS` / `stableMainSurface` / `stableSubagentSurface` | kaz-mode / ka-whale-workflow（v0.8 Step A） | Stable Main Surface 固定集：12 Base + Goal 三件套 + `whale_report` + `subagent`；子代理保守 Base；Plan 例外与 assignedTools 由纯函数表达 |
 | `TOOL_AUTO_ON_CONFIG` / `MODE_SCOPED_TOOL_PLUGIN_KEYS` / `PLAN_AUTO_ON_TOOLS` / `GOAL_AUTO_ON_TOOLS` / `defaultToolAutoOnState` / `normalizeToolList` / `normalizeAutoOnLayer` / `mergeAutoOnLayers` / `autoOnSettingsEqual` / `hasAutoOnLayerFields` | kaz-mode（kaz_tool_auto_on） | 模式工具自动启用参数单一事实源 + 三层单 JSON 设置模型：原设置（代码）→ 默认设置（用户 JSON）→ 专属设置（项目 JSON）的归一化 / 合并 / 生效计算 |
 | `reviewGuidanceText` / `toolCallable` | ka-whale-workflow / kaz-memory | 方向1 复盘指引（英文/第三人称/紧凑）与工具可用性判定 |
 | `BASE_TOOLS` / `MEMORY_READ_TOOLS` / `KAZ_MAINTENANCE_ONLY_TOOLS` / `baseToolNames` / `optionalToolPoolNames` / `validateOptionalToolCount` | kaz-mode / ka-whale-workflow | 任务分类工具面：主线基础面只含记忆**读**工具；记忆写工具（`memory_save/update/forget`）只进维护子代理白名单；可选池 >6 提醒、>8 拒绝 |
@@ -47,9 +48,12 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 - **官方出厂**：`TOOL_PLUGIN_CATALOG` + `TOOL_PLUGINS`（tool-fs / tool-pwsh / ... / kaz-memory）。
 - **旧 `kaz-mode.toolWhitelist` 已弃用**：kaz-mode 不再读取/写入 settings.yaml 的该字段；
   `TOOL_WHITELIST` / `effectiveToolWhitelist` 仅保留给 kaz-memory 可用性兜底等旧路径。
-- **Kaz 模式**（kaz-mode.enabled=true）：
-  - 全量阶段 = `computeToolPluginSurfaceFromEffective(computeEffectiveToolState(...))`；
-  - 首阶段（round-minimal 信号 `minimalPhase=true`）只保留 `firstRoundTools`；为空时按 `resolveFirstRoundTools({ kazMemoryEnabled })` 自动解析——kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`。
+- **Kaz 模式**（kaz-mode.enabled=true，v0.8 Step A）：
+  - 稳定阶段主模型 = `stableMainSurface()` = `KAZ_BASE_TOOLS`(12) + Goal 三件套 +
+    `whale_report` + `subagent`（代码级固定集；用户 JSON false 不隐藏这些固定成员）；
+  - 子代理稳定阶段 = `stableSubagentSurface()`（保守 Base；per-task assigned 工具待后续受控委派 Step）；
+  - 首阶段（round-minimal 信号 `minimalPhase=true`）只保留 `firstRoundTools`；为空时按 `resolveFirstRoundTools({ kazMemoryEnabled })` 自动解析——kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`；
+  - 原生 Plan 是显式例外：`stableMainSurface({ planActive: true, planAutoOnTools })` 在 Plan 激活时追加 plan 控制工具。
 - **记忆工具**：仍由 kaz-mode 按 agent 会话开关从工具面剔除（不依赖 JSON 开关）。
 - **非 Kaz 模式**：本模块不干预工具面（由标准模式决定）。
 

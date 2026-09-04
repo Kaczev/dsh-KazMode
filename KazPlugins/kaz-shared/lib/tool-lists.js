@@ -158,6 +158,67 @@ export const KAZ_EXTERNAL_CANDIDATES = Object.freeze({
   storageHint: "user other-*.json / project other-*.json（面板添加通道）",
 });
 
+/** v0.8 Step A：Goal 三件套 = create_goal / get_goal / update_goal，常驻 Stable Main Surface。 */
+export const KAZ_GOAL_TOOLS = Object.freeze([
+  "create_goal",
+  "get_goal",
+  "update_goal",
+]);
+
+/** v0.8 Step A：Stable Main Surface 的子代理控制工具。
+ *  20/21 裁决：先用现有 DSH `subagent` 入主面，不新造 delegate_subagent；
+ *  send_message / list_agents 暂不默认加入（后续有 continuable/后台需求再加）。 */
+export const KAZ_SUBAGENT_CONTROL_TOOLS = Object.freeze(["subagent"]);
+
+/** v0.8 Step A：Stable Main Surface = KAZ_BASE_TOOLS(12) + Goal 三件套 +
+ *  whale_report + subagent（20/21 裁决后的固定集）。 */
+export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([
+  ...new Set([
+    ...KAZ_BASE_TOOLS,
+    ...KAZ_GOAL_TOOLS,
+    "whale_report",
+    ...KAZ_SUBAGENT_CONTROL_TOOLS,
+  ]),
+]);
+
+/** v0.8 Step A：保守子代理 Stable Base（不含 safe_json_write、不含记忆写工具；
+ *  自创建工具由后续受控委派 Step 作为“主模型指定工具”加入）。 */
+export const KAZ_SUBAGENT_BASE_TOOLS = Object.freeze([
+  "read",
+  "write",
+  "edit",
+  "glob",
+  "grep",
+  "pwsh",
+  "todo_write",
+  "memory_list",
+  "memory_search",
+  "memory_detail",
+  "web_search",
+]);
+
+/** 计算主模型 stable surface（Set）。原生 Plan 例外：plan 模式激活时允许追加
+ *  plan 自动放行工具；该例外在原生 Plan 实际移除 Step 后删除。 */
+export function stableMainSurface({ planActive = false, planAutoOnTools = [] } = {}) {
+  const tools = new Set(KAZ_STABLE_MAIN_TOOLS);
+  if (planActive === true && Array.isArray(planAutoOnTools)) {
+    for (const tool of planAutoOnTools) {
+      if (typeof tool === "string" && tool.trim().length > 0) tools.add(tool.trim());
+    }
+  }
+  return tools;
+}
+
+/** 计算子代理 stable surface（Set）：Stable Subagent Base + 主模型指定工作工具。
+ *  Step A 尚无 delegate_subagent 参数通道，assignedTools 默认空；后续受控委派 Step 接入。 */
+export function stableSubagentSurface({ baseTools = KAZ_SUBAGENT_BASE_TOOLS, assignedTools = [] } = {}) {
+  const tools = new Set(Array.isArray(baseTools) ? baseTools : KAZ_SUBAGENT_BASE_TOOLS);
+  for (const tool of Array.isArray(assignedTools) ? assignedTools : []) {
+    if (typeof tool === "string" && tool.trim().length > 0) tools.add(tool.trim());
+  }
+  return tools;
+}
+
 /** Kaz 5.0 角色特化段（初稿）：只按角色/任务类型固定，禁止按任务实例动态生成。 */
 export const KAZ_ROLE_PROMPTS = Object.freeze({
   main: Object.freeze(

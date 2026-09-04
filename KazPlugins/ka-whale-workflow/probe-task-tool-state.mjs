@@ -224,52 +224,38 @@ const storeNow = () => createStageStore(STORE_FILE);
   check("reconstruction 阶段 taskToolStateOf=null（非 done）", workflowService.taskToolStateOf(agent) === null);
 }
 
-// 分类写状态：reconstruction → classification → done
+// v0.8 Step A：whale_report 直接从稳定状态 bookkeeping，不再写任务工具状态
 {
   const agent = makeAgent("s-classify");
   await enterReconstruction(agent);
-  check("whale_report 无参进入 classification", (await execute(whaleReport(), {}, agent)).stage === "classification");
-  // Kaczev 裁决：分类推进无需 ask_user_question 确认；直接 whale_report({mode}) 即 done。
-  await execute(whaleReport(), { mode: "normal", optional_tools: ["safe_json_write"] }, agent);
-  check("分类无需确认直接进入 done（normal）", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-classify")?.mode === "normal");
-  check("分类写 initialOptionalTools", JSON.stringify(storeNow().getTaskToolState("s-classify")?.initialOptionalTools) === JSON.stringify(["safe_json_write"]));
-  check("分类写 jitEnabledTools=[]", Array.isArray(storeNow().getTaskToolState("s-classify")?.jitEnabledTools) && storeNow().getTaskToolState("s-classify").jitEnabledTools.length === 0);
-  check("done 阶段 taskToolStateOf 返回状态", workflowService.taskToolStateOf(agent)?.taskRunId === storeNow().getTaskToolState("s-classify").taskRunId);
+  check("whale_report 无参从稳定状态直接 done", (await execute(whaleReport(), {}, agent)).stage === "done");
+  check("whale_report normal 后 stage=done 且不写 taskToolState", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-classify") === null);
+  check("done 阶段 taskToolStateOf=null（任务过滤已退役）", workflowService.taskToolStateOf(agent) === null);
 }
 
-// 分类启动 plan：保留状态
+// whale_report mode=plan：仍可启动原生 Plan（显式例外），不写任务工具状态
 {
   const agent = makeAgent("s-plan");
   await enterReconstruction(agent);
-  await execute(whaleReport(), {}, agent);
-  await execute(whaleReport(), { mode: "plan", optional_tools: [] }, agent);
-  check("分类启动 plan 后保留任务状态", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-plan")?.mode === "plan");
-  check("plan 激活路径不清空状态", workflowService.taskToolStateOf(agent) !== null);
+  const result = await execute(whaleReport(), { mode: "plan" }, agent);
+  check("whale_report mode=plan → done（原生 Plan 例外）", result.stage === "done" && storeNow().getTaskToolState("s-plan") === null);
 }
 
-// 分类启动 goal：保留状态
+// whale_report mode=goal：创建 goal，不写任务工具状态
 {
   const agent = makeAgent("s-goal");
   await enterReconstruction(agent);
-  await execute(whaleReport(), {}, agent);
-  await execute(whaleReport(), { mode: "goal", objective: "test goal", optional_tools: ["read_image"] }, agent);
-  check("分类启动 goal 后保留任务状态", workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-goal")?.mode === "goal");
-  check("goal 创建已调用", goalsMock.created.some((item) => item.agent === "s-goal" && item.payload.objective === "test goal"));
-  check("goal 状态含 initial read_image", JSON.stringify(storeNow().getTaskToolState("s-goal")?.initialOptionalTools) === JSON.stringify(["read_image"]));
+  const result = await execute(whaleReport(), { mode: "goal", objective: "test goal" }, agent);
+  check("whale_report mode=goal → done 并创建 goal", result.stage === "done" && goalsMock.created.some((item) => item.agent === "s-goal" && item.payload.objective === "test goal"));
+  check("goal 创建后不写 taskToolState", storeNow().getTaskToolState("s-goal") === null);
 }
 
-// 校验拒绝：不在池 / 基础工具 / 未知工具
+// legacy optional_tools 参数在 Step A 被忽略，不校验不阻塞
 {
   const agent = makeAgent("s-invalid");
   await enterReconstruction(agent);
-  await execute(whaleReport(), {}, agent);
-  let threw = false;
-  try {
-    await execute(whaleReport(), { mode: "normal", optional_tools: ["pwsh"] }, agent);
-  } catch (error) {
-    threw = /not in the current optional tool pool/.test(error.message);
-  }
-  check("分类拒绝基础工具并保持 classification", threw === true && workflowService.stageOf(agent) === "classification");
+  const result = await execute(whaleReport(), { mode: "normal", optional_tools: ["pwsh"] }, agent);
+  check("legacy optional_tools 忽略：仍 done 且不报池校验", result.stage === "done" && workflowService.stageOf(agent) === "done" && storeNow().getTaskToolState("s-invalid") === null);
 }
 
 // 直接 /plan 旁路清状态且 taskToolStateOf=null

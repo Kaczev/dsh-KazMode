@@ -11,14 +11,13 @@
 //      （逐字、最前；不再按记忆插件开关切换 persona 变体）+ 计划模式段（计划模式
 //      仍需生效）。角色特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS；本插件
 //      不再负责系统提示词。
-//   2) 工具面两阶段（工具清单全部由 kaz-shared 的 tool-lists.js 管理）：
-//        - 首次工具调用前（核心机制收编 round-minimal）：仅保留 KAZ_FIRST_ROUND_TOOLS
-//          首轮工具集（ka-whale-memory 开 → memory_search；关 → read + pwsh，≤2）；
-//        - 首次工具调用后：恢复 Kaz 全部工具 = 工具插件 JSON（官方/外置统一：
-//          代码目录 → 用户默认 → 项目设置）。
-//          不再有 settings.yaml 的 toolWhitelist / minimalTools / 群组加减。
-//        - 记忆工具是否真正出现 ⇔ 插件 enabled 时注册到 harness（关闭时
-//          ka-whale-memory 把工具完全注销）且仍在工具插件 JSON 中。
+//   2) 工具面两阶段（v0.8 Step A 固定集，工具清单由 kaz-shared 的 tool-lists.js 管理）：
+//        - 首次工具调用前（round-minimal）：仅保留首轮工具集（≤2）；
+//        - 首次工具调用后：Stable Main Surface = KAZ_BASE_TOOLS(12) + Goal 三件套
+//          + whale_report + subagent（子代理为 Stable Subagent Base）。
+//          不再恢复“工具面板 JSON 全量”；旧 JSON 只作兼容读。
+//          原生 Plan 是显式模式边界例外：Plan 激活时按 auto-on 追加 plan 控制工具。
+//        - 记忆工具是否真正出现仍兼容既有项目状态（记忆组件关时从固定面剔除）。
 //   3) 插件联动：只有 kaz-mode.enabled 变为 true（进入 Kaz）时，先快照被管理
 //      插件的原始 enabled 状态到 kaz-mode.savedPluginStates（供状态报告展示），
 //      再按项目/默认状态应用（同一项目内所有会话共享）。变为 false（关闭 / 切走）
@@ -58,6 +57,10 @@ import {
   OFFICIAL_TOOL_PLUGIN_KEYS,
   KAZ_TOOL_PLUGIN_KEYS,
   MODE_SCOPED_TOOL_PLUGIN_KEYS,
+  KAZ_STABLE_MAIN_TOOLS,
+  KAZ_SUBAGENT_BASE_TOOLS,
+  stableMainSurface,
+  stableSubagentSurface,
   defaultToolAutoOnState,
   normalizeAutoOnLayer,
   mergeAutoOnLayers,
@@ -1076,12 +1079,11 @@ export default {
 
     /** 该代理此刻是否处于首阶段极简（round-minimal 能力收编进核心机制）：
      *  1) 兼容期：round-minimal 服务仍在时以其判定为准（回滚/旧会话）；
-     *  2) 核心兜底：Kaz 模式所有非子代理会话在第一次 tool/call 前都保持极简，
-     *     保证首轮工具面 ≤2（硬边界 2）。
+     *  2) 核心兜底：Kaz 模式主模型与子代理在第一次 tool/call 前都保持极简，
+     *     保证首次工具调用前工具面 ≤2（硬边界 2；v0.8 Step A 子代理同样适用）。
      *  注意：kazSurfaceFor 只用于 Kaz 会话，因此这里不会误伤非 Kaz 模式。 */
     function isMinimalAgent(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
-      if (isSubagent(agent)) return false;
       const roundMinimal = ctx.get("roundMinimal");
       if (roundMinimal !== undefined && roundMinimal !== null && typeof roundMinimal.isMinimal === "function") {
         try {
@@ -1350,87 +1352,43 @@ export default {
     }
 
     /**
-     * 计算某 agent 此刻的 Kaz 工具面（Set）——全部交给 kaz-shared 的
-     * computeSurface：白名单来自 settings（用户优先），再按该 agent 会话的
-     * kaz-memory 生效状态动态剔除对应工具；外置工具插件按
-     * 原设置（代码 + 用户 other-*）→ 用户默认 → 项目设置 合并后加入；
-     * round-minimal 首阶段信号由本插件读取并传入。
+     * 计算某 agent 此刻的 Kaz 工具面（Set）。
+     *
+     * v0.8 Step A 语义：
+     *   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface
+     *     （KAZ_BASE_TOOLS + Goal 三件套 + whale_report + subagent）；一次变化。
+     *   - 子代理：minimal → Stable Subagent Base（Step A 尚无 per-task assigned
+     *     工具通道，assignedTools 由后续受控委派 Step 接入）。
+     *   - 代码级固定集优先：旧 tool-plugin JSON 只作兼容读，不决定固定成员是否可见。
+     *   - 原生 Plan 例外：Plan 模式激活时按 auto-on 追加 plan 控制工具；该例外在
+     *     原生 Plan 实际移除 Step 后删除，探针需能区分 Plan 边界与普通阶段抖动。
+     *   - taskToolSelection / enable_tool 不再参与主模型工具面。
      */
     function kazSurfaceFor(agent, current, states, options = {}) {
-      // 统一工具插件数据源：代码原设置 + 用户 other-* + 默认 + 项目专属。
       let whitelist;
       try {
         const layers = loadExternalToolPluginLayers(workspaceOfAgent(agent), ctx.logger);
         whitelist = new Set(computeToolPluginSurfaceFromEffective(layers.effective));
-        // 模式限定插件（plan-mode / goal）即使被工具控制面板 JSON 启用，也不进
-        // 基础工具面；它们只由下方的 kaz_tool_auto_on 在模式激活时临时放行。
         for (const pluginKey of MODE_SCOPED_TOOL_PLUGIN_KEYS) {
           const universe = layers.effective.T0?.[pluginKey] ?? {};
           for (const tool of Object.keys(universe)) whitelist.delete(tool);
         }
-        // 第14次更新：Agent 管理「自写工具」层在任务过滤之前并入 Kaz 白名单；
-        // 全局生效、不受四文件/other-* 删除影响，registry 缺失/损坏 = 空集。
         whitelist = mergeAgentManagedToolsIntoSurface(whitelist, layers.agentManagedRegistry);
       } catch (error) {
         ctx.logger?.debug?.("[kaz-mode] 计算统一工具插件面失败：" + safeMessage(error));
         whitelist = new Set();
       }
-      // kaz_tool_auto_on：当前会话 plan/goal/鲸鱼工作流阶段命中时，按项目三层生效设置
-      // 临时放行对应工具；模式/阶段结束自动移除。autoOn 同时参与任务过滤的“放行并集”，
-      // 保证 exit_plan_mode / get_goal / update_goal / whale_report 永不被任务过滤移除。
+
+      // kaz_tool_auto_on（原生 Plan 移除前保留）：只用于 Plan 显式模式边界例外。
       const autoOn = autoOnToolsFor(agent, states);
-      for (const tool of autoOn) whitelist.add(tool);
-      // 第三次升级：任务分类工具选择（task-classification decides the tool surface）。
-      // 任务过滤必须在 auto-on 之后做交集：最终面 =
-      //   (基础 ∪ 分类初始 optional ∪ enable_tool 已点亮 ∪ auto-on) ∩ 当前 Kaz 白名单。
-      // 状态缺失 / 特性关闭 / manual bypass 由 kaWhaleWorkflow.taskToolStateOf 返回 null，
-      // 此处跳过任务过滤，回到“放行全量 Kaz 白名单”的旧行为。
-      let taskState = null;
-      if (options.taskFilter !== false) {
-        try {
-          const svc = ctx.get("kaWhaleWorkflow");
-          if (svc !== undefined && svc !== null && typeof svc.taskToolStateOf === "function") {
-            const raw = svc.taskToolStateOf(agent);
-            if (raw !== null && raw !== undefined && typeof raw === "object") taskState = raw;
-          }
-        } catch {
-          // 服务异常按无任务状态处理，不阻断
-        }
-      }
-      if (taskState !== null) {
-        whitelist.add(ENABLE_TOOL);
-        const memoryEnabled = states["ka-whale-memory"]?.enabled === true;
-        const allowed = new Set([
-          ...baseToolNames({ memoryEnabled }),
-          ...normalizeOptionalTools(taskState.initialOptionalTools),
-          ...(Array.isArray(taskState.jitEnabledTools)
-            ? taskState.jitEnabledTools
-                .map((entry) => (entry !== null && typeof entry === "object" ? entry.tool : undefined))
-                .filter((tool) => typeof tool === "string" && tool.length > 0)
-            : []),
-          ...autoOn,
-        ]);
-        whitelist = new Set([...whitelist].filter((tool) => allowed.has(tool)));
-      }
-      // 状态缺失（undefined）按「禁用」处理（2026-08-21 加固）：只有显式 enabled=true
-      // 才保留记忆工具，避免新对话/未落盘状态被误判为启用。
-      if (states["ka-whale-memory"]?.enabled !== true) {
-        for (const tool of MEMORY_TOOLS) whitelist.delete(tool);
-      }
-      // 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，对应工具不进入工具面。
-      for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
-        if (states[pluginId]?.enabled !== true) {
-          for (const tool of tools) whitelist.delete(tool);
-        }
-      }
+
+      const subagent = isSubagent(agent) === true;
       const minimalPhase = isMinimalAgent(agent) === true;
       let firstRoundTools = [];
       if (minimalPhase) {
         try {
           const rm = ctx.get("roundMinimal");
           if (rm !== undefined && rm !== null && typeof rm.firstRoundTools === "function") {
-            // 传 agent：读取该对话的生效首轮工具（Kaz 面板覆盖优先），
-            // 而不是 round-minimal 自身 settings.yaml 的全局空值。
             const tools = rm.firstRoundTools(agent);
             if (Array.isArray(tools)) firstRoundTools = tools;
           }
@@ -1438,13 +1396,44 @@ export default {
           // 保持空数组（computeSurface 按 kaz-memory 自动解析）
         }
       }
-      return computeSurface({
-        toolWhitelist: [...whitelist],
-        minimalPhase,
-        firstRoundTools,
-        // firstRoundTools 为空时：kaz-memory 开 → memory_search；关 → pwsh/read/edit
-        kazMemoryEnabled: states["ka-whale-memory"]?.enabled === true,
-      });
+
+      if (minimalPhase) {
+        const subagentMinimalTools = ["memory_search"];
+        if (subagent) {
+          firstRoundTools = firstRoundTools.length > 0 ? firstRoundTools : subagentMinimalTools;
+        }
+        return computeSurface({
+          toolWhitelist: [...whitelist],
+          minimalPhase: true,
+          firstRoundTools,
+          kazMemoryEnabled: states["ka-whale-memory"]?.enabled === true,
+        });
+      }
+
+      let allowed;
+      if (subagent) {
+        // Step A：子代理 Stable Base（静态保守集）；主模型指定工作工具待后续受控委派 Step。
+        allowed = stableSubagentSurface({ assignedTools: [] });
+      } else {
+        const planActive = planModeActive(agent) === true;
+        allowed = stableMainSurface({
+          planActive,
+          // 原生 Plan 例外：仅 Plan 激活时把 auto-on 的 plan 控制工具并入可见面。
+          planAutoOnTools: planActive ? autoOn : [],
+        });
+      }
+
+      // 兼容既有插件状态闸门（后续 Step 才做“Kaz 固定常开”清理）：
+      // 记忆组件关 → 记忆读工具从固定面剔除；ka-whale-workflow 关 → whale_report 不出现。
+      if (states["ka-whale-memory"]?.enabled !== true) {
+        for (const tool of MEMORY_TOOLS) allowed.delete(tool);
+      }
+      for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
+        if (states[pluginId]?.enabled !== true) {
+          for (const tool of tools) allowed.delete(tool);
+        }
+      }
+      return allowed;
     }
 
     /** 某工具是否属于“携带工具的 Kaz 被管理组件”且该组件当前未启用。 */

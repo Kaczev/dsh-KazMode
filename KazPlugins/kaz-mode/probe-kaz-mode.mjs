@@ -46,22 +46,22 @@ const SESSIONS = {
   "s-kaz-legacy": { cwd: PROJECT_D, agentPreset: "kaz" },
   "s-kaz-plan": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-goal": { cwd: PROJECT_A, agentPreset: "kaz" },
-  "s-kaz-whale-rec": { cwd: PROJECT_A, agentPreset: "kaz" },
-  "s-kaz-whale-cls": { cwd: PROJECT_A, agentPreset: "kaz" },
+  // v0.8 Step A：子代理 stable/minimal 会话（带 subagent/descriptor）。
+  "s-kaz-sub": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true },
+  "s-kaz-sub-min": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true },
   // 专门验证首轮极简（无任何 tool/call）的 Kaz 会话。
   "s-kaz-min": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-min-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
 };
 
-/** plan/mode 会话事件：s-kaz-plan 模拟“当前处于 plan 模式”；whale 阶段事件同理。
- *  除 s-kaz-min 外都先放一条 tool/call，模拟“首次工具调用后”的全量阶段，
- *  使既有工具面断言不再被首轮极简（核心收编后默认生效）干扰。 */
+/** 会话事件：s-kaz-plan 模拟“当前处于 plan 模式”；sub 会话模拟子代理。
+ *  除 s-kaz-min / s-kaz-sub-min 外都先放一条 tool/call，模拟“首次工具调用后”的稳定阶段。 */
 const eventsOf = (id) => {
-  if (id === "s-kaz-min" || id === "s-kaz-min-nomem") return [];
-  const base = [{ type: "tool/call", seq: 0, time: Date.now(), data: { name: "pwsh" } }];
-  if (id === "s-kaz-plan") return [...base, { type: "plan/mode", seq: 1, time: Date.now(), data: { active: true } }];
-  if (id === "s-kaz-whale-rec") return [...base, { type: "ka-whale-workflow/stage", seq: 1, time: Date.now(), data: { stage: "reconstruction" } }];
-  if (id === "s-kaz-whale-cls") return [...base, { type: "ka-whale-workflow/stage", seq: 1, time: Date.now(), data: { stage: "classification" } }];
+  const isSub = SESSIONS[id]?.subagent === true;
+  const descriptor = isSub ? [{ type: "subagent/descriptor", seq: 0, time: Date.now(), data: {} }] : [];
+  if (id === "s-kaz-min" || id === "s-kaz-min-nomem" || id === "s-kaz-sub-min") return descriptor;
+  const base = [...descriptor, { type: "tool/call", seq: descriptor.length, time: Date.now(), data: { name: "pwsh" } }];
+  if (id === "s-kaz-plan") return [...base, { type: "plan/mode", seq: base.length, time: Date.now(), data: { active: true } }];
   return base;
 };
 
@@ -208,6 +208,8 @@ const sPlainMem = agentOf("s-plain-mem");
 const sKazLegacy = agentOf("s-kaz-legacy");
 const sKazMin = agentOf("s-kaz-min");
 const sKazMinNomem = agentOf("s-kaz-min-nomem");
+const sKazSub = agentOf("s-kaz-sub");
+const sKazSubMin = agentOf("s-kaz-sub-min");
 
 // ② 硬边界 2：首次工具调用前工具面 ≤2（kaz-memory/ka-whale-memory 开与关两种状态）。
 {
@@ -218,9 +220,25 @@ const sKazMinNomem = agentOf("s-kaz-min-nomem");
   check("①.11 首轮极简不放行 edit/write/web_search", kazMode.toolVisible(sKazMin, "edit") === false && kazMode.toolVisible(sKazMin, "write") === false && kazMode.toolVisible(sKazMin, "web_search") === false && kazMode.toolVisible(sKazMinNomem, "edit") === false);
 }
 
+// ②.5 v0.8 Step A：稳定主面/子代理面（首次工具调用后）
+{
+  const stable = kazMode.surfaceOf(sKaz);
+  const nomem = kazMode.surfaceOf(sKazNomem);
+  const sub = kazMode.surfaceOf(sKazSub);
+  const subMin = kazMode.surfaceOf(sKazSubMin);
+  check("②.5 Stable Main Surface = 17（12 Base + Goal 三件套 + whale_report + subagent）", stable !== null && stable.size === 17);
+  check("②.5 主面含 create_goal/get_goal/update_goal（常驻）", kazMode.toolVisible(sKaz, "create_goal") === true && kazMode.toolVisible(sKaz, "get_goal") === true && kazMode.toolVisible(sKaz, "update_goal") === true);
+  check("②.5 主面含 whale_report/subagent", kazMode.toolVisible(sKaz, "whale_report") === true && kazMode.toolVisible(sKaz, "subagent") === true);
+  check("②.5 主面不含 send_message/list_agents/enable_tool/workflow/subagent_fork", kazMode.toolVisible(sKaz, "send_message") === false && kazMode.toolVisible(sKaz, "list_agents") === false && kazMode.toolVisible(sKaz, "enable_tool") === false && kazMode.toolVisible(sKaz, "workflow") === false && kazMode.toolVisible(sKaz, "subagent_fork") === false);
+  check("②.5 非 Plan 主面不含 exit_plan_mode（Plan 例外只存在于 Plan 模式）", kazMode.toolVisible(sKaz, "exit_plan_mode") === false);
+  check("②.5 记忆关稳定主面=固定集剔除记忆读三件", nomem !== null && nomem.size === 14 && !nomem.has("memory_search") && nomem.has("get_goal"));
+  check("②.5 子代理稳定面 = 保守 Subagent Base 11", sub !== null && sub.size === 11 && sub.has("read") && sub.has("web_search") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
+  check("②.5 子代理 minimal = memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
+}
+
+// ①.6 RPC：四文件模型（Step A 固定主面下，外置工具只写候选层，不进主面）
 {
   const rpc = rpcHandlers.get("/kaz-mode");
-  check("①.6 RPC 通道已注册", typeof rpc === "function");
   const getRes = await rpc("getExternalToolPlugins", { cwd: TMP });
   check("①.6 getExternalToolPlugins 返回四文件模型", getRes !== null && getRes.ok === true && getRes.value !== null && typeof getRes.value.userEnable === "object" && typeof getRes.value.userCatalog === "object" && typeof getRes.value.effective === "object");
   check("①.6 初始 projectDiffers=false / userDiffersFactory=false", getRes.value.projectDiffers === false && getRes.value.userDiffersFactory === false);
@@ -228,7 +246,7 @@ const sKazMinNomem = agentOf("s-kaz-min-nomem");
   check("①.6 addPlugin 写入用户 other-enable/other-catalog", addP !== null && addP.ok === true && addP.value.userOtherEnable["dsh-pixel-art"] === true);
   const addT = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", toolName: "render_pixel_art", addTool: true });
   check("①.6 addTool 写入用户 other-catalog", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true);
-  check("①.6 手动添加的插件/工具进入 Kaz 工具面", kazMode.toolVisible(sKaz, "render_pixel_art") === true);
+  check("①.6 手动添加的插件/工具写入候选层，但 Step A 固定主面不放行外置工具", addT !== null && addT.ok === true && addT.value.userOtherCatalog["dsh-pixel-art"]?.render_pixel_art === true && kazMode.toolVisible(sKaz, "render_pixel_art") === false);
   const resetU = await rpc("resetExternalToolPlugins", { cwd: TMP, layer: "user" });
   check("①.6 reset(user) 用出厂数据替换默认层并把 other-* 全置 true", resetU !== null && resetU.ok === true && resetU.value.userEnable["tool-fs"] === true && resetU.value.userCatalog["tool-fs"]?.read === true && resetU.value.userOtherEnable["dsh-pixel-art"] === true && resetU.value.projectOtherEnable["dsh-pixel-art"] === undefined);
   const tog = await rpc("setExternalToolPlugin", { cwd: TMP, pluginName: "dsh-pixel-art", layer: "project", capable: false });
@@ -291,12 +309,12 @@ const runAssemble = async (agent, tools) => {
   await listener(assembly, { agent }, () => assembly);
   return assembly.tools.map((t) => t.name);
 };
-const ALL_TOOLS = [...WHITELIST, "workflow", "subagent"];
+const ALL_TOOLS = [...WHITELIST, "workflow", "subagent", "subagent_fork", "create_goal", "get_goal", "update_goal", "whale_report", "enable_tool", "send_message", "list_agents", "exit_plan_mode"];
 const kazNames = await runAssemble(sKaz, ALL_TOOLS);
-check("② Kaz 会话：白名单外工具被移除（workflow/subagent）", !kazNames.includes("workflow") && !kazNames.includes("subagent"));
-check("② Kaz 会话：白名单内工具保留（read/memory_search/web_search）", kazNames.includes("read") && kazNames.includes("memory_search") && kazNames.includes("web_search"));
+check("② Kaz 会话：白名单外工具被移除（workflow/subagent_fork/enable_tool/send_message/list_agents/exit_plan_mode）", !kazNames.includes("workflow") && !kazNames.includes("subagent_fork") && !kazNames.includes("enable_tool") && !kazNames.includes("send_message") && !kazNames.includes("list_agents") && !kazNames.includes("exit_plan_mode"));
+check("② Kaz 会话：Stable Main 固定工具保留（read/subagent/create_goal/whale_report）", kazNames.includes("read") && kazNames.includes("memory_search") && kazNames.includes("web_search") && kazNames.includes("subagent") && kazNames.includes("create_goal") && kazNames.includes("whale_report"));
 const kazNomemNames = await runAssemble(sKazNomem, ALL_TOOLS);
-check("② Kaz 会话（记忆关）：记忆工具被过滤", !kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save"));
+check("② Kaz 会话（记忆关）：记忆工具被过滤，Goal 工具仍常驻", !kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save") && kazNomemNames.includes("get_goal"));
 
 // ③ 组装层：非 Kaz 会话
 const plainNames = await runAssemble(sPlain, ALL_TOOLS);
@@ -340,15 +358,14 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "other:policy"));
 }
 
-// ⑦ kaz_tool_auto_on：三层单 JSON（原设置/默认设置/专属设置）+ 运行时临时放行
+// ⑦ v0.8 Step A：Goal 三件套常驻 + 原生 Plan 作为显式模式边界例外
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const sKazPlan = agentOf("s-kaz-plan");
   const sKazGoal = agentOf("s-kaz-goal");
   const sKazBase = agentOf("s-kaz");
 
-  // 预置用户默认 auto-on JSON（等同出厂值） + 工具控制 JSON 里启用 plan-mode/goal
-  // （应被模式限定逻辑从基础工具面移除）。
+  // 预置用户默认 auto-on JSON + 工具控制 JSON（旧 JSON 只作兼容读，Plan 例外仍读取）。
   writeFileSync(
     join(TMP, "dsh-storages", "ka_tool_auto_on_setting.json"),
     JSON.stringify(
@@ -379,67 +396,13 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
     "utf8",
   );
 
-  // 模式限定：工具控制 JSON 里启用了 plan-mode/goal，但基础面仍不放行。
-  check("⑦ 基础面不放行模式限定工具", kazMode.toolVisible(sKazBase, "exit_plan_mode") === false && kazMode.toolVisible(sKazBase, "get_goal") === false && kazMode.toolVisible(sKazBase, "update_goal") === false);
+  check("⑦ 非 Plan 稳定主面：Goal 三件套常驻，exit_plan_mode 不可见", kazMode.toolVisible(sKazBase, "create_goal") === true && kazMode.toolVisible(sKazBase, "get_goal") === true && kazMode.toolVisible(sKazBase, "update_goal") === true && kazMode.toolVisible(sKazBase, "exit_plan_mode") === false);
+  check("⑦ Plan 模式（显式例外）：stable + exit_plan_mode，Goal 仍常驻", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === true && kazMode.toolVisible(sKazPlan, "create_goal") === true && kazMode.toolVisible(sKazPlan, "get_goal") === true);
+  check("⑦ Goal 会话：Goal 常驻、无 Plan 例外", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === true && kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
+  check("⑦ whale_report 常驻主面（不再依赖工作流阶段）", kazMode.toolVisible(sKazBase, "whale_report") === true && kazMode.toolVisible(sKazGoal, "whale_report") === true && kazMode.toolVisible(sKazPlan, "whale_report") === true);
 
-  // 按项目设置生效，无需 applySession：plan/goal 模式激活时自动放行。
-  check("⑦ plan 模式自动放行 exit_plan_mode", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === true);
-  check("⑦ goal 模式自动放行 get_goal/update_goal", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === true);
-  check("⑦ goal 会话不放行 plan 工具", kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
-  check("⑦ plan 会话不放行 goal 工具", kazMode.toolVisible(sKazPlan, "get_goal") === false);
-
-  // 鲸鱼工作流：重构/分类阶段临时放行 whale_report；分类不再单独放行 create_goal/create_plan。
-  const sKazWhaleRec = agentOf("s-kaz-whale-rec");
-  const sKazWhaleCls = agentOf("s-kaz-whale-cls");
-  check("⑦ 重构阶段放行 whale_report", kazMode.toolVisible(sKazWhaleRec, "whale_report") === true);
-  check("⑦ 分类阶段仅放行 whale_report", kazMode.toolVisible(sKazWhaleCls, "whale_report") === true && kazMode.toolVisible(sKazWhaleCls, "create_goal") === false && kazMode.toolVisible(sKazWhaleCls, "create_plan") === false);
-  check("⑦ 非工作流会话不放行 whale_report/启动工具", kazMode.toolVisible(sKazBase, "whale_report") === false && kazMode.toolVisible(sKazBase, "create_goal") === false && kazMode.toolVisible(sKazBase, "create_plan") === false);
-
-  // RPC 快照：返回三层与生效状态。
   const snap = await rpc("getToolAutoOn", { sessionId: "s-kaz-plan" });
-  check("⑦ getToolAutoOn 返回三层与生效状态", snap?.ok === true && snap.value?.effective?.plan?.enabled === true && Array.isArray(snap.value?.effective?.plan?.tools) && snap.value.effective.plan.tools.includes("exit_plan_mode") && snap.value?.projectDiffers === false && snap.value?.features?.plan?.overridden === false);
-  check("⑦ getToolAutoOn 返回 whale 生效状态（无 launch）", snap?.ok === true && snap.value?.effective?.whale?.tools?.includes("whale_report") === true && snap.value?.effective?.whale?.launch === undefined);
-
-  // 项目 JSON 写了与默认完全相同的值 → 不算“专属”。
-  const same = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: true, tools: ["exit_plan_mode"] });
-  check("⑦ 项目设置与默认一致时不显示专属", same?.ok === true && same.value?.features?.plan?.overridden === false && same.value?.hasProjectOverrides === false);
-
-  // 写项目专属：关闭 plan 开关 → 写入项目 ka_tool_auto_on_setting.json。
-  const off = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", enabled: false });
-  check("⑦ setToolAutoOn(project) 写入项目专属并生效", off?.ok === true && off.value?.features?.plan?.enabled === false && off.value?.features?.plan?.overridden === true && off.value?.hasProjectOverrides === true);
-  check("⑦ 关闭 plan 后 exit_plan_mode 不再放行", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false);
-  const projFile = JSON.parse(readFileSync(join(PROJECT_A, ".dsh", "storages", "ka_tool_auto_on_setting.json"), "utf8"));
-  check("⑦ 项目 JSON 已写入 plan.enabled=false", projFile?.plan?.enabled === false);
-
-  // 调整 goal 工具清单（项目专属）→ 只放行新清单。
-  const custom = await rpc("setToolAutoOn", { sessionId: "s-kaz-goal", feature: "goal", enabled: true, tools: ["get_goal"] });
-  check("⑦ setToolAutoOn 调整 goal 工具清单", custom?.ok === true && JSON.stringify(custom.value?.features?.goal?.tools) === JSON.stringify(["get_goal"]));
-  check("⑦ 调整后只放行新清单", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === false);
-
-  // 调整鲸鱼工作流工具清单（项目专属）→ 只放行新清单（launch 子项已移除）。
-  const whaleCustom = await rpc("setToolAutoOn", { sessionId: "s-kaz-whale-cls", feature: "whale", enabled: true, tools: ["whale_report"] });
-  check("⑦ setToolAutoOn 调整 whale 工具清单", whaleCustom?.ok === true && JSON.stringify(whaleCustom.value?.features?.whale?.tools) === JSON.stringify(["whale_report"]) && whaleCustom.value?.features?.whale?.launch === undefined);
-  const whaleReset = await rpc("setToolAutoOn", { sessionId: "s-kaz-whale-cls", feature: "whale", reset: true });
-  check("⑦ reset whale 清除项目专属", whaleReset?.ok === true && whaleReset.value?.features?.whale?.launch === undefined && whaleReset.value?.features?.whale?.overridden === false);
-
-  // 清除某个 feature 的项目专属覆盖 → 回落到用户默认。
-  const resetOne = await rpc("setToolAutoOn", { sessionId: "s-kaz-plan", feature: "plan", reset: true });
-  check("⑦ reset feature 清除项目专属", resetOne?.ok === true && resetOne.value?.features?.plan?.overridden === false && resetOne.value?.features?.plan?.enabled === true);
-  check("⑦ 清除后 plan 工具恢复放行", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === true);
-
-  // 设为默认：把当前项目专属（goal 清单）复制到用户默认 JSON。
-  const asDefault = await rpc("setToolAutoOnAsDefault", { sessionId: "s-kaz-goal" });
-  check("⑦ setToolAutoOnAsDefault 复制项目专属到用户默认", asDefault?.ok === true && asDefault.value?.effective?.goal?.tools?.includes("get_goal") === true);
-  const userFile = JSON.parse(readFileSync(join(TMP, "dsh-storages", "ka_tool_auto_on_setting.json"), "utf8"));
-  check("⑦ 用户 JSON 已更新 goal.tools 为 [get_goal]", JSON.stringify(userFile?.goal?.tools) === JSON.stringify(["get_goal"]));
-
-  // 清空项目专属 → 生效回到用户默认。
-  const resetProj = await rpc("resetToolAutoOn", { sessionId: "s-kaz-goal", layer: "project" });
-  check("⑦ resetToolAutoOn(project) 清空专属", resetProj?.ok === true && resetProj.value?.hasProjectOverrides === false && resetProj.value?.effective?.goal?.tools?.includes("get_goal") === true);
-
-  // 恢复用户默认 → 回到出厂。
-  const resetUser = await rpc("resetToolAutoOn", { sessionId: "s-kaz-goal", layer: "user" });
-  check("⑦ resetToolAutoOn(user) 恢复出厂", resetUser?.ok === true && JSON.stringify(resetUser.value?.effective?.goal?.tools) === JSON.stringify(["get_goal", "update_goal"]));
+  check("⑦ getToolAutoOn 仍可读 Plan 例外三层状态", snap?.ok === true && snap.value?.effective?.plan?.enabled === true && Array.isArray(snap.value?.effective?.plan?.tools) && snap.value.effective.plan.tools.includes("exit_plan_mode"));
 }
 
 rmSync(TMP, { recursive: true, force: true });

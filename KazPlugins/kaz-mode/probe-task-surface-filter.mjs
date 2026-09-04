@@ -211,55 +211,54 @@ const sPlan = agentOf("s-plan");
 const sGoal = agentOf("s-goal");
 const sNomem = agentOf("s-nomem");
 
-// ① unfilteredSurfaceOf / taskToolPoolOf
+// ① v0.8 Step A：unfilteredSurfaceOf/taskToolPoolOf 也按固定主面（不再暴露外部可选）
 {
   const unfiltered = kazMode.unfilteredSurfaceOf(sSel);
-  check("unfilteredSurfaceOf 返回完整当前 Kaz 面（含未选 optional）", unfiltered !== null && unfiltered.has("read_image") && unfiltered.has("job_list") && unfiltered.has("subagent") && unfiltered.has("read"));
+  check("unfilteredSurfaceOf 返回 Stable Main（无 read_image/job_list/enable_tool）", unfiltered !== null && !unfiltered.has("read_image") && !unfiltered.has("job_list") && !unfiltered.has("enable_tool"));
+  check("unfilteredSurfaceOf 含固定工具（read/subagent/create_goal/whale_report）", unfiltered !== null && unfiltered.has("read") && unfiltered.has("subagent") && unfiltered.has("create_goal") && unfiltered.has("whale_report"));
   const pool = kazMode.taskToolPoolOf(sSel);
-  const expectedPool = optionalToolPoolNames(unfiltered, { memoryEnabled: true });
-  check("taskToolPoolOf = optionalToolPoolNames(unfilteredSurfaceOf)", JSON.stringify(pool) === JSON.stringify(expectedPool));
-  check("可选池排除基础/模式工具且含可选工具", pool.includes("read_image") && pool.includes("job_list") && pool.includes("subagent") && !pool.includes("read") && !pool.includes("enable_tool") && !pool.includes("exit_plan_mode") && !pool.includes("get_goal") && !pool.includes("whale_report"));
+  check("taskToolPoolOf 不含外部候选 read_image/job_list/enable_tool/模式工具", !pool.includes("read_image") && !pool.includes("job_list") && !pool.includes("enable_tool") && !pool.includes("exit_plan_mode"));
   const unfilteredNomem = kazMode.unfilteredSurfaceOf(sNomem);
   check("unfilteredSurfaceOf(memory off) 不含 memory 工具", unfilteredNomem !== null && !unfilteredNomem.has("memory_search") && !unfilteredNomem.has("memory_save"));
   check("taskToolPoolOf(memory off) 不含 memory 工具", !kazMode.taskToolPoolOf(sNomem).includes("memory_search"));
 }
 
-// ② surfaceOf：任务过滤后 selected/JIT 进面、unselected 不进
+// ② v0.8 Step A：surfaceOf 忽略任务状态，恒为 Stable Main
 {
   const surface = kazMode.surfaceOf(sSel);
   check("surfaceOf(selected) 含基础工具", surface.has("read") && surface.has("pwsh") && surface.has("web_search"));
-  check("surfaceOf(selected) 含初始 optional（read_image）", surface.has("read_image"));
-  check("surfaceOf(selected) 含 JIT 已点亮（job_list）", surface.has("job_list"));
-  check("surfaceOf(selected) 不含未选 optional（subagent）", !surface.has("subagent"));
-  check("surfaceOf(selected) 含 enable_tool", surface.has("enable_tool"));
-  check("surfaceOf(selected, memory on) 读记忆进基础面、写记忆不进", surface.has("memory_search") && surface.has("memory_list") && surface.has("memory_detail") && !surface.has("memory_save") && !surface.has("memory_update") && !surface.has("memory_forget"));
+  check("surfaceOf(selected) 不含初始 optional（read_image）", !surface.has("read_image"));
+  check("surfaceOf(selected) 不含 JIT 已点亮（job_list）", !surface.has("job_list"));
+  check("surfaceOf(selected) 含固定 subagent/create_goal", surface.has("subagent") && surface.has("create_goal"));
+  check("surfaceOf(selected) 不含 enable_tool", !surface.has("enable_tool"));
+  check("surfaceOf(selected, memory on) 读记忆进面、写记忆不进", surface.has("memory_search") && surface.has("memory_list") && surface.has("memory_detail") && !surface.has("memory_save") && !surface.has("memory_update") && !surface.has("memory_forget"));
   const emptySurface = kazMode.surfaceOf(sEmpty);
-  check("空 optional 列表 = 仅基础 + enable_tool", emptySurface.has("read") && emptySurface.has("enable_tool") && !emptySurface.has("read_image") && !emptySurface.has("job_list") && !emptySurface.has("subagent"));
+  check("空 optional 列表与 selected 相同（固定主面）", emptySurface.has("read") && !emptySurface.has("read_image") && !emptySurface.has("job_list") && !emptySurface.has("enable_tool"));
   const noStateSurface = kazMode.surfaceOf(sNoState);
-  check("无任务状态 = 全量 Kaz 白名单（不回退、不加 enable_tool）", noStateSurface.has("read_image") && noStateSurface.has("job_list") && noStateSurface.has("subagent") && !noStateSurface.has("enable_tool"));
+  check("无任务状态 = 固定主面（不回退旧全量、不加 enable_tool）", noStateSurface.has("read") && noStateSurface.has("subagent") && !noStateSurface.has("read_image") && !noStateSurface.has("job_list") && !noStateSurface.has("enable_tool"));
 }
 
-// ③ plan/goal auto-on 在任务过滤后保留
+// ③ v0.8 Step A：Plan 显式例外；Goal 三件套常驻
 {
   const planSurface = kazMode.surfaceOf(sPlan);
-  check("plan 激活：exit_plan_mode 不被任务过滤移除", planSurface.has("exit_plan_mode"));
-  check("plan 激活：未选 optional 仍不进面", !planSurface.has("read_image"));
+  check("plan 激活：exit_plan_mode 作为显式例外加入", planSurface.has("exit_plan_mode"));
+  check("plan 激活：外部 optional 仍不进面", !planSurface.has("read_image") && !planSurface.has("job_list"));
   const goalSurface = kazMode.surfaceOf(sGoal);
-  check("goal 激活：get_goal/update_goal 不被任务过滤移除", goalSurface.has("get_goal") && goalSurface.has("update_goal"));
-  check("goal 激活：未选 optional 仍不进面", !goalSurface.has("job_list"));
+  check("goal 激活：get_goal/update_goal 常驻（非动态）", goalSurface.has("get_goal") && goalSurface.has("update_goal") && goalSurface.has("create_goal"));
+  check("goal 激活：外部 optional 仍不进面", !goalSurface.has("job_list") && !goalSurface.has("read_image"));
 }
 
 // ④ memory 开关
 {
   const emptyMemSurface = kazMode.surfaceOf(sEmpty);
-  check("memory on：记忆读工具进基础面、写工具不进", emptyMemSurface.has("memory_search") && emptyMemSurface.has("memory_list") && !emptyMemSurface.has("memory_save") && !emptyMemSurface.has("memory_forget"));
+  check("memory on：记忆读工具进面、写工具不进", emptyMemSurface.has("memory_search") && emptyMemSurface.has("memory_list") && !emptyMemSurface.has("memory_save") && !emptyMemSurface.has("memory_forget"));
   const nomemSurface = kazMode.surfaceOf(sNomem);
   check("memory off：memory 工具不进面", !nomemSurface.has("memory_search") && !nomemSurface.has("memory_save"));
-  check("memory off：基础/optional 不受影响", nomemSurface.has("read") && nomemSurface.has("enable_tool") && !nomemSurface.has("read_image"));
+  check("memory off：固定基础工具不受影响且无 enable_tool", nomemSurface.has("read") && !nomemSurface.has("enable_tool") && !nomemSurface.has("read_image"));
 }
 
-// ⑤ assemble 与 pre-execute 使用同一 kazSurfaceFor
-const ALL_TOOLS = ["read", "pwsh", "web_search", "read_image", "job_list", "subagent", "enable_tool", "exit_plan_mode", "get_goal", "update_goal", "memory_search", "memory_save"];
+// ⑤ assemble 与 pre-execute 使用同一稳定主面
+const ALL_TOOLS = ["read", "pwsh", "web_search", "read_image", "job_list", "subagent", "enable_tool", "exit_plan_mode", "create_goal", "get_goal", "update_goal", "whale_report", "memory_search", "memory_save"];
 const runAssemble = async (agent) => {
   const listener = listeners.get("system-prompt/assemble")[0];
   const assembly = { tools: ALL_TOOLS.map((name) => ({ name })), sections: [], contexts: [], variables: {} };
@@ -267,14 +266,12 @@ const runAssemble = async (agent) => {
   return new Set(assembly.tools.map((t) => t.name));
 };
 const assembledSel = await runAssemble(sSel);
-check("assemble(selected)：selected/JIT/基础/enable_tool 保留", assembledSel.has("read_image") && assembledSel.has("job_list") && assembledSel.has("read") && assembledSel.has("enable_tool"));
-check("assemble(selected)：unselected optional 移除", !assembledSel.has("subagent"));
+check("assemble(selected)：固定主面保留 subagent/create_goal/whale_report，移除外部/可选", assembledSel.has("read") && assembledSel.has("subagent") && assembledSel.has("create_goal") && assembledSel.has("whale_report") && !assembledSel.has("read_image") && !assembledSel.has("job_list") && !assembledSel.has("enable_tool"));
 const gate = listeners.get("tools/pre-execute")[0];
 const runGate = async (agent, name) => gate({ name, agent }, async () => ({ kind: "allow" }));
-check("pre-execute 放行 selected optional", (await runGate(sSel, "read_image")).kind === "allow");
-check("pre-execute 放行 JIT optional", (await runGate(sSel, "job_list")).kind === "allow");
-check("pre-execute 拒绝 unselected optional", (await runGate(sSel, "subagent")).kind === "deny");
-check("pre-execute 放行 enable_tool（任务过滤开启）", (await runGate(sSel, "enable_tool")).kind === "allow");
+check("pre-execute 放行固定工具", (await runGate(sSel, "subagent")).kind === "allow" && (await runGate(sSel, "create_goal")).kind === "allow");
+check("pre-execute 拒绝外部候选/enable_tool", (await runGate(sSel, "read_image")).kind === "deny" && (await runGate(sSel, "job_list")).kind === "deny" && (await runGate(sSel, "enable_tool")).kind === "deny");
+check("pre-execute 拒绝记忆写工具", (await runGate(sSel, "memory_save")).kind === "deny");
 
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures === 0 ? "\nTASK-SURFACE-FILTER PROBE OK" : `\nTASK-SURFACE-FILTER PROBE FAILED (${failures} 项失败)`);

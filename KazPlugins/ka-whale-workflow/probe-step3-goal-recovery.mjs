@@ -12,7 +12,7 @@ import plugin, {
   DEFAULT_RECONSTRUCTION_TOOLS,
   createStageStore,
   GOAL_RECOVERY_STAGE,
-  GOAL_RECOVERY_PROMPT,
+  GOAL_CONTINUATION_TEXT,
   goalRecoveryNeededOf,
   nextStageOnUserMessage,
   currentGoalOf,
@@ -63,8 +63,8 @@ const check = (label, ok) => {
     "nextStageOnUserMessage: no goal → reconstruction",
     nextStageOnUserMessage("done", 2, { modeActive: false, goalRecovery: null }) === "reconstruction",
   );
-  check("GOAL_RECOVERY_PROMPT 含 ask_user_question 与继续/新任务/结束", GOAL_RECOVERY_PROMPT.includes("ask_user_question") && GOAL_RECOVERY_PROMPT.includes("Continue the original goal") && GOAL_RECOVERY_PROMPT.includes("Start a new task"));
-  check("goal-recovery 提醒含 whale_report", whaleReportReminderText(GOAL_RECOVERY_STAGE).includes("whale_report"));
+  check("GOAL_CONTINUATION_TEXT 含 ask_user_question 与继续/新任务/结束", GOAL_CONTINUATION_TEXT.includes("ask_user_question") && GOAL_CONTINUATION_TEXT.includes("Continue the original goal") && GOAL_CONTINUATION_TEXT.includes("Start a new task"));
+  check("v0.8 Step A 提醒为空（不再有旧阶段提醒）", whaleReportReminderText(GOAL_RECOVERY_STAGE) === "");
 
   const humanAgent = { session: { events: [
     { type: "turn/start", data: { turn: 2 } },
@@ -200,19 +200,9 @@ const claimedHandlers = listeners.get("agent/inbox/claimed") ?? [];
 const claimedHandler = claimedHandlers[0];
 const whaleReport = () => registeredTools.get("whale_report");
 const execute = async (def, args, agent) => def.execute(args, { agent });
-const toClassification = async (agent, turn = 2) => {
-  let guard = 0;
-  while (stageFromFile(agent.id) !== "classification" && guard < 6) {
-    guard += 1;
-    const stage = stageFromFile(agent.id);
-    if (stage === "done") {
-      await claimedHandler({ agent, message: userMessage(), turn });
-    } else if (stage === GOAL_RECOVERY_STAGE || stage === "reconstruction") {
-      await execute(whaleReport(), {}, agent);
-    } else {
-      break;
-    }
-  }
+const toClassification = async (agent) => {
+  // v0.8 Step A：whale_report 从稳定状态直接处理 mode；不再需要 reconstruction/classification。
+  store.set(agent.id, "done");
   return stageFromFile(agent.id);
 };
 
@@ -294,7 +284,7 @@ const toClassification = async (agent, turn = 2) => {
     rejected = error.message;
   }
   check("轮次耗尽：拒绝且给出 maxGoalRounds 指引", rejected !== null && /exhausted/.test(rejected) && /maxGoalRounds/.test(rejected));
-  check("轮次耗尽：不 resume/create，stage 保持 classification", calls.length === 0 && stageFromFile("s-classify-exhausted") === "classification");
+  check("轮次耗尽：不 resume/create，stage 保持 done", calls.length === 0 && stageFromFile("s-classify-exhausted") === "done");
 }
 
 // 3.4 既有 goal + 不同 objective → 拒绝，不静默 create

@@ -10,13 +10,13 @@ Kaz 模式同时具备两个入口，双向同步：
 | 插件 | 角色 |
 | --- | --- |
 | `thinking-anchor` | 思考锚点（**消息注入**）：新对话开始时把完整思考协议作为一条合成用户消息注入，此后每轮开头注入短提醒；不触碰系统提示词 |
-| `round-minimal` | 首阶段极简：**首次工具调用前**按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`/`read`/`edit`），首次工具调用后恢复全部工具 |
+| `round-minimal` | 首阶段极简：**首次工具调用前**按 kaz-memory 自动暴露（开=`memory_search`；关=`pwsh`/`read`/`edit`），首次工具调用后恢复 Stable Main Surface（固定集） |
 | `plugin-filter`（原 tool-filter） | 工具过滤：按名单移除 / 禁用指定工具 |
 | `output-beep` | 输出完成提示音：模型输出完毕时响提示音（可配频率/时长/子代理） |
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
 | `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |
-| `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单在 ka-whale-workflow 配置面板的代码框中修改（与其它输入框同底色），`whale_report` 由「工具自动启用」临时放行，分类时由 `whale_report({mode})` 统一启动 plan/goal |
+| `ka-whale-workflow` | 鲸鱼工作流（v0.8 Step A）：主/子两套新流程上下文 + `whale_report` 常驻工作簿记；不再有 reconstruction/classification 阶段收窄工具面 |
 | `create-plan` | 挂在 Kaz 预设 `planning` isolate 组：`create_plan` 工具（支持 `active` 进入/退出），作为 `whale_report` 启动/退出 plan 模式的 realm 桥，也可手动直接使用 |
 
 **Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
@@ -26,12 +26,14 @@ Kaz 模式同时具备两个入口，双向同步：
    记忆优先提示词。组装层把提示段收敛为 persona 一句（+ 计划模式段，保证 plan mode
    仍工作），其余任何提示段（thinking-anchor / round-minimal 轮次提示 / kaz-memory
    指引 / tool:* 指导段 / 运行时上下文…）一律过滤。**kaz-mode 插件不再控制系统提示词。**
-2. **工具面两阶段**：
+2. **工具面两阶段（v0.8 Step A 固定集）**：
    - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
      （为空时自动：kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；
-   - 首次工具调用后：恢复 **Kaz 全部工具** = 工具控制面板 JSON（官方/外置统一：
-     `factory → 用户默认 → 项目设置`；真正的新插件/新工具默认开启，
-     已知但默认关闭的插件/工具保持关闭）。
+   - 首次工具调用后：恢复 **Stable Main Surface** = `KAZ_BASE_TOOLS`(12) +
+     Goal 三件套（`create_goal/get_goal/update_goal`）+ `whale_report` + `subagent`。
+     代码级固定集不受旧 tool-plugin JSON 的 false 开关影响；外部/自创建工具不进主面。
+   - 原生 Plan 是显式模式边界例外：Plan 激活时按 auto-on 追加 `exit_plan_mode` 等；
+     该例外在原生 Plan 实际移除 Step 后删除。
 3. **记忆工具按项目生效**：`kaz-memory` 关闭时，其六工具从该项目所有会话的工具面
    移出、调用被拒。
 4. **skill 已整体移除**（2026-08，Kaczev）：`skill` 工具、技能发现行与技能目录已从
@@ -88,17 +90,16 @@ kaz-mode 配置区内的临时工具放行区块，位于「工具控制面板�
   - 形状：`{ "plan": { "enabled": true, "tools": ["exit_plan_mode"] }, "goal": { "enabled": true, "tools": ["get_goal", "update_goal"] }, "whale": { "enabled": true, "tools": ["whale_report"] } }`
   - 生效值 = 专属覆盖默认、默认覆盖原设置（enabled / tools 逐项继承）。
 - **plan 模式**：当前会话激活 plan 模式时，自动临时放行生效清单里的 plan 工具；
-  plan 模式结束自动移除。
-- **goal 模式**：当前会话存在 active/paused 目标时，自动临时放行生效清单里的 goal 工具；
-  goal 模式结束自动移除。
-- **鲸鱼工作流**：任务重构/分类时临时放行 `whale_report`；任务分类的模式启动由
-  `whale_report({mode})` 统一完成，不再单独放行 `create_goal` / `create_plan`。
-- 三个功能在面板里都有独立开关，并可编辑各自临时放行工具清单；面板中模式/阶段激活且
-  开关打开时显示紫色「启用中」，模式/阶段结束自动恢复灰色。
-- **编辑即写项目专属 JSON**（同一项目所有对话共享）；「设为默认设置」把当前项目
-  生效设置复制到用户默认 JSON；「恢复原设置 / 恢复默认设置」分别重置用户 / 项目层。
-- **模式限定**：`plan-mode` / `goal` 插件即使被工具控制面板 JSON 启用，也不进基础
-  工具面，只由自动启用按会话模式临时放行。
+  plan 模式结束自动移除（v0.8 Step A 的显式模式边界例外）。
+- **goal 模式**：Goal 三件套已常驻 Stable Main Surface；auto-on 的 goal 条目不再
+  改变工具面，旧 JSON 只作兼容读。
+- **Goal 工具**：v0.8 Step A 起 Goal 三件套常驻 Stable Main Surface，不再由 auto-on
+  按会话模式临时放行（auto-on 旧 JSON 只作兼容读）。
+- **鲸鱼工作流**：`whale_report` 常驻 Stable Main Surface；不再由阶段临时放行，
+  不再有“分类阶段只剩 whale_report”。
+- 面板与 RPC 在 auto-on 退役前保留给 Plan 例外使用；Goal/whale 相关旧 JSON 只读兼容。
+- **模式限定**：`plan-mode` 仍按显式 Plan 例外处理；`goal` 三件套因 C32 不再作为
+  动态模式限定工具。
 - 参数修改点：`kaz-shared/lib/tool-auto-on.js`（原设置）。
 
 ---
@@ -138,17 +139,15 @@ kaz-mode 配置区内的临时工具放行区块，位于「工具控制面板�
   - 不做自动检测；新插件/新工具只能手动添加，写入用户 `other-*` 文件（共享所有项目）；
     开关调整写项目对应文件，可经「设为默认设置」把项目四个文件复制为用户默认。
 - `kaz-memory` 关闭 → 六工具自动移出。
-- 「Kaz 模式工具自动启用」属于“临时放行叠加层”：不写工具控制面板四文件 JSON，
-  只写自己的单 JSON（用户默认 / 项目专属）；当前会话 plan/goal 模式激活时按三层
-  生效清单临时放行对应工具，模式结束自动移除。
+- 「Kaz 模式工具自动启用」目前只作为 Plan 显式例外保留：只写自己的单 JSON；
+  Goal/whale 固定工具不受它影响。
 
 ### 5. round-minimal 信号（首阶段极简）
 
 round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件。kaz-mode
 据此在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集（为空时自动：
 kaz-memory 开 → `memory_search`；关 → `pwsh` + `read` + `edit`）；首次工具调用后
-恢复工具控制面板 JSON 定义的全部工具。Kaz 模式下 round-minimal 的 `guidanceHeadEnabled` 默认开，
-会在第一轮开始时注入一条「先使用首轮工具，之后才能用其它工具」的精简提示。
+恢复 Stable Main Surface（v0.8 Step A 固定集，不由工具控制面板 JSON 决定）。
 
 ### 6. 设置（`~/.dsh/settings.yaml`，热重载）
 
@@ -197,13 +196,14 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-kaz-mode.mjs"
    默认是 `You are a helpful software engineer assistant.`，`kaz-memory` 启用时是
    记忆优先提示词（+ 计划模式段）；
 2. 首次工具调用前工具面：kaz-memory 开 = `memory_search`；关 = `pwsh` + `read` + `edit`；
-   第一次工具调用后恢复工具控制面板 JSON 定义的全部工具（kaz-memory 关闭时无记忆工具）；
+   第一次工具调用后恢复 Stable Main Surface = `KAZ_BASE_TOOLS`(12) + Goal 三件套 +
+   `whale_report` + `subagent`（记忆组件关时记忆读工具从该固定面剔除）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
-5. Kaz 面板「工具控制面板」区块可管理官方/外置插件（开关、手动添加、删除外置），改完即生效；
+5. Kaz 面板「工具控制面板」区块只作为旧 JSON 兼容读/外置候选展示；Step A 主面不受
+   其 false 开关影响；
 6. 来回切换 Kaz / 非 Kaz 会话、在 Kaz 面板改「项目专属设置/默认设置」——settings.yaml
    里除 `kaz-mode:` 等保留段外**不新增/改写任何被管理插件的段**，改动只落在
    `kaz-defaults.json`、`kaz-project-states.json` 与工具控制面板 JSON。
-7. 进入 plan / goal 模式、鲸鱼工作流阶段命中时，kaz-mode 配置区「Kaz 模式工具自动启用」
-   显示紫色「启用中」，对应工具临时放行；模式/阶段结束自动移除。面板编辑只写
-   `ka_tool_auto_on_setting.json`（用户默认 / 项目专属），不写工具控制面板 JSON 与 settings.yaml。
+7. 原生 Plan 仍是显式例外：Plan 模式激活时 `exit_plan_mode` 才追加；Goal 三件套与
+   `whale_report` 常驻，不再因 plan/goal/工作流阶段出现 4–8 次工具面抖动。

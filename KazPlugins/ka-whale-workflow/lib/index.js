@@ -1,33 +1,27 @@
-// ka-whale-workflow —— 鲸鱼工作流（任务重构 → 任务分类 → done）
+// ka-whale-workflow —— 鲸鱼工作流（v0.8 Step A：主/子两套新流程 + 工具面稳定）
 // ===========================================================================
 // 流程：
-//   1) 首轮真实用户消息（turn=1）进入「任务重构」：
-//        - 系统提示词段 ka-whale-workflow:prompt 显示重构 prompt；
-//        - 上下文注入 [ka-whale-workflow TaskReconstruction]；
-//        - 工具面收敛为「ka-whale-workflow 配置面板重构清单 ∩ Kaz 白名单」
-//          + 自动启用面板临时放行的 whale_report。
-//   2) whale_report 后进入「任务分类」：
-//        - 系统提示词段切为分类 prompt；
-//        - 上下文注入 [ka-whale-workflow TaskClassification]；
-//        - 工具面收敛为 whale_report。
-//   3) whale_report({mode}) 自动启动 plan/goal 后进入 done：不再过滤，放行 Kaz 白名单。
-//      plan 模式由 whale_report 内部经 create_plan 工具（planning isolate 组内）切换，
-//      因为 whale_report 自身在 host 层解析不到 planMode 服务。
-//   4) 插话（模型运行中，同一轮中途追加消息）不改变当前工作流阶段。
-//      第 2、3、4……轮（turn>=2、模型不在运行）直接重新进入「任务重构」；
-//      Plan/Goal 模式激活时除外——用户回复不进入任务重构，保持在当前模式。
-//   5) 用户通过 /plan 或 /goal 指令开启模式的那一条消息：跳过鲸鱼工作流，
-//      不进入任务重构；round-minimal 极简过滤仍照常生效。
+//   1) 主模型注入 [ka-whale-workflow main flow]（一次/新会话），描述 v0.8 主线：
+//      Minimal → 简单/复杂判断 → 质疑并找最小方案 → 明确工具/子代理需求 →
+//      工作流 → Communication → 汇报候选记忆/技能建议。
+//   2) 子代理注入 [ka-whale-workflow subagent flow]（一次），描述 v0.8 子线：
+//      Minimal → 质疑委派 → 判断主模型指定工具是否足够 → Working/Communication →
+//      汇报候选经验/技能建议（不自写记忆/技能）。
+//   3) 非 complete goal 时按轮注入 [ka-whale-workflow goal continuation] 确认
+//      继续原 Goal / 新任务 / 结束。
+//   4) whale_report 在 Stable Main Surface 常驻，只做工作簿记/模式记录；不再触发
+//      “只剩 whale_report”的阶段级工具面切换。
 //
-// 与 round-minimal：
-//   round-minimal 优先。极简阶段（首次工具调用前）不进入重构；第一次 tool/call
-//   解除极简后立刻进入重构。命令旁路不影响 round-minimal。
+// 工具面（由 kaz-mode + kaz-shared 执行）：
+//   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface（固定集）；
+//   - 子代理：minimal → Stable Subagent Base（Step A 静态保守集，assigned 待后续）；
+//   - 原生 Plan 是显式模式边界例外（Plan 移除前保留）。
 //
-// 阶段状态：
+// 阶段状态（内部兼容）：
 //   写入插件自己的 JSON 存储（~/.dsh/storages/ka-whale-workflow-stage.json，
-//   按 session id 索引），重启/续接会话自然恢复。
-//   不再写入会话事件 ka-whale-workflow/stage——DSH 会把未知自定义事件视为
-//   "not marked ignorable"，导致重载会话日志时拒绝读取整条日志。
+//   按 session id 索引），重启/续接会话自然恢复。旧 reconstruction/classification
+//   值只作存储兼容与 review/skill-review 边界；旧阶段文案不再注入，也不再注册
+//   ka-whale-workflow:prompt system 段或做阶段工具过滤。
 // ===========================================================================
 
 import z from "@deepseek-ai/schemastery";
@@ -81,7 +75,7 @@ function defaultAgentManagedRegistryFile() {
   return join(process.env.DSH_HOME || join(homedir(), ".dsh"), "storages", AGENT_MANAGED_STORAGE_FILE);
 }
 
-/** whale_report：由 kaz_tool_auto_on「鲸鱼工作流」临时放行（重构 + 分类）。 */
+/** whale_report：v0.8 Step A 后为 Stable Main Surface 常驻工具（不再由阶段临时放行）。 */
 export const WHALE_REPORT_TOOL = "whale_report";
 
 /** create_plan：planning isolate 组内的 realm 桥。whale_report 通过它进入/退出 plan 模式。 */
@@ -90,91 +84,46 @@ const CREATE_PLAN_TOOL = "create_plan";
 /** 用户手动指令开启模式的命令名（/plan、/goal）。 */
 const MANUAL_COMMAND_NAMES = ["plan", "goal"];
 
-/** 任务重构 prompt（草案原文；<工具列表> 渲染为当前阶段实际可见工具）。 */
-export const RECONSTRUCTION_PROMPT =`Task reconstruction stage: rewrite the user's request into a structured task description preserving all key points, intent, and system-level constraints. No analysis, diagnosis, or solutions — later.
+/** v0.8 Step A 主流程上下文注入文案（不再有 TaskReconstruction/Classification）。 */
+export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
+>
+This session uses the v0.8 main-line workflow:
+- Minimal (before the first tool call): judge whether the task is simple or complex using only the few visible tools.
+- Simple: communicate the answer; do not expand the surface.
+- Complex: challenge the user's proposed approach when needed, find the smallest-workable solution, decide what tools are required, and decide whether a subagent should create tools. Write the working plan with per-item subagent and tool assignments.
+- If the task should be a Goal, start or resume it via the stable Goal tools (create_goal/get_goal/update_goal) or whale_report once; otherwise continue Working with the stable surface.
+- During Working, keep gray reasoning concise; delegate specialized subtasks to subagent instead of expanding your own tool surface.
+- Communicate results to Kaczev, then report candidate memory/skill suggestions. Memory/skill write tools belong to maintenance subagents only.
+The tool surface is fixed after the first tool call: KAZ_BASE_TOOLS + Goal tools + whale_report + subagent. Old reconstruction/classification stage prompts no longer exist; do not wait for them.`;
 
-Write it in English even for Chinese input; it's context for classification (next stage), not a user deliverable; English saves tokens.
+/** v0.8 Step A 子代理流程上下文注入文案。 */
+export const SUBAGENT_FLOW_TEXT = `[ka-whale-workflow subagent flow]
+>
+This session uses the v0.8 subagent workflow:
+- Minimal (before the first tool call): judge whether the delegated task is simple or complex.
+- If the delegation is ambiguous or complex: challenge it with the main model, find the minimal solution, and check whether the tools the main model specified are sufficient.
+- Sufficient tools: go to Working.
+- Insufficient tools: report to the main model (Communication) and ask for another delegation; do not explore or create tools on your own.
+- Do not create a new subagent that carries tools. Do not write memory or skills yourself.
+- At the end, report candidate experience/skill suggestions to the main model; actual writes are done by maintenance subagents.`;
 
-Record:
-- Clarity: fully specified / partially specified / open-ended
-- Open design decisions: unspecified choices the task requires
-- Deliverable shape: text / code / page / plan / analysis / other
-- Exploration or design needed: codebase exploration, option comparison, or approach design?
-- Expected shape: single-turn answer / multi-round iterative / plan-then-approval
+/** 非 complete goal 时的继续/新任务/结束确认文案（替代旧 goal-recovery 提示）。 */
+export const GOAL_CONTINUATION_TEXT = `[ka-whale-workflow goal continuation]
+>
+A non-complete goal already exists in this session. Before routing this human message as a new task, confirm Kaczev's intent with ask_user_question:
+- Continue the original goal: resume it through the stable Goal tools (or whale_report({mode:'goal'}) without a new objective when a resume is actually needed).
+- Start a new task: treat this message as a new main-flow task; do not silently modify or clear the existing goal.
+- End the current goal: do not resume or silently create; tell Kaczev to complete/clear it or choose another option.`;
 
-Keep original ambiguity; don't silently concretize vague requests; quote/summarize what's open. Mark design-type: design, proposal, "why", or how-to-improve requests.
-
-Only use <工具列表> tools. When done, call whale_report to proceed to classification. Call whale_report before ending your turn; never end this stage with only the stage text.`;
-
-/** 任务分类 prompt：无任务工具选择段的基础版（特性关闭 / 服务不可用时的 back-compat）。 */
-export const CLASSIFICATION_PROMPT_BODY = `We are now in the task classification stage. Based on the reconstructed task description — including its clarity and open-design metadata — decide which execution mode best fits.
-
-Use this decision order:
-1. Normal — only if the task is fully specified, requires no exploration or design decisions, and can be completed in one turn.
-2. Plan — if the task involves significant unknowns, open design choices, requires exploring the codebase, or asks for a design, a proposal, a migration plan, an analysis, or an explanation of why/how something should change.
-3. Goal — clear objective, naturally multi-turn (iterative build-and-refine, progress tracking, recovery). When chosen: split into small todos, do one per round, never finish the whole goal in one turn.
-
-Tie-breakers:
-- If unsure between Normal and Plan, prefer Plan when the user asked for design, a proposal, or "why / how to improve".
-- Generating a code snippet is Normal only when the request is concrete and single-turn. Building/designing a page or feature with unspecified details is Plan (or Goal when the user gave a clear objective to iterate on).
-- Do not rely only on the cleaned reconstruction: preserve signals from the original request's ambiguity.
-
-The user's message itself is the task instruction. After classification, call whale_report with the chosen mode; no separate ask_user_question confirmation is required to advance the workflow stage.
-
-Call whale_report with the chosen mode; it will launch plan/goal mode if needed and quit task classification stage. Call whale_report before ending your turn; never end this stage with only the stage text.`;
-
-/** 任务分类 prompt（完整版）：任务工具选择开启时渲染 <可选工具目录> 并强制 optional_tools。 */
-export const CLASSIFICATION_PROMPT = `${CLASSIFICATION_PROMPT_BODY}
-
-Optional tools for this task (non-base, currently enabled in Kaz; empty list = deliberately use none):
-<可选工具目录>
-
-Call whale_report with the chosen mode and \`optional_tools\`: an array of optional tool names to pre-enable for this task. Do not list base tools or mode auto-on tools. If you deliberately want no optional tools, pass \`optional_tools: []\`. \`enable_tool\` remains available during execution, so nothing is locked. Keep optional tools minimal: >6 triggers a convergence warning, >8 is rejected.`;
-
-/** Goal 恢复阶段名：非 complete goal（blocked / paused / disarmed active）存在时，
- *  新一轮真实人类消息先进入本阶段，确认继续原 Goal / 新任务 / 结束，再决定走向。 */
+/** Goal 恢复阶段名：非 complete goal（blocked / paused / disarmed active）存在时使用。 */
 export const GOAL_RECOVERY_STAGE = "goal-recovery";
 
-/** Goal 恢复阶段 prompt：让模型先经 ask_user_question 澄清意图，再按选择推进。 */
-export const GOAL_RECOVERY_PROMPT = `Goal recovery stage: a non-complete goal already exists in this session. Before routing this human message as a new task, confirm Kaczev's intent with ask_user_question:
-- Continue the original goal → call whale_report({mode:'goal'}) with no objective; it resumes the existing goal when rounds remain and gives structured guidance when they are exhausted.
-- Start a new task → call whale_report() with no mode; this enters task reconstruction.
-- End the current goal → do not resume or silently create; tell Kaczev to complete/clear it (for example with /goal) or choose another option.
+/** 同一 turn/stage 内最多自动提醒次数（v0.8 Step A 不再用于旧阶段提示，保留常量以免破坏旧探针导入）。 */
+export const MAX_WHALE_REMINDERS = 0;
 
-Do not call whale_report before ask_user_question has returned an answer. Call whale_report before ending your turn; never end this stage with only the stage text.`;
-
-/** 首轮全流程介绍：仅新对话第一轮注入一次，位置早于 TaskReconstruction 块。 */
-export const FIRST_ROUND_OVERVIEW = `[ka-whale-workflow overview]
->
-This conversation uses ka-whale-workflow. The workflow activates after the first tool call, and guides every task through three phases:
-1. Task reconstruction — tool surface narrows; rewrite the request into a structured task description, then call whale_report (without mode) to advance.
-2. Task classification — only whale_report is visible; choose normal, plan, or goal, and call whale_report({mode}) to finish the workflow and launch that mode.
-3. Execution — full Kaz tools are restored. For subsequent user turns, the workflow normally re-enters reconstruction, unless a plan/goal mode is still active.
-  
-When the conversation ends, ka-whale-workflow will remind us to save insights and distill skills from this session.
-<`;
-
-/** 同一 turn/stage 内最多自动提醒次数（防止模型反复漏调 whale_report 导致死循环）。 */
-export const MAX_WHALE_REMINDERS = 2;
-
-/** 任务重构/分类/Goal 恢复阶段漏调 whale_report 时的提醒消息文本。 */
-export function whaleReportReminderText(stage) {
-  if (stage === "goal-recovery") {
-    return `[ka-whale-workflow Reminder]
->
-Goal recovery is waiting for whale_report. If Kaczev chose to continue the existing goal, call whale_report({mode:'goal'}) with no objective; if Kaczev chose a new task, call whale_report() with no mode. Do not end the turn without calling whale_report.
-<`;
-  }
-  if (stage === "classification") {
-    return `[ka-whale-workflow Reminder]
->
-Task classification is complete, but the turn ended before calling whale_report. Call whale_report now with the chosen mode ('normal', 'plan', or 'goal') to finish the workflow and launch that mode if needed. Do not end the turn without calling whale_report.
-<`;
-  }
-  return `[ka-whale-workflow Reminder]
->
-Task reconstruction is complete, but the turn ended before calling whale_report. Call whale_report now with no arguments to advance to task classification. Do not end the turn without calling whale_report.
-<`;
+/** v0.8 Step A 后不再需要阶段级 whale_report 提醒；保留空实现以免旧调用报错。 */
+export function whaleReportReminderText(_stage) {
+  return "";
 }
 
 /** 任务完成 / plan-goal 结束时的紧凑复盘指引（方向1）：语义/文本已解耦到 kaz-shared。 */
@@ -1455,77 +1404,9 @@ export default {
       return true;
     }
 
-    /** ka-whale-workflow 配置面板里的重构工具清单（白名单之上的过滤器）。 */
-    function reconstructionToolsFor(agent) {
-      const current = liveFor(agent);
-      const tools = Array.isArray(current.reconstructionTools)
-        ? current.reconstructionTools.filter((tool) => typeof tool === "string" && tool.trim().length > 0)
-        : [];
-      return tools.length > 0 ? tools : [...DEFAULT_RECONSTRUCTION_TOOLS];
-    }
-
-    /** 当前阶段实际可见工具（供 prompt 里的 <工具列表> 渲染）。 */
-    function availableStageTools(agent, stage) {
-      const candidates =
-        stage === "reconstruction"
-          ? [...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]
-          : stage === "goal-recovery"
-            ? ["ask_user_question", WHALE_REPORT_TOOL]
-            : stage === "classification"
-              ? [WHALE_REPORT_TOOL]
-              : [];
-      const out = [];
-      for (const tool of candidates) {
-        if (out.includes(tool)) continue;
-        try {
-          const svc = ctx.get("kazMode");
-          if (svc !== undefined && svc !== null && typeof svc.toolVisible === "function") {
-            if (svc.toolVisible(agent, tool) !== true) continue;
-          }
-        } catch {
-          // 服务异常时保留候选
-        }
-        out.push(tool);
-      }
-      return out;
-    }
-
-    function renderPrompt(agent, stage) {
-      const toolSelectionUsable =
-        stage === "classification" &&
-        taskToolSelectionEnabledFor(agent) === true &&
-        kazModeTaskToolPoolFor(agent) !== null;
-      const prompt =
-        stage === "reconstruction"
-          ? RECONSTRUCTION_PROMPT
-          : stage === GOAL_RECOVERY_STAGE
-            ? GOAL_RECOVERY_PROMPT
-            : stage === "classification"
-              ? toolSelectionUsable
-                ? CLASSIFICATION_PROMPT
-                : CLASSIFICATION_PROMPT_BODY
-              : "";
-      const tools = availableStageTools(agent, stage);
-      const list = tools.length > 0 ? tools.join(", ") : "the currently available tools";
-      let rendered = prompt.replace(/<工具列表>/g, list);
-      if (stage === "classification" && toolSelectionUsable) {
-        rendered = rendered.replace(/<可选工具目录>/g, optionalToolDirectoryFor(agent) || "(no optional tools available)");
-      }
-      if (stage === "classification") {
-        const existingGoal = currentGoalOf(agent, ctx.get("goals"));
-        if (existingGoal !== null && existingGoal.phase !== "complete") {
-          const roundsStarted = Number.isSafeInteger(existingGoal.roundsStarted) ? existingGoal.roundsStarted : 0;
-          const maxGoalRounds = Number.isSafeInteger(existingGoal.maxGoalRounds) ? existingGoal.maxGoalRounds : 1;
-          const reason =
-            existingGoal.phase === "blocked" && typeof existingGoal.blockedReason === "object" && existingGoal.blockedReason !== null
-              ? `; blockedReason=${existingGoal.blockedReason.message ?? JSON.stringify(existingGoal.blockedReason)}`
-              : "";
-          rendered =
-            `[Goal status] Existing non-complete goal: phase=${existingGoal.phase}; roundsStarted=${roundsStarted}; maxGoalRounds=${maxGoalRounds}; objective=${existingGoal.objective}${reason}\n\n` +
-            rendered;
-        }
-      }
-      return rendered;
+    /** v0.8 Step A：主/子流程上下文文案（按代理类型选择；不再按 stage 渲染工具清单）。 */
+    function flowTextFor(agent) {
+      return isSubagent(agent) ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
     }
 
     /** 尝试把本插件给模型发送的信息上报给 round-display（best-effort）。 */
@@ -1595,6 +1476,11 @@ export default {
             `complete/clear the current goal first. To continue the existing goal, call whale_report({mode:'goal'}) without a new objective.`,
         );
       }
+      // v0.8 Step A / active-armed no-op：Goal 已在 active+armed 时无需 resume；
+      // 防止“已自动续跑”的 paused goal 在 goal-recovery 残留阶段重复 resume 报错。
+      if (existing.phase === "active" && existing.activation === "armed") {
+        return;
+      }
       if (!hasDirectHumanInOpenTurn(agent)) {
         throw new Error("whale_report mode=goal cannot resume an existing goal without a direct human turn on a top-level agent");
       }
@@ -1613,12 +1499,12 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report that the current ka-whale-workflow stage is complete and advance to the next stage. Call once per stage: during task reconstruction, calling without mode only advances to task classification (stage='classification'); during task classification, pass mode ('normal' | 'plan' | 'goal') to finish the workflow (stage='done') and launch plan/goal mode if needed, so create_plan/create_goal are not needed. During goal recovery, call whale_report({mode:'goal'}) with no objective to resume the existing goal, or whale_report() with no mode to start a new task. For mode='goal', pass objective only when creating a new goal; when a non-complete goal already exists, omit objective so whale_report resumes the existing goal.",
+        "Report workflow bookkeeping or mode to ka-whale-workflow. v0.8 Stable Main Surface keeps this tool constant; it no longer narrows the tool surface. Pass mode='goal' to create/resume a Goal, mode='plan' only while native Plan still exists (removal deferred), or no mode for normal completion. During goal continuation, pass mode='goal' only when a resume is actually needed; an already active+armed goal is a no-op.",
       parameters: {
         mode: {
           type: "string",
           description:
-            "Only for task classification: 'normal' (no mode, default), 'plan' (enter plan mode), or 'goal' (resume an existing goal, or create a new one when none/complete). During goal recovery, pass 'goal' to resume or omit mode to enter task reconstruction.",
+            "'normal' (default) finishes workflow bookkeeping; 'plan' enters native Plan (deferred removal); 'goal' creates a new Goal or resumes a non-complete one. During goal continuation, pass 'goal' only when a resume is required; omit mode only when starting a new task.",
         },
         objective: {
           type: "string",
@@ -1632,7 +1518,7 @@ export default {
           type: "array",
           items: { type: "string" },
           description:
-            "Only for the task classification stage when task tool selection is enabled: initial optional (non-base) tools to pre-enable for this task. Empty or omitted means deliberately use none.",
+            "Deprecated in v0.8 Step A (main stable surface no longer uses task optional tools); retained only for old compatibility calls. Empty or omitted means deliberately use none.",
         },
       },
       output: {
@@ -1671,93 +1557,35 @@ export default {
           }
           return Promise.resolve({ ok: true, stage: "reconstruction", restarted: false });
         }
-        if (current === "reconstruction") {
-          setStageAgent(agent, "classification");
-          reportRoundDisplay(agent, "任务重构完成，进入任务分类。", "阶段切换");
-          return Promise.resolve({ ok: true, stage: "classification", restarted: false });
+        // v0.8 Step A：非 goal-recovery 状态下 whale_report 是一次性 bookkeeping；
+        // 可直接带 mode 完成 normal/plan/goal，不再经过 reconstruction/classification。
+        const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
+        const launches = [];
+        if (mode === "plan") {
+          try {
+            const result = await runPlanBridge(agent, exec, true);
+            if (result === null || typeof result !== "object" || result.ok !== true) {
+              throw new Error("unexpected create_plan result: " + JSON.stringify(result));
+            }
+            launches.push("plan");
+          } catch (error) {
+            return Promise.reject(new Error("failed to enter plan mode: " + (error instanceof Error ? error.message : String(error))));
+          }
+        } else if (mode === "goal") {
+          try {
+            await launchGoalMode(agent, ctx.get("goals"), args);
+            launches.push("goal");
+          } catch (error) {
+            return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+          }
         }
-        if (current === "classification") {
-          const mode = args?.mode === "plan" ? "plan" : args?.mode === "goal" ? "goal" : "normal";
-          const sessionId = sessionIdOf(agent);
-          // Kaczev 裁决（BUG-20260903-001）：分类阶段推进无需 ask_user_question 确认。
-          // 用户消息本身即任务指令；whale_report({mode}) 可直接完成模式启动与 done。
-          const toolSelectionUsable =
-            taskToolSelectionEnabledFor(agent) === true && kazModeTaskToolPoolFor(agent) !== null;
-          let selectedOptionalTools = [];
-          let optionalWarning = null;
-          if (toolSelectionUsable) {
-            const pool = kazModeTaskToolPoolFor(agent);
-            selectedOptionalTools = normalizeOptionalTools(args?.optional_tools);
-            const invalid = selectedOptionalTools.find((tool) => !pool.includes(tool));
-            if (invalid !== undefined) {
-              const allowed = pool.length > 0 ? pool.join(", ") : "(no optional tools available)";
-              ctx.logger.info(
-                `[ka-whale-workflow] whale_report 拒绝 optional_tools 含未知/越权工具 "${invalid}"（可选池：${allowed}）`,
-              );
-              return Promise.reject(
-                new Error(
-                  `whale_report rejected: optional_tools contains "${invalid}", which is not in the current optional tool pool (base/mode-scoped/unknown/not in Kaz surface). Allowed: ${allowed}`,
-                ),
-              );
-            }
-            // Kaz 5.0 可选工具规则唯一触发点（契约生成 / whale_report({optional_tools})）：
-            // >6 提醒收敛，>8 拒绝。
-            const countCheck = validateOptionalToolCount(selectedOptionalTools);
-            if (countCheck.ok !== true) {
-              ctx.logger.info(`[ka-whale-workflow] ${countCheck.error}`);
-              return Promise.reject(new Error(countCheck.error));
-            }
-            if (countCheck.warn !== null) {
-              optionalWarning = countCheck.warn;
-              ctx.logger.info(`[ka-whale-workflow] ${countCheck.warn}`);
-              reportRoundDisplay(agent, countCheck.warn, "可选工具提醒");
-            }
-          }
-          const launches = [];
-          if (mode === "plan") {
-            try {
-              const result = await runPlanBridge(agent, exec, true);
-              if (result === null || typeof result !== "object" || result.ok !== true) {
-                throw new Error("unexpected create_plan result: " + JSON.stringify(result));
-              }
-              launches.push("plan");
-            } catch (error) {
-              return Promise.reject(new Error("failed to enter plan mode: " + (error instanceof Error ? error.message : String(error))));
-            }
-          } else if (mode === "goal") {
-            try {
-              await launchGoalMode(agent, ctx.get("goals"), args);
-              launches.push("goal");
-            } catch (error) {
-              return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-            }
-          }
-          // 全部成功后才写任务工具状态（plan/goal bridge 失败时不写状态、保持 classification）。
-          if (toolSelectionUsable && typeof sessionId === "string" && sessionId.length > 0) {
-            const taskRunId = reviewRunStateOf(sessionId).taskRunId;
-            stageStore.setTaskToolState(sessionId, {
-              taskRunId,
-              mode,
-              initialOptionalTools: selectedOptionalTools,
-              jitEnabledTools: [],
-            });
-          }
-          setStageAgent(agent, "done");
-          reportRoundDisplay(
-            agent,
-            "任务分类完成（模式：" + mode + (launches.length > 0 ? "，已启动 " + launches.join("、") : "") + "），鲸鱼工作流结束" + (toolSelectionUsable ? "，任务工具面已按 optional_tools 收敛" : "，放行 Kaz 白名单工具") + "。",
-            "阶段切换",
-          );
-          return Promise.resolve({
-            ok: true,
-            stage: "done",
-            restarted: false,
-            ...(optionalWarning === null ? {} : { warning: optionalWarning }),
-          });
-        }
-        return Promise.reject(
-          new Error("whale_report can only be called during task reconstruction, goal recovery, or task classification"),
+        setStageAgent(agent, "done");
+        reportRoundDisplay(
+          agent,
+          "whale_report（模式：" + mode + (launches.length > 0 ? "，已启动 " + launches.join("、") : "") + "）：工作流记录完成，Stable Main Surface 不变。",
+          "鲸鱼工作流",
         );
+        return Promise.resolve({ ok: true, stage: "done", restarted: false });
       },
       presentCall: () => ({ card: "generic", title: "鲸鱼工作流汇报", kind: "other" }),
     });
@@ -2194,46 +2022,6 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 回合关闭兜底：重构/分类阶段模型漏掉 whale_report 时，steer 一条提醒，
-    // 让回合继续而不是“停止对话”。同一 turn/stage 最多提醒 MAX_WHALE_REMINDERS 次。
-    // -----------------------------------------------------------------------
-    ctx.on("agent/turn-stopping", ({ agent, turn, signal }) => {
-      if (agent === null || agent === undefined || typeof agent !== "object") return;
-      if (signal?.aborted === true) return;
-      if (liveFor(agent).enabled !== true) return;
-      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return;
-      if (isBypassed(agent)) return;
-      const stage = stageOfAgent(agent);
-      if (stage !== "reconstruction" && stage !== "classification" && stage !== GOAL_RECOVERY_STAGE) return;
-      const sessionId = sessionIdOf(agent);
-      if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      let state = turnReminderCounts.get(sessionId);
-      if (state === undefined || state.turn !== turn || state.stage !== stage) {
-        state = { turn, stage, count: 0 };
-      }
-      if (state.count >= MAX_WHALE_REMINDERS) {
-        turnReminderCounts.set(sessionId, state);
-        return;
-      }
-      let message;
-      try {
-        message = createUserMessage({
-          content: [{ type: "text", text: whaleReportReminderText(stage) }],
-          source: { kind: "plugin", plugin: "ka-whale-workflow", form: "reminder" },
-        });
-      } catch (error) {
-        ctx.logger.warn(
-          `[ka-whale-workflow] 构造 whale_report 提醒消息失败：${error instanceof Error ? error.message : String(error)}`,
-        );
-        return;
-      }
-      agent.steer(message);
-      state.count += 1;
-      turnReminderCounts.set(sessionId, state);
-      reportRoundDisplay(agent, whaleReportReminderText(stage), "工作流提醒");
-    });
-
-    // -----------------------------------------------------------------------
     // 任务完成 / plan-goal 结束节点：注入紧凑复盘指引（方向1）。
     //   只在 ka-whale-workflow 进入 done 后（任务被执行）且检测到结束节点时触发；
     //   每 session 每种类型最多注入一次；没有实质结论时模型应不写记忆。
@@ -2462,228 +2250,44 @@ export default {
       if (agent === null || agent === undefined || typeof agent !== "object") return decision;
       if (liveFor(agent).enabled !== true) return decision;
       if (isBypassed(agent)) return decision;
-      // 首轮全流程介绍：仅新对话第一轮注入一次，且早于 TaskReconstruction 块。
+      // v0.8 Step A：主/子流程上下文只以追加历史消息注入一次；Goal 继续确认在
+      // goal-recovery 时按轮注入。不再注入 TaskReconstruction/TaskClassification。
       const liveNow = liveFor(agent);
       const skipSubagentNow = liveNow.includeSubagents !== true && isSubagent(agent);
+      const stageNow = stageOfAgent(agent);
+      const subagentNow = isSubagent(agent);
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
-      const hasRealUserMessageNow = Array.isArray(payload?.messages)
-        ? payload.messages.some((message) => isUserMessage(message))
-        : false;
-      const hasPriorUserMessage =
-        agent.session !== undefined &&
-        agent.session !== null &&
-        Array.isArray(agent.session.events) &&
-        agent.session.events.some(
-          (event) => event !== null && typeof event === "object" && event.type === "user/message",
-        );
-      const isNewConversation = !hasPriorUserMessage && turn === 1 && hasRealUserMessageNow;
-      if (
-        isNewConversation &&
-        liveNow.enabled === true &&
-        !skipSubagentNow &&
-        !hasInjectedBefore(agent, "overview")
-      ) {
-        let overviewMessage;
-        try {
-          overviewMessage = createUserMessage({
-            content: [{ type: "text", text: FIRST_ROUND_OVERVIEW }],
-            source: { kind: "plugin", plugin: "ka-whale-workflow", form: "overview" },
-          });
-        } catch (error) {
-          ctx.logger.warn(
-            `[ka-whale-workflow] 构造首轮介绍消息失败：${error instanceof Error ? error.message : String(error)}`,
+      if (liveNow.enabled === true && !skipSubagentNow && !isBypassed(agent)) {
+        const recoveryNow = stageNow === GOAL_RECOVERY_STAGE;
+        const form = recoveryNow ? "goal-continuation" : subagentNow ? "subagent-flow" : "main-flow";
+        const alreadyInjectedTurn = hasInjectedInTurn(agent, form, turn);
+        const alreadyInjectedBefore = !recoveryNow && hasInjectedBefore(agent, form);
+        if (!alreadyInjectedTurn && !alreadyInjectedBefore) {
+          const text = recoveryNow ? GOAL_CONTINUATION_TEXT : subagentNow ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
+          let message;
+          try {
+            message = createUserMessage({
+              content: [{ type: "text", text }],
+              source: { kind: "plugin", plugin: "ka-whale-workflow", form },
+            });
+          } catch (error) {
+            ctx.logger.warn(
+              `[ka-whale-workflow] 构造主/子流程上下文消息失败：${error instanceof Error ? error.message : String(error)}`,
+            );
+            return decision;
+          }
+          reportRoundDisplay(
+            agent,
+            text,
+            recoveryNow ? "Goal 继续确认" : subagentNow ? "子代理流程" : "主流程",
           );
-        }
-        if (overviewMessage !== undefined) {
-          reportRoundDisplay(agent, FIRST_ROUND_OVERVIEW, "首轮介绍");
-          decision = {
+          return {
             ...decision,
-            messages: Array.isArray(decision.messages)
-              ? [...decision.messages, overviewMessage]
-              : decision.messages,
+            messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages,
           };
         }
       }
-      const stage = stageOfAgent(agent);
-      const form =
-        stage === "reconstruction"
-          ? "reconstruction"
-          : stage === GOAL_RECOVERY_STAGE
-            ? "goal-recovery"
-            : stage === "classification"
-              ? "classification"
-              : null;
-      if (form === null) return decision;
-      if (hasInjectedInTurn(agent, form, turn)) return decision;
-      const title =
-        stage === "reconstruction"
-          ? "ka-whale-workflow TaskReconstruction"
-          : stage === GOAL_RECOVERY_STAGE
-            ? "ka-whale-workflow GoalRecovery"
-            : "ka-whale-workflow TaskClassification";
-      const text = ["[" + title + "]", ">", renderPrompt(agent, stage), "<"].join("\n");
-      let message;
-      try {
-        message = createUserMessage({
-          content: [{ type: "text", text }],
-          source: { kind: "plugin", plugin: "ka-whale-workflow", form },
-        });
-      } catch (error) {
-        ctx.logger.warn(`[ka-whale-workflow] 构造上下文消息失败：${error instanceof Error ? error.message : String(error)}`);
-        return decision;
-      }
-      reportRoundDisplay(
-        agent,
-        text,
-        stage === "reconstruction"
-          ? "任务重构"
-          : stage === GOAL_RECOVERY_STAGE
-            ? "Goal 恢复确认"
-            : "任务分类",
-      );
-      return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
-    });
-
-    // -----------------------------------------------------------------------
-    // 系统提示词段：接在 persona 后面（kaz-system-prompt 会保留本段）。
-    // -----------------------------------------------------------------------
-    ctx.systemPrompt.section({
-      name: "ka-whale-workflow:prompt",
-      order: 40,
-      text: (context) => {
-        const agent = context?.agent;
-        if (agent === null || agent === undefined || typeof agent !== "object") return "";
-        if (liveFor(agent).enabled !== true) return "";
-        const stage = stageOfAgent(agent);
-        if (stage !== "reconstruction" && stage !== GOAL_RECOVERY_STAGE && stage !== "classification") return "";
-        if (isBypassed(agent)) return "";
-        return renderPrompt(agent, stage);
-      },
-    });
-
-    // -----------------------------------------------------------------------
-    // 工具面过滤：重构/分类按阶段清单过滤；命令旁路/done/idle 放行白名单。
-    // -----------------------------------------------------------------------
-    ctx.on("system-prompt/assemble", async function (assembly, context, next) {
-      const agent = context?.agent;
-      const before = toolNamesOf(assembly?.tools);
-      const enabled = agent !== null && agent !== undefined && typeof agent === "object" && liveFor(agent).enabled === true;
-      const bypassed = enabled && isBypassed(agent);
-      // /plan /goal 命令消息：跳过鲸鱼工作流过滤与提示词段，直接放行白名单工具。
-      if (bypassed) {
-        const whaleSection = assembly.sections.find(
-          (section) => typeof section?.name === "string" && section.name === "ka-whale-workflow:prompt",
-        );
-        if (whaleSection !== null && whaleSection !== undefined) whaleSection.text = "";
-        const nextResult = await next();
-        const finalAssembly = nextResult ?? assembly;
-        const after = toolNamesOf(finalAssembly?.tools);
-        if (before.join(",") !== after.join(",")) {
-          reportRoundDisplay(
-            agent,
-            "工具面变化（命令旁路）\n- 阶段：manual-command\n- 当前工具（" + after.length + "）：" + (after.length > 0 ? after.join(", ") : "（无）"),
-            "工作流工具面",
-          );
-        }
-        return nextResult;
-      }
-      let stage = enabled ? stageOfAgent(agent) : "idle";
-      // assemble 兜底：round-minimal 解除后、首次 tool/call 的下一步组装时，
-      // 阶段可能还没被 session/event 路径推进（assemble 先于 agent/pre-step 执行）。
-      // 在这里补一次阶段切换，使【紧跟在首次工具调用后的那次请求】就拿到对应工具面
-      // 和系统提示词段，而不是再等一个 step。阶段丢失时一律进入任务重构；
-      // Plan/Goal 模式激活时除外。
-      if (
-        enabled &&
-        stage === "idle" &&
-        liveFor(agent).includeSubagents !== true &&
-        !isSubagent(agent) &&
-        !isMinimal(agent) &&
-        hasToolCall(agent) &&
-        !planModeActiveOf(agent) &&
-        !goalModeActive(agent)
-      ) {
-        const recoveryGoal = goalRecoveryNeeded(agent);
-        const nextStage = recoveryGoal !== null ? GOAL_RECOVERY_STAGE : "reconstruction";
-        if (setStageAgent(agent, nextStage)) {
-          reportRoundDisplay(
-            agent,
-            nextStage === GOAL_RECOVERY_STAGE
-              ? "round-minimal 已解除，进入 Goal 恢复确认（assemble 兜底）。"
-              : "round-minimal 已解除，进入任务重构（assemble 兜底）。",
-            "阶段切换",
-          );
-          stage = nextStage;
-        }
-      }
-      let allowed = null;
-      if (stage === "reconstruction") {
-        allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
-      } else if (stage === GOAL_RECOVERY_STAGE) {
-        allowed = new Set(["ask_user_question", WHALE_REPORT_TOOL]);
-      } else if (stage === "classification") {
-        allowed = new Set([WHALE_REPORT_TOOL]);
-      }
-      if (allowed !== null) {
-        assembly.tools = assembly.tools.filter(
-          (tool) => tool !== null && typeof tool === "object" && allowed.has(tool.name),
-        );
-        assembly.sections = assembly.sections.filter((section) => {
-          if (typeof section?.name !== "string" || !section.name.startsWith("tool:")) return true;
-          return allowed.has(section.name.slice("tool:".length));
-        });
-        // 本插件自己的提示词段在 assemble 开始时已按旧阶段渲染成空串；
-        // 阶段刚被推进时在这里补写，让同一请求的 system 里就带对应阶段提示。
-        const whaleSection = assembly.sections.find(
-          (section) => typeof section?.name === "string" && section.name === "ka-whale-workflow:prompt",
-        );
-        if (whaleSection !== null && whaleSection !== undefined) {
-          whaleSection.text = renderPrompt(agent, stage);
-        }
-      }
-      const nextResult = await next();
-      const finalAssembly = nextResult ?? assembly;
-      const after = toolNamesOf(finalAssembly?.tools);
-      if (before.join(",") !== after.join(",")) {
-        reportRoundDisplay(
-          agent,
-          "工具面变化（ka-whale-workflow 阶段过滤）\n- 阶段：" + stage + "\n- 当前工具（" + after.length + "）：" + (after.length > 0 ? after.join(", ") : "（无）"),
-          "工作流工具面",
-        );
-      }
-      return nextResult;
-    });
-
-    // -----------------------------------------------------------------------
-    // 执行层闸门：重构/分类阶段只允许阶段工具（纵深防御，组装层已隐藏）。
-    // -----------------------------------------------------------------------
-    ctx.on("tools/pre-execute", (exec, next) => {
-      const agent = exec?.agent;
-      if (agent === null || agent === undefined || typeof agent !== "object") return next();
-      if (liveFor(agent).enabled !== true) return next();
-      if (liveFor(agent).includeSubagents !== true && isSubagent(agent)) return next();
-      if (isBypassed(agent)) return next();
-      const stage = stageOfAgent(agent);
-      let allowed = null;
-      if (stage === "reconstruction") {
-        allowed = new Set([...reconstructionToolsFor(agent), WHALE_REPORT_TOOL]);
-      } else if (stage === GOAL_RECOVERY_STAGE) {
-        allowed = new Set(["ask_user_question", WHALE_REPORT_TOOL]);
-      } else if (stage === "classification") {
-        allowed = new Set([WHALE_REPORT_TOOL]);
-      }
-      if (allowed !== null && typeof exec?.name === "string" && !allowed.has(exec.name)) {
-        ctx.logger.info(
-          `[ka-whale-workflow] ${stage} 阶段拒绝调用工具 "${exec.name}"（仅允许：${[...allowed].join(", ")}）`,
-        );
-        return {
-          kind: "deny",
-          reason:
-            `工具 "${exec.name}" 在鲸鱼工作流「${stage}」阶段不可用，当前仅允许：` +
-            `${[...allowed].join(", ")}。完成本阶段（调用 whale_report）后即可恢复白名单工具。`,
-        };
-      }
-      return next();
+      return decision;
     });
 
     ctx.effect(() => () => {
