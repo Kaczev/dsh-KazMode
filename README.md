@@ -1,21 +1,21 @@
 # Kaz 模式（dsh-KazMode 全家桶）
 
 > 为 DeepSeek Harness（dsh）设计的一套工作模式与插件合集：**极简提示词 + 两阶段工具面 + 跨会话记忆**，用于提升模型的推理效率与输出质量。
-> 没有安排多subagent，因为我现在用不起，没法测试效果。所以该模式只有一个agent。
+> v0.9 起由 ka-whale-workflow 支持**受控子代理委派**（worker / memoryMaintainer / pluginMaintainer），不是无约束的多 agent / Plan 模式。
 
 ## 一、核心特性
 
 - **跨会话记忆**：模型会把经验存为明文记忆，同一话题下越用越好用。以往每次重开新对话，要么重新向模型说明项目，要么模型每次都需要自己重新探索项目，有了ka-whale-memory插件，模型可以从记忆中搜索，快速找到方向；
 - **agent自优化·记忆**：记忆系统并非单纯的记忆，而是会总结成经验，具有类似于skill的特性。agent会管理记忆，及时清除无用记忆，优化已有记忆。
-- **agent自优化·工具与skill**：agent会自己创建、管理、删除kaz-skill-<工具名>插件，内置SKILL，agent在工作时会选择性开启。自建技能默认放在用户 profile 的 `KazPrivatePlugins`（如 `%USERPROFILE%\.dsh\profiles\web\KazPrivatePlugins`），是用户私有能力与过程产物，不随本仓库发布。
-- **提示词极简**：Kaz 会话的系统提示词由 `kaz/kaz-system-prompt.mjs` 按条件控制，默认是极简模式的 `You are a helpful software engineer assistant.`，`ka-whale-memory` 启用时切换为记忆优先提示词，保障deepseek-v4的性能；
-- **工具面两阶段**：首次工具调用前按 ka-whale-memory 自动暴露（开=`memory_search`；关=`pwsh`+`read`+`edit`），第一次工具调用后恢复白名单里的全部工具；
-- **根据任务适配模式**：会根据任务类别，自动启用Plan、Goal模式适配任务。
+- **agent自优化·子代理维护**：v0.9 的 ka-whale-workflow 会把任务按持久化 task plan 受控委派给 worker / memoryMaintainer / pluginMaintainer 子代理（各自带 role Minimal / Stable Base 与专用 report 工具）；memoryMaintainer 维护记忆，pluginMaintainer 维护用户私有插件候选（`KazPrivatePlugins`，如 `kaz-skill-*` 命名），私有产物不随本仓库发布。
+- **提示词极简**：Kaz 会话的系统提示词由 `kaz/kaz-system-prompt.mjs` 收敛为 `You are a helpful software engineer assistant.`（persona + ka-whale-workflow 段），不随记忆插件开关切换 persona；
+- **工具面两阶段（无 round-minimal 插件）**：首次工具调用前由 kaz-mode 核心 Minimal 收敛（Kaz 恒开 ka-whale-memory → 只有 `memory_search`），首次工具调用后恢复代码级固定的 Stable Main Surface；真实工具面增删以 `category=tool-surface` 上报 round-display；
+- **工作流模式选择**：ka-whale-workflow 在 decide-goal 阶段用 `whale_report` 选择 **normal / goal**；**没有原生 Plan 模式**，没有 `create_plan`。
 - **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；
 - **功能按插件分离**：Kaz模式的功能是按插件分离的。如果仅想要Kaz模式的部分功能，也可以在 **Kaz面板** 里面单独开启；
-- **工具精选**：Kaz模式下，默认的工具很少。如果安装了其它插件，需要额外添加工具，则在面板中的白名单里面加入工具名称即可。（不推荐加很多，尽可能少吧）
+- **工具精选 / 固定面**：Kaz 首次工具调用前只有极简 Minimal，之后恢复代码级固定的 Stable Main Surface；其它插件工具默认不直接进入主面，需作为候选经受控委派 / 任务计划选择（不推荐加很多）。
 
-- **注意，如果要用/plan和/goal，需要在工具面板开启对应的工具，默认不开启，这是为了提高效率。**
+- **注意：Kaz v0.9 没有原生 Plan 模式，`/plan` 与 `create_plan` 不适用；Goal 走官方 Goal 工具 / `whale_report({mode:'goal'})`，无需在工具面板手动开启固定面工具。**
 - **推荐思考强度在high及以上**，low容易使用let me思维链。
 
 > 有小概率出现Let me开始思考，但是无需担心，很快会变回Let's、We的表述
@@ -76,7 +76,7 @@
 
 - **功能按插件分离**：Kaz 面板可单独开启 / 关闭每个插件。不喜欢某个插件？在 Kaz 面板直接关掉；还能把当前状态“设为 Kaz / 非 Kaz 模式的默认设置”，非常灵活。
 - **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰。
-- **工具白名单**：Kaz 模式下默认工具很少；若安装了其它插件需额外添加工具，在面板白名单里加入工具名称即可（不推荐加很多，尽可能少）。
+- **固定工具面**：Kaz 主工具面由代码级 Stable Main Surface / workflow 面固定；工具控制面板只读展示，并只允许把外置 / 私有插件作为候选添加（不直接进主面）。
 - **面板「本地版本」**：读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段，发版逻辑见「八、文件与版本说明」。
 
 ### 3.1 面板在哪打开
@@ -87,7 +87,7 @@
 
 ![记忆面板和Kaz面板在哪打开](一些指引/记忆面板和Kaz面板在哪打开.png)
 
-**工具面板（工具控制面板）**：管理工具白名单（哪些工具进入 Kaz 工具面），按项目隔离。
+**工具面板（工具控制面板）**：只读展示 Kaz 固定工具面（Stable Main / workflow 面），并维护外置 / 私有插件候选，按项目隔离。
 
 ![工具面板在哪打开](一些指引/工具面板在哪打开.png)
 
@@ -99,8 +99,7 @@
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（含 kaz-shared 依赖包；36.9 已删除 round-minimal）
-│   ├── create-plan/
+├── KazPlugins/                     # 插件全家桶（含 kaz-shared 依赖包；6.0.2：round-minimal / create-plan 已删除，首阶段 Minimal 由 kaz-mode 核心拥有）
 │   ├── deepseek-default-model/
 │   ├── ka-whale-workflow/
 │   ├── kaz-agent-preset-display/
@@ -134,8 +133,7 @@ dsh-KazMode/
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `ka-whale-memory` | `ka-whale-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
-| `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流：任务重构 → 任务分类 → 放行；重构工具清单在 ka-whale-workflow 配置面板的代码框中修改（与其它输入框同底色），`whale_report` / `create_goal` / `create_plan` 由工具自动启用面板临时放行 |
-| `create-plan` | `create-plan` | 挂在 Kaz 预设 planning isolate 组：`create_plan` 工具，让鲸鱼自己启用 plan 模式 |
+| `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流（v0.9）：主/子阶段机 + tools/pre-execute 软闸门 + task plan 持久化 + `ka_sub_whale` 受控委派（worker / memoryMaintainer / pluginMaintainer）+ 子代理 report；`whale_report` 模式只有 normal / goal，无原生 Plan |
 
 其中几个值得知道的插件（完整清单见上表）：
 
@@ -206,7 +204,7 @@ DeepSeek 收到提示词后直接读对应指引文件，不要读本 README：
 
 ### 8.2 发版提醒（给未来的我和 agent）
 
-Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段。
+Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段（当前仓库为 **6.0.2**）。
 
 **发新版本时，务必同步修改 `KazPlugins/kaz-mode/package.json` 里的 `version`，否则面板会用旧版本号和 GitHub tag 比较，产生错误的新版本提醒。**
 
@@ -222,7 +220,7 @@ node KazPlugins/kaz-mode/check-version.mjs
 
 ## 附录 A：`cordis.patch.yml` 完整示例
 
-完整内容（11 个 insert 块，`create-plan` 在 kaz 预设内挂载、不在 cordis.patch）见 **`ds安装指引.md` 第 6 步** / **`ds更新指引.md` 第 8 步**，README 不再重复维护，避免两处漂移。安装 / 更新时按指引步骤操作即可。
+完整内容（**8 个 Kaz insert 块**：ka-whale-memory / plugin-filter / kaz-mode / kaz-agent-preset-display / output-beep / round-display / deepseek-default-model / ka-whale-workflow；目标机上非 Kaz 自定义块如 `kaz-skill-*` 保留）见 **`ds安装指引.md` 第 6 步** / **`ds更新指引.md` 第 8 步**，README 不再重复维护，避免两处漂移。安装 / 更新时按指引步骤操作即可。
 
 ## 附录 B：`settings.yaml` 说明（纯方案 A）
 

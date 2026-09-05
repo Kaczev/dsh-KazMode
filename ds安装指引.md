@@ -70,7 +70,6 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
-"create-plan": "file:KazPlugins/create-plan",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
 "ka-whale-memory": "file:KazPlugins/ka-whale-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
@@ -82,8 +81,8 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 
 规则：
 - **保留** `dependencies` 里已有的其它依赖（如 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等），只加不删其它项。
-- 若已存在旧的 Kaz 依赖行（例如 `kaz-diag`，或上面依赖行里的旧版本写法），用上面依赖行**替换**旧行，不要重复。
-- `kaz-shared` 是必需依赖：kaz-mode / ka-whale-memory / plugin-filter 都 import 它，漏装会导致插件加载失败；36.9 起不再需要 `round-minimal`。
+- 若已存在旧的 Kaz 依赖行（例如 `kaz-diag`，或上面依赖行里的旧版本写法），用上面依赖行**替换**旧行，不要重复；旧版已删除的 `create-plan` / `round-minimal` 依赖行要**直接删除**，不要保留。
+- `kaz-shared` 是必需依赖：kaz-mode / ka-whale-memory / plugin-filter 都 import 它，漏装会导致插件加载失败；当前版本已删除 `round-minimal` 与 `create-plan`，**不要**把它们加回 package.json。
 - 文件用 UTF-8 **无 BOM** 保存。用你的 edit 工具改即可；若必须用 PowerShell 写文件，用下面的写法（不要用 `Set-Content -Encoding UTF8`，它会写 BOM 破坏 JSON 解析）：
 
 ```powershell
@@ -134,8 +133,8 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
 
 打开 `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`：
 
-1. **删除**文件中已有的 Kaz 相关 insert 块。按块内 `id` 判断，以下 11 个 id 都是 Kaz 的块，全部删掉（文件不存在则跳过本小步）：
-   - `memory`
+1. **删除**文件中已有的 Kaz 相关 insert 块。按块内 `id` 判断，以下 **8** 个 id 都是 Kaz 的块，全部删掉（文件不存在则跳过本小步）：
+   - `memory`（ka-whale-memory）
    - `plugin-filter`
    - `kaz-agent-preset-display`
    - `kaz-mode`
@@ -143,17 +142,13 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
    - `round-display`
    - `deepseek-default-model`
    - `ka-whale-workflow`
-2. 文件中**非 Kaz 的自定义块保留**，不要动。
-3. 把下面**完整内容**追加到文件末尾（文件不存在则新建，直接写入）：
+2. 文件中**非 Kaz 的自定义块保留**，不要动。特别是 `kaz-skill-*` 私有块（如 `kaz-skill-safe-json`）属于用户私有非 Kaz 块，保留原样，**不要**删除或复制到下面示例。
+3. 把下面 **Kaz 部分完整内容**追加到文件末尾（文件不存在则新建，直接写入；不含 `kaz-skill-*` 私有块，那些块按第 2 条保留在目标机已有位置）：
 
 ```yaml
 - insert:
     - id: memory
       name: ka-whale-memory
-
-- insert:
-      config:
-        enabled: true
 
 - insert:
     - id: plugin-filter
@@ -168,16 +163,16 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
           - claude-code
 
 - insert:
-    - id: kaz-agent-preset-display
-      name: kaz-agent-preset-display
-      config:
-        enabled: true
-
-- insert:
     - id: kaz-mode
       name: kaz-mode
       config:
         enabled: false
+
+- insert:
+    - id: kaz-agent-preset-display
+      name: kaz-agent-preset-display
+      config:
+        enabled: true
 
 - insert:
     - id: output-beep
@@ -198,10 +193,6 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
         enabled: true
 
 - insert:
-      config:
-        enabled: true
-
-- insert:
     - id: ka-whale-workflow
       name: ka-whale-workflow
       config:
@@ -209,7 +200,8 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
 ```
 
 注意：
-- `create-plan` **不**进 `cordis.patch.yml`，它由 `kaz/agent.cordis.yml` 的 `planning` isolate 组挂载（随 kaz 预设复制）。
+- 上面是当前 `cordis.patch.yml` 中的 **8 个 Kaz insert 块**（不含 `kaz-skill-*` 私有块）；私有块按本步第 2 条保留在目标机已有位置。
+- 已没有 `create-plan` 插件 / 依赖行，Kaz v0.9 也没有原生 Plan 模式；**不要**把 `create_plan`、`/plan` 或 `create-plan` 相关行加回。
 - `kaz-mode` 默认 `enabled: false` 是**正常**的，它由"选择 kaz 预设"这一动作联动开启，**不要改成 true**。
 
 出错处理：YAML 解析失败 / 报 BOM 错误 → 用 UTF-8 无 BOM 保存（同第 4 步的写法）。
@@ -221,7 +213,7 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
 - `~/.dsh/storages/kaz-defaults.json`
 - `<项目>/.dsh/storages/kaz-project-states.json`
 
-工具白名单走"工具控制面板"的四文件 JSON（`tool-plugin.json` 等，按项目隔离）。settings.yaml 只保留 kaz-mode / agent-default-model / agent-presets 等少量段，都有自愈写入，不需要你编辑。
+Kaz 主工具面是代码级固定的 Stable Main Surface / workflow 面；工具控制面板只读展示并按项目维护候选，旧 four-file JSON（`tool-plugin.json` 等）仅作兼容只读状态来源。settings.yaml 只保留 kaz-mode / agent-default-model / agent-presets 等少量段，都有自愈写入，不需要你编辑。
 
 若你在 settings.yaml 里看到旧版残留的 `toolWhitelist` / `minimalTools` / 被管理插件段，可以顺手删除这些字段；不删也不影响（新代码不读）。
 
@@ -248,8 +240,8 @@ dsh.cmd --profile web --dump-config
 >
 > 重启后自查：
 > - 新对话的思考内出现 "We need" / "Let's"，不再出现 "Let me"；
-> - 首次工具调用前工具面是极简状态（开 ka-whale-memory 时只有 `memory_search`；关闭时只有 `pwsh` + `read` + `edit`）；
-> - 第一次工具调用后恢复白名单里的全部工具；
+> - 首次工具调用前工具面是极简状态（Kaz 恒开 ka-whale-memory → 只有 `memory_search`）；
+> - 第一次工具调用后恢复 Stable Main Surface（代码级固定面）；
 > - Kaz 面板出现各被管理插件的开关行。
 
 ---

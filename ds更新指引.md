@@ -90,14 +90,13 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 
 打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中：
 
-1. **删除**所有旧的 Kaz 依赖行（包括 `kaz-diag`、旧版 `kaz-*` 行）。
+1. **删除**所有旧的 Kaz 依赖行（包括 `kaz-diag`、旧版 `kaz-*` 行，以及已删除插件的 `create-plan` / `round-minimal` 行）。
    - **保留**以 `file:KazPrivatePlugins/...` 开头的用户私有依赖行（如 `"kaz-skill-safe-json": "file:KazPrivatePlugins/kaz-skill-safe-json"`），它们不在公共 repo 里，整目录删除 `KazPlugins` 不会碰到。
 2. **合并**下面依赖行（保留 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等其它依赖，只加不删其它项）：
 
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
-"create-plan": "file:KazPlugins/create-plan",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
 "ka-whale-memory": "file:KazPlugins/ka-whale-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
@@ -107,7 +106,7 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 "round-display": "file:KazPlugins/round-display",
 ```
 
-注意：`kaz-shared` 是必需依赖，漏装会导致 kaz-mode / ka-whale-memory / plugin-filter 加载失败；36.9 起不再需要 `round-minimal`。
+注意：`kaz-shared` 是必需依赖，漏装会导致 kaz-mode / ka-whale-memory / plugin-filter 加载失败；当前版本已删除 `round-minimal` 与 `create-plan`，**不要**把它们加回 package.json。
 
 文件用 UTF-8 **无 BOM** 保存。用 edit 工具改即可；若必须用 PowerShell 写文件，用（不要用 `Set-Content -Encoding UTF8`）：
 
@@ -128,11 +127,11 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
 然后检查锁文件是否残留旧包（`npm prune` 不会自动清掉 `package-lock.json` / `pnpm-lock.yaml` 里的 stale 条目）：
 
 ```powershell
-Get-ChildItem package-lock.json,pnpm-lock.yaml -ErrorAction SilentlyContinue | Select-String -Pattern 'kaz-diag'
+Get-ChildItem package-lock.json,pnpm-lock.yaml -ErrorAction SilentlyContinue | Select-String -Pattern 'kaz-diag|create-plan|round-minimal'
 ```
 
 - 没有输出 → 跳过，进入第 8 步。
-- 有输出 → 用 edit 工具删除 lock 文件中对应的 `kaz-diag` 条目（及其依赖块），再执行一次：
+- 有输出 → 用 edit 工具删除 lock 文件中对应的 `kaz-diag` / `create-plan` / `round-minimal` 条目（及其依赖块），再执行一次：
 
 ```powershell
 npm.cmd prune --legacy-peer-deps --no-audit --no-fund
@@ -168,8 +167,8 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 
 打开 `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`：
 
-1. **删除**文件中已有的 Kaz 相关 insert 块。按块内 `id` 判断，以下 11 个 id 都是 Kaz 的块，全部删掉（文件不存在则跳过本小步）：
-   - `memory`
+1. **删除**文件中已有的 Kaz 相关 insert 块。按块内 `id` 判断，以下 **8** 个 id 都是 Kaz 的块，全部删掉（文件不存在则跳过本小步）：
+   - `memory`（ka-whale-memory）
    - `plugin-filter`
    - `kaz-agent-preset-display`
    - `kaz-mode`
@@ -177,18 +176,13 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
    - `round-display`
    - `deepseek-default-model`
    - `ka-whale-workflow`
-   - 私有 `kaz-skill-*` 的 insert 块（例如 `kaz-skill-safe-json`）**不是** Kaz 框架块，属于“非 Kaz 自定义块”，**保留**，不要删除。
-2. 文件中**非 Kaz 的自定义块保留**，不要动。
-3. 把下面**完整内容**追加到文件末尾（文件不存在则新建，直接写入）：
+2. 文件中**非 Kaz 的自定义块保留**，不要动。特别是私有 `kaz-skill-*` 的 insert 块（例如 `kaz-skill-safe-json`）**不是** Kaz 框架块，属于“非 Kaz 自定义块”，**保留**，不要删除或复制到下面示例。
+3. 把下面 **Kaz 部分完整内容**追加到文件末尾（文件不存在则新建，直接写入；不含 `kaz-skill-*` 私有块，那些块按第 2 条保留在目标机已有位置）：
 
 ```yaml
 - insert:
     - id: memory
       name: ka-whale-memory
-
-- insert:
-      config:
-        enabled: true
 
 - insert:
     - id: plugin-filter
@@ -203,16 +197,16 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
           - claude-code
 
 - insert:
-    - id: kaz-agent-preset-display
-      name: kaz-agent-preset-display
-      config:
-        enabled: true
-
-- insert:
     - id: kaz-mode
       name: kaz-mode
       config:
         enabled: false
+
+- insert:
+    - id: kaz-agent-preset-display
+      name: kaz-agent-preset-display
+      config:
+        enabled: true
 
 - insert:
     - id: output-beep
@@ -233,10 +227,6 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
         enabled: true
 
 - insert:
-      config:
-        enabled: true
-
-- insert:
     - id: ka-whale-workflow
       name: ka-whale-workflow
       config:
@@ -244,7 +234,8 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 ```
 
 注意：
-- `create-plan` **不**进 `cordis.patch.yml`，它由 `kaz/agent.cordis.yml` 的 `planning` isolate 组挂载（随 kaz 预设复制）。
+- 上面是当前 `cordis.patch.yml` 中的 **8 个 Kaz insert 块**（不含 `kaz-skill-*` 私有块）；私有块按本步第 2 条保留在目标机已有位置。
+- 已没有 `create-plan` 插件 / 依赖行，Kaz v0.9 也没有原生 Plan 模式；**不要**把 `create_plan`、`/plan` 或 `create-plan` 相关行加回。
 - `kaz-mode` 默认 `enabled: false` 是**正常**的，它由"选择 kaz 预设"这一动作联动开启，**不要改成 true**。
 
 出错处理：YAML 解析失败 / 报 BOM 错误 → 用 UTF-8 无 BOM 保存（同第 6 步的写法）。
@@ -253,11 +244,11 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 
 **跳过本步骤，不要动 `%USERPROFILE%\.dsh\settings.yaml`。**
 
-原因（纯方案 A）：被管理插件（含 ka-whale-workflow / create-plan）配置由 kazMode 服务自动从 `~/.dsh/storages/kaz-defaults.json` + `<项目>/.dsh/storages/kaz-project-states.json` 读取（自动创建）；工具白名单走"工具控制面板"四文件 JSON，whale_report/create_goal/create_plan 走 `ka_tool_auto_on_setting.json`。settings.yaml 只保留 kaz-mode / agent-default-model / agent-presets 等少量段，都有自愈写入。
+原因（纯方案 A）：被管理插件（含 ka-whale-workflow）配置由 kazMode 服务自动从 `~/.dsh/storages/kaz-defaults.json` + `<项目>/.dsh/storages/kaz-project-states.json` 读取（自动创建）；工具面固定为代码级 Stable Main / workflow 面，工具控制面板只读展示并维护候选；`whale_report` 固定常驻，模式只有 normal / goal。已无 `create_plan`，`ka_tool_auto_on_setting.json` 不再被 Kaz 读取或写入。settings.yaml 只保留 kaz-mode / agent-default-model / agent-presets 等少量段，都有自愈写入。
 
 若你在 settings.yaml 里看到旧版残留的 `toolWhitelist` / `minimalTools` / 被管理插件段，可以顺手删除这些字段；不删也不影响（新代码不读）。
 
-> 给用户的一句话（原样转达）：如果你在旧版里自定义过工具白名单，更新后需要在新版「工具控制面板」里重新配置；Kaz 面板的开关设置会保留在 `kaz-defaults.json`，不会丢。
+> 给用户的一句话（原样转达）：如果你在旧版里自定义过工具白名单，那些旧 JSON 已不再控制 Kaz 主工具面；更新后如需外置 / 私有工具，在新版「工具控制面板」中作为候选添加即可。Kaz 面板的开关设置会保留在 `kaz-defaults.json`，不会丢。
 
 ## 第 10 步 验证（不重启也能做的部分，约 1 秒）
 
@@ -282,8 +273,8 @@ dsh.cmd --profile web --dump-config
 >
 > 重启后自查：
 > - 新对话的思考内出现 "We need" / "Let's"，不再出现 "Let me"；
-> - 首次工具调用前工具面是极简状态（开 ka-whale-memory 时只有 `memory_search`；关闭时只有 `pwsh` + `read` + `edit`）；
-> - 第一次工具调用后恢复白名单里的全部工具；
+> - 首次工具调用前工具面是极简状态（Kaz 恒开 ka-whale-memory → 只有 `memory_search`）；
+> - 第一次工具调用后恢复 Stable Main Surface（代码级固定面）；
 > - Kaz 面板出现各被管理插件的开关行。
 
 ---
