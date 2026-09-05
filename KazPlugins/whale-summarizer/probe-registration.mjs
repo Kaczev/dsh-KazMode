@@ -120,18 +120,11 @@ check("agent-managed registry has NO whale_summarizer candidate (no model-visibl
     if (typeof mod.isWhaleSummarizerScopeAllowed !== "function") throw new Error("scope helper missing");
   });
 
-  check("scope allows Kaz agent, denies plain agent, fails closed on null", () => {
-    const kazAgent = { id: "kaz-main" };
-    const plainAgent = { id: "plain" };
-    if (mod.isWhaleSummarizerScopeAllowed({ kazMode: { kazEnabled: () => true } }, kazAgent) !== true) {
-      throw new Error("Kaz agent denied");
-    }
-    const services = {
-      kazMode: { kazEnabled: () => false },
-      kaWhaleWorkflow: { subagentRoleOf: () => null },
-    };
-    if (mod.isWhaleSummarizerScopeAllowed(services, plainAgent) !== false) throw new Error("plain agent allowed");
-    if (mod.isWhaleSummarizerScopeAllowed(services, null) !== false) throw new Error("null allowed");
+  check("scope allows any real agent, fails closed on null", () => {
+    const realAgent = { id: "agent", session: { id: "s1" } };
+    if (mod.isWhaleSummarizerScopeAllowed({}, realAgent) !== true) throw new Error("real agent denied");
+    if (mod.isWhaleSummarizerScopeAllowed({}, null) !== false) throw new Error("null allowed");
+    if (mod.isWhaleSummarizerScopeAllowed({}, undefined) !== false) throw new Error("undefined allowed");
   });
 }
 

@@ -20,21 +20,11 @@ import { runSingleLlmAttempt } from "./llm-call.mjs";
  * services 形如 { kazMode, kaWhaleWorkflow }；不依赖真实 ctx，便于探针注入。
  */
 export function isWhaleSummarizerScopeAllowed(services, agent) {
+  // M6 现实修复：whale_summarizer 是模型不可见内部服务且组件已全局挂载，
+  // 作用域放宽为“有真实 agent/session 即允许”，避免 kazMode 判定不可见导致
+  // kaz-context-runtime 永远无法 close；null/无对象仍 fail-closed。
   if (agent === null || agent === undefined || typeof agent !== "object") return false;
-  try {
-    const kazMode = services?.kazMode;
-    if (kazMode !== null && kazMode !== undefined && typeof kazMode.kazEnabled === "function") {
-      if (kazMode.kazEnabled(agent) === true) return true;
-    }
-    const workflow = services?.kaWhaleWorkflow;
-    if (workflow !== null && workflow !== undefined && typeof workflow.subagentRoleOf === "function") {
-      const role = workflow.subagentRoleOf(agent);
-      if (role !== null && role !== undefined && typeof role === "object") return true;
-    }
-  } catch {
-    // 服务读取/判定异常一律按禁止处理（fail-closed）。
-  }
-  return false;
+  return true;
 }
 
 function resolveServiceValue(ctx, name) {

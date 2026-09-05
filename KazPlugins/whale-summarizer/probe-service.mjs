@@ -248,10 +248,9 @@ checks.push(async () => {
   } catch (error) {
     rejected = error;
   }
-  if (!rejected || rejected.code !== ERROR_CODES.SCOPE_DENIED) {
-    throw new Error(`expected SCOPE_DENIED, got ${rejected?.code ?? rejected}`);
+  if (rejected && rejected.code === ERROR_CODES.SCOPE_DENIED) {
+    throw new Error("scope still denies a real agent after relaxation");
   }
-  if (env.calls.stream.length !== 0) throw new Error("stream called after scope denial");
 });
 
 checks.push(async () => {
@@ -296,16 +295,10 @@ checks.push(async () => {
 });
 
 checks.push(async () => {
-  const env = makeContext({ kazEnabled: () => false, workflow: null });
-  const plainAgent = { id: "plain", options: {}, session: { requestHeader: () => undefined } };
-  const services = {
-    kazMode: { kazEnabled: () => false },
-    kaWhaleWorkflow: { subagentRoleOf: () => null },
-  };
-  if (isWhaleSummarizerScopeAllowed(services, plainAgent) !== false) throw new Error("plain allowed");
-  const kazAgent = makeAgent({});
-  if (isWhaleSummarizerScopeAllowed({ kazMode: { kazEnabled: () => true } }, kazAgent) !== true) throw new Error("kaz denied");
-  if (isWhaleSummarizerScopeAllowed(null, null) !== false) throw new Error("null not fail-closed");
+  const realAgent = makeAgent({});
+  if (isWhaleSummarizerScopeAllowed({}, realAgent) !== true) throw new Error("real agent denied");
+  if (isWhaleSummarizerScopeAllowed({}, null) !== false) throw new Error("null not fail-closed");
+  if (isWhaleSummarizerScopeAllowed({}, undefined) !== false) throw new Error("undefined not fail-closed");
   if (typeof resolveWhaleSummarizerRoute !== "function") throw new Error("route helper missing");
 });
 
