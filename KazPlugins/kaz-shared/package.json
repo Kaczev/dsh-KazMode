@@ -8,12 +8,14 @@
     ".": {
       "default": "./lib/tool-lists.js"
     },
+    "./lib/context-compress.js": "./lib/context-compress.js",
     "./lib/safe-json-file.js": "./lib/safe-json-file.js",
     "./lib/step4-metrics.js": "./lib/step4-metrics.js",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/tool-lists.js",
+    "lib/context-compress.js",
     "lib/tool-plugin-catalog.js",
     "lib/review-guidance.js",
     "lib/skill-guidance.js",

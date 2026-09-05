@@ -35,6 +35,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `hotLoadProbe` / `hotLoadVerdictText` | Kaz 6.0 Step 2 受控热加载 | 统一记录 DSH 是否支持运行时私有插件注册；不支持时一律“下一任务/重启后生效”，不扩展当前 Task Surface |
 | `SKILL_PRIVATE_DIR_NAME` / `SKILL_PROCESS_DIR_NAME` / `SKILL_BOUNDARY_MAX_CHANGES` / `SKILL_LIFECYCLE_TOOLS` / `skillLifecycleCallable` | ka-whale-workflow | 私有插件生命周期常量与技能闭环基础能力判定（B3.5 已移除 `skillReviewGuidanceText` / `SKILL_EVIDENCE_MIN`） |
 | `SKILL_LIFECYCLE_VERSION` / `SKILL_LIFECYCLE_STATUSES` / `SKILL_LIFECYCLE_DEFAULTS` / `normalizeSkillLifecycle` / `normalizeSkillLifecycleDefaults` / `skillKeyOf` / `auditSkillLifecycle` / `projectRegistryFromLifecycle` / `transitionAllowed` | ka-whale-workflow（内部执行器） | 终案 E 全自动 Skill 生命周期纯函数层：v2 lifecycle 归一化（损坏 → feature off）、闲置/失败/补丁审计建议、registry 工具列表投影、状态机白名单；只输出建议，不写文件 |
+| `SUBLIMATION_THRESHOLD` / `KAZ_CONTEXT_RENDER_ORDER` / `KAZ_CONTEXT_CACHE_SCENARIOS` / `KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY` / `normalizeCacheScenario` / `classifyCacheScenario` / `cacheMeasurementMode` / `hFull` / `hReadProxy` / `compressionRatioPass` / `renderOrderValid` | Kaz7.0 M0 后续压缩/缓存验收 | 最终基准 v1.1 纯模块：升华 N=4、渲染顺序判据、A/B/C/D cache 可用性矩阵、原生 1M 兜底策略、H_full/H_read_proxy/R 等事后测量纯函数；不设任何 MC/token 触发或保留预算 |
 
 > **官方/Kaz 分类修改点**：`lib/tool-plugin-catalog.js`。外置插件数据（手动添加）保存在用户目录 storages 的 `other-*.json`；项目专属开关调整：官方/Kaz 写项目 `tool-plugin.json` / `tool-plugin-catalog.json`，外置写项目 `other-*.json`，**不写在源码里**。
 >
