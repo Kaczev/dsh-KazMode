@@ -1600,7 +1600,7 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in plugin-preflight pass finalPlanPayload containing only pluginCreator items for pre-finalization; in write-plan pass finalPlanPayload with status finalized for full second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'.",
+        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for full second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'.",
       parameters: {
         mode: {
           type: "string",
@@ -1610,7 +1610,7 @@ export default {
         nextStage: {
           type: "string",
           description:
-            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, plugin-preflight, write-plan, decide-goal, working, goal-active, memory-maintenance, plugin-maintenance. In decide-tools/write-plan/plugin-preflight it may be omitted when the payload implies the only/default transition.",
+            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, write-plan, decide-goal, working, goal-active, memory-maintenance, plugin-maintenance. In decide-tools/write-plan it may be omitted when the payload implies the only/default transition.",
         },
         objective: {
           type: "string",
@@ -1627,7 +1627,7 @@ export default {
         },
         finalPlanPayload: {
           type: "json",
-          description: "Used in plugin-preflight: { items: [{ planItemId, persona: 'pluginCreator', task, assignedTools }] } to pre-finalize only pluginCreator items. Used in write-plan: { status: 'finalized', items: [...] } to persist/finalize the complete task plan (second persistence).",
+          description: "Used in write-plan: { status: 'finalized', items: [...] } to persist/finalize the complete task plan (second persistence).",
         },
       },
       output: {
@@ -1685,8 +1685,8 @@ export default {
         }
 
         // v0.9 task plan persistence stage guards.
-        // challenge-plan / decide-tools cannot write or finalize task plans outside
-        // their own persistence stages; plugin-preflight only pre-finalizes pluginCreator.
+        // draftPlanItems only in decide-tools; finalPlanPayload only in write-plan.
+        // memory-maintenance/plugin-maintenance can only read/amend via write-plan.
         const hasDraftPlanItems = Array.isArray(args?.draftPlanItems);
         const hasFinalPlanPayload =
           args?.finalPlanPayload !== null && args?.finalPlanPayload !== undefined;
@@ -1698,11 +1698,11 @@ export default {
             ),
           );
         }
-        if (hasFinalPlanPayload && current !== "write-plan" && current !== "plugin-preflight") {
+        if (hasFinalPlanPayload && current !== "write-plan") {
           return Promise.reject(
             new Error(
-              `workflow-stage-deny: finalPlanPayload can only be used in write-plan or plugin-preflight (current="${current}"). ` +
-                `Writing/finalizing task plans here is not allowed.`,
+              `workflow-stage-deny: finalPlanPayload can only be used in write-plan (current="${current}"). ` +
+                `Writing/finalizing task plans here is not allowed; memory-maintenance/plugin-maintenance must amend via write-plan.`,
             ),
           );
         }
@@ -1710,33 +1710,6 @@ export default {
           const persisted = taskPlanStore.persistDraftItems(args.draftPlanItems);
           if (persisted.ok !== true) {
             return Promise.reject(new Error("whale_report failed to persist draft task plan items; task plan store write failed."));
-          }
-        }
-        if (current === "plugin-preflight") {
-          const payload = args?.finalPlanPayload;
-          if (payload === null || payload === undefined || typeof payload !== "object") {
-            const def = stageDefinitionFor(MAIN_ROLE, "plugin-preflight");
-            return Promise.reject(
-              new Error(
-                `workflow-stage-deny: plugin-preflight requires whale_report(finalPlanPayload) with only persona=pluginCreator items to pre-finalize; ` +
-                  `current allowed tools: [${def.allowedTools.join(", ")}].`,
-              ),
-            );
-          }
-          const items = Array.isArray(payload.items) ? payload.items : [];
-          const hasNonPluginCreator = items.some(
-            (item) => item === null || typeof item !== "object" || item.persona !== "pluginCreator",
-          );
-          if (items.length === 0 || hasNonPluginCreator) {
-            return Promise.reject(
-              new Error(
-                "workflow-stage-deny: plugin-preflight accepts finalPlanPayload only when every item has persona=pluginCreator; other personas must be finalized later in write-plan.",
-              ),
-            );
-          }
-          const persisted = taskPlanStore.persistFinalPayload(payload);
-          if (persisted.ok !== true) {
-            return Promise.reject(new Error("whale_report failed to persist pluginCreator pre-finalization; task plan store write failed."));
           }
         }
         if (current === "write-plan") {
@@ -1764,10 +1737,8 @@ export default {
               ? "decide-tools"
               : current === "decide-tools"
                 ? "write-plan"
-                : current === "plugin-preflight"
-                  ? "decide-tools"
-                  : current === "write-plan"
-                    ? "decide-goal"
+                : current === "write-plan"
+                  ? "decide-goal"
                     : current === "decide-goal"
                       ? args?.mode === "goal"
                         ? GOAL_ACTIVE_STAGE
@@ -1898,16 +1869,17 @@ export default {
             reason: `ka_sub_whale rejected plan item "${item.planItemId}": persona "${item.persona}" is not in the v0.9 role set.`,
           });
         }
-        // 36.8 stage-persona mapping enforcement:
-        //   plugin-preflight → pluginCreator; working → worker;
-        //   memory-maintenance → memoryMaintainer; plugin-maintenance → pluginMaintainer.
+        // 36.8 + 37.5 stage-persona mapping enforcement:
+        //   working → worker; memory-maintenance → memoryMaintainer;
+        //   plugin-maintenance → pluginMaintainer. pluginCreator is store-only/unused
+        //   and is not exposed through any main stage.
         const currentStage = stageOfAgent(agent);
         const expectedPersona = V09_KA_SUB_WHALE_STAGE_PERSONAS[currentStage];
         if (expectedPersona !== undefined && role !== expectedPersona) {
           return Promise.resolve({
             ok: false,
             code: "stage-persona-mismatch",
-            reason: `ka_sub_whale rejected plan item "${item.planItemId}" in ${currentStage}: persona "${role}" does not match the only delegable persona "${expectedPersona}" for this stage. Working delegates only worker; memory-maintenance only memoryMaintainer; plugin-maintenance only pluginMaintainer; plugin-preflight only pluginCreator.`,
+            reason: `ka_sub_whale rejected plan item "${item.planItemId}" in ${currentStage}: persona "${role}" does not match the only delegable persona "${expectedPersona}" for this stage. Working delegates only worker; memory-maintenance only memoryMaintainer; plugin-maintenance only pluginMaintainer; pluginCreator is store-only/unused and has no delegating main stage.`,
           });
         }
 

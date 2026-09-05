@@ -1,13 +1,14 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting + 37.5 移除 plugin-preflight / 收紧 task-plan 创建与图）。
 
 ## 范围
 
 - 主/子阶段机：英文 stage id，Allowed tools / Can advance to / Task 与 v0.9
   表格一致；`decide-goal` 可推进 `working` 或外部模式 `goal-active`；
-  36.5 新增 `plugin-preflight`：`decide-tools → plugin-preflight → decide-tools`，
-  只 pre-finalize/委派 `pluginCreator` plan item。
+  37.5 移除 `plugin-preflight`：主流程为
+  `decide-tools → write-plan → decide-goal → working → memory-maintenance → plugin-maintenance/communication`；
+  `pluginCreator` 角色定义保留，但没有主阶段可委派它（store-only/unused）。
 - Goal-active 外部模式：`whale_report({mode:'goal', objective, max_goal_rounds?})`
   从 decide-goal 或非主 stage（idle/done/end）进入 `goal-active`；该值写入 stage
   state，但不加入 `MAIN_STAGE_IDS`；goal-active 期间普通 `whale_report` 推进返回
@@ -34,8 +35,8 @@
   category=`subagent-report`，记在主 agent 名下），child-side 不再直接写
   round-display。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
-  Allowed / Can advance / Task，并在 write-plan/plugin-preflight/working/maintenance
-  阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
+  Allowed / Can advance / Task，并在 write-plan/working/memory-maintenance/
+  plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
   `lifecyclePath`，在 decide-tools 阶段携带当前私有插件候选目录。
 - B2.5 重启语义：Minimal 只在整段 session 第一次 tool/call 前发生；后续
   workflow-run 重新进入 `assess-complexity` 但不重复 Minimal；Goal 存在时不重复
@@ -51,9 +52,10 @@
   `assess-complexity`。
 - Task plan：独立 `ka-whale-workflow-task-plan.json`；
   `decide-tools` 通过 `whale_report(draftPlanItems)` 第一次持久化（draft）；
-  `plugin-preflight` 通过 `whale_report(finalPlanPayload)` 只 pre-finalize
-  `pluginCreator` items（完整 create + 登记候选）；
   `write-plan` 通过 `whale_report(finalPlanPayload)` 第二次完整定稿（finalized）；
+  `finalPlanPayload` 只在 write-plan 可用；
+  memory-maintenance/plugin-maintenance 不能创建 task plan，只能经 write-plan
+  读取/改约；
   plan item `persona` 允许 `main` + 四子代理角色；`ka_sub_whale` 只接受
   finalized planItemId 且 persona 必须是四子代理角色之一，`persona=main` 返回
   结构化 `main-persona-delegation-denied`。
@@ -65,12 +67,12 @@
   continuable child；模型只能传 `planItemId`。
 - 36.5 working 委派语义：`persona=main` 由主线执行，子代理 persona 经
   `ka_sub_whale` 委派；主线监控/验证/改约并只在计划外提问；working 后若仍有
-  `memoryMaintainer`/`pluginMaintainer`/`pluginCreator` items 或候选建议，必须先
-  走 `memory-maintenance`/`plugin-maintenance` 再 communication。
+  `memoryMaintainer`/`pluginMaintainer` items，必须先走
+  `memory-maintenance`/`plugin-maintenance` 再 communication。
 - 36.6 事件驱动等待：`ka_sub_whale` 创建 continuable child 后，主线不使用
   `pwsh sleep` / 轮询 `list_agents` 等待；应结束当前回合，等子代理 report/finished
   消息到达主会话再继续。`list_agents` / `send_message` 不是等待原语；主 Persona、
-  working/plugin-preflight/memory-maintenance/plugin-maintenance 注入与
+  working/memory-maintenance/plugin-maintenance 注入与
   `ka_sub_whale` description/output 都明确该口径。
 - 36.7 challenge-plan 批评纪律：主/worker 的 challenge-plan 阶段要求先批评、
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
@@ -85,13 +87,13 @@
   `working → plugin-maintenance` 已移除，`whale_report` 从 working 的默认推进
   目标是 `memory-maintenance`。working 完成后总是先进入 memory-maintenance，
   再按 plugin work 进入 plugin-maintenance 或 communication。
-- 36.8 stage-persona mapping：`ka_sub_whale` 的委派阶段与 persona 固定映射
-  （plugin-preflight→pluginCreator、working→worker、
-  memory-maintenance→memoryMaintainer、plugin-maintenance→pluginMaintainer）；
-  不匹配返回结构化 `stage-persona-mismatch`。
+- 36.8/37.5 stage-persona mapping：`ka_sub_whale` 的委派阶段与 persona 固定映射
+  （working→worker、memory-maintenance→memoryMaintainer、
+  plugin-maintenance→pluginMaintainer）；`pluginCreator` 保留角色定义但无主阶段
+  可委派（store-only/unused）；不匹配返回结构化 `stage-persona-mismatch`。
 - 36.8 task splitting：write-plan 必须为每个 coherent task 建独立 planItem；
-  working 逐个委派 worker planItems；memory/plugin planItems 留给对应维护阶段，
-  pluginCreator planItems 留给 plugin-preflight。
+  working 逐个委派 worker planItems；memory/plugin planItems 留给对应维护阶段；
+  37.5 起 no pluginCreator plan item is delegated from any main stage。
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 四个 `*_sub_whale_report`

@@ -77,7 +77,7 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
 }
 
 check("36.5 终态新消息进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity" && nextStageOnUserMessage("end", 3) === "assess-complexity" && nextStageOnUserMessage("idle", 1) === "assess-complexity");
-check("36.5 活动阶段新消息保留当前阶段", nextStageOnUserMessage("working", 2) === "working" && nextStageOnUserMessage("challenge-plan", 3) === "challenge-plan" && nextStageOnUserMessage("decide-tools", 2) === "decide-tools" && nextStageOnUserMessage("plugin-preflight", 2) === "plugin-preflight" && nextStageOnUserMessage("memory-maintenance", 2) === "memory-maintenance");
+check("36.5/37.5 活动阶段新消息保留当前阶段", nextStageOnUserMessage("working", 2) === "working" && nextStageOnUserMessage("challenge-plan", 3) === "challenge-plan" && nextStageOnUserMessage("decide-tools", 2) === "decide-tools" && nextStageOnUserMessage("write-plan", 2) === "write-plan" && nextStageOnUserMessage("memory-maintenance", 2) === "memory-maintenance");
 check("goal active 时进入/保持 goal-active", nextStageOnUserMessage("done", 2, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage("idle", 1, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2, { goalActive: true }) === GOAL_ACTIVE_STAGE);
 check("stale goal-active（goalActive=false/缺省）回到 assess-complexity", nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2, { goalActive: false }) === "assess-complexity" && nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2) === "assess-complexity");
 check("goalModeActiveOf active/paused 为 true", goalModeActiveOf(agent, { get: () => ({ phase: "active" }) }) === true && goalModeActiveOf(agent, { get: () => ({ phase: "paused" }) }) === true);
@@ -108,11 +108,15 @@ check("subagent report/settled 消息判定为假", isUserMessage({ content: [],
 }
 
 check("v0.9 工具名", KA_SUB_WHALE_TOOL === "ka_sub_whale" && WORK_SUB_WHALE_REPORT_TOOL === "work_sub_whale_report" && MEMORY_SUB_WHALE_REPORT_TOOL === "memory_sub_whale_report" && PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL === "plugin_maintainer_sub_whale_report" && PLUGIN_CREATOR_SUB_WHALE_REPORT_TOOL === "plugin_creator_sub_whale_report");
-check("v0.9 stage 常量导出", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 10 && MAIN_STAGE_IDS.includes("plugin-preflight") && V09_SUBAGENT_ROLES.length === 4 && V09_STAGE_IDS.length > 0);
+check("v0.9 stage 常量导出（37.5 无 plugin-preflight）", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight") && V09_SUBAGENT_ROLES.length === 4 && V09_SUBAGENT_ROLES.includes("pluginCreator") && V09_STAGE_IDS.length > 0);
 
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && workingDef?.canAdvance.includes("write-plan"));
+check("37.5 新图：write-plan 可到 decide-goal/working/maintenance/communication", ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
+check("37.5 新图：working 只到 write-plan/memory-maintenance", JSON.stringify(workingDef?.canAdvance) === JSON.stringify(["write-plan", "memory-maintenance"]));
+check("37.5 新图：memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "memory-maintenance", "plugin-maintenance") === true && canAdvance(MAIN_ROLE, "memory-maintenance", "communication") === true);
+check("37.5 plugin-preflight 不再是主阶段且 decide-tools 只到 write-plan", stageDefinitionFor(MAIN_ROLE, "plugin-preflight") === null && JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools")?.canAdvance) === JSON.stringify(["write-plan"]));
 check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.canAdvance.includes("communication") === false && workingDef?.canAdvance.includes("plugin-maintenance") === false && workingDef?.canAdvance.includes("memory-maintenance") === true);
 {
   const mainChallenge = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
@@ -155,7 +159,7 @@ check("子代理 role stage 定义齐全", ["worker", "memoryMaintainer", "plugi
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });
 check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlanText.includes("taskPlanPath: C:/tmp/task-plan.json"));
 {
-  const waitStages = ["working", "plugin-preflight", "memory-maintenance", "plugin-maintenance"];
+  const waitStages = ["working", "memory-maintenance", "plugin-maintenance"];
   const waitOk = waitStages.every((stage) => {
     const text = stageInjectionText(MAIN_ROLE, stage);
     return (
@@ -165,7 +169,7 @@ check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlan
       text.includes("not wait primitives")
     );
   });
-  check("36.6 working/plugin-preflight/maintenance 阶段注入含事件驱动等待语义", waitOk);
+  check("36.6 working/memory-maintenance/plugin-maintenance 阶段注入含事件驱动等待语义", waitOk);
 }
 
 {

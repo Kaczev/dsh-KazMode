@@ -137,11 +137,11 @@ const whaleReport = registeredTools.get("whale_report");
 const kaSubWhale = registeredTools.get(KA_SUB_WHALE_TOOL);
 
 // 纯函数层
-check("主 stage ids 与 v0.9 36.5 一致", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools","plugin-preflight","write-plan","decide-goal","working","memory-maintenance","plugin-maintenance","communication"]));
+check("主 stage ids 与 v0.9 37.5 一致", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools","write-plan","decide-goal","working","memory-maintenance","plugin-maintenance","communication"]));
 check("worker/memory/plugin stage ids 齐全", WORKER_STAGE_IDS.includes("check-tools") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_CREATOR_STAGE_IDS.includes("create-plugin"));
-check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE) && MAIN_STAGE_IDS.length === 10);
-check("plugin-preflight 边：decide-tools→plugin-preflight→decide-tools", canAdvance(MAIN_ROLE, "decide-tools", "plugin-preflight") === true && canAdvance(MAIN_ROLE, "decide-tools", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-preflight", "decide-tools") === true && canAdvance(MAIN_ROLE, "plugin-preflight", "write-plan") === false);
-check("plugin-preflight 注入含 taskPlanPath 与 pluginCreator-only 口径", stageInjectionText(MAIN_ROLE, "plugin-preflight", { taskPlanPath: "C:/plan.json" }).includes("taskPlanPath: C:/plan.json") && stageInjectionText(MAIN_ROLE, "plugin-preflight").includes("only persona=pluginCreator") && stageInjectionText(MAIN_ROLE, "plugin-preflight").includes("Can advance to: [decide-tools]"));
+check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE) && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight"));
+check("37.5 新图：decide-tools 只到 write-plan，write-plan 可到 decide-goal/working/maintenance/communication", JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools")?.canAdvance) === JSON.stringify(["write-plan"]) && ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
+check("37.5 plugin-preflight 无主 stage 定义/无 taskPlanPath 注入", stageDefinitionFor(MAIN_ROLE, "plugin-preflight") === null && !stageInjectionText(MAIN_ROLE, "write-plan").includes("plugin-preflight"));
 check("decide-goal 可推进 working 与 goal-active", canAdvance(MAIN_ROLE, "decide-goal", "working") === true && canAdvance(MAIN_ROLE, "decide-goal", GOAL_ACTIVE_STAGE) === true);
 check("decide-goal 注入含 goal-active task 口径", stageInjectionText(MAIN_ROLE, "decide-goal").includes("Can advance to: [working, goal-active]") && stageInjectionText(MAIN_ROLE, "decide-goal").includes("that enters goal-active"));
 check("decide-goal 注入含 goal/normal 选择标准", stageInjectionText(MAIN_ROLE, "decide-goal").includes("Choose normal when the task can be completed in this workflow-run") && stageInjectionText(MAIN_ROLE, "decide-goal").includes("Choose goal when the objective is clear") && stageInjectionText(MAIN_ROLE, "decide-goal").includes("multi-step is still normal"));
@@ -162,8 +162,10 @@ check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity"
   check("36.8 worker challenge-plan 只可推进 check-tools", JSON.stringify(workerChallengeDef?.canAdvance) === JSON.stringify(["check-tools"]));
   check("36.8 worker challenge/check-tools 文本说明文件工具只在 working 且不得提前报告不足", typeof workerChallengeDef?.task === "string" && workerChallengeDef.task.includes("full working file-tool set (edit, write, pwsh, read) is granted in the working stage") && workerChallengeDef.task.includes("Do not report tool insufficiency before reaching working") && typeof workerCheckToolsDef?.task === "string" && workerCheckToolsDef.task.includes("do not report tool insufficiency before reaching working") && workerCheckToolsDef.task.includes("genuine blocker"));
   check("36.8 working 只可推进 write-plan/memory-maintenance", JSON.stringify(workingDef?.canAdvance) === JSON.stringify(["write-plan", "memory-maintenance"]));
-  check("36.8 working task 含逐个 worker 委派/保留维护项/强制 memory gate", typeof workingDef?.task === "string" && workingDef.task.includes("delegate each persona=worker plan item individually via ka_sub_whale") && workingDef.task.includes("Do not delegate memoryMaintainer/pluginMaintainer/pluginCreator plan items in working") && workingDef.task.includes("always advance to memory-maintenance before any communication") && workingDef.task.includes("advance to plugin-maintenance from memory-maintenance only when plugin work remains"));
+  check("36.8/37.5 working task 含逐个 worker 委派/保留维护项/强制 memory gate", typeof workingDef?.task === "string" && workingDef.task.includes("delegate each persona=worker plan item individually via ka_sub_whale") && workingDef.task.includes("Do not delegate memoryMaintainer/pluginMaintainer plan items in working") && workingDef.task.includes("always advance to memory-maintenance before any communication") && workingDef.task.includes("advance to plugin-maintenance from memory-maintenance only when plugin work remains") && !workingDef.task.includes("plugin-preflight"));
   check("36.8 write-plan task 含按 coherent task 拆分 planItems", typeof stageDefinitionFor(MAIN_ROLE, "write-plan")?.task === "string" && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("separate planItems per coherent task") && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("do not pack all work into one planItem"));
+  check("37.5 write-plan/working/memory/plugin 主阶段不再引用 pluginCreator/plugin-preflight", ["write-plan", "working", "memory-maintenance", "plugin-maintenance"].every((stage) => !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("pluginCreator") && !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("plugin-preflight")));
+  check("37.5 memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-maintenance", "write-plan") === true);
   check("36.7 主 working task 批判性评估子代理批评", typeof workingDef?.task === "string" && workingDef.task.includes("critically evaluates subagent reports and their critiques") && workingDef.task.includes("instead of accepting them blindly"));
   check("36.5 working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
 }
@@ -198,11 +200,9 @@ check("communication 中调用 read 返回 workflow-stage-deny", denyComm.kind =
 await claimed({ agent, message: userMessage, turn: 2 });
 check("36.5 communication 收到新一轮真实用户消息进入 assess-complexity", JSON.parse(readFileSync(STORE_FILE, "utf8")).sessions?.["s-v09"] === "assess-complexity");
 
-// 36.5 plugin-preflight runtime: advance plugin-internal stage to plugin-preflight,
-// then verify pluginCreator-only finalization/delegation and stage preservation.
+// 37.5 runtime: reach working through decide-tools → write-plan → decide-goal.
 await whaleReport.execute({ nextStage: "challenge-plan" }, { agent });
 await whaleReport.execute({ nextStage: "decide-tools" }, { agent });
-await whaleReport.execute({ nextStage: "plugin-preflight" }, { agent });
 let badPayloadError = null;
 try {
   await whaleReport.execute(
@@ -212,27 +212,9 @@ try {
 } catch (error) {
   badPayloadError = error;
 }
-check("plugin-preflight 拒绝非 pluginCreator finalPlanPayload", badPayloadError !== null && String(badPayloadError.message).includes("pluginCreator"));
-const preflightOk = await whaleReport.execute(
-  { finalPlanPayload: { status: "finalized", items: [{ planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] }] }, nextStage: "decide-tools" },
-  { agent },
-);
-check("plugin-preflight 可 pre-finalize pluginCreator 并回到 decide-tools", preflightOk.ok === true && preflightOk.stage === "decide-tools");
-await whaleReport.execute({ nextStage: "plugin-preflight" }, { agent });
-const workerInPreflight = await kaSubWhale.execute({ planItemId: "p1" }, { agent });
-check("plugin-preflight 拒绝非 pluginCreator ka_sub_whale 委派", workerInPreflight.ok === false && workerInPreflight.code === "stage-persona-mismatch");
-const creatorInPreflight = await kaSubWhale.execute({ planItemId: "p-creator" }, { agent });
-check("plugin-preflight 允许 pluginCreator ka_sub_whale 委派", creatorInPreflight.ok === true && creatorInPreflight.code === "subagent-created");
-await claimed({ agent, message: userMessage, turn: 2 });
-check("36.5 plugin-preflight 收到新一轮真实用户消息保留 plugin-preflight", JSON.parse(readFileSync(STORE_FILE, "utf8")).sessions?.["s-v09"] === "plugin-preflight");
-
-// 36.8 stage-persona mapping runtime: reach working through write-plan/decide-goal,
-// then verify each stage only delegates its mapped persona.
-await whaleReport.execute(
-  { finalPlanPayload: { status: "finalized", items: [{ planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] }] }, nextStage: "decide-tools" },
-  { agent },
-);
-await whaleReport.execute({ nextStage: "write-plan" }, { agent });
+check("decide-tools 拒绝 finalPlanPayload（只能在 write-plan）", badPayloadError !== null && String(badPayloadError.message).includes("write-plan"));
+const defaultToWritePlan = await whaleReport.execute({}, { agent });
+check("whale_report 从 decide-tools 默认推进到 write-plan", defaultToWritePlan.ok === true && defaultToWritePlan.stage === "write-plan");
 await whaleReport.execute(
   {
     finalPlanPayload: {
@@ -250,6 +232,9 @@ await whaleReport.execute(
   { agent },
 );
 await whaleReport.execute({ nextStage: "working" }, { agent });
+
+// 36.8 stage-persona mapping runtime: the runtime is already in working; verify
+// each stage only delegates its mapped persona.
 const memoryInWorking = await kaSubWhale.execute({ planItemId: "p-memory" }, { agent });
 check("working 拒绝 memoryMaintainer 委派（stage-persona-mismatch）", memoryInWorking.ok === false && memoryInWorking.code === "stage-persona-mismatch");
 const creatorInWorking = await kaSubWhale.execute({ planItemId: "p-creator" }, { agent });
@@ -270,7 +255,7 @@ check("plugin-maintenance 允许 pluginMaintainer 委派", maintainerInPlugin.ok
 
 check("v0.9 工具已注册", registeredTools.has("whale_report") && registeredTools.has(KA_SUB_WHALE_TOOL) && registeredTools.has(WORK_SUB_WHALE_REPORT_TOOL));
 check("36.6 ka_sub_whale description 含异步等待提示", typeof kaSubWhale?.description === "string" && kaSubWhale.description.includes("end the current turn and await its report/finished message") && kaSubWhale.description.includes("do not use pwsh sleep or poll list_agents"));
-check("36.6 ka_sub_whale 成功输出含 notice", creatorInPreflight?.ok === true && typeof creatorInPreflight?.notice === "string" && creatorInPreflight.notice.includes("End the current turn and await its report/finished message") && creatorInPreflight.notice.includes("not wait primitives"));
+check("36.6 ka_sub_whale 成功输出含 notice", workerInWorking?.ok === true && typeof workerInWorking?.notice === "string" && workerInWorking.notice.includes("End the current turn and await its report/finished message") && workerInWorking.notice.includes("not wait primitives"));
 
 // 36.6 main-side subagent-report capture: parent agent receives subagent report
 // and settled messages, and ka-whale-workflow reports one-line summaries to
