@@ -134,6 +134,11 @@
 # browser reads for every session — behind a realm those units would come and go
 # with whichever presets happen to be mounted. What a preset chooses is whether
 # its agent compacts at all, which is `compaction-basic` below.
+#
+# Kaz7.0 M6 v0.3.0: kaz-context-runtime owns Kaz structural boundary compaction
+# (render() checkpoint surface replace), so stock automatic pressure compaction
+# is disabled here (auto:false). Manual /compact stays available; the runtime
+# driver skips its own replace while a compaction/start…end bracket is live.
 - id: compaction
   name: cordis:group
   group: true
@@ -143,6 +148,8 @@
   config:
     - id: compaction-basic
       name: '@deepseek-ai/dsh-compaction-basic'
+      config:
+        auto: false
 
     - id: command-compact
       name: '@deepseek-ai/dsh-command-compact'
@@ -296,9 +303,11 @@
 
 # ── Kaz7.0 kaz-context-runtime 树形运行时 driver（Kaczev 专属，仅本 preset）──
 # kaz-context-runtime：镜像真实 DSH session/event 到 Kaz session tree，在可靠
-# 结构边界经 whaleSummarizer 生成摘要后 close(round)，并经 session-tree-store-io
+# 结构边界经 whaleSummarizer 生成摘要后 close，并经 session-tree-store-io
 # 持久化；v0.2.0 M6 版本边界内注册只读 whale_expand 工具（Stable Main 19→20）。
-# 本阶段不替换真实 messages。插件本体在 profile 的
+# v0.3.0 起在结构里程碑（planItem/goal close 或 round 自动升华）用官方 DSH
+# surfaceOp replace 写入 render() 最新分支剖面 checkpoint；stock compaction-basic
+# 已设 auto:false。插件本体在 profile 的
 # KazPrivatePlugins/kaz-context-runtime；只挂本 Kaz preset，不挂 profile 全局
 # cordis.patch.yml，因此非 Kaz 预设不装载。
 - id: kaz-context-runtime
