@@ -21,7 +21,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `resolveFirstRoundTools({ kazMemoryEnabled })` | kaz-mode / computeSurface | 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点） |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode 面板 | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
-| `KAZ_BASE_TOOLS` / `KAZ_STABLE_MAIN_TOOLS` / `KAZ_V09_MAIN_TOOLS` / `KAZ_V09_SUBAGENT_ROLE_TOOLS` / `KAZ_SUBAGENT_BASE_TOOLS` / `stableMainSurface` / `stableSubagentSurface` | kaz-mode / ka-whale-workflow（v0.9） | Stable Main Surface = v0.9 §1.1 固定 20 项（M6 版本边界新增只读树检索工具 `whale_expand`；无旧 create_goal/subagent）；子代理 role 面与报告工具；B5 后旧 Goal/subagent 工具常量已删除 |
+| `KAZ_BASE_TOOLS` / `KAZ_STABLE_MAIN_TOOLS` / `KAZ_V09_MAIN_TOOLS` / `KAZ_V09_SUBAGENT_ROLE_TOOLS` / `KAZ_SUBAGENT_BASE_TOOLS` / `stableMainSurface` / `stableSubagentSurface` | kaz-mode / ka-whale-workflow（v0.9） | Stable Main Surface = v0.9 §1.1 固定 20 项（M6 版本边界新增只读树检索工具 `whale_expand`；无旧 create_goal/subagent）；`whale_expand` 同时为主/子代理常驻：保守 Subagent Base 12、四角色 Stable Base worker 13 / memoryMaintainer 11 / pluginMaintainer 9 / pluginCreator 9（均含该工具）；子代理 role 面与报告工具；B5 后旧 Goal/subagent 工具常量已删除 |
 | `KAZ_ROLE_PROMPTS` | ka-whale-workflow / kaz-mode / kaz-system-prompt | v0.9 §9.1–9.5 全量 Persona 唯一收口（`main` + 四个 subagent 角色）；主会话真实系统由 kaz-system-prompt 把 `deployment:persona` 设为 `KAZ_ROLE_PROMPTS.main` 全文，旧 `KAZ_MAIN_ROLE_BODY` / `ka-whale-workflow:main` 第二段机制已退役；stage-defs 的 `V09_ROLE_PERSONAS` 与 main/subagent flow 文本由此派生；36.5 已同步 delegation-first（persona=main 主线执行 / subagent 委派）与 maintenance 路由语义；36.6 已同步事件驱动等待（`ka_sub_whale` 后不 sleep / 不轮询 `list_agents`，结束回合等 report/finished；`list_agents`/`send_message` 非等待原语）；36.7 已同步 challenge-plan 批评纪律（先批评/识别真弱点/不制造批评；主批判性评估子代理批评、不盲从；worker 先批评委派、不盲从）；36.8 已同步 worker 不在 challenge/check-tools 提前报告工具不足、主 working 后强制 memory-maintenance、write-plan 按 coherent task 拆分 planItems、working 逐个委派 worker planItems；37.5 已从 main Persona 移除 plugin-preflight/pluginCreator 主流程委派（pluginCreator 仅保留子代理角色定义）；子代理四条经 `request.persona` 注入受控子代理并由 kaz-system-prompt 原样保留 |
 | `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` / `KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH` | ka-whale-workflow / kaz-mode 探针 | v0.9 task plan 独立存储绝对路径；私有插件生命周期参考文件绝对路径；私有插件候选注册表（与 agent-managed 同源）绝对路径 |
 | `V09_SUBAGENT_ROLE_IDS` / `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` / `V09_SUBAGENT_ROLE_STABLE_BASE` / `V09_SUBAGENT_ROLE_PERSONA_REFS` / `V09_SUBAGENT_ROLE_TOOL_FILTERS` / `computeV09FinalSurface` / `resolveV09AssignedTools` | ka-whale-workflow / kaz-mode（v0.9 B3） | 四角色（worker/memoryMaintainer/pluginMaintainer/pluginCreator）的 Minimal/Stable Base/personaRef/toolFilter；assignedTools 来源（tool-jobs + 私有插件候选）与数量校验；最终角色面计算 |
@@ -60,8 +60,10 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
     固定 20 项：M6 版本边界新增只读树检索工具 `whale_expand`，含
     `ka_sub_whale`/`list_agents`/`send_message`/`interrupt_agent`/
     `get_goal`/`update_goal`/`whale_report`；不含旧 `create_goal/subagent`）；
-  - 子代理稳定阶段 = `stableSubagentSurface()`（保守 Base 兜底；v0.9 受控 role 面由
-    `KAZ_V09_SUBAGENT_ROLE_TOOLS` 表达，供 ka_sub_whale 使用）；
+  - 子代理稳定阶段 = `stableSubagentSurface()`（保守 Base 兜底，含 `whale_expand`，共 12 项；v0.9 受控 role 面由
+    `KAZ_V09_SUBAGENT_ROLE_TOOLS` 表达，供 ka_sub_whale 使用——worker 13 /
+    memoryMaintainer 11 / pluginMaintainer 9 / pluginCreator 9，均常驻
+    `whale_expand`）；
   - 首阶段（kaz-mode 核心 `minimalPhase=true`）只保留 `firstRoundTools`；
     为空时按 `resolveFirstRoundTools({ kazMemoryEnabled })` 自动解析——Kaz 下
     ka-whale-memory 恒开 → `memory_search`；

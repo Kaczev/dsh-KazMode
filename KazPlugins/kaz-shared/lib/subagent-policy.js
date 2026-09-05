@@ -69,7 +69,7 @@ export const V09_SUBAGENT_ROLE_MINIMAL_TOOLS = Object.freeze({
   pluginCreator: Object.freeze(["read", "plugin_creator_sub_whale_report"]),
 });
 
-/** v0.9 子代理 Stable Base（§1.2–1.5；含该角色的 report 工具）。 */
+/** v0.9 子代理 Stable Base（§1.2–1.5；含该角色的 report 工具；worker/四角色均含只读 whale_expand 常驻）。 */
 export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
   worker: Object.freeze([
     "edit",
@@ -83,6 +83,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "todo_write",
     "web_search",
     "write",
+    "whale_expand",
     "work_sub_whale_report",
   ]),
   memoryMaintainer: Object.freeze([
@@ -95,6 +96,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "read",
     "glob",
     "grep",
+    "whale_expand",
     "memory_sub_whale_report",
   ]),
   pluginMaintainer: Object.freeze([
@@ -105,6 +107,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "grep",
     "pwsh",
     "todo_write",
+    "whale_expand",
     "plugin_maintainer_sub_whale_report",
   ]),
   pluginCreator: Object.freeze([
@@ -115,6 +118,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "grep",
     "pwsh",
     "todo_write",
+    "whale_expand",
     "plugin_creator_sub_whale_report",
   ]),
 });

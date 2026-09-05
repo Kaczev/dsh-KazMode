@@ -6,7 +6,8 @@ official plugin (v0.3.1) under `KazPlugins/kaz-context-runtime` on 2026-09-05
 
 ## Purpose
 
-- Model-visible tool: **`whale_expand`** (read-only, Stable Main 20th tool).
+- Model-visible tool: **`whale_expand`** (read-only, Stable Main 20th tool; also a
+  standing tool in the conservative Subagent Base and all v0.9 role Stable Bases).
 - The Kaz-only runtime Cordis plugin mirrors real DSH session events into the
   Kaz session tree, closes completed structural boundaries through
   `whaleSummarizer`, persists each tree through `kaz-shared`'s
@@ -70,9 +71,12 @@ official plugin (v0.3.1) under `KazPlugins/kaz-context-runtime` on 2026-09-05
     those upstream events exist, the explicit `kazContextBoundary` API is the
     authoritative completion path for main-line/main-session boundaries.
 - Stable Main boundary remains the v0.2.0 20-item surface (`whale_expand`
-  present; no tool-list change in v0.3.0/v0.3.1); the 2026-09-05 formalization
+  present; no tool-list change in v0.3.0/v0.3.1). The 2026-09-05 formalization
   changed only the whale_expand candidate `source` to
-  `KazPlugins/kaz-context-runtime` (available/tool behavior unchanged).
+  `KazPlugins/kaz-context-runtime` (available/tool behavior unchanged). Later
+  standing update: `whale_expand` was added to `KAZ_SUBAGENT_BASE_TOOLS` and the
+  v0.9 role Stable Bases, and removed from `kaz-agent-managed-tools.json`
+  `candidates` (safe_json_write retained); Stable Main remains 20.
 
 ## Missing upstream events (待接清单, implemented around — not skipped)
 
@@ -113,8 +117,9 @@ official plugin (v0.3.1) under `KazPlugins/kaz-context-runtime` on 2026-09-05
 - Full v0.3.0 rollback baseline remains
   `KazPrivatePlugins/process/kaz-context-runtime/backups/v0.3.0-20260905-225343/`.
 - Re-enable `compaction-basic.auto` if preset rollback is required.
-- Remove `whale_expand` from `KAZ_V09_MAIN_TOOLS`, candidate registry, and
-  plugin tool registration only if full v0.2.0 boundary rollback is required.
+- Remove `whale_expand` from `KAZ_V09_MAIN_TOOLS`, `KAZ_SUBAGENT_BASE_TOOLS`,
+  v0.9 role Stable Base lists, and plugin tool registration, and re-add its
+  candidate registry entry, only if full v0.2.0 boundary rollback is required.
 - Remove the Kaz-preset mount row and profile dependency only if full runtime
   rollback is required.
 - Remove `node_modules/kaz-context-runtime` junction if created (junction only).
@@ -124,6 +129,11 @@ official plugin (v0.3.1) under `KazPlugins/kaz-context-runtime` on 2026-09-05
 
 ## Result history
 
+- Standing subagent-base update: `whale_expand` added to
+  `KAZ_SUBAGENT_BASE_TOOLS` and v0.9 role Stable Bases
+  (tool-lists.js + subagent-policy.js); removed from
+  `kaz-agent-managed-tools.json` `candidates` (`safe_json_write` retained);
+  Stable Main remains the 20-item surface.
 - 2026-09-05 formalized: moved to `KazPlugins/kaz-context-runtime`, removed
   `private:true`, synced profile dependency/lockfile/junction/Kaz-preset path,
   whale_expand candidate source changed to `KazPlugins/kaz-context-runtime`;

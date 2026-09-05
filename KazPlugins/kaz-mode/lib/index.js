@@ -1197,8 +1197,8 @@ export default {
      * v0.8 Step A/B1 语义：
      *   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface
      *     （KAZ_STABLE_MAIN_TOOLS v0.9 固定 20 项，M6 版本边界新增 whale_expand）；一次变化。
-     *   - 子代理：minimal → Stable Subagent Base（Step A 尚无 per-task assigned
-     *     工具通道，assignedTools 由后续受控委派 Step 接入）。
+     *   - 子代理：minimal → Stable Subagent Base（保守 Base 12 项，含 whale_expand；
+     *     Step A 尚无 per-task assigned 工具通道，assignedTools 由后续受控委派 Step 接入）。
      *   - 代码级固定集优先：旧 tool-plugin JSON 只作兼容读，不决定固定成员是否可见。
      *   - v0.8 Step B1：原生 Plan 已移除，不再存在 Plan 自动放行例外。
      *   - v0.9 B5：enable_tool / taskToolSelection 已整体退役，不再参与工具面。
@@ -1250,7 +1250,9 @@ export default {
       let allowed;
       if (subagent) {
         // v0.9 B3：受控子代理使用 role Stable Base + assignedTools（由
-        // ka-whale-workflow 持久化）；旧/未知子代理回落到静态保守 Stable Base。
+        // ka-whale-workflow 持久化；四角色 Stable Base 均含 whale_expand：
+        // worker 13 / memoryMaintainer 11 / pluginMaintainer 9 / pluginCreator 9）；
+        // 旧/未知子代理回落到静态保守 Stable Base（12 项，含 whale_expand）。
         const controlledSurface = controlledSubagentSurfaceOf(agent);
         if (Array.isArray(controlledSurface) && controlledSurface.length > 0) {
           allowed = new Set(controlledSurface);

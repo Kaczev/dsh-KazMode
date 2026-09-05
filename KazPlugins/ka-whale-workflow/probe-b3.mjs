@@ -70,6 +70,7 @@ check("pluginCreator Minimal 从 read + report 开始", JSON.stringify(V09_SUBAG
 check("worker Stable Base 不含 memory_save/update/forget", ["memory_save", "memory_update", "memory_forget"].every((tool) => !V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes(tool)));
 check("worker Stable Base 含 work_sub_whale_report", V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes("work_sub_whale_report"));
 check("memoryMaintainer Stable Base 含全部记忆写工具", ["memory_save", "memory_update", "memory_forget"].every((tool) => V09_SUBAGENT_ROLE_STABLE_BASE.memoryMaintainer.includes(tool)));
+check("v0.9 四角色 Stable Base 均常驻 whale_expand（worker 13 / memoryMaintainer 11 / plugin* 9）", V09_SUBAGENT_ROLE_IDS.every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("whale_expand")) && V09_SUBAGENT_ROLE_STABLE_BASE.worker.length === 13 && V09_SUBAGENT_ROLE_STABLE_BASE.memoryMaintainer.length === 11 && V09_SUBAGENT_ROLE_STABLE_BASE.pluginMaintainer.length === 9 && V09_SUBAGENT_ROLE_STABLE_BASE.pluginCreator.length === 9);
 check("tool-lists KAZ_V09_SUBAGENT_ROLE_TOOLS 与 v09 Stable Base 一致", JSON.stringify(KAZ_V09_SUBAGENT_ROLE_TOOLS) === JSON.stringify(V09_SUBAGENT_ROLE_STABLE_BASE));
 check("tool-jobs 固定集合", JSON.stringify(V09_TOOL_JOBS) === JSON.stringify(["job_list", "job_output", "job_kill"]));
 

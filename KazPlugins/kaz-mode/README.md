@@ -188,7 +188,9 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    新增只读树检索工具 `whale_expand`，
    不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +
-   assignedTools 显示，旧/未知子代理回落到保守 Base；
+   assignedTools 显示（四角色 Stable Base 均常驻只读 `whale_expand`：worker 13 /
+   memoryMaintainer 11 / pluginMaintainer 9 / pluginCreator 9），旧/未知子代理回落到
+   保守 Base 12（含 `whale_expand`）；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
 5. Kaz 面板「工具控制面板」只读展示 Stable Main/workflow 面；私有插件候选只读、

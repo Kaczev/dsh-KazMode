@@ -55,7 +55,8 @@ const agentOfSubagent = (id) => ({
 });
 const CONTROLLED_WORKER_SURFACE = [
   "edit", "glob", "grep", "memory_detail", "memory_list", "memory_search",
-  "pwsh", "read", "todo_write", "web_search", "write", "work_sub_whale_report", "job_list",
+  "pwsh", "read", "todo_write", "web_search", "write", "whale_expand",
+  "work_sub_whale_report", "job_list",
 ];
 const kaWhaleMock = {
   stageOf: () => "working",
@@ -150,7 +151,7 @@ const sPlainNomem = agentOf("s-plain-nomem");
 {
   const ctrl = agentOfSubagent("s-ctrl");
   const ctrlSurface = kazMode.surfaceOf(ctrl);
-  check("controlled worker surface = role base + assigned tool-jobs", ctrlSurface.has("work_sub_whale_report") && ctrlSurface.has("job_list") && ctrlSurface.has("write") && !ctrlSurface.has("memory_save"));
+  check("controlled worker surface = role base + assigned tool-jobs（含 whale_expand）", ctrlSurface.has("work_sub_whale_report") && ctrlSurface.has("job_list") && ctrlSurface.has("write") && ctrlSurface.has("whale_expand") && !ctrlSurface.has("memory_save"));
 }
 
 // ⑤ assemble/pre-execute use same stable surface.

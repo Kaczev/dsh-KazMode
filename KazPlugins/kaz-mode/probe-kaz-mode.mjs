@@ -229,7 +229,7 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   check("②.5 主面不含 enable_tool/workflow/subagent_fork", kazMode.toolVisible(sKaz, "enable_tool") === false && kazMode.toolVisible(sKaz, "workflow") === false && kazMode.toolVisible(sKaz, "subagent_fork") === false);
   check("②.5 主面不含 exit_plan_mode（v0.8 Step B1：原生 Plan 已移除）", kazMode.toolVisible(sKaz, "exit_plan_mode") === false);
   check("②.5 Kaz 恒开：记忆关旧状态不再影响固定主面（仍 20 含 whale_expand 与记忆读）", nomem !== null && nomem.size === 20 && nomem.has("whale_expand") && nomem.has("memory_search") && nomem.has("memory_list") && nomem.has("memory_detail") && nomem.has("get_goal"));
-  check("②.5 子代理稳定面 = 保守 Subagent Base 11", sub !== null && sub.size === 11 && sub.has("read") && sub.has("web_search") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
+  check("②.5 子代理稳定面 = 保守 Subagent Base 12（含 whale_expand）", sub !== null && sub.size === 12 && sub.has("read") && sub.has("web_search") && sub.has("whale_expand") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
   check("②.5 子代理 minimal = memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
 }
 

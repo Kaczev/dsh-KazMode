@@ -1,7 +1,8 @@
 # kaz-context-runtime（Kaz7.0 M6 运行时接线 driver）
 
 KazPlugins 正式 Cordis 插件：只挂 Kaz preset；v0.2.0 起注册只读
-`whale_expand` 工具（M6 Stable Main 版本边界 19→20）；v0.3.0 起在结构里程碑用
+`whale_expand` 工具（M6 Stable Main 版本边界 19→20；现已升级为 Kaz 主/子代理常驻
+Base 并移出私有插件候选）；v0.3.0 起在结构里程碑用
 DSH 官方 `surfaceOp replace` 把旧历史段替换成 `render()` 最新分支剖面 checkpoint；
 v0.3.1 起提供 `kazContextBoundary` workflow 边界桥，把 planItem(level 2) / goal
 (level 3) 的 open/close 接到同一条 surface-replace 管线。不改 DSH 核心。
@@ -70,10 +71,14 @@ v0.3.1 起提供 `kazContextBoundary` workflow 边界桥，把 planItem(level 2)
 - 包装：`kaz-shared/lib/session-tree-expand.js` 的纯 `expand()`，始终使用
   当前 session 的完整持久化 Session（hiddenRootIds/checkpoint 不影响展开）。
 - 入参：`path`（必填；`""` 列出根 children）、可选 `limit`、可选 `cursor`。
-- 注册范围：Kaz preset 内 `ctx.tools.register`；同时已加入
-  `KAZ_V09_MAIN_TOOLS` / `KAZ_STABLE_MAIN_TOOLS`（Stable Main 20 项）。
-- 候选注册：`~/.dsh/storages/kaz-agent-managed-tools.json` 的
-  `candidates` 已登记该工具，供受控 worker 子代理 `assignedTools` 使用。
+- 注册范围：Kaz preset 内 `ctx.tools.register`；同时常驻主面与全部子代理 Stable
+  Base：`KAZ_V09_MAIN_TOOLS` / `KAZ_STABLE_MAIN_TOOLS`（Stable Main 20 项）、
+  `KAZ_SUBAGENT_BASE_TOOLS`（保守 Base 12 项）、`KAZ_V09_SUBAGENT_ROLE_TOOLS`
+  四角色（worker 13 / memoryMaintainer 11 / pluginMaintainer 9 /
+  pluginCreator 9，均含该工具）。
+- 候选注册：已从 `~/.dsh/storages/kaz-agent-managed-tools.json` 的
+  `candidates` 移除（常驻 Stable Base 后不再依赖该候选做 `assignedTools`；
+  `safe_json_write` 等其余候选保留）。
 - 只读纪律：执行只做 `store` 加载 + 纯 `expand`，不调用 DSH
   `session.append`，不写树、不写 store、不读 archive。
 

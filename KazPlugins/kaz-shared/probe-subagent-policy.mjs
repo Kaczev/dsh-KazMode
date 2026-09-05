@@ -35,6 +35,7 @@ const V09_ROLES = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCrea
 // ---------- v0.9 角色常量 ----------
 check("角色常量只含 v0.9 四值且冻结", Array.isArray(V09_SUBAGENT_ROLE_IDS) && Object.isFrozen(V09_SUBAGENT_ROLE_IDS) && JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(V09_ROLES));
 check("每个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_ROLES.every((role) => Array.isArray(V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role]) && Array.isArray(V09_SUBAGENT_ROLE_STABLE_BASE[role]) && typeof V09_SUBAGENT_ROLE_PERSONA_REFS[role] === "string" && Array.isArray(V09_SUBAGENT_ROLE_TOOL_FILTERS[role].allow)));
+check("v0.9 四角色 Stable Base 均含只读 whale_expand", V09_ROLES.every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("whale_expand")));
 check("旧 toolCreator/retriever 被拒绝", normalizeV09Role("toolCreator") === null && normalizeV09Role("retriever") === null);
 check("未知角色被拒绝", normalizeV09Role("attackerRole") === null);
 

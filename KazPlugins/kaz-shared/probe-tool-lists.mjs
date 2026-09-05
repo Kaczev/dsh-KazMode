@@ -13,6 +13,7 @@ import {
   KAZ_BASE_TOOLS,
   KAZ_STABLE_MAIN_TOOLS,
   KAZ_SUBAGENT_BASE_TOOLS,
+  KAZ_V09_SUBAGENT_ROLE_TOOLS,
   stableMainSurface,
   stableSubagentSurface,
   KAZ_EXTERNAL_CANDIDATES,
@@ -53,6 +54,7 @@ check("① B5 不再保留旧 KAZ_GOAL_TOOLS / KAZ_SUBAGENT_CONTROL_TOOLS", !Obj
 check("① v0.9 Stable Main Surface = 20（M6 版本边界新增 whale_expand，无 create_goal/subagent）", KAZ_STABLE_MAIN_TOOLS.length === 20 && KAZ_STABLE_MAIN_TOOLS.every((t) => typeof t === "string") && KAZ_STABLE_MAIN_TOOLS.includes("whale_expand") && KAZ_STABLE_MAIN_TOOLS.includes("whale_report") && KAZ_STABLE_MAIN_TOOLS.includes("ka_sub_whale") && KAZ_STABLE_MAIN_TOOLS.includes("list_agents") && KAZ_STABLE_MAIN_TOOLS.includes("send_message") && KAZ_STABLE_MAIN_TOOLS.includes("interrupt_agent") && !KAZ_STABLE_MAIN_TOOLS.includes("create_goal") && !KAZ_STABLE_MAIN_TOOLS.includes("subagent"));
 check("① stableMainSurface = v0.9 固定集 20", stableMainSurface().size === 20 && stableMainSurface().has("whale_expand") && stableMainSurface().has("ka_sub_whale") && stableMainSurface().has("get_goal") && stableMainSurface().has("update_goal") && !stableMainSurface().has("exit_plan_mode") && !stableMainSurface().has("subagent") && !stableMainSurface().has("create_goal"));
 check("① KAZ_SUBAGENT_BASE_TOOLS 不含 safe_json_write / memory 写工具", !KAZ_SUBAGENT_BASE_TOOLS.includes("safe_json_write") && !KAZ_SUBAGENT_BASE_TOOLS.includes("memory_save") && !KAZ_SUBAGENT_BASE_TOOLS.includes("memory_update") && !KAZ_SUBAGENT_BASE_TOOLS.includes("memory_forget"));
+check("① 子代理 Stable Base 均常驻 whale_expand（保守 12；worker 13 / memoryMaintainer 11 / plugin* 9）", KAZ_SUBAGENT_BASE_TOOLS.length === 12 && KAZ_SUBAGENT_BASE_TOOLS.includes("whale_expand") && Object.entries(KAZ_V09_SUBAGENT_ROLE_TOOLS).every(([role, tools]) => Array.isArray(tools) && tools.includes("whale_expand") && ((role === "worker" && tools.length === 13) || (role === "memoryMaintainer" && tools.length === 11) || (role === "pluginMaintainer" && tools.length === 9) || (role === "pluginCreator" && tools.length === 9))));
 check("① stableSubagentSurface 支持 assignedTools 并入", stableSubagentSurface({ assignedTools: ["tool_jobs"] }).has("tool_jobs") && stableSubagentSurface({ baseTools: ["read"], assignedTools: ["write"] }).size === 2);
 check("① KAZ_EXTERNAL_CANDIDATES / KAZ_ROLE_PROMPTS 冻结", Object.isFrozen(KAZ_EXTERNAL_CANDIDATES) && Object.isFrozen(KAZ_ROLE_PROMPTS) && Object.isFrozen(KAZ_MAINTENANCE_ONLY_TOOLS));
 check("① KAZ_ROLE_PROMPTS.main 首句与 Goal-active 语义正确", KAZ_ROLE_PROMPTS.main.startsWith("You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.") && KAZ_ROLE_PROMPTS.main.includes("Start or resume Goal via whale_report") && KAZ_ROLE_PROMPTS.main.includes("do not use whale_report to advance ordinary stages") && KAZ_ROLE_PROMPTS.main.includes("get_goal/update_goal") && KAZ_ROLE_PROMPTS.main.includes("At decide-goal, choose normal when the task is completable in this workflow-run") && KAZ_ROLE_PROMPTS.main.includes("Choose goal when the objective is clear") && KAZ_ROLE_PROMPTS.main.includes("multi-step is still normal"));
