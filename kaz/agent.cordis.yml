@@ -293,3 +293,13 @@
 - id: whale-summarizer
   name: ../../profiles/web/KazPrivatePlugins/whale-summarizer/lib/index.js
   config: {}
+
+# ── Kaz7.0 kaz-context-runtime 树形运行时 driver（Kaczev 专属，仅本 preset）──
+# kaz-context-runtime：镜像真实 DSH session/event 到 Kaz session tree，在可靠
+# 结构边界经 whaleSummarizer 生成摘要后 close(round)，并经 session-tree-store-io
+# 持久化；本阶段不注册工具、不替换真实 messages。插件本体在 profile 的
+# KazPrivatePlugins/kaz-context-runtime；只挂本 Kaz preset，不挂 profile 全局
+# cordis.patch.yml，因此非 Kaz 预设不装载。
+- id: kaz-context-runtime
+  name: ../../profiles/web/KazPrivatePlugins/kaz-context-runtime/lib/index.js
+  config: {}
