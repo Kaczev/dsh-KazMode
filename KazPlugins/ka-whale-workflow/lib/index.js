@@ -64,6 +64,7 @@ import { readJsonFileSafe, writeJsonFileSafe } from "kaz-shared/lib/safe-json-fi
 import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
 import {
   MAIN_ROLE,
   MAIN_STAGE_IDS,
@@ -1983,8 +1984,29 @@ export default {
             ? `\n\nlifecyclePath: ${lifecycleReferencePath}`
             : "";
         const promptText = `${item.task}${lifecycleNote}`;
+        // 6.0.2: reserve the child id before materialization and write the role
+        // record BEFORE startContinuable, so the child's first assembly already
+        // sees its role instead of falling back to memory_search-only minimal.
+        const childId = randomUUID();
+        const now = new Date().toISOString();
+        const roleRecord = {
+          planItemId: item.planItemId,
+          persona: role,
+          assignedTools: assignedValidation.tools,
+          finalTools: finalSurface,
+          createdAt: now,
+          updatedAt: now,
+        };
+        if (stageStore.setSubagentRole(childId, roleRecord) !== true) {
+          return Promise.resolve({
+            ok: false,
+            code: "subagent-start-failed",
+            reason: "ka_sub_whale could not persist the child role record before starting the subagent.",
+          });
+        }
         try {
           const started = await subagents.startContinuable({
+            childId,
             provider: "spawn",
             label: `kaz:${role}:${item.planItemId}`,
             request: {
@@ -2001,22 +2023,19 @@ export default {
             started !== null && typeof started === "object" && typeof started.childId === "string"
               ? started.childId
               : "";
-          if (subagentId.length === 0) {
+          if (subagentId !== childId) {
+            // Start did not materialize under the reserved id; remove the
+            // pre-written role instead of leaving a stale record behind.
+            stageStore.removeSubagentRole(childId);
             return Promise.resolve({
               ok: false,
               code: "subagent-start-failed",
-              reason: "ka_sub_whale started a continuable child but no subagentId was returned.",
+              reason:
+                "ka_sub_whale started a continuable child but the returned childId did not match the caller-reserved childId.",
             });
           }
-          const now = new Date().toISOString();
-          stageStore.setSubagentRole(subagentId, {
-            planItemId: item.planItemId,
-            persona: role,
-            assignedTools: assignedValidation.tools,
-            finalTools: finalSurface,
-            createdAt: now,
-            updatedAt: now,
-          });
+          // Keep the post-start set for idempotency (preserves createdAt).
+          stageStore.setSubagentRole(childId, roleRecord);
           reportRoundDisplay(
             agent,
             `ka_sub_whale created ${role} subagent ${subagentId} for plan item ${item.planItemId}.`,
@@ -2039,6 +2058,7 @@ export default {
               : {}),
           });
         } catch (error) {
+          stageStore.removeSubagentRole(childId);
           return Promise.resolve({
             ok: false,
             code: "subagent-start-failed",
@@ -2144,15 +2164,20 @@ export default {
               reportRoundDisplay(agent, `${reportTool}: ${role} ${current} → ${nextStage}`, "阶段切换");
             }
           }
+          // 6.0.2 child-side write: the reporting subagent records its own
+          // output summary under its own round-display, so child pages reliably
+          // show report summaries under the child's own turn.
+          reportRoundDisplay(agent, oneLineSummary(output), "子代理汇报", "subagent-report");
           const content = [{ type: "text", text: output }];
           const messageId = await subagents.reportFrom(agent, content, {
             delivery: "next-step",
             signal: exec.signal,
           });
-          // 37.5: this tool intentionally does not write round-display itself.
-          // The report message is delivered to the parent main line and captured
-          // in agent/pre-step there, which records it under BOTH the parent/main
-          // agent and this child subagent session (child id from senderSessionId).
+          // 6.0.2 keeps the existing parent-side capture: when the report message
+          // reaches the parent main line, agent/pre-step still records the summary
+          // under the main agent and attempts the child-session write too. Child-side
+          // writing above plus parent-side capture make the child page reliable
+          // even when the parent-side child resolution is delayed or unavailable.
           return {
             messageId,
             role,
@@ -2573,11 +2598,12 @@ export default {
       const sessionIdNow = sessionIdOf(agent);
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
       const messages = Array.isArray(decision.messages) ? decision.messages : [];
-      // 37.5 subagent round-display routing: when the parent main agent receives
+      // 6.0.2 subagent round-display: child-side *_sub_whale_report already writes
+      // a summary under the child; when the parent main agent additionally receives
       // a DSH subagent-report/subagent-settled message, record the summary under
       // BOTH the parent/main agent and the child subagent session (resolved from
-      // message.source.senderSessionId), so child pages show their own reports
-      // while the main session keeps its existing summary.
+      // message.source.senderSessionId), keeping the main session summary while
+      // reinforcing the child-side write.
       if (
         liveNow.enabled === true &&
         controlledRoleNow === null &&

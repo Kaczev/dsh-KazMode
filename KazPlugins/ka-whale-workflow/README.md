@@ -39,11 +39,13 @@
   里 role guidance 只出现一次，不再重复 `You are a helpful software engineer assistant`
   header 或 final-white-response 结尾；受控 v0.9 子代理的 `request.persona` 携带当前
   `KAZ_ROLE_PROMPTS.subagent.*`，`kaz-system-prompt` 会原样保留该角色 Persona。
-- 子代理 report 的 round-display 摘要（37.5）：父主线 `agent/pre-step` 收到
-  `subagent-report` / `subagent-settled` 后以 category=`subagent-report` 同时记录到
-  主 agent 与 child subagent session（child id 取自 `source.senderSessionId`），
-  因此主会话和 child 页面都能看到该次汇报；child agent 结束后 round-display 仍保留
-  child 记录；child-side `*_sub_whale_report` 自身仍不直接写 round-display。
+- 子代理 report 的 round-display 摘要（37.5 → 6.0.2）：child-side
+  `*_sub_whale_report` 会先以 category=`subagent-report` 把 output 的单行摘要写到
+  child 自己的 round-display；父主线 `agent/pre-step` 收到 `subagent-report` /
+  `subagent-settled` 后仍保留 parent-side capture，以 category=`subagent-report`
+  同时记录到主 agent 与 child subagent session（child id 取自
+  `source.senderSessionId`）。因此主会话和 child 页面都能看到该次汇报；child agent
+  结束后 round-display 仍保留 child 记录。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/working/memory-maintenance/
   plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
@@ -71,9 +73,11 @@
 - B3 受控委派：`ka_sub_whale` 按 finalized `planItemId` 读取
   persona/task/assignedTools，校验 assignedTools 来源
   （tool-jobs + available 私有插件候选）与数量（>6 提醒、>8 拒绝），
-  计算 role Stable Base + assignedTools 最终 toolFilter，再通过
-  `ctx.subagents.startContinuable({ provider: 'spawn', maxDepth: 1 })` 创建
-  continuable child；模型只能传 `planItemId`。
+  计算 role Stable Base + assignedTools 最终 toolFilter，先以 caller-reserved
+  `childId`（randomUUID）写入 stage store 的 subagentRoles，再通过
+  `ctx.subagents.startContinuable({ childId, provider: 'spawn', maxDepth: 1 })` 创建
+  continuable child（成功后幂等重写角色记录；启动失败删除预写记录）；
+  模型只能传 `planItemId`。
 - 36.5 working 委派语义：`persona=main` 由主线执行，子代理 persona 经
   `ka_sub_whale` 委派；主线监控/验证/改约并只在计划外提问；working 后若仍有
   `memoryMaintainer`/`pluginMaintainer` items，必须先走

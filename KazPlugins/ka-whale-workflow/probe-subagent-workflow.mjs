@@ -55,6 +55,7 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
     },
   };
   const capturedReports = [];
+  const roundReports = [];
   const mockKazMode = {
     pluginConfig: () => ({ enabled: true, includeSubagents }),
     toolVisible: () => true,
@@ -81,7 +82,7 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
       if (name === "tools") return toolsMock;
       if (name === "kazMode") return mockKazMode;
       if (name === "goals") return { get: () => undefined };
-      if (name === "roundDisplay") return { report: () => {} };
+      if (name === "roundDisplay") return { report: (payload) => roundReports.push(payload) };
       if (name === "subagents") {
         return {
           reportFrom: async (_child, content, options) => {
@@ -95,7 +96,7 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
     systemPrompt: { section() { return () => {}; } },
     tools: toolsMock,
   };
-  return { listeners, registeredTools, base, capturedReports };
+  return { listeners, registeredTools, base, capturedReports, roundReports };
 }
 
 function stageFromFile(file, sessionId) {
@@ -187,6 +188,7 @@ check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL
   check("前置：child-worker 处于 assess-complexity", stageFromFile(STORE_FILE, "child-worker") === "assess-complexity");
   const workReport = h1.registeredTools.get("work_sub_whale_report");
   const beforeReports = h1.capturedReports.length;
+  const beforeRoundReports = h1.roundReports.length;
   const result = await workReport.execute(
     { output: "assessed: complex delegation", nextStage: "challenge-plan" },
     { agent, signal: new AbortController().signal },
@@ -194,6 +196,13 @@ check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL
   check("report+nextStage 推进 worker assess-complexity → challenge-plan", result?.stage === "challenge-plan" && result?.role === "worker" && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
   check("report+nextStage 仍调用原生 reportFrom 汇报给主模型", result?.messageId === "report-1" && h1.capturedReports.length === beforeReports + 1);
   check("reportFrom 收到输出内容与 delivery=next-step", h1.capturedReports.at(-1)?.options?.delivery === "next-step" && JSON.stringify(h1.capturedReports.at(-1)?.content ?? []).includes("assessed: complex delegation"));
+  const childRdReports = h1.roundReports
+    .slice(beforeRoundReports)
+    .filter((payload) => payload?.category === "subagent-report" && payload?.agent?.id === "child-worker");
+  check(
+    "6.0.2 work_sub_whale_report child-side 写 child round-display 摘要",
+    childRdReports.length >= 1 && childRdReports.some((payload) => payload?.content === "assessed: complex delegation"),
+  );
   const readAllow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const writeDeny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
   check("推进后 challenge-plan 软闸门：read 放行、write 拒绝", readAllow?.kind === "allow" && writeDeny?.kind === "deny");

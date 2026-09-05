@@ -119,7 +119,7 @@ const base = {
     if (name === "sessions") return { get: (id) => sessionsRegistry.get(id) };
     if (name === "subagents") {
       return {
-        startContinuable: async () => ({ childId: "child-v09-365" }),
+        startContinuable: async (spec) => ({ childId: spec.childId }),
         reportFrom: async () => "report-v09-365",
       };
     }

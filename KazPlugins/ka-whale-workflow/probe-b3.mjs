@@ -175,8 +175,17 @@ const base = {
     if (name === "subagents") {
       return {
         startContinuable: async (spec) => {
-          capturedStarts.push(spec);
-          return { childId: "child-b3-1" };
+          let roleAtStart = null;
+          try {
+            const raw = readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, "");
+            roleAtStart = JSON.parse(raw).subagentRoles?.[spec?.childId] ?? null;
+          } catch {
+            roleAtStart = null;
+          }
+          capturedStarts.push({ spec, roleAtStart });
+          // The real continuable-subagent service honors the caller-reserved id;
+          // the mock echoes it so the probe mirrors the production contract.
+          return { childId: spec.childId };
         },
         reportFrom: async (child, content, options) => {
           capturedReports.push({ child, content, options });
@@ -222,11 +231,14 @@ const kaSubWhale = registeredTools.get("ka_sub_whale");
 
 {
   const result = await kaSubWhale.execute({ planItemId: "p1" }, { agent, signal });
-  check("ka_sub_whale 创建 continuable child", result.ok === true && result.code === "subagent-created" && result.subagentId === "child-b3-1");
-  check("返回 persona/task/finalSurface 来自 plan", result.persona === "worker" && result.finalSurface.includes("work_sub_whale_report") && result.finalSurface.includes("safe_json_write"));
   const start = capturedStarts[0];
-  check("startContinuable 使用 provider spawn + maxDepth 1 + persona + toolFilter", start?.provider === "spawn" && start?.request?.maxDepth === 1 && typeof start?.request?.persona === "string" && Array.isArray(start?.request?.toolFilter?.allow));
-  const stored = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.["child-b3-1"];
+  const childId = start?.spec?.childId;
+  check("ka_sub_whale 创建 continuable child", result.ok === true && result.code === "subagent-created" && result.subagentId === childId);
+  check("返回 persona/task/finalSurface 来自 plan", result.persona === "worker" && result.finalSurface.includes("work_sub_whale_report") && result.finalSurface.includes("safe_json_write"));
+  check("startContinuable 使用 caller-reserved childId", typeof childId === "string" && childId.length > 0 && start?.spec?.childId === result.subagentId);
+  check("stage store 在 startContinuable 前已有 child 角色记录", start?.roleAtStart?.persona === "worker" && start?.roleAtStart?.finalTools?.includes("safe_json_write") && start?.roleAtStart?.planItemId === "p1");
+  check("startContinuable 使用 provider spawn + maxDepth 1 + persona + toolFilter", start?.spec?.provider === "spawn" && start?.spec?.request?.maxDepth === 1 && typeof start?.spec?.request?.persona === "string" && Array.isArray(start?.spec?.request?.toolFilter?.allow));
+  const stored = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.[childId];
   check("stage store 记录 child 角色面", stored?.persona === "worker" && stored?.finalTools?.includes("safe_json_write"));
 }
 {
@@ -246,7 +258,8 @@ const kaSubWhale = registeredTools.get("ka_sub_whale");
   check("无效 planItemId 继续结构化拒绝", missing.ok === false && missing.code === "plan-item-not-found");
 }
 {
-  const childAgent = { id: "child-b3-1", session: { id: "child-b3-1", events: [] } };
+  const childId = capturedStarts[0]?.spec?.childId;
+  const childAgent = { id: childId, session: { id: childId, events: [] } };
   const reportDef = registeredTools.get("work_sub_whale_report");
   const reportResult = await reportDef.execute({ output: "Work complete." }, { agent: childAgent, signal });
   check("*_sub_whale_report 真实调用 reportFrom（非空壳）", reportResult?.messageId === "report-1" && capturedReports.length === 1);

@@ -23,8 +23,9 @@
 - **主动上报**：发布 `roundDisplay` 服务（`report({ agent, plugin, title, content, category })`），
   其它要发送信息的插件在发送时调用它告诉本插件要显示（best-effort：服务不存在
   时静默跳过）。2026-08-21 起不再监听组装段，展示内容全部来自主动上报。
-- **子代理 report 路由（36.6 → 37.5）**：`ka-whale-workflow` 的
-  `*_sub_whale_report` 仍不在子代理工具内直接写 round-display；父主线在
+- **子代理 report 路由（36.6 → 37.5 → 6.0.2）**：`ka-whale-workflow` 的
+  `*_sub_whale_report` 现在从 child side 先以 `category=subagent-report` 把自己的
+  output 摘要写入 child round-display；父主线仍保留 parent-side capture，在
   `agent/pre-step` 收到 `subagent-report` / `subagent-settled` 后，以
   `category=subagent-report` 上报同一行摘要到 **主 agent 与 child subagent
   session 两处**（child id 取自消息 `source.senderSessionId`），因此主会话面板
