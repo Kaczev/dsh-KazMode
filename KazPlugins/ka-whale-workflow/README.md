@@ -1,6 +1,6 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由）。
 
 ## 范围
 
@@ -29,8 +29,10 @@
   `includeSubagents=true` 时使用通用 subagent-flow。
 - B6 收口：`KAZ_ROLE_PROMPTS`（v0.9 §9.1–9.5）作为全量 Persona 唯一源存放在
   `kaz-shared`，本组件 `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 与
-  `V09_ROLE_PERSONAS` 都由它派生；`*_sub_whale_report` 会向 round-display 上报
-  子代理 report 摘要（白名单类别 `subagent-report`）。
+  `V09_ROLE_PERSONAS` 都由它派生；36.6 起子代理 report 的 round-display 摘要改由
+  父主线 `agent/pre-step` 捕获（`subagent-report` / `subagent-settled` →
+  category=`subagent-report`，记在主 agent 名下），child-side 不再直接写
+  round-display。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/plugin-preflight/working/maintenance
   阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
@@ -65,6 +67,11 @@
   `ka_sub_whale` 委派；主线监控/验证/改约并只在计划外提问；working 后若仍有
   `memoryMaintainer`/`pluginMaintainer`/`pluginCreator` items 或候选建议，必须先
   走 `memory-maintenance`/`plugin-maintenance` 再 communication。
+- 36.6 事件驱动等待：`ka_sub_whale` 创建 continuable child 后，主线不使用
+  `pwsh sleep` / 轮询 `list_agents` 等待；应结束当前回合，等子代理 report/finished
+  消息到达主会话再继续。`list_agents` / `send_message` 不是等待原语；主 Persona、
+  working/plugin-preflight/memory-maintenance/plugin-maintenance 注入与
+  `ka_sub_whale` description/output 都明确该口径。
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 四个 `*_sub_whale_report`

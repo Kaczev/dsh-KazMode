@@ -21,6 +21,10 @@
 - **主动上报**：发布 `roundDisplay` 服务（`report({ agent, plugin, title, content, category })`），
   其它要发送信息的插件在发送时调用它告诉本插件要显示（best-effort：服务不存在
   时静默跳过）。2026-08-21 起不再监听组装段，展示内容全部来自主动上报。
+- **子代理 report 路由（36.6）**：`ka-whale-workflow` 的 `*_sub_whale_report`
+  不再用 child session 写 `subagent-report`；父主线在 `agent/pre-step` 收到
+  `subagent-report` / `subagent-settled` 后，以主 agent + `category=subagent-report`
+  上报一行摘要，因此主会话面板能看到子代理汇报。
 - **输出白名单**：`category` 必须在
   `stable-boundary / goal-context / task-contract / subagent-report / memory-snapshot`
   五类中；不带 `category` 的旧上报按来源/内容回退分类。非白名单记录不进入内存、

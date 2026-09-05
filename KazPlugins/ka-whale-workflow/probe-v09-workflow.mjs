@@ -51,6 +51,7 @@ planStore.persistFinalPayload({
   ],
 });
 
+const rdReports = [];
 // --- minimal plugin mock ---
 const listeners = new Map();
 const registeredTools = new Map();
@@ -104,7 +105,7 @@ const base = {
     if (name === "tools") return toolsMock;
     if (name === "kazMode") return mockKazMode;
     if (name === "goals") return { get: () => undefined };
-    if (name === "roundDisplay") return { report: () => {} };
+    if (name === "roundDisplay") return { report: (payload) => rdReports.push(payload) };
     if (name === "subagents") {
       return {
         startContinuable: async () => ({ childId: "child-v09-365" }),
@@ -212,6 +213,43 @@ await claimed({ agent, message: userMessage, turn: 2 });
 check("36.5 plugin-preflight 收到新一轮真实用户消息保留 plugin-preflight", JSON.parse(readFileSync(STORE_FILE, "utf8")).sessions?.["s-v09"] === "plugin-preflight");
 
 check("v0.9 工具已注册", registeredTools.has("whale_report") && registeredTools.has(KA_SUB_WHALE_TOOL) && registeredTools.has(WORK_SUB_WHALE_REPORT_TOOL));
+check("36.6 ka_sub_whale description 含异步等待提示", typeof kaSubWhale?.description === "string" && kaSubWhale.description.includes("end the current turn and await its report/finished message") && kaSubWhale.description.includes("do not use pwsh sleep or poll list_agents"));
+check("36.6 ka_sub_whale 成功输出含 notice", creatorInPreflight?.ok === true && typeof creatorInPreflight?.notice === "string" && creatorInPreflight.notice.includes("End the current turn and await its report/finished message") && creatorInPreflight.notice.includes("not wait primitives"));
+
+// 36.6 main-side subagent-report capture: parent agent receives subagent report
+// and settled messages, and ka-whale-workflow reports one-line summaries to
+// round-display keyed to the parent agent.
+{
+  const preStep = listeners.get("agent/pre-step")?.[0];
+  const parent = { id: "s-parent-366", session: { id: "s-parent-366", events: [] } };
+  const reportMessage = {
+    role: "user",
+    content: [{ type: "text", text: "parent report\nsecond line" }],
+    source: { kind: "subagent-report", form: "relay" },
+  };
+  const settledMessage = {
+    role: "user",
+    content: [],
+    source: { kind: "subagent-settled", form: "notice", summary: "settled summary here" },
+  };
+  const before = rdReports.length;
+  const preDecision = { kind: "enter", messages: [reportMessage, settledMessage] };
+  await preStep({ agent: parent, turn: 1 }, async () => preDecision);
+  const subagentReports = rdReports
+    .slice(before)
+    .filter(
+      (payload) =>
+        payload?.category === "subagent-report" &&
+        payload?.plugin === "ka-whale-workflow" &&
+        payload?.agent?.id === parent.id,
+    );
+  check(
+    "36.6 父代理 pre-step 收到 subagent-report/settled 产生主会话 round-display 记录",
+    subagentReports.length === 2 &&
+      subagentReports.some((payload) => payload.content === "parent report second line") &&
+      subagentReports.some((payload) => payload.content === "settled summary here"),
+  );
+}
 
 rmSync(TMP, { recursive: true, force: true });
 console.log(failures === 0 ? "\nV09 WORKFLOW PROBE OK" : `\nV09 WORKFLOW PROBE FAILED (${failures} 项失败)`);

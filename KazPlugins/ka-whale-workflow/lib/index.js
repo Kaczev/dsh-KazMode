@@ -362,6 +362,57 @@ function isSubagentSession(session) {
   }
 }
 
+/** 从消息中提取纯文本：content 数组的 text 部分；无则回退 source.summary。 */
+export function messageTextOf(message) {
+  try {
+    if (message === null || message === undefined || typeof message !== "object") return "";
+    const content = Array.isArray(message.content) ? message.content : [];
+    const parts = [];
+    for (const part of content) {
+      if (
+        part !== null &&
+        typeof part === "object" &&
+        typeof part.text === "string" &&
+        part.text.trim().length > 0
+      ) {
+        parts.push(part.text);
+      }
+    }
+    if (parts.length > 0) return parts.join("\n");
+    const source = message.source;
+    if (source !== null && typeof source === "object" && typeof source.summary === "string") {
+      return source.summary;
+    }
+    return "";
+  } catch {
+    return "";
+  }
+}
+
+/** 把多行文本压成单行摘要；超长截断到 max（默认 240）。 */
+export function oneLineSummary(value, max = 240) {
+  const text = typeof value === "string" ? value : "";
+  const line = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim();
+  return line.length > max ? line.slice(0, max) + "…" : line;
+}
+
+/** 是否为 DSH 子代理 report/settled 内部消息。 */
+export function isSubagentReportMessage(message) {
+  try {
+    const source = message?.source;
+    if (source === null || source === undefined || typeof source !== "object") return false;
+    return source.kind === "subagent-report" || source.kind === "subagent-settled";
+  } catch {
+    return false;
+  }
+}
+
+/** 提取子代理 report/settled 消息的单行摘要；非该类消息返回空串。 */
+export function subagentReportSummaryOf(message) {
+  if (!isSubagentReportMessage(message)) return "";
+  return oneLineSummary(messageTextOf(message));
+}
+
 /** 会话里是否已发生第一次工具调用。 */
 function hasToolCall(agent) {
   try {
@@ -1779,7 +1830,7 @@ export default {
     const kaSubWhaleDef = defineTool({
       name: KA_SUB_WHALE_TOOL,
       description:
-        "Kaz controlled delegation tool: create a continuable subagent from a finalized task-plan planItemId. The persona, task, and assignedTools are bound from the persisted task plan; pass only planItemId. Draft, missing, or not-yet-persisted ids are rejected with a structured refusal.",
+        "Kaz controlled delegation tool: create a continuable subagent from a finalized task-plan planItemId. The persona, task, and assignedTools are bound from the persisted task plan; pass only planItemId. Draft, missing, or not-yet-persisted ids are rejected with a structured refusal. After a successful start, the subagent runs asynchronously: end the current turn and await its report/finished message; do not use pwsh sleep or poll list_agents, and list_agents/send_message are not wait primitives.",
       parameters: {
         planItemId: {
           type: "string",
@@ -1802,6 +1853,7 @@ export default {
             assignedTools: { type: "array", items: { type: "string" } },
             finalSurface: { type: "array", items: { type: "string" } },
             subagentId: { type: "string" },
+            notice: { type: "string" },
             warning: { type: "string" },
           },
         },
@@ -1951,6 +2003,8 @@ export default {
             assignedTools: assignedValidation.tools,
             finalSurface,
             subagentId,
+            notice:
+              "Subagent started asynchronously. End the current turn and await its report/finished message; do not use pwsh sleep or poll list_agents, and list_agents/send_message are not wait primitives.",
             ...(typeof assignedValidation.warning === "string" && assignedValidation.warning.length > 0
               ? { warning: assignedValidation.warning }
               : {}),
@@ -2066,10 +2120,9 @@ export default {
             delivery: "next-step",
             signal: exec.signal,
           });
-          // v0.9 B6：子代理 report 摘要进入 round-display 白名单（不显示每次阶段切换）。
-          const oneLine = output.replace(/\r?\n/g, " ").trim();
-          const summary = oneLine.length > 240 ? oneLine.slice(0, 240) + "…" : oneLine;
-          reportRoundDisplay(agent, `${reportTool}: ${role} 汇报摘要：${summary}`, "子代理汇报", "subagent-report");
+          // 36.6: child-side round-display report removed. The report message is
+          // delivered to the parent main line and captured in agent/pre-step there,
+          // so it is recorded under the parent/main agent, not this child session.
           return {
             messageId,
             role,
@@ -2465,6 +2518,24 @@ export default {
       const sessionIdNow = sessionIdOf(agent);
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
       const messages = Array.isArray(decision.messages) ? decision.messages : [];
+      // 36.6: main-side subagent report capture. The child-side *_sub_whale_report
+      // no longer writes to round-display; when the parent main agent receives a
+      // DSH subagent-report/subagent-settled message, record one line here under
+      // the parent/main agent with the whitelisted subagent-report category.
+      if (
+        liveNow.enabled === true &&
+        controlledRoleNow === null &&
+        !skipSubagentNow &&
+        !subagentNow &&
+        !isBypassed(agent)
+      ) {
+        for (const message of messages) {
+          const summary = subagentReportSummaryOf(message);
+          if (summary.length > 0) {
+            reportRoundDisplay(agent, summary, "子代理汇报", "subagent-report");
+          }
+        }
+      }
       let appended = false;
       if (liveNow.enabled === true && !skipSubagentNow && !isBypassed(agent)) {
         // 受控 v0.9 子代理的 Persona 已由 ka_sub_whale 带入对应 role flow；

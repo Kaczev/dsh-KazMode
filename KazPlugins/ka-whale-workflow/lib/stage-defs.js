@@ -130,7 +130,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["decide-tools"],
       task:
-        "Preflight pluginCreator-only plan items. Finalize only persona=pluginCreator items via whale_report(finalPlanPayload), delegate them via ka_sub_whale for full create+register candidate, then return to decide-tools. Other personas must not be pre-finalized or delegated in this stage.",
+        "Preflight pluginCreator-only plan items. Finalize only persona=pluginCreator items via whale_report(finalPlanPayload), delegate them via ka_sub_whale for full create+register candidate, then end the current turn and wait for the subagent's report/finished message (do not use pwsh sleep or poll list_agents; list_agents/send_message are not wait primitives), then return to decide-tools. Other personas must not be pre-finalized or delegated in this stage.",
     },
     "write-plan": {
       allowedTools: ["whale_report", "read"],
@@ -148,7 +148,7 @@ const DEFINITIONS = {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["write-plan", "memory-maintenance", "plugin-maintenance", "communication"],
       task:
-        "Execute persona=main plan items on the main line; delegate subagent-persona plan items via ka_sub_whale. Review the task plan whenever needed via taskPlanPath. Main monitors, verifies subagent reports, amends only through write-plan, and asks only for decisions outside the plan. Before advancing to communication, if any memoryMaintainer/pluginMaintainer/pluginCreator plan items or candidate suggestions remain, pass through memory-maintenance/plugin-maintenance first.",
+        "Execute persona=main plan items on the main line; delegate subagent-persona plan items via ka_sub_whale. After ka_sub_whale, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Review the task plan whenever needed via taskPlanPath. Main monitors, verifies subagent reports, amends only through write-plan, and asks only for decisions outside the plan. Before advancing to communication, if any memoryMaintainer/pluginMaintainer/pluginCreator plan items or candidate suggestions remain, pass through memory-maintenance/plugin-maintenance first.",
     },
     "memory-maintenance": {
       allowedTools: [
@@ -164,7 +164,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["plugin-maintenance", "communication"],
       task:
-        "Delegate a memoryMaintainer persona to write memories. Read taskPlanPath when needed to review the plan.",
+        "Delegate a memoryMaintainer persona to write memories. After each ka_sub_whale delegation, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Read taskPlanPath when needed to review the plan.",
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -177,7 +177,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["write-plan", "communication"],
       task:
-        "Delegate a pluginMaintainer persona to create/update/retire private plugins as needed. Read taskPlanPath to review the plan. If a new plan item is needed, advance to write-plan first. pluginCreator remains for decide-tools pre-created items.",
+        "Delegate a pluginMaintainer persona to create/update/retire private plugins as needed. After each ka_sub_whale delegation, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Read taskPlanPath to review the plan. If a new plan item is needed, advance to write-plan first. pluginCreator remains for decide-tools pre-created items.",
     },
     communication: {
       allowedTools: [],

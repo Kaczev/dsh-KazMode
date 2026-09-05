@@ -57,7 +57,8 @@ check("插件默认导出存在", plugin !== null && typeof plugin === "object" 
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 check("主流程文案已导出且非空", typeof MAIN_FLOW_TEXT === "string" && MAIN_FLOW_TEXT.trim().length > 0);
 check("主流程文案含 v0.9 §9.1 Goal-active 语义", MAIN_FLOW_TEXT.includes("working (or goal-active)") && MAIN_FLOW_TEXT.includes("do not use create_goal directly") && MAIN_FLOW_TEXT.includes("After Goal ends, proceed as if working ended"));
-check("子代理流程文案已导出且非空", typeof SUBAGENT_FLOW_TEXT === "string" && SUBAGENT_FLOW_TEXT.includes("work_sub_whale_report") && SUBAGENT_FLOW_TEXT.includes("subagent flow"));
+check("36.6 主 Persona 含事件驱动等待语义", MAIN_FLOW_TEXT.includes("must NOT use pwsh sleep") && MAIN_FLOW_TEXT.includes("poll list_agents") && MAIN_FLOW_TEXT.includes("end the current turn and wait for the subagent's report/finished message") && MAIN_FLOW_TEXT.includes("list_agents and send_message are not wait primitives"));
+check("36.6 子代理流程文案已导出且非空", typeof SUBAGENT_FLOW_TEXT === "string" && SUBAGENT_FLOW_TEXT.includes("work_sub_whale_report") && SUBAGENT_FLOW_TEXT.includes("subagent flow"));
 check("goal-active 常量不在 MAIN_STAGE_IDS", GOAL_ACTIVE_STAGE === "goal-active" && !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE));
 check("goal-active/working-resumed 文本导出", GOAL_ACTIVE_CONTEXT_TEXT.includes("[ka-whale-workflow goal-active]") && workingResumedContextText("C:/plan.json").includes("taskPlanPath: C:/plan.json"));
 
@@ -114,6 +115,19 @@ check("decide-goal 定义含 working 与 goal-active", canAdvance(MAIN_ROLE, "de
 check("子代理 role stage 定义齐全", ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"].every((role) => stageIdsForRole(role).length >= 4));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });
 check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlanText.includes("taskPlanPath: C:/tmp/task-plan.json"));
+{
+  const waitStages = ["working", "plugin-preflight", "memory-maintenance", "plugin-maintenance"];
+  const waitOk = waitStages.every((stage) => {
+    const text = stageInjectionText(MAIN_ROLE, stage);
+    return (
+      text.includes("end the current turn and wait for the subagent's report/finished message") &&
+      text.includes("pwsh sleep") &&
+      text.includes("poll list_agents") &&
+      text.includes("not wait primitives")
+    );
+  });
+  check("36.6 working/plugin-preflight/maintenance 阶段注入含事件驱动等待语义", waitOk);
+}
 
 {
   const PLAN_FILE = join(TMP, "ka-whale-workflow-task-plan.json");
