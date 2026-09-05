@@ -101,7 +101,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     mode: "remove",
     disabledTools: [...DEFAULT_DISABLED_TOOLS],
   },
-  "output-beep": { enabled: false, includeSubagents: false, frequency: 1000, duration: 300 },
+  "output-beep": { enabled: false, idleBeep: false, includeSubagents: false, frequency: 1000, duration: 300 },
   "round-display": { enabled: false },
   "deepseek-default-model": {
     enabled: false,

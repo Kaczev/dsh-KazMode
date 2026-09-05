@@ -12,7 +12,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | `thinking-anchor` | 思考锚点（**消息注入**）：新对话开始时把完整思考协议作为一条合成用户消息注入，此后每轮开头注入短提醒；不触碰系统提示词 |
 | 首阶段极简（核心能力，36.9 起无独立插件） | **首次工具调用前**由 kaz-mode 直接暴露 `memory_search`（Kaz 恒开 ka-whale-memory），首次工具调用后恢复 Stable Main Surface（固定集） |
 | `plugin-filter`（原 tool-filter） | 工具过滤：按名单移除 / 禁用指定工具 |
-| `output-beep` | 输出完成提示音：模型输出完毕时响提示音（可配频率/时长/子代理） |
+| `output-beep` | 用户输入提示音：模型 `ask_user_question` / `exit_plan_mode` 弹窗时响；`idleBeep`（默认关）可恢复“输出完毕也响” |
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
 | `deepseek-default-model` | DeepSeek 采样参数：面板调整 temperature / top_p / repetition_penalty，并把 temperature 应用到请求；默认模型与思考强度由 DSH 官方面板管理 |
 | `kaz-memory` | 独立记忆组件：六工具（memory_save/update/list/search/detail/forget）+ 对话开始时自动载入已确认的 autoLoad 记忆 |

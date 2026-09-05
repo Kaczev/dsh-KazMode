@@ -105,10 +105,11 @@ window.__ModuleLoader__.load({
 				id: "output-beep",
 				namespace: "output-beep",
 				name: "output-beep",
-				tag: "输出完成提示音",
+				tag: "用户输入提示音",
 				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关：模型输出完毕时响提示音）" },
-					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理输出完毕也提示；默认关）" },
+					{ key: "enabled", kind: "boolean", label: "enabled（总开关：提问 / 提交 plan 方案时响提示音）" },
+					{ key: "idleBeep", kind: "boolean", label: "idleBeep（输出完毕回到 idle 也提示；默认关）" },
+					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也提示；默认关）" },
 				],
 			},
 			{

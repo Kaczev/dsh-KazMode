@@ -396,7 +396,7 @@ export const FIXED_PERSONA = "You are a helpful software engineer assistant.";
  *  v0.8 Step B2：create-plan 插件目录已删除，不再列入。 */
 export const MANAGED_PLUGINS = [
   { id: "plugin-filter", label: "plugin-filter（工具过滤 · 已收编进 kaz-shared/preset，面板隐藏）" },
-  { id: "output-beep", label: "output-beep（输出完成提示音）" },
+  { id: "output-beep", label: "output-beep（用户输入提示音）" },
   { id: "round-display", label: "round-display（每轮注入显示）" },
   { id: "deepseek-default-model", label: "deepseek-default-model（DeepSeek 采样参数）" },
   { id: "ka-whale-memory", label: "ka-whale-memory（独立记忆组件，原 kaz-memory 改名）" },
