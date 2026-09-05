@@ -207,6 +207,16 @@ check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL
     badError = error;
   }
   check("非法 nextStage 被拒绝且 stage 不变", badError !== null && String(badError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  let earlyCommError = null;
+  try {
+    await workReport.execute(
+      { output: "early communication not allowed", nextStage: "communication" },
+      { agent, signal: new AbortController().signal },
+    );
+  } catch (error) {
+    earlyCommError = error;
+  }
+  check("36.8 worker challenge-plan 不可直接推进 communication", earlyCommError !== null && String(earlyCommError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
 }
 
 // memoryMaintainer: idle 进入 assess-delegation 并注入 role 专属文本。

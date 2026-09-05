@@ -40,6 +40,8 @@ planStore.persistDraftItems([
   { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
   { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
   { planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] },
+  { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
+  { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
   { planItemId: "p-draft", persona: "worker", task: "Draft only", assignedTools: [] },
 ]);
 planStore.persistFinalPayload({
@@ -48,6 +50,8 @@ planStore.persistFinalPayload({
     { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
     { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
     { planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] },
+    { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
+    { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
   ],
 });
 
@@ -148,12 +152,17 @@ check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity"
 {
   const challengeDef = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
   const workerChallengeDef = stageDefinitionFor("worker", "challenge-plan");
+  const workerCheckToolsDef = stageDefinitionFor("worker", "check-tools");
   const workingText = stageInjectionText(MAIN_ROLE, "working", { taskPlanPath: "C:/plan.json" });
   const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
   check("36.5 challenge-plan 不持有 ka_sub_whale 且任务禁止写/定稿 plan", !challengeDef?.allowedTools.includes("ka_sub_whale") && typeof challengeDef?.task === "string" && challengeDef.task.includes("Do not write or finalize task plans") && challengeDef.task.includes("do not call ka_sub_whale"));
   check("36.7 主 challenge-plan task 含批评纪律", typeof challengeDef?.task === "string" && challengeDef.task.includes("Critique the user's approach first") && challengeDef.task.includes("identify real weaknesses") && challengeDef.task.includes("do not manufacture criticism"));
   check("36.7 worker challenge-plan task 含批评纪律", typeof workerChallengeDef?.task === "string" && workerChallengeDef.task.includes("Critique the delegation first") && workerChallengeDef.task.includes("do not manufacture criticism"));
-  check("36.5 working 委派/维护路由语义文本", typeof workingDef?.task === "string" && workingDef.task.includes("persona=main plan items on the main line") && workingDef.task.includes("delegate subagent-persona plan items via ka_sub_whale") && workingDef.task.includes("pass through memory-maintenance/plugin-maintenance first"));
+  check("36.8 worker challenge-plan 只可推进 check-tools", JSON.stringify(workerChallengeDef?.canAdvance) === JSON.stringify(["check-tools"]));
+  check("36.8 worker challenge/check-tools 文本说明文件工具只在 working 且不得提前报告不足", typeof workerChallengeDef?.task === "string" && workerChallengeDef.task.includes("full working file-tool set (edit, write, pwsh, read) is granted in the working stage") && workerChallengeDef.task.includes("Do not report tool insufficiency before reaching working") && typeof workerCheckToolsDef?.task === "string" && workerCheckToolsDef.task.includes("do not report tool insufficiency before reaching working") && workerCheckToolsDef.task.includes("genuine blocker"));
+  check("36.8 working 只可推进 write-plan/memory-maintenance", JSON.stringify(workingDef?.canAdvance) === JSON.stringify(["write-plan", "memory-maintenance"]));
+  check("36.8 working task 含逐个 worker 委派/保留维护项/强制 memory gate", typeof workingDef?.task === "string" && workingDef.task.includes("delegate each persona=worker plan item individually via ka_sub_whale") && workingDef.task.includes("Do not delegate memoryMaintainer/pluginMaintainer/pluginCreator plan items in working") && workingDef.task.includes("always advance to memory-maintenance before any communication") && workingDef.task.includes("advance to plugin-maintenance from memory-maintenance only when plugin work remains"));
+  check("36.8 write-plan task 含按 coherent task 拆分 planItems", typeof stageDefinitionFor(MAIN_ROLE, "write-plan")?.task === "string" && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("separate planItems per coherent task") && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("do not pack all work into one planItem"));
   check("36.7 主 working task 批判性评估子代理批评", typeof workingDef?.task === "string" && workingDef.task.includes("critically evaluates subagent reports and their critiques") && workingDef.task.includes("instead of accepting them blindly"));
   check("36.5 working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
 }
@@ -210,11 +219,53 @@ const preflightOk = await whaleReport.execute(
 check("plugin-preflight 可 pre-finalize pluginCreator 并回到 decide-tools", preflightOk.ok === true && preflightOk.stage === "decide-tools");
 await whaleReport.execute({ nextStage: "plugin-preflight" }, { agent });
 const workerInPreflight = await kaSubWhale.execute({ planItemId: "p1" }, { agent });
-check("plugin-preflight 拒绝非 pluginCreator ka_sub_whale 委派", workerInPreflight.ok === false && workerInPreflight.code === "plugin-preflight-persona-denied");
+check("plugin-preflight 拒绝非 pluginCreator ka_sub_whale 委派", workerInPreflight.ok === false && workerInPreflight.code === "stage-persona-mismatch");
 const creatorInPreflight = await kaSubWhale.execute({ planItemId: "p-creator" }, { agent });
 check("plugin-preflight 允许 pluginCreator ka_sub_whale 委派", creatorInPreflight.ok === true && creatorInPreflight.code === "subagent-created");
 await claimed({ agent, message: userMessage, turn: 2 });
 check("36.5 plugin-preflight 收到新一轮真实用户消息保留 plugin-preflight", JSON.parse(readFileSync(STORE_FILE, "utf8")).sessions?.["s-v09"] === "plugin-preflight");
+
+// 36.8 stage-persona mapping runtime: reach working through write-plan/decide-goal,
+// then verify each stage only delegates its mapped persona.
+await whaleReport.execute(
+  { finalPlanPayload: { status: "finalized", items: [{ planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] }] }, nextStage: "decide-tools" },
+  { agent },
+);
+await whaleReport.execute({ nextStage: "write-plan" }, { agent });
+await whaleReport.execute(
+  {
+    finalPlanPayload: {
+      status: "finalized",
+      items: [
+        { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
+        { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
+        { planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] },
+        { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
+        { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
+      ],
+    },
+    nextStage: "decide-goal",
+  },
+  { agent },
+);
+await whaleReport.execute({ nextStage: "working" }, { agent });
+const memoryInWorking = await kaSubWhale.execute({ planItemId: "p-memory" }, { agent });
+check("working 拒绝 memoryMaintainer 委派（stage-persona-mismatch）", memoryInWorking.ok === false && memoryInWorking.code === "stage-persona-mismatch");
+const creatorInWorking = await kaSubWhale.execute({ planItemId: "p-creator" }, { agent });
+check("working 拒绝 pluginCreator 委派（stage-persona-mismatch）", creatorInWorking.ok === false && creatorInWorking.code === "stage-persona-mismatch");
+const workerInWorking = await kaSubWhale.execute({ planItemId: "p1" }, { agent });
+check("working 允许 worker 委派", workerInWorking.ok === true && workerInWorking.code === "subagent-created");
+const workingDefault = await whaleReport.execute({}, { agent });
+check("whale_report 从 working 默认推进到 memory-maintenance", workingDefault.ok === true && workingDefault.stage === "memory-maintenance");
+const workerInMemory = await kaSubWhale.execute({ planItemId: "p1" }, { agent });
+check("memory-maintenance 拒绝 worker 委派（stage-persona-mismatch）", workerInMemory.ok === false && workerInMemory.code === "stage-persona-mismatch");
+const memoryInMemory = await kaSubWhale.execute({ planItemId: "p-memory" }, { agent });
+check("memory-maintenance 允许 memoryMaintainer 委派", memoryInMemory.ok === true && memoryInMemory.code === "subagent-created");
+await whaleReport.execute({ nextStage: "plugin-maintenance" }, { agent });
+const memoryInPlugin = await kaSubWhale.execute({ planItemId: "p-memory" }, { agent });
+check("plugin-maintenance 拒绝 memoryMaintainer 委派（stage-persona-mismatch）", memoryInPlugin.ok === false && memoryInPlugin.code === "stage-persona-mismatch");
+const maintainerInPlugin = await kaSubWhale.execute({ planItemId: "p-maintainer" }, { agent });
+check("plugin-maintenance 允许 pluginMaintainer 委派", maintainerInPlugin.ok === true && maintainerInPlugin.code === "subagent-created");
 
 check("v0.9 工具已注册", registeredTools.has("whale_report") && registeredTools.has(KA_SUB_WHALE_TOOL) && registeredTools.has(WORK_SUB_WHALE_REPORT_TOOL));
 check("36.6 ka_sub_whale description 含异步等待提示", typeof kaSubWhale?.description === "string" && kaSubWhale.description.includes("end the current turn and await its report/finished message") && kaSubWhale.description.includes("do not use pwsh sleep or poll list_agents"));

@@ -73,6 +73,7 @@ import {
   V09_STAGE_IDS,
   V09_ROLE_PERSONAS,
   V09_ROLE_REPORT_TOOLS,
+  V09_KA_SUB_WHALE_STAGE_PERSONAS,
   stageDefinitionFor,
   stageInjectionText,
   stageIdsForRole,
@@ -1777,7 +1778,9 @@ export default {
                       ? args?.mode === "goal"
                         ? GOAL_ACTIVE_STAGE
                         : "working"
-                      : "communication";
+                      : current === "working"
+                        ? "memory-maintenance"
+                        : "communication";
         const requested =
           typeof args?.nextStage === "string" && args.nextStage.trim().length > 0
             ? args.nextStage.trim()
@@ -1901,12 +1904,16 @@ export default {
             reason: `ka_sub_whale rejected plan item "${item.planItemId}": persona "${item.persona}" is not in the v0.9 role set.`,
           });
         }
-        if (stageOfAgent(agent) === "plugin-preflight" && role !== "pluginCreator") {
-          // 36.5：plugin-preflight may pre-finalize/delegate only pluginCreator items.
+        // 36.8 stage-persona mapping enforcement:
+        //   plugin-preflight → pluginCreator; working → worker;
+        //   memory-maintenance → memoryMaintainer; plugin-maintenance → pluginMaintainer.
+        const currentStage = stageOfAgent(agent);
+        const expectedPersona = V09_KA_SUB_WHALE_STAGE_PERSONAS[currentStage];
+        if (expectedPersona !== undefined && role !== expectedPersona) {
           return Promise.resolve({
             ok: false,
-            code: "plugin-preflight-persona-denied",
-            reason: `ka_sub_whale rejected plan item "${item.planItemId}" in plugin-preflight: persona "${role}" is not pluginCreator. Only pluginCreator items may be pre-finalized and delegated in this stage.`,
+            code: "stage-persona-mismatch",
+            reason: `ka_sub_whale rejected plan item "${item.planItemId}" in ${currentStage}: persona "${role}" does not match the only delegable persona "${expectedPersona}" for this stage. Working delegates only worker; memory-maintenance only memoryMaintainer; plugin-maintenance only pluginMaintainer; plugin-preflight only pluginCreator.`,
           });
         }
 

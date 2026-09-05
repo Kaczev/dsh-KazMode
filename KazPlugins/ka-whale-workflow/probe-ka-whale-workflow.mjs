@@ -113,6 +113,7 @@ check("v0.9 stage 常量导出", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length =
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && workingDef?.canAdvance.includes("write-plan"));
+check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.canAdvance.includes("communication") === false && workingDef?.canAdvance.includes("plugin-maintenance") === false && workingDef?.canAdvance.includes("memory-maintenance") === true);
 {
   const mainChallenge = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
   const workerChallenge = stageDefinitionFor("worker", "challenge-plan");
@@ -129,6 +130,18 @@ check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale
       workerChallenge.task.includes("Critique the delegation first") &&
       workerChallenge.task.includes("identify real weaknesses") &&
       workerChallenge.task.includes("do not manufacture criticism"),
+  );
+  check(
+    "36.8 worker challenge-plan 只可推进 check-tools",
+    JSON.stringify(workerChallenge?.canAdvance) === JSON.stringify(["check-tools"]),
+  );
+  check(
+    "36.8 worker challenge/check-tools 文本含文件工具只在 working 与不得提前报告",
+    typeof workerChallenge?.task === "string" &&
+      workerChallenge.task.includes("full working file-tool set (edit, write, pwsh, read) is granted in the working stage") &&
+      workerChallenge.task.includes("Do not report tool insufficiency before reaching working") &&
+      typeof stageDefinitionFor("worker", "check-tools")?.task === "string" &&
+      stageDefinitionFor("worker", "check-tools").task.includes("do not report tool insufficiency before reaching working"),
   );
   check(
     "36.7 主 working task 批判性评估子代理批评而非盲从",

@@ -1,6 +1,6 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting）。
 
 ## 范围
 
@@ -76,6 +76,22 @@
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
   批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与
   `KAZ_ROLE_PROMPTS` 同步更新，避免文档/代码漂移。
+- 36.8 worker 不提前终止：worker `challenge-plan` 只可推进到 `check-tools`；
+  challenge/check-tools 不是执行阶段，完整 working 文件工具面
+  （edit/write/pwsh/read）在 `working` 才授予；worker 不得在到达 working 前报告
+  工具不足。`check-tools` 仍保留 `communication`，但只用于 genuine blockers。
+- 36.8 mandatory memory-maintenance gate：主 `working` 只可推进到
+  `write-plan`（改约）或 `memory-maintenance`；`working → communication` 与
+  `working → plugin-maintenance` 已移除，`whale_report` 从 working 的默认推进
+  目标是 `memory-maintenance`。working 完成后总是先进入 memory-maintenance，
+  再按 plugin work 进入 plugin-maintenance 或 communication。
+- 36.8 stage-persona mapping：`ka_sub_whale` 的委派阶段与 persona 固定映射
+  （plugin-preflight→pluginCreator、working→worker、
+  memory-maintenance→memoryMaintainer、plugin-maintenance→pluginMaintainer）；
+  不匹配返回结构化 `stage-persona-mismatch`。
+- 36.8 task splitting：write-plan 必须为每个 coherent task 建独立 planItem；
+  working 逐个委派 worker planItems；memory/plugin planItems 留给对应维护阶段，
+  pluginCreator planItems 留给 plugin-preflight。
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 四个 `*_sub_whale_report`
