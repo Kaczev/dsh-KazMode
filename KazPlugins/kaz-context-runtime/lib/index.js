@@ -100,6 +100,7 @@ export default {
         : undefined;
     const enableSurfaceReplace =
       config.enableSurfaceReplace !== false;
+    const enableRoundReplace = config.enableRoundReplace === true;
     const enableWorkflowBridge =
       config.workflowSignalBridge !== false;
     const bySession = new Map();
@@ -302,7 +303,13 @@ export default {
         return { replaced: false, reason: "disabled" };
       }
       const milestone = milestoneOf(changes);
-      if (!milestone || !isMilestoneChanges(changes)) {
+      const roundCloseChanges =
+        enableRoundReplace === true &&
+        Array.isArray(changes) &&
+        changes.some(
+          (change) => change?.type === "close" && change?.boundary === "round",
+        );
+      if (!milestone || (!isMilestoneChanges(changes) && !roundCloseChanges)) {
         return { replaced: false, reason: "not-milestone" };
       }
       if (state.compactionActive === true) {
