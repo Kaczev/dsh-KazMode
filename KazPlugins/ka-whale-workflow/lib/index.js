@@ -1662,7 +1662,7 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for full second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'.",
+        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. Task plans can only be written/finalized in write-plan via finalPlanPayload. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'.",
       parameters: {
         mode: {
           type: "string",
@@ -1685,11 +1685,11 @@ export default {
         draftPlanItems: {
           type: "array",
           items: { type: "json" },
-          description: "Used in decide-tools: array of { planItemId, persona, task, assignedTools } to persist as draft task plan items (first persistence).",
+          description: "Rejected: task plans can only be written/finalized in write-plan via finalPlanPayload.",
         },
         finalPlanPayload: {
           type: "json",
-          description: "Used in write-plan: { status: 'finalized', items: [...] } to persist/finalize the complete task plan (second persistence).",
+          description: "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, assignedTools }] } to create/finalize the complete task plan.",
         },
       },
       output: {
@@ -1746,17 +1746,17 @@ export default {
           return Promise.reject(new Error(reason));
         }
 
-        // v0.9 task plan persistence stage guards.
-        // draftPlanItems only in decide-tools; finalPlanPayload only in write-plan.
-        // memory-maintenance/plugin-maintenance can only read/amend via write-plan.
+        // v0.9 task plan persistence stage guard:
+        // Task plans can only be written/finalized in write-plan via finalPlanPayload.
+        // decide-tools cannot draft; memory/plugin-maintenance can only read/amend via write-plan.
         const hasDraftPlanItems = Array.isArray(args?.draftPlanItems);
         const hasFinalPlanPayload =
           args?.finalPlanPayload !== null && args?.finalPlanPayload !== undefined;
-        if (hasDraftPlanItems && current !== "decide-tools") {
+        if (hasDraftPlanItems) {
           return Promise.reject(
             new Error(
-              `workflow-stage-deny: draftPlanItems can only be persisted in decide-tools (current="${current}"). ` +
-                `Writing/finalizing task plans here is not allowed.`,
+              `workflow-stage-deny: draftPlanItems is no longer accepted in any stage (current="${current}"). ` +
+                `Task plans can only be written/finalized in write-plan via finalPlanPayload.`,
             ),
           );
         }
@@ -1767,12 +1767,6 @@ export default {
                 `Writing/finalizing task plans here is not allowed; memory-maintenance/plugin-maintenance must amend via write-plan.`,
             ),
           );
-        }
-        if (current === "decide-tools" && hasDraftPlanItems) {
-          const persisted = taskPlanStore.persistDraftItems(args.draftPlanItems);
-          if (persisted.ok !== true) {
-            return Promise.reject(new Error("whale_report failed to persist draft task plan items; task plan store write failed."));
-          }
         }
         if (current === "write-plan") {
           const payload = args?.finalPlanPayload;

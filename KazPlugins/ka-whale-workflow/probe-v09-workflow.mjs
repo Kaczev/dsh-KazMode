@@ -236,6 +236,16 @@ check("36.5 communication 收到新一轮真实用户消息进入 assess-complex
 // 37.5 runtime: reach working through decide-tools → write-plan → decide-goal.
 await whaleReport.execute({ nextStage: "challenge-plan" }, { agent });
 await whaleReport.execute({ nextStage: "decide-tools" }, { agent });
+let draftPayloadError = null;
+try {
+  await whaleReport.execute(
+    { draftPlanItems: [{ planItemId: "p-draft-runtime", persona: "worker", task: "Draft should be rejected", assignedTools: [] }] },
+    { agent },
+  );
+} catch (error) {
+  draftPayloadError = error;
+}
+check("decide-tools 拒绝 draftPlanItems（只能在 write-plan 写入 task plan）", draftPayloadError !== null && String(draftPayloadError.message).includes("write-plan"));
 let badPayloadError = null;
 try {
   await whaleReport.execute(

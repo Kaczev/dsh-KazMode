@@ -61,9 +61,8 @@
   不是真实用户消息，`isUserMessage` 返回 false，不会把主模型 working 重置成
   `assess-complexity`。
 - Task plan：独立 `ka-whale-workflow-task-plan.json`；
-  `decide-tools` 通过 `whale_report(draftPlanItems)` 第一次持久化（draft）；
-  `write-plan` 通过 `whale_report(finalPlanPayload)` 第二次完整定稿（finalized）；
-  `finalPlanPayload` 只在 write-plan 可用；
+  `decide-tools` 不得写 draft planItems（会拒绝）；task plan 只在
+  `write-plan` 通过 `whale_report(finalPlanPayload)` 创建/定稿（finalized）；
   memory-maintenance/plugin-maintenance 不能创建 task plan，只能经 write-plan
   读取/改约；
   plan item `persona` 允许 `main` + 四子代理角色；`ka_sub_whale` 只接受

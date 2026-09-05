@@ -178,7 +178,7 @@ check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlan
   const PLAN_FILE = join(TMP, "ka-whale-workflow-task-plan.json");
   const planStore = createTaskPlanStore(PLAN_FILE);
   planStore.persistDraftItems([{ planItemId: "p1", persona: "worker", task: "Do work", assignedTools: [] }]);
-  check("decide-tools 草稿为 draft 且不可委派", planStore.get("p1")?.status === "draft" && resolvePlanItemForDelegation(planStore, "p1").ok === false);
+  check("内部 store draft 兼容项仍不可委派（workflow 只在 write-plan 写 plan）", planStore.get("p1")?.status === "draft" && resolvePlanItemForDelegation(planStore, "p1").ok === false);
   planStore.persistFinalPayload({ status: "finalized", items: [{ planItemId: "p1", persona: "worker", task: "Do work", assignedTools: [] }] });
   check("write-plan 定稿为 finalized 且可委派", planStore.get("p1")?.status === "finalized" && resolvePlanItemForDelegation(planStore, "p1").ok === true);
 }

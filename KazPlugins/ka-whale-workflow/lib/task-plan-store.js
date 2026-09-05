@@ -2,8 +2,8 @@
 // ===========================================================================
 // 存储文件：ka-whale-workflow-task-plan.json（与 stage store 同目录）。
 // 生命周期：
-//   decide-tools whale_report(draftPlanItems) → 草稿 draft；
-//   write-plan  whale_report(finalPlanPayload) → 完整计划定稿 finalized；
+//   write-plan  whale_report(finalPlanPayload) → 完整计划创建/定稿 finalized；
+//   decide-tools 不得写入 draft；memory/plugin-maintenance 只读/经 write-plan 改约。
 //   persona=main 表示主线执行；ka_sub_whale 只接受 finalized planItemId 且只放行
 //   四个 v0.9 子代理角色，persona=main 由主线执行并拒绝委派。
 // ===========================================================================

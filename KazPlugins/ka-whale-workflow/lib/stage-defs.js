@@ -107,19 +107,19 @@ const DEFINITIONS = {
       ],
       canAdvance: ["decide-tools", "communication"],
       task:
-        "Critique the user's approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write or finalize task plans here (decide-tools/write-plan own plan persistence) and do not call ka_sub_whale. Then advance.",
+        "Critique the user's approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write or finalize task plans here (write-plan owns task-plan persistence) and do not call ka_sub_whale. Then advance.",
     },
     "decide-tools": {
       allowedTools: ["whale_report"],
       canAdvance: ["write-plan"],
       task:
-        "Decide required tools. Create draft plan items via whale_report (first persistence; each gets planItemId). Then advance to write-plan. Do not execute ka_sub_whale here. Candidate assignedTools list (system-injected actual names with descriptions): <candidate tools: name: description>.",
+        "Decide required tools. Do not write or draft task plans here; task-plan creation and finalization happens only in write-plan. Then advance to write-plan. Do not execute ka_sub_whale here. Candidate assignedTools list (system-injected actual names with descriptions): <candidate tools: name: description>.",
     },
     "write-plan": {
       allowedTools: ["whale_report", "read"],
       canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"],
       task:
-        "Finalize and persist the complete task plan via whale_report with finalPlanPayload (second persistence). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan via taskPlanPath, persist the revised plan, then advance to the appropriate next stage (working, memory-maintenance, plugin-maintenance, or communication). Do not rely on plain-text-only persistence.",
+        "Create and finalize the complete task plan here via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan via taskPlanPath, persist the revised plan, then advance to the appropriate next stage (working, memory-maintenance, plugin-maintenance, or communication). Do not rely on plain-text-only persistence.",
     },
     "decide-goal": {
       allowedTools: ["whale_report"],
