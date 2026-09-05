@@ -3,7 +3,7 @@
 > **作用**：Kaz 全家桶的公共依赖包——Kaz 工具清单（出厂默认/首轮工具/默认禁用/被管理插件目录/默认 persona）、工具控制面板状态模型和工具面计算的唯一来源，其它插件不再各自维护副本。
 
 `kaz-mode` / `ka-whale-memory` / `plugin-filter` 的公共依赖。
-**纯 ESM 模块**（`lib/tool-lists.js` / `lib/context-compress.js` / `lib/session-tree.js` / `lib/session-tree-store-core.js` / `lib/session-tree-expand.js` / `lib/context-cache-guard.js`），不注册任何服务、不注入任何提示段，只是常量 + 纯函数。`lib/session-tree-store-io.js` 是唯一允许 node:fs/node:crypto 的 thin I/O adapter。
+**纯 ESM 模块**（`lib/tool-lists.js` / `lib/context-compress.js` / `lib/session-tree.js` / `lib/session-tree-store-core.js` / `lib/session-tree-expand.js` / `lib/context-cache-guard.js` / `lib/memory-evidence-pack.js`），不注册任何服务、不注入任何提示段，只是常量 + 纯函数。`lib/session-tree-store-io.js` 是唯一允许 node:fs/node:crypto 的 thin I/O adapter。
 36.9：round-minimal 已删除，不再作为公共依赖消费者。
 
 ## 职责
@@ -41,6 +41,7 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `KAZ_CONTEXT_STORE_ROOT` / `sessionDirIdOf` / `createSessionTreeStore` | Kaz7.0 M2 树 store（I/O adapter） | thin node:fs/crypto adapter：store.json 原子快照（同目录临时 + rename + 写前备份）、raw/op 日志先写快照后写、损坏回退 op-replay→raw-only→显式失败、`fallbackTrim` 计算并持久化 hiddenRootIds、写 fallback-hide 审计后原子写快照（不删除/不归档移动/不改 raw-op）、archive 无默认 TTL；不修改 `session-tree.js` |
 | `DEFAULT_WHALE_EXPAND_LIMIT` / `parseWhalePath` / `resolveWhalePath` / `collectExpandItems` / `estimateExpandReturnTokens` / `paginateExpandItems` / `expand` | Kaz7.0 M3 子步骤 A whale_expand（纯读取） | 纯 ESM、零 I/O：path 按当前树 id 祖先链解析、block/scope 返回直接 children（源顺序）、leaf 返回完整原信息、≤1000 单位分页保护 + cursor 续读、单条超长不截断；始终吃完整 Session，因此 hiddenRootIds 不影响；archive 不隐式 fallback；不加入 `tool-lists.js` 公共根 re-export |
 | `classifyTransition` / `prefixStableAfter` / `invalidationCount` / `systemToolsHashStable` / `surfaceHashStable` / `renderStableAcrossAppend` / `windowStableAfterHidden` / `evaluateCacheSample` / `stablePeriodMedianH` / `m4Verdict` / `stableCanonicalText` | Kaz7.0 M4 子步骤 A 缓存与稳定前缀守卫（纯测量） | 纯 ESM、零 I/O：A/B/C/D 与 H_full/H_read_proxy 组合、append-only/planned-invalidation/version-boundary/prefix-violation 分类、S1–S9/C1/C3–C5/C12 纯断言与 InvalidationEvents 汇总；复用 context-compress 的矩阵与渲染判据；不加入 `tool-lists.js` 公共根 re-export |
+| `collectMemoryEvidenceRefs` / `buildMemoryCandidateDraft` / `packMemoryCandidates` / `validateMemoryCandidateDraft` | Kaz7.0 M5 memory-maintenance 收口（纯证据打包） | 纯 ESM、零 I/O：把已加载 block/leaf/raw/archive 引用机械打包成 `MemoryCandidateDraft[]`（一个证据组=一个候选），不做 LLM 摘要、不做去重、不灌整树/渲染全文/expand 分页；无来源/空正文记录 dropped；不写/删 ka-whale-memory，不加入 `tool-lists.js` 公共根 re-export |
 
 > **官方/Kaz 分类修改点**：`lib/tool-plugin-catalog.js`。外置插件数据（手动添加）保存在用户目录 storages 的 `other-*.json`；项目专属开关调整：官方/Kaz 写项目 `tool-plugin.json` / `tool-plugin-catalog.json`，外置写项目 `other-*.json`，**不写在源码里**。
 >
