@@ -250,8 +250,13 @@ export default {
               if (content.trim().length === 0) continue;
               const plugin = typeof item.plugin === "string" ? item.plugin : "";
               const title = typeof item.title === "string" ? item.title : "";
-              // v0.9 B6：恢复旧记录时也应用输出白名单；不允许的旧条目不再展示。
-              const category = classifyRoundDisplayReport({ plugin, title, content });
+              // v0.9 B6：恢复旧记录时优先使用已持久化的显式 category（新记录都带），
+              // 只有旧数据缺 category 才按来源/内容回退分类；不允许的旧条目不再展示。
+              const explicitCategory = normalizeCategory(item.category);
+              const category =
+                explicitCategory !== null
+                  ? explicitCategory
+                  : classifyRoundDisplayReport({ plugin, title, content });
               if (category === null) continue;
               const entry = {
                 key: plugin + "|" + category + "|" + content,
@@ -464,23 +469,27 @@ export default {
               : undefined;
           let turns = [];
           if (typeof sessionId === "string" && sessionId.length > 0) {
+            // 优先解析 live agent / 仍保留的 session 对象；取不到时直接回退到
+            // 持久化记录 map 中按请求 sessionId 存的条目。这样 child 结束/重启后
+            // sessions 注册表不再包含该 child 时，history 仍能返回其长期记录。
             const agent = resolveAgentOrSession(sessionId);
-            if (agent !== undefined) {
-              const id = agent.id ?? agent.session?.id ?? agent.sessionId ?? sessionId;
-              const byTurn = byAgent.get(id);
-              if (byTurn !== undefined) {
-                turns = [...byTurn.entries()]
-                  .sort((a, b) => a[0] - b[0])
-                  .map(([turn, list]) => ({
-                    turn,
-                    // 2026-08-28：轮内条目新消息排上（at 降序）；轮次本身
-                    // 仍由客户端倒序展示（新轮在上）。
-                    entries: list
-                      .slice()
-                      .sort((a, b) => b.at - a.at)
-                      .map(toPublic),
-                  }));
-              }
+            const id =
+              agent !== undefined
+                ? agent.id ?? agent.session?.id ?? agent.sessionId ?? sessionId
+                : sessionId;
+            const byTurn = byAgent.get(id);
+            if (byTurn !== undefined) {
+              turns = [...byTurn.entries()]
+                .sort((a, b) => a[0] - b[0])
+                .map(([turn, list]) => ({
+                  turn,
+                  // 2026-08-28：轮内条目新消息排上（at 降序）；轮次本身
+                  // 仍由客户端倒序展示（新轮在上）。
+                  entries: list
+                    .slice()
+                    .sort((a, b) => b.at - a.at)
+                    .map(toPublic),
+                }));
             }
           }
           return { ok: true, value: { turns } };

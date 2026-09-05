@@ -182,6 +182,10 @@ window.__ModuleLoader__.load({
 				const turn = data !== null && typeof data.turn === "number" ? data.turn : 0;
 				const entries = data !== null && Array.isArray(data.entries) ? data.entries : [];
 				const turns = data !== null && Array.isArray(data.turns) ? data.turns : [];
+				const totalHistoryEntries = turns.reduce(
+					(sum, turnEntry) => sum + (Array.isArray(turnEntry.entries) ? turnEntry.entries.length : 0),
+					0,
+				);
 
 				/** 取条目的来源名；空/缺失时返回空串（显示为「未知来源」）。 */
 				function sourceLabelOf(item) {
@@ -207,7 +211,7 @@ window.__ModuleLoader__.load({
 
 				let currentBody;
 				if (entries.length === 0) {
-					currentBody = createElement("p", { className: "rd-note" }, "本轮没有插件注入信息。（蹭蹭）");
+					currentBody = createElement("p", { className: "rd-note" }, "本轮没有插件注入信息；已结束/重启的会话请切到“全部轮次”查看持久化历史。（蹭蹭）");
 				} else {
 					currentBody = entries.map((item, ii) => entryBlock(item, "cur" + ii));
 				}
@@ -236,29 +240,35 @@ window.__ModuleLoader__.load({
 
 				return createElement(
 					"div",
-					{ className: "rd-panel", role: "dialog", "aria-label": "本轮插件注入信息面板" },
+					{ className: "rd-panel", role: "dialog", "aria-label": "Kaz 插件注入信息面板（当前轮 / 全部轮次）" },
 					createElement(
 						"p",
 						{ className: "rd-panel-title" },
-						"本轮插件注入",
-						createElement("span", { className: "rd-badge" }, turn > 0 ? "第 " + turn + " 轮" : "尚未开始"),
-						createElement("span", { className: "rd-badge" }, entries.length + " 条"),
+						"Kaz 插件注入信息",
+						mode === "history"
+							? createElement("span", { className: "rd-badge" }, turns.length > 0 ? turns.length + " 轮历史" : "无历史")
+							: createElement("span", { className: "rd-badge" }, turn > 0 ? "第 " + turn + " 轮" : "尚未开始"),
+						mode === "history"
+							? createElement("span", { className: "rd-badge" }, totalHistoryEntries + " 条记录")
+							: createElement("span", { className: "rd-badge" }, entries.length + " 条"),
 						createElement("button", { type: "button", className: "rd-act", disabled: busy, title: "手动刷新", onClick: () => { setBusy(true); void refresh().finally(() => setBusy(false)); } }, "刷新"),
 						createElement("button", { type: "button", className: "rd-act", title: "收起", onClick: onClose }, "收起"),
 					),
 					createElement(
 						"p",
 						{ className: "rd-note" },
-						"Kaz 模式联动/附属插件在本轮（每次用户消息 = 一轮）给模型发送的白名单信息（v0.9 B6）：稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、记忆快照注入。阶段切换 / whale_report 逐次噪音 / 系统提示词快照 / 记忆指引不再显示。格式：[插件名]>（信息内容）<。",
+						"「当前轮」只显示该会话最近一轮（每次用户消息 = 一轮）的白名单注入；「全部轮次」显示落盘持久化的历史，child 会话结束 / dsh 重启后仍可查询。白名单（v0.9 B6）：系统提示词快照、工具面变化、稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、记忆快照注入。阶段切换 / whale_report 逐次噪音不再显示。格式：[插件名]>（信息内容）<。",
 						lastRpcError.length > 0 && createElement("span", { className: "rd-note" }, "  RPC 通道未就绪：" + lastRpcError),
 					),
 					createElement(
 						"div",
 						{ className: "rd-tab" },
-						createElement("button", { type: "button", className: "rd-tab-btn", "data-on": mode === "current" ? "true" : "false", onClick: () => setMode("current") }, "当前轮"),
-						createElement("button", { type: "button", className: "rd-tab-btn", "data-on": mode === "history" ? "true" : "false", onClick: () => setMode("history") }, "全部轮次"),
+						createElement("button", { type: "button", className: "rd-tab-btn", "data-on": mode === "current" ? "true" : "false", onClick: () => setMode("current") }, "当前轮（活跃会话）"),
+						createElement("button", { type: "button", className: "rd-tab-btn", "data-on": mode === "history" ? "true" : "false", onClick: () => setMode("history") }, "全部轮次（历史）"),
 					),
 					mode === "current" ? currentBody : historyBody,
+					mode === "history" &&
+						createElement("p", { className: "rd-note" }, "历史来自持久化记录（<DSH_HOME>/storages/round-display-records.json）；子代理结束后请在此查看其长期记录。"),
 				);
 			}
 

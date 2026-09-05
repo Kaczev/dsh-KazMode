@@ -20,7 +20,7 @@ import {
   canAdvance,
 } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
-import { KAZ_MAIN_ROLE_BODY } from "../kaz-shared/lib/tool-lists.js";
+import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,6 +58,7 @@ planStore.persistFinalPayload({
 
 const rdReports = [];
 const promptSections = [];
+const startedSubagentRequests = [];
 const agentRegistry = new Map();
 const sessionsRegistry = new Map();
 // --- minimal plugin mock ---
@@ -119,7 +120,10 @@ const base = {
     if (name === "sessions") return { get: (id) => sessionsRegistry.get(id) };
     if (name === "subagents") {
       return {
-        startContinuable: async (spec) => ({ childId: spec.childId }),
+        startContinuable: async (spec) => {
+          startedSubagentRequests.push(spec?.request ?? null);
+          return { childId: spec.childId };
+        },
         reportFrom: async () => "report-v09-365",
       };
     }
@@ -148,25 +152,16 @@ const preExecute = listeners.get("tools/pre-execute")?.[0];
 const whaleReport = registeredTools.get("whale_report");
 const kaSubWhale = registeredTools.get(KA_SUB_WHALE_TOOL);
 
-// 37.5 persona-application: ka-whale-workflow registers a real system section.
+// persona application: ka-whale-workflow no longer registers ka-whale-workflow:main
+// (or any system section); kaz-system-prompt sets deployment:persona to
+// KAZ_ROLE_PROMPTS.main for main and preserves KAZ_ROLE_PROMPTS.subagent.* children.
 {
   const mainSection = promptSections.find((section) => section?.name === "ka-whale-workflow:main");
+  const anyWhaleSection = promptSections.some((section) => typeof section?.name === "string" && section.name.startsWith("ka-whale-workflow:"));
   check(
-    "37.5 main persona system section registered as ka-whale-workflow:main",
-    mainSection !== undefined && mainSection.order === 10,
+    "persona application: ka-whale-workflow no longer registers ka-whale-workflow:main system section",
+    mainSection === undefined && anyWhaleSection === false,
   );
-  const mainText = typeof mainSection?.text === "function" ? mainSection.text({ agent }) : "";
-  check(
-    "37.5 system section resolves to KAZ_MAIN_ROLE_BODY for Kaz main agent (base boilerplate de-duplicated)",
-    mainText === KAZ_MAIN_ROLE_BODY,
-  );
-  const childForSection = {
-    id: "s-child-system",
-    options: { subagentDepth: 1 },
-    session: { id: "s-child-system", events: [], header: { origin: "subagent", parentSession: agent.id } },
-  };
-  const childText = typeof mainSection?.text === "function" ? mainSection.text({ agent: childForSection }) : "";
-  check("37.5 system section is empty for subagents", childText === "");
 }
 
 // 纯函数层
@@ -295,6 +290,18 @@ const memoryInPlugin = await kaSubWhale.execute({ planItemId: "p-memory" }, { ag
 check("plugin-maintenance 拒绝 memoryMaintainer 委派（stage-persona-mismatch）", memoryInPlugin.ok === false && memoryInPlugin.code === "stage-persona-mismatch");
 const maintainerInPlugin = await kaSubWhale.execute({ planItemId: "p-maintainer" }, { agent });
 check("plugin-maintenance 允许 pluginMaintainer 委派", maintainerInPlugin.ok === true && maintainerInPlugin.code === "subagent-created");
+
+{
+  const requestPersonas = startedSubagentRequests
+    .filter((request) => request !== null && typeof request === "object" && typeof request.persona === "string")
+    .map((request) => request.persona);
+  const expectedPersonas = ["worker", "memoryMaintainer", "pluginMaintainer"]
+    .map((role) => KAZ_ROLE_PROMPTS.subagent[role]);
+  check(
+    "受控子代理 startContinuable request.persona 逐字等于 KAZ_ROLE_PROMPTS.subagent.<role>",
+    JSON.stringify(requestPersonas) === JSON.stringify(expectedPersonas),
+  );
+}
 
 check("v0.9 工具已注册", registeredTools.has("whale_report") && registeredTools.has(KA_SUB_WHALE_TOOL) && registeredTools.has(WORK_SUB_WHALE_REPORT_TOOL));
 check("36.6 ka_sub_whale description 含异步等待提示", typeof kaSubWhale?.description === "string" && kaSubWhale.description.includes("end the current turn and await its report/finished message") && kaSubWhale.description.includes("do not use pwsh sleep or poll list_agents"));

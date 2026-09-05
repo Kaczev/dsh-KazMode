@@ -3,10 +3,11 @@
 # 组合基底 = shipped `cordis` 预设的完整副本（完整工具面），persona 行保留为
 # 默认兜底（complete: false、includeRuntimeContext: false——运行时上下文快照
 # 由 persona 行的 includeRuntimeContext 抑制，不再需要 kaz-no-context 插件）。
-# Kaz 模式的系统提示词由本目录的 kaz-system-prompt.mjs 在组装层收敛为
-# DeepSeek 基础提示词（逐字、最前；不再按记忆插件开关切换 persona 变体），
-# 角色特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS（Step 1 初稿，未逐任务
-# 动态生成）；任何插件都不再向 Kaz 会话注入其它提示段；首阶段极简（首次工具
+# Kaz 模式的系统提示词由本目录的 kaz-system-prompt.mjs 在组装层把
+# deployment:persona 整段设为 kaz-shared KAZ_ROLE_PROMPTS.main（v0.9 §9.1 完整
+# Persona；不再叠加 DeepSeek base 或 ka-whale-workflow:main 第二段；不再按记忆
+# 插件开关切换 persona 变体），角色特化段固定存放于 kaz-shared 的
+# KAZ_ROLE_PROMPTS（未逐任务动态生成）；任何插件都不再向 Kaz 会话注入其它提示段；首阶段极简（首次工具
 # 调用前 ≤2 个工具，之后恢复全部工具）已收编进 kaz-mode/kaz-shared 核心机制，
 # 工具面白名单由 kaz-mode 的工具控制面板四文件 JSON 决定（= Kaz 全部工具）。
 # 工具过滤由 kaz-shared 的 DEFAULT_DISABLED_TOOLS + 兼容保留的 plugin-filter
@@ -54,8 +55,10 @@
 
 # ── system prompt controller ────────────────────────────────────────────────
 #
-# 系统提示词控制脚本：Kaz 任何状态下 persona = DeepSeek 基础提示词（逐字、最前），
-# 不随记忆插件开关切换 persona 变体；角色特化段固定放 kaz-shared 的 KAZ_ROLE_PROMPTS。
+# 系统提示词控制脚本：Kaz 主会话 persona = kaz-shared KAZ_ROLE_PROMPTS.main
+# （v0.9 §9.1 完整 Persona，逐字、最前且唯一），不随记忆插件开关切换 persona 变体；
+# 受控子代理的 KAZ_ROLE_PROMPTS.subagent.* 原样保留；角色特化段固定放
+# kaz-shared 的 KAZ_ROLE_PROMPTS。
 - id: kaz-system-prompt
   name: ./kaz-system-prompt.mjs
   config: {}

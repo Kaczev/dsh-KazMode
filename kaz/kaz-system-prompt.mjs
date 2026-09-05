@@ -8,11 +8,11 @@
  * 同时也负责把展示信息上报 round-display（best-effort）：
  *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
- *     Kaz 主会话真实 system = deployment:persona（DeepSeek 基础提示词，逐字、
- *     最前）+ ka-whale-workflow:main（KAZ_MAIN_ROLE_BODY —— KAZ_ROLE_PROMPTS.main
- *     去掉 base 首句/末句的 role body；37.5 起由 ka-whale-workflow 注册为真实
- *     system 段，本代去重后不再重复 base 首/末行）；受控子代理保留 request.persona
- *     带入的 KAZ_ROLE_PROMPTS.subagent.*，不再被本控制器覆盖成基础 persona。
+ *     Kaz 主会话真实 system = deployment:persona 整段逐字为
+ *     kaz-shared KAZ_ROLE_PROMPTS.main（v0.9 §9.1 完整 Persona，含基础首句/末句），
+ *     不再有独立的 BASE_PROMPT 重复段，也不再注册/保留 ka-whale-workflow:main
+ *     第二段；受控子代理保留 request.persona 带入的
+ *     KAZ_ROLE_PROMPTS.subagent.*，不再被本控制器覆盖成基础 persona。
  *     原生 plan:policy / tool:goal 段不再注入——v0.8 Step B1 已实际移除）；
  *   - agent/pre-step 扫描上报：
  *       - dsh-goal-round-driver 的 <goal_round>（source.kind === "goal"）；
@@ -23,19 +23,75 @@
  * session/event 从 host 根 scope 派发，agent scope 监听器收不到（output-beep
  * 能收是因为它在 host 平面）。
  *
- * 规则：Kaz 主会话 persona = DeepSeek 基础提示词（逐字、最前），
- * 不再按 kaz-memory/ka-whale-memory 插件开关切换 persona 变体（C12/R-C12）；
+ * 规则：Kaz 主会话 persona = kaz-shared KAZ_ROLE_PROMPTS.main（完整 Persona，
+ * 不按 kaz-memory/ka-whale-memory 插件开关切换 persona 变体）；
  * 记忆搜索/保存指引改由追加消息承担。
  * 受控子代理的 request.persona 是完整的 KAZ_ROLE_PROMPTS.subagent.* 角色
  * Persona，必须原样保留；普通/未知子代理没有显式 role persona 时才回退基础词。
  * 角色/任务类型特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS，
  * 代码级维护，禁止按具体任务实例动态生成 system。
+ *
+ * kaz-shared 解析：本文件可能在仓库 kaz/ 位置（与 KazPlugins 同级）或部署后的
+ * .agent-presets/kaz 位置（与 profiles/web/KazPlugins 相隔两层）运行；先尝试
+ * config.kazSharedPath，再按两个相对布局逐个探测，避免把单一硬编码路径当唯一解。
  */
 
 export const name = 'kaz-system-prompt'
 
 /** 只依赖事件系统；不需要额外 inject。 */
 export const inject = []
+
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+/** 本脚本所在目录（仓库 kaz/ 或部署 .agent-presets/kaz/）。 */
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
+
+/** kaz-shared/lib/tool-lists.js 候选相对布局。
+ *  候选 1：仓库 kaz/ → ../KazPlugins/kaz-shared；也可兼容 .agent-presets 下
+ *  与 KazPlugins 同级的复制布局。
+ *  候选 2：部署 .agent-presets/kaz/ → ../../profiles/web/KazPlugins/kaz-shared。 */
+const KAZ_SHARED_CANDIDATES = [
+  join(MODULE_DIR, "..", "KazPlugins", "kaz-shared", "lib", "tool-lists.js"),
+  join(MODULE_DIR, "..", "..", "profiles", "web", "KazPlugins", "kaz-shared", "lib", "tool-lists.js"),
+];
+
+/** 动态 import 缓存（按绝对路径，避免每个 assemble 都重复解析）。 */
+const kazSharedCache = new Map();
+
+/** 解析 kaz-shared 模块：config.kazSharedPath 优先，随后按候选路径探测。 */
+async function loadKazShared(config) {
+  const explicit =
+    config !== null &&
+    typeof config === "object" &&
+    typeof config.kazSharedPath === "string" &&
+    config.kazSharedPath.trim().length > 0
+      ? config.kazSharedPath.trim()
+      : "";
+  const candidates = [];
+  if (explicit.length > 0) candidates.push(explicit);
+  candidates.push(...KAZ_SHARED_CANDIDATES);
+  let lastError = null;
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue;
+      if (!kazSharedCache.has(candidate)) {
+        kazSharedCache.set(candidate, import(pathToFileURL(candidate).href));
+      }
+      return await kazSharedCache.get(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  const detail =
+    lastError !== null && lastError instanceof Error
+      ? ` (last error: ${lastError.message})`
+      : "";
+  throw new Error(
+    `[kaz-system-prompt] cannot resolve kaz-shared/lib/tool-lists.js from ${MODULE_DIR}; tried ${JSON.stringify(candidates)}${detail}`,
+  );
+}
 
 /** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。
  *  36.7：真实系统提示词显式带 category=system-prompt；goal 通知显式带
@@ -112,10 +168,10 @@ function reportInjectedMessage(ctx, agent, message) {
 }
 
 /**
- * DeepSeek 基础提示词：逐字保留且必须位于所有提示词第一段（v0.4 §0.1）。
- * Kaz 任何状态下都不再切换 persona 变体。
+ * 普通/未知子代理的兜底 prompt（旧行为兼容；仅在该类子代理带着默认/短 persona
+ * 时使用。Kaz 主会话与受控 v0.9 子代理都走 KAZ_ROLE_PROMPTS，不经过这里）。
  */
-const BASE_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
+const SUBAGENT_FALLBACK_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
 
 Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
 
@@ -124,12 +180,12 @@ The final white response should be crisp and to the point, and only appear after
 /** kaz/agent.cordis.yml 的 persona 行原始短文本（未受 kaz-system-prompt 覆盖前）。 */
 const PRESET_PERSONA_TEXT = 'You are a helpful software engineer assistant.'
 
-/** 是否为默认/基础 persona 文本（preset 短兜底或本控制器完整 base）。
+/** 是否为默认/基础 persona 文本（preset 短兜底或未知子代理完整 base）。
  *  子代理只有 request.persona 带来的显式 role persona 才需要保留。 */
 function isDefaultPersonaText(text) {
   return (
     text === PRESET_PERSONA_TEXT ||
-    text === BASE_PROMPT ||
+    text === SUBAGENT_FALLBACK_PROMPT ||
     text.trim() === PRESET_PERSONA_TEXT.trim()
   )
 }
@@ -155,25 +211,20 @@ function isSubagentAgent(agent) {
   return false
 }
 
-/** 是否为受控 v0.9 角色 Persona 文本（KAZ_ROLE_PROMPTS.subagent.*）。
- *  子代理只要带着非默认 persona，就视为请求方注入的显式 role persona，应保留；
- *  只有预设短 persona / 完整 base 才由本控制器回填。 */
+/** 是否为子代理显式 role Persona 文本（非默认即保留；包含
+ *  KAZ_ROLE_PROMPTS.subagent.* 四条）。 */
 function isSubagentRolePersonaText(text) {
   return typeof text === 'string' && !isDefaultPersonaText(text)
-}
-
-/** 取当前会话命中的系统提示词：恒为 DeepSeek 基础提示词。 */
-function resolvePrompt() {
-  return BASE_PROMPT
 }
 
 /** persona 段名（与 kaz preset 的 persona 行一致）。 */
 const PERSONA_SECTION = 'deployment:persona'
 
-/** ka-whale-workflow 工作流提示词段前缀（保持 persona 之后）。 */
+/** ka-whale-workflow 历史 system 段前缀：新机制不再保留任何此类段，
+ *  只保留 deployment:persona 单段，避免旧插件残留段导致 persona 重复。 */
 const WHALE_SECTION_PREFIX = 'ka-whale-workflow:'
 
-export function apply(ctx, _config) {
+export function apply(ctx, config = {}) {
   ctx.on('system-prompt/assemble', async (assembly, context, next) => {
     const agent = context?.agent
 
@@ -187,11 +238,16 @@ export function apply(ctx, _config) {
       // 服务缺失时不拦截，继续按 Kaz 预设处理
     }
 
-    const prompt = resolvePrompt()
+    // v0.9 §9.1 完整 Persona 是 main 真实系统的唯一内容源。
+    const kazShared = await loadKazShared(config)
+    const MAIN_PROMPT = kazShared?.KAZ_ROLE_PROMPTS?.main
+    if (typeof MAIN_PROMPT !== 'string' || MAIN_PROMPT.length === 0) {
+      throw new Error('[kaz-system-prompt] KAZ_ROLE_PROMPTS.main missing from kaz-shared')
+    }
 
-    // v0.8 Step B1：收敛为 persona + ka-whale-workflow 段，其余提示段一律过滤；
-    // 不再保留/替换 plan:policy 或 tool:goal 段（原生 Plan 已从 Kaz 移除，
-    // tool:goal 自定义文本逻辑已删除）。persona 绝对最前。
+    // v0.8 Step B1：收敛为 persona 单段；其余提示段一律过滤（含历史
+    // ka-whale-workflow:* system 段）。persona 绝对最前。Kaz 主会话
+    // deployment:persona = KAZ_ROLE_PROMPTS.main 全量文本。
     const kept = []
 
     let personaKept = false
@@ -199,35 +255,45 @@ export function apply(ctx, _config) {
       if (section === null || typeof section !== 'object' || section.name !== PERSONA_SECTION) {
         continue
       }
-      // 37.5: controlled subagents receive KAZ_ROLE_PROMPTS.subagent.* through
-      // request.persona (deployment:persona). Preserve that explicit role text;
-      // only replace default/base persona with BASE_PROMPT.
+      // 受控 v0.9 子代理的 request.persona（KAZ_ROLE_PROMPTS.subagent.*）通过
+      // deployment:persona 携带，是显式 role 文本，原样保留；只替换默认/base
+      // persona（主会话替换为完整 main；普通未知子代理保留旧 fallback 语义）。
       const preserveSubagentRolePersona =
         isSubagentAgent(agent) && isSubagentRolePersonaText(section.text)
       if (typeof section.text === 'string' && !preserveSubagentRolePersona) {
-        section.text = prompt
+        section.text = isSubagentAgent(agent) ? SUBAGENT_FALLBACK_PROMPT : MAIN_PROMPT
       }
       kept.push(section)
       personaKept = true
     }
     if (!personaKept) {
-      kept.push({ name: PERSONA_SECTION, order: 0, text: prompt })
+      kept.push({
+        name: PERSONA_SECTION,
+        order: 0,
+        text: isSubagentAgent(agent) ? SUBAGENT_FALLBACK_PROMPT : MAIN_PROMPT,
+      })
     }
-    const whaleSections = assembly.sections.filter(
+    // 不保留任何 ka-whale-workflow:* 段：主 Persona 已完整在 deployment:persona。
+    // 这样即使旧插件仍注册 ka-whale-workflow:main，真实 system 也不会重复正文。
+    const _discardedWhaleSections = assembly.sections.filter(
       (section) =>
         section !== null &&
         typeof section === 'object' &&
         typeof section.name === 'string' &&
         section.name.startsWith(WHALE_SECTION_PREFIX),
     )
-    for (const section of whaleSections) kept.push(section)
+    if (_discardedWhaleSections.length > 0) {
+      ctx.logger?.debug?.(
+        `[kaz-system-prompt] discarded ${_discardedWhaleSections.length} legacy ka-whale-workflow:* system section(s); main persona is deployment:persona only`,
+      )
+    }
 
     assembly.sections = kept
     // 等后续监听器（kaz-mode 只过滤工具段；36.9 起首轮 Minimal 由 kaz-mode 核心
     // 处理）跑完，
     // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
     // renderPrompt 一致：空段过滤、"\n\n" 连接）。persona 在最前；
-    // ka-whale-workflow 段在 persona 之后。这正是模型真实看到的 system 字段。
+    // 这正是模型真实看到的 system 字段。
     const nextResult = await next()
     const finalAssembly = nextResult ?? assembly
     const finalPrompt = realPromptOf(finalAssembly?.sections)

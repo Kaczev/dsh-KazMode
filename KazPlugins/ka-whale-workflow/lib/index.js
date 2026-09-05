@@ -1,8 +1,8 @@
 // ka-whale-workflow —— 鲸鱼工作流（v0.9：主/受控子代理阶段机 + 工具面稳定）
 // ===========================================================================
 // 流程：
-//   1) 主模型 Persona 由 ka-whale-workflow:main system-prompt 段承载（每个 step
-//      重新组装）；各 v0.9 阶段入口按 pending run 注入。
+//   1) 主模型 Persona 由 kaz-system-prompt 把 deployment:persona 设为
+//      KAZ_ROLE_PROMPTS.main 全文（每个 step 重新组装）；各 v0.9 阶段入口按 pending run 注入。
 //   2) 受控 v0.9 子代理经 ka_sub_whale request.persona 获得 role Persona；普通旧
 //      未知子代理（includeSubagents=true）注入旧通用 subagent-flow。
 //   3) whale_report 在 Stable Main Surface 常驻，是主模型 stage 推进与 task plan
@@ -40,7 +40,6 @@ import {
   KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH,
   KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH,
   KAZ_ROLE_PROMPTS,
-  KAZ_MAIN_ROLE_BODY,
   KAZ_V09_MAIN_TOOLS,
   KAZ_V09_SUB_WHALE_REPORT_TOOLS,
   KAZ_V09_SUBAGENT_ROLE_TOOLS,
@@ -141,10 +140,8 @@ const MANUAL_COMMAND_NAMES = ["goal"];
 
 /** v0.9 主流程上下文文案（v0.9 §9.1 Persona Goal-active 口径；阶段注入另行按 run 追加）。
  *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.main，避免双源漂移。
- *  37.5：运行时的主 Persona 已注册为 `ka-whale-workflow:main` system-prompt 段；
- *  本代去重：该真实 system 段只放 KAZ_MAIN_ROLE_BODY（完整 Persona 去掉 DeepSeek base
- *  首句/末句），因为 `deployment:persona` 已先逐字携带 base prompt；本常量仅保留给
- *  探针/兼容引用，不再作为主会话 user message 注入。 */
+ *  当前运行时的主 Persona 已由 kaz-system-prompt 整段设为 deployment:persona；
+ *  本常量仅保留给探针/兼容引用，不再作为主会话 user message 注入。 */
 export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
 >
 ${KAZ_ROLE_PROMPTS.main}`;
@@ -989,7 +986,7 @@ function toolNamesOf(tools) {
 
 export default {
   name: "ka-whale-workflow",
-  inject: ["systemPrompt", "tools", "timer"],
+  inject: ["tools", "timer"],
   apply(ctx, config = {}) {
     const entry = normalizeConfig(config);
     let source = () => entry;
@@ -1006,39 +1003,10 @@ export default {
       },
     });
 
-    // 37.5 persona-application: the main role system section is assembled on
-    // every step, so existing sessions receive persona updates immediately
-    // instead of being blocked by the old one-time main-flow user-message +
-    // hasInjectedBefore logic. The section emits KAZ_MAIN_ROLE_BODY (the
-    // KAZ_ROLE_PROMPTS.main role text minus the DeepSeek base header/footer);
-    // deployment:persona already carries the base prompt verbatim first.
-    ctx.effect(
-      () =>
-        ctx.systemPrompt.section({
-          name: "ka-whale-workflow:main",
-          order: 10,
-          text: (context) => {
-            try {
-              if (source().enabled === false) return "";
-              const agent = context?.agent;
-              if (agent === null || agent === undefined || typeof agent !== "object") return "";
-              if (isSubagent(agent)) return "";
-              const kazMode = ctx.get("kazMode");
-              if (
-                kazMode !== undefined &&
-                kazMode !== null &&
-                typeof kazMode.kazEnabled === "function"
-              ) {
-                return kazMode.kazEnabled(agent) === true ? KAZ_MAIN_ROLE_BODY : "";
-              }
-              return "";
-            } catch {
-              return "";
-            }
-          },
-        }),
-      "ka-whale-workflow: register main persona system section",
-    );
+    // v0.9 persona application: the main role system text is now applied by
+    // kaz-system-prompt as the entire deployment:persona section
+    // (KAZ_ROLE_PROMPTS.main). ka-whale-workflow no longer registers a second
+    // ka-whale-workflow:main section; doing so would duplicate the full persona.
 
     /** 阶段状态存储：插件自己的 JSON（config.stageStore 可覆盖，探针用临时文件）。
      *  绝不写会话事件——自定义事件会让 dsh 重载会话日志时拒绝整条日志。 */
@@ -2519,9 +2487,9 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 上下文注入：主 Persona 是 ka-whale-workflow:main system 段（不在此注入）；
-    // 旧/未知子代理的 SUBAGENT_FLOW_TEXT 按 turn 去重注入一次；v0.9 阶段与
-    // Goal 边界注入按 pending 精确一次。
+    // 上下文注入：主 Persona 已由 kaz-system-prompt 作为 deployment:persona
+    // 整段携带（不在此注入）；旧/未知子代理的 SUBAGENT_FLOW_TEXT 按 turn 去重
+    // 注入一次；v0.9 阶段与 Goal 边界注入按 pending 精确一次。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
       const agent = payload?.agent;
@@ -2585,7 +2553,8 @@ export default {
       if (liveFor(agent).enabled !== true) return decision;
       if (isBypassed(agent)) return decision;
       // 上下文注入：
-      //   - 主 Persona 已是 ka-whale-workflow:main system 段，不再注入 user message；
+      //   - 主 Persona 已是 kaz-system-prompt 整段 deployment:persona
+      //     （KAZ_ROLE_PROMPTS.main），不再注入 user message；
       //   - 旧未知子代理（includeSubagents=true）的 SUBAGENT_FLOW_TEXT 首次注入一次；
       //   - 受控 v0.9 子代理只注入 role-specific stage，不注入旧通用 subagent-flow；
       //   - v0.9 stage 注入按 pendingStageInjection 精确一次（同一 run 内重新
@@ -2626,10 +2595,11 @@ export default {
       }
       let appended = false;
       if (liveNow.enabled === true && !skipSubagentNow && !isBypassed(agent)) {
-        // 37.5 persona-application:
-        //   - main persona is now the ka-whale-workflow:main system section,
-        //     assembled fresh each step; no one-time MAIN_FLOW_TEXT user message
-        //     is appended, so old sessions are never blocked by hasInjectedBefore.
+        // persona application:
+        //   - main persona is now the deployment:persona section text
+        //     KAZ_ROLE_PROMPTS.main, assembled fresh each step by
+        //     kaz-system-prompt; no one-time MAIN_FLOW_TEXT user message is
+        //     appended, so old sessions are never blocked by hasInjectedBefore.
         //   - controlled v0.9 subagents receive KAZ_ROLE_PROMPTS.subagent.* via
         //     request.persona; do not inject the old generic SUBAGENT_FLOW_TEXT.
         //   - only old/unknown subagents (includeSubagents=true) still get the

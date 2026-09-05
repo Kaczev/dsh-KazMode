@@ -8,7 +8,10 @@
 - **跨会话记忆**：模型会把经验存为明文记忆，同一话题下越用越好用。以往每次重开新对话，要么重新向模型说明项目，要么模型每次都需要自己重新探索项目，有了ka-whale-memory插件，模型可以从记忆中搜索，快速找到方向；
 - **agent自优化·记忆**：记忆系统并非单纯的记忆，而是会总结成经验，具有类似于skill的特性。agent会管理记忆，及时清除无用记忆，优化已有记忆。
 - **agent自优化·子代理维护**：v0.9 的 ka-whale-workflow 会把任务按持久化 task plan 受控委派给 worker / memoryMaintainer / pluginMaintainer 子代理（各自带 role Minimal / Stable Base 与专用 report 工具）；memoryMaintainer 维护记忆，pluginMaintainer 维护用户私有插件候选（`KazPrivatePlugins`，如 `kaz-skill-*` 命名），私有产物不随本仓库发布。
-- **提示词极简**：Kaz 会话的系统提示词由 `kaz/kaz-system-prompt.mjs` 收敛为 `You are a helpful software engineer assistant.`（persona + ka-whale-workflow 段），不随记忆插件开关切换 persona；
+- **提示词极简**：Kaz 会话的真实系统提示词由 `kaz/kaz-system-prompt.mjs` 收敛为
+  `deployment:persona` 单段，主会话逐字使用 kaz-shared 的 `KAZ_ROLE_PROMPTS.main`
+  （v0.9 §9.1 完整 Persona），不再叠加第二段 role body；受控子代理保留
+  `KAZ_ROLE_PROMPTS.subagent.*` 原样 persona；
 - **工具面两阶段（无 round-minimal 插件）**：首次工具调用前由 kaz-mode 核心 Minimal 收敛（Kaz 恒开 ka-whale-memory → 只有 `memory_search`），首次工具调用后恢复代码级固定的 Stable Main Surface；真实工具面增删以 `category=tool-surface` 上报 round-display；
 - **工作流模式选择**：ka-whale-workflow 在 decide-goal 阶段用 `whale_report` 选择 **normal / goal**；**没有原生 Plan 模式**，没有 `create_plan`。
 - **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；

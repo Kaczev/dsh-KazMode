@@ -20,9 +20,11 @@ Kaz 模式同时具备两个入口，双向同步：
 
 **Kaz 模式的核心语义（2026-08-21，纯方案 A；2026-08-23 系统提示词移到 kaz 预设）**：
 
-1. **系统提示词由 `kaz` 预设的 `kaz-system-prompt.mjs` 控制**。默认是
-   `You are a helpful software engineer assistant.`。组装层把提示段收敛为
-   persona + ka-whale-workflow 段；v0.8 Step B1 起不再保留 plan:policy / tool:goal 段，
+1. **系统提示词由 `kaz` 预设的 `kaz-system-prompt.mjs` 控制**。主会话的
+   `deployment:persona` 被整段设为 kaz-shared `KAZ_ROLE_PROMPTS.main`
+   （v0.9 §9.1 完整 Persona，含基础首句/末句）；受控子代理的
+   `KAZ_ROLE_PROMPTS.subagent.*` 原样保留。组装层把提示段收敛为
+   persona 单段；v0.8 Step B1 起不再保留 plan:policy / tool:goal 段，
    其余任何提示段（thinking-anchor / 首阶段 guidance / kaz-memory 指引 /
    tool:* 指导段 / 运行时上下文…）一律过滤。**kaz-mode 插件不再控制系统提示词。**
 2. **工具面两阶段（v0.8 Step A/B1 固定集；36.9 起无 round-minimal 插件）**：
@@ -177,7 +179,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
 ## 验收要点
 
 1. 选择 `kaz` 预设后：新建对话的系统提示词由 `kaz/kaz-system-prompt.mjs` 收敛；
-   真实 system = persona + ka-whale-workflow 段（v0.8 Step B1 后不再含
+   真实 system = `deployment:persona` 单段，主会话逐字 `KAZ_ROLE_PROMPTS.main`，
+   受控子代理逐字 `KAZ_ROLE_PROMPTS.subagent.<role>`（v0.8 Step B1 后不再含
    plan:policy / tool:goal）；
 2. 首次工具调用前工具面：Kaz = `memory_search`（ka-whale-memory 恒开）；
    第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 19 项，

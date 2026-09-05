@@ -38,11 +38,16 @@
   非白名单记录不进入内存、不落盘、也不从历史恢复，阶段切换与 whale_report
   噪音因此不再出现。
 - **面板通道**：专用 RPC（`/round-display`，loopback）。客户端面板打开时每 2 秒轮询：
-  `list` = 当前轮；`history` = 全部轮次。
+  `list` = 当前轮（只对仍活跃/可解析的会话有意义）；`history` = 全部轮次
+  （落盘持久化，即使 agents/sessions 注册表已不包含已结束的 child，
+  也直接按 sessionId 回退查询持久化记录）。
 - **持久化（2026-08-21）**：记录按 agent × 轮次落盘到
   `<DSH_HOME>/storages/round-display-records.json`（`config.recordsStore` 可覆盖），
   **dsh 重启后 history 仍能看到此前各轮的注入记录**；每个 agent 最多保留
   200 轮，防抖 1s 落盘、卸载时 flush。恢复旧记录时同样套用白名单。
+  child 的 system-prompt / report / tool-surface 等记录在 child dispose 与
+  重启后都保留：dispose 清理跳过子代理，history RPC 在会话对象不可解析时
+  直接读持久化 map，因此“当前轮”空但“全部轮次”可查是正常语义。
 
 ## 配置
 

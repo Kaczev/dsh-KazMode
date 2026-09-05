@@ -1,8 +1,10 @@
-// round-display + kaz-system-prompt 探针（2026-08-28；v0.8 Step B1 移除 Plan/tool:goal 段；
-// v0.9 36.7 白名单扩展：system-prompt/tool-surface；36.9 round-minimal 已删除）
+// round-display + kaz-system-prompt 探针（v0.9：真实 main system 必须逐字等于
+// KAZ_ROLE_PROMPTS.main，部署 deployment:persona 单段；受控子代理保留
+// KAZ_ROLE_PROMPTS.subagent.*；36.9 round-minimal 已删除）
 // 覆盖：
 //   ① kaz-system-prompt.mjs：system-prompt/assemble 后上报“真实系统提示词”
-//     （persona + ka-whale-workflow 段；plan:policy 与 tool:goal 一律丢弃；"\n\n" 连接，
+//     （Kaz 主会话 = deployment:persona 单段，逐字 KAZ_ROLE_PROMPTS.main；
+//     ka-whale-workflow:* / plan:policy / tool:goal 一律丢弃；"\n\n" 连接，
 //     空段过滤；category=system-prompt）；
 //   ② kaz-system-prompt.mjs：agent/pre-step 上报 goal-round-driver <goal_round>、
 //      tool-goal <goal_complete>/<goal_blocked>；plan-mode 通知不再上报；
@@ -19,14 +21,10 @@ import kazModePlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KAZ_ROLE_PROMPTS, KAZ_MAIN_ROLE_BODY } from "../kaz-shared/lib/tool-lists.js";
+import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
 
-/** Kaz 5.0 Step1：kaz-system-prompt 恒为 DeepSeek 基础提示词（不再有短 persona 变体）。 */
-const BASE_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
-
-Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
-
-The final white response should be crisp and to the point, and only appear after reasoning and working.`;
+/** v0.9 §9.1 main Persona 是主会话真实系统的唯一期望文本。 */
+const MAIN_PROMPT = KAZ_ROLE_PROMPTS.main;
 
 let failures = 0;
 function check(label, ok) {
@@ -162,20 +160,22 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
     check(
-      "①.a plan/tool:goal/其它段被丢弃，真实 system 只有 persona",
-      systemReport !== undefined && systemReport.content === BASE_PROMPT,
+      "①.a plan/tool:goal/其它段被丢弃，真实 system 只有完整 main Persona",
+      systemReport !== undefined && systemReport.content === MAIN_PROMPT,
     );
     check("①.a systemReport 携带 category=system-prompt", systemReport?.category === "system-prompt");
     check("①.a assemble 返回值原样透传", result === assembly);
     check("①.a 过滤后 sections 只剩 persona", assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona");
   }
 
-  // ①.b whale section：persona + ka-whale-workflow:prompt 都被保留
+  // ①.b 旧 ka-whale-workflow:* system 段（含历史 ka-whale-workflow:main）
+  // 必须被丢弃：主 Persona 已完整在 deployment:persona，不能出现第二段重复。
   {
     const assemble = mock.listeners.get("system-prompt/assemble")[0];
     const assembly = {
       sections: [
         { name: "ka-whale-workflow:prompt", text: "WHALE_SECTION" },
+        { name: "ka-whale-workflow:main", text: "LEGACY_MAIN_DUPLICATE" },
         { name: "deployment:persona", text: "ignored" },
       ],
       contexts: [],
@@ -186,25 +186,20 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
     check(
-      "①.b2 保留 ka-whale-workflow 段（persona 最前）",
+      "①.b 旧 ka-whale-workflow:* 段被丢弃，真实 system = KAZ_ROLE_PROMPTS.main",
       systemReport !== undefined &&
-        systemReport.content === BASE_PROMPT + "\n\nWHALE_SECTION" &&
-        assembly.sections.length === 2 &&
-        assembly.sections[0].name === "deployment:persona" &&
-        assembly.sections[1].name === "ka-whale-workflow:prompt",
+        systemReport.content === MAIN_PROMPT &&
+        assembly.sections.length === 1 &&
+        assembly.sections[0].name === "deployment:persona",
     );
   }
 
-  // ①.b3 37.5 persona-application: ka-whale-workflow:main section carrying the
-  // current main role body is preserved after the DeepSeek base persona. The
-  // section uses KAZ_MAIN_ROLE_BODY so the base header/footer are not repeated.
+  // ①.b3 真实 main system 与 KAZ_ROLE_PROMPTS.main 逐字相等；header/footer/
+  // Keep-gray/role guidance 都只出现一次（不再由 BASE_PROMPT 重复 keep-gray）。
   {
     const assemble = mock.listeners.get("system-prompt/assemble")[0];
     const assembly = {
-      sections: [
-        { name: "ka-whale-workflow:main", text: KAZ_MAIN_ROLE_BODY },
-        { name: "deployment:persona", text: "ignored" },
-      ],
+      sections: [{ name: "deployment:persona", text: "ignored" }],
       contexts: [],
       variables: {},
     };
@@ -213,61 +208,68 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
     const assembledSystem = systemReport?.content ?? "";
-    const headerPhrase = "You are a helpful software engineer assistant.";
+    const headerPhrase = "You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.";
     const headerCount = assembledSystem.split(headerPhrase).length - 1;
     const footerPhrase = "The final white response should be crisp and to the point, and only appear after reasoning and working.";
     const footerCount = assembledSystem.split(footerPhrase).length - 1;
+    const keepGrayPhrase = "Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences.";
+    const keepGrayCount = assembledSystem.split(keepGrayPhrase).length - 1;
     const roleGuidancePhrase = "Follow the ka-whale-workflow in order:";
     const roleGuidanceCount = assembledSystem.split(roleGuidancePhrase).length - 1;
     check(
-      "①.b3 37.5 真实 system = base persona + KAZ_MAIN_ROLE_BODY（无 base 首/末重复）",
+      "①.b3 真实 main system 逐字等于 KAZ_ROLE_PROMPTS.main",
       systemReport !== undefined &&
-        systemReport.content === BASE_PROMPT + "\n\n" + KAZ_MAIN_ROLE_BODY &&
-        assembly.sections.length === 2 &&
-        assembly.sections[0].name === "deployment:persona" &&
-        assembly.sections[1].name === "ka-whale-workflow:main",
+        systemReport.content === KAZ_ROLE_PROMPTS.main &&
+        assembly.sections.length === 1 &&
+        assembly.sections[0].name === "deployment:persona",
     );
-    check(
-      "①.b3 组装后 'You are a helpful software engineer assistant' header 恰好一次",
-      headerCount === 1,
-    );
-    check(
-      "①.b3 组装后 final white response 结尾恰好一次",
-      footerCount === 1,
-    );
-    check(
-      "①.b3 组装后 main role guidance 恰好一次",
-      roleGuidanceCount === 1,
-    );
-    check(
-      "①.b3 ka-whale-workflow:main 段本身不含 base header/closing",
-      !KAZ_MAIN_ROLE_BODY.startsWith("You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.") &&
-        !KAZ_MAIN_ROLE_BODY.endsWith("The final white response should be crisp and to the point, and only appear after reasoning and working."),
-    );
+    check("①.b3 组装后 header 恰好一次", headerCount === 1);
+    check("①.b3 组装后 final white response 结尾恰好一次", footerCount === 1);
+    check("①.b3 组装后 Keep-gray 指引恰好一次（无 BASE_PROMPT 重复）", keepGrayCount === 1);
+    check("①.b3 组装后 main role guidance 恰好一次", roleGuidanceCount === 1);
   }
 
-  // ①.b4 37.5 controlled subagents: request.persona role text is preserved,
-  // not overwritten by the DeepSeek base persona.
+  // ①.b4 controlled subagents: request.persona carries KAZ_ROLE_PROMPTS.subagent.<role>
+  // exactly and kaz-system-prompt preserves it; reported real system must equal it.
   {
     const assemble = mock.listeners.get("system-prompt/assemble")[0];
-    const subAgent = {
-      id: "s-kaz-sub",
-      options: { subagentDepth: 1 },
-      session: {
-        events: [{ type: "subagent/descriptor", data: {} }],
-        header: { origin: "subagent", parentSession: "s-kaz", agentPreset: "kaz" },
-      },
-    };
-    const assembly = {
-      sections: [{ name: "deployment:persona", text: KAZ_ROLE_PROMPTS.subagent.worker }],
-      contexts: [],
-      variables: {},
-    };
-    await assemble(assembly, { agent: subAgent }, async () => assembly);
+    const roles = Object.keys(KAZ_ROLE_PROMPTS.subagent);
+    let allPassed = true;
+    let allSystemEqual = true;
+    for (const role of roles) {
+      const subAgent = {
+        id: "s-kaz-sub-" + role,
+        options: { subagentDepth: 1 },
+        session: {
+          events: [{ type: "subagent/descriptor", data: {} }],
+          header: { origin: "subagent", parentSession: "s-kaz", agentPreset: "kaz" },
+        },
+      };
+      const assembly = {
+        sections: [{ name: "deployment:persona", text: KAZ_ROLE_PROMPTS.subagent[role] }],
+        contexts: [],
+        variables: {},
+      };
+      const before = kspReports.length;
+      await assemble(assembly, { agent: subAgent }, async () => assembly);
+      const reports = kspReports.slice(before);
+      const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
+      const preserved =
+        assembly.sections.length === 1 &&
+        assembly.sections[0].text === KAZ_ROLE_PROMPTS.subagent[role];
+      const systemEqual =
+        systemReport !== undefined &&
+        systemReport.content === KAZ_ROLE_PROMPTS.subagent[role];
+      if (!preserved) allPassed = false;
+      if (!systemEqual) allSystemEqual = false;
+    }
     check(
-      "①.b4 受控子代理 request.persona 保留 KAZ_ROLE_PROMPTS.subagent.worker",
-      assembly.sections.length === 1 &&
-        assembly.sections[0].text === KAZ_ROLE_PROMPTS.subagent.worker,
+      "①.b4 四个受控子代理 request.persona 原样保留 KAZ_ROLE_PROMPTS.subagent.<role>",
+      allPassed,
+    );
+    check(
+      "①.b4 四个受控子代理真实 system 逐字等于 KAZ_ROLE_PROMPTS.subagent.<role>",
+      allSystemEqual,
     );
   }
 
@@ -326,7 +328,7 @@ function makeSettings() {
     await assemble(assembly, { agent: AGENT }, async () => assembly);
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
-    check("①.c goal 模式开启时 tool:goal 仍被丢弃", systemReport !== undefined && systemReport.content === BASE_PROMPT);
+    check("①.c goal 模式开启时 tool:goal 仍被丢弃", systemReport !== undefined && systemReport.content === MAIN_PROMPT);
     check("①.c 过滤后 sections 只剩 persona", assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona");
   }
 
@@ -346,7 +348,7 @@ function makeSettings() {
     await assemble(assembly, { agent: AGENT }, async () => assembly);
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
-    check("①.d plan + tool:goal 都被丢弃，真实 system 只有 persona", systemReport !== undefined && systemReport.content === BASE_PROMPT);
+    check("①.d plan + tool:goal 都被丢弃，真实 system = 完整 main Persona", systemReport !== undefined && systemReport.content === MAIN_PROMPT);
     check("①.d 过滤后 sections 只剩 persona", assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona");
   }
 
@@ -527,6 +529,65 @@ function makeSettings() {
     listRes?.ok === true &&
       listEntries.length === 1 &&
       listEntries[0].content === "child report after disposal still visible",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ③.d child records persist across dispose + simulated dsh restart; even when
+// agents/sessions no longer resolve the ended child, history falls back to the
+// persisted record map by requested sessionId.
+// ---------------------------------------------------------------------------
+{
+  const CHILD_RESTART_ID = "s-rd-child-restart";
+  const childAgentForRestart = {
+    id: CHILD_RESTART_ID,
+    options: { subagentDepth: 1 },
+    session: {
+      id: CHILD_RESTART_ID,
+      events: [{ type: "turn/start", data: { turn: 1 } }],
+      header: { origin: "subagent", parentSession: "s-parent-restart" },
+    },
+  };
+  const settings = makeSettings();
+  const recordsStore = join(TMP, "round-display-records-child-restart.json");
+  const firstMock = makeMockCtx({
+    settings,
+    agents: null,
+    provided: {
+      sessions: { get: (id) => (id === CHILD_RESTART_ID ? childAgentForRestart : undefined) },
+    },
+  });
+  rdPlugin.apply(firstMock.ctx, { enabled: true, recordsStore });
+  const firstRd = firstMock.provided["roundDisplay"];
+  const firstRpc = firstMock.rpcHandlers.get("/round-display");
+  const realNow = Date.now;
+  let nowTick = 2500000;
+  Date.now = () => nowTick++;
+  try {
+    firstRd.report({ agent: childAgentForRestart, plugin: "kaz-system-prompt", category: "system-prompt", title: "system prompt", content: "child full system prompt record" });
+    firstRd.report({ agent: childAgentForRestart, plugin: "kaz-mode", category: "tool-surface", title: "本轮工具变化", content: "child tool surface record" });
+    firstRd.report({ agent: childAgentForRestart, plugin: "ka-whale-workflow", category: "subagent-report", title: "子代理汇报", content: "child report record" });
+  } finally {
+    Date.now = realNow;
+  }
+  const disposeListener = firstMock.listeners.get("agent/disposed")?.[0];
+  disposeListener?.({ agent: childAgentForRestart });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  // Simulate restart: no live agents/sessions registry contains the ended child.
+  const secondMock = makeMockCtx({ settings: makeSettings(), agents: null, provided: {} });
+  rdPlugin.apply(secondMock.ctx, { enabled: true, recordsStore });
+  const secondRpc = secondMock.rpcHandlers.get("/round-display");
+  const historyRes = await secondRpc("history", { sessionId: CHILD_RESTART_ID });
+  const turns = Array.isArray(historyRes?.value?.turns) ? historyRes.value.turns : [];
+  const contents = turns.flatMap((turn) =>
+    Array.isArray(turn.entries) ? turn.entries.map((entry) => entry.content) : [],
+  );
+  check(
+    "③.d child system-prompt/report/tool-surface 记录在 dispose+重启后可由 history 按 sessionId 读取",
+    historyRes?.ok === true &&
+      contents.includes("child full system prompt record") &&
+      contents.includes("child tool surface record") &&
+      contents.includes("child report record"),
   );
 }
 
