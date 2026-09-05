@@ -56,7 +56,7 @@ const store = createStageStore(STORE_FILE);
 check("插件默认导出存在", plugin !== null && typeof plugin === "object" && plugin.name === "ka-whale-workflow");
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 check("主流程文案已导出且非空", typeof MAIN_FLOW_TEXT === "string" && MAIN_FLOW_TEXT.trim().length > 0);
-check("主流程文案含 v0.9 §9.1 Goal-active 语义", MAIN_FLOW_TEXT.includes("working (or goal-active)") && MAIN_FLOW_TEXT.includes("do not use create_goal directly") && MAIN_FLOW_TEXT.includes("After Goal ends, proceed as if working ended"));
+check("主流程文案含 v0.9 §9.1 Goal-active 语义", MAIN_FLOW_TEXT.includes("working (or goal-active)") && MAIN_FLOW_TEXT.includes("do not use create_goal directly") && MAIN_FLOW_TEXT.includes("After Goal ends, proceed as if working ended") && MAIN_FLOW_TEXT.includes("At decide-goal, choose normal when the task is completable in this workflow-run") && MAIN_FLOW_TEXT.includes("Choose goal when the objective is clear"));
 check("36.6 主 Persona 含事件驱动等待语义", MAIN_FLOW_TEXT.includes("must NOT use pwsh sleep") && MAIN_FLOW_TEXT.includes("poll list_agents") && MAIN_FLOW_TEXT.includes("end the current turn and wait for the subagent's report/finished message") && MAIN_FLOW_TEXT.includes("list_agents and send_message are not wait primitives"));
 check("36.7 主 Persona 含批评纪律", MAIN_FLOW_TEXT.includes("Critique first") && MAIN_FLOW_TEXT.includes("do not manufacture criticism") && MAIN_FLOW_TEXT.includes("Critically evaluate subagent reports and critiques instead of accepting them blindly"));
 check("36.7 worker 流程含批评纪律", SUBAGENT_FLOW_TEXT.includes("critique the delegation first") && SUBAGENT_FLOW_TEXT.includes("identify real weaknesses") && SUBAGENT_FLOW_TEXT.includes("do not blindly accept"));

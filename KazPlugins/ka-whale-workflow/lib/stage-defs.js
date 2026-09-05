@@ -142,7 +142,7 @@ const DEFINITIONS = {
       allowedTools: ["whale_report"],
       canAdvance: ["working", GOAL_ACTIVE_STAGE],
       task:
-        "Decide whether to start or resume Goal mode. If Goal is needed, call whale_report({mode:'goal', objective, max_goal_rounds?}); that enters goal-active. If not needed, call whale_report with normal/default mode to advance to working.",
+        "Decide whether to use Goal or normal. Choose normal when the task can be completed in this workflow-run and does not need official Goal-driver cross-round auto-continuation or resume; multi-step is still normal when the task plan can manage it in working. Choose goal when the objective is clear but naturally requires multi-round autonomous iteration, progress tracking/resume, or an active/paused Goal already exists and the user wants to continue it. If Goal is needed, call whale_report({mode:'goal', objective, max_goal_rounds?}); that enters goal-active. If normal, call whale_report with normal/default mode to advance to working.",
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
