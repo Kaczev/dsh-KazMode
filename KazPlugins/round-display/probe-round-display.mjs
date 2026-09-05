@@ -19,7 +19,7 @@ import kazModePlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
+import { KAZ_ROLE_PROMPTS, KAZ_MAIN_ROLE_BODY } from "../kaz-shared/lib/tool-lists.js";
 
 /** Kaz 5.0 Step1：kaz-system-prompt 恒为 DeepSeek 基础提示词（不再有短 persona 变体）。 */
 const BASE_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
@@ -195,13 +195,14 @@ function makeSettings() {
     );
   }
 
-  // ①.b3 37.5 persona-application: ka-whale-workflow:main section carrying
-  // current KAZ_ROLE_PROMPTS.main is preserved after the DeepSeek base persona.
+  // ①.b3 37.5 persona-application: ka-whale-workflow:main section carrying the
+  // current main role body is preserved after the DeepSeek base persona. The
+  // section uses KAZ_MAIN_ROLE_BODY so the base header/footer are not repeated.
   {
     const assemble = mock.listeners.get("system-prompt/assemble")[0];
     const assembly = {
       sections: [
-        { name: "ka-whale-workflow:main", text: KAZ_ROLE_PROMPTS.main },
+        { name: "ka-whale-workflow:main", text: KAZ_MAIN_ROLE_BODY },
         { name: "deployment:persona", text: "ignored" },
       ],
       contexts: [],
@@ -211,13 +212,37 @@ function makeSettings() {
     await assemble(assembly, { agent: AGENT }, async () => assembly);
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
+    const assembledSystem = systemReport?.content ?? "";
+    const headerPhrase = "You are a helpful software engineer assistant.";
+    const headerCount = assembledSystem.split(headerPhrase).length - 1;
+    const footerPhrase = "The final white response should be crisp and to the point, and only appear after reasoning and working.";
+    const footerCount = assembledSystem.split(footerPhrase).length - 1;
+    const roleGuidancePhrase = "Follow the ka-whale-workflow in order:";
+    const roleGuidanceCount = assembledSystem.split(roleGuidancePhrase).length - 1;
     check(
-      "①.b3 37.5 真实 system = base persona + 当前 KAZ_ROLE_PROMPTS.main",
+      "①.b3 37.5 真实 system = base persona + KAZ_MAIN_ROLE_BODY（无 base 首/末重复）",
       systemReport !== undefined &&
-        systemReport.content === BASE_PROMPT + "\n\n" + KAZ_ROLE_PROMPTS.main &&
+        systemReport.content === BASE_PROMPT + "\n\n" + KAZ_MAIN_ROLE_BODY &&
         assembly.sections.length === 2 &&
         assembly.sections[0].name === "deployment:persona" &&
         assembly.sections[1].name === "ka-whale-workflow:main",
+    );
+    check(
+      "①.b3 组装后 'You are a helpful software engineer assistant' header 恰好一次",
+      headerCount === 1,
+    );
+    check(
+      "①.b3 组装后 final white response 结尾恰好一次",
+      footerCount === 1,
+    );
+    check(
+      "①.b3 组装后 main role guidance 恰好一次",
+      roleGuidanceCount === 1,
+    );
+    check(
+      "①.b3 ka-whale-workflow:main 段本身不含 base header/closing",
+      !KAZ_MAIN_ROLE_BODY.startsWith("You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.") &&
+        !KAZ_MAIN_ROLE_BODY.endsWith("The final white response should be crisp and to the point, and only appear after reasoning and working."),
     );
   }
 

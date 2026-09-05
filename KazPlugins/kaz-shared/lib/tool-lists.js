@@ -380,6 +380,24 @@ The final white response should be crisp and to the point, and only appear after
   }),
 });
 
+/** DeepSeek base 首句/末句：`KAZ_ROLE_PROMPTS.main` 作为完整 Persona 含它们，
+ *  但真实系统里 `deployment:persona` 已先逐字携带完整 base prompt，因此
+ *  `ka-whale-workflow:main` 段只放去掉这两段后的 main role body，避免重复。 */
+const KAZ_MAIN_ROLE_HEADER = "You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.\n\n";
+const KAZ_MAIN_ROLE_FOOTER = "\n\nThe final white response should be crisp and to the point, and only appear after reasoning and working.";
+
+/** v0.9 §9.1 main Persona 的运行时 role body（派生自 KAZ_ROLE_PROMPTS.main，
+ *  不另存一份正文，避免双源漂移）。 */
+export const KAZ_MAIN_ROLE_BODY = Object.freeze(
+  KAZ_ROLE_PROMPTS.main.startsWith(KAZ_MAIN_ROLE_HEADER) &&
+  KAZ_ROLE_PROMPTS.main.endsWith(KAZ_MAIN_ROLE_FOOTER)
+    ? KAZ_ROLE_PROMPTS.main.slice(
+        KAZ_MAIN_ROLE_HEADER.length,
+        KAZ_ROLE_PROMPTS.main.length - KAZ_MAIN_ROLE_FOOTER.length,
+      )
+    : KAZ_ROLE_PROMPTS.main,
+);
+
 /** 只进维护子代理面的记忆写工具（主线基础面/可选池都不放行）。 */
 export const KAZ_MAINTENANCE_ONLY_TOOLS = Object.freeze([
   "memory_save",

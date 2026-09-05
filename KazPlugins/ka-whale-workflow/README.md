@@ -33,8 +33,11 @@
   `kaz-shared`，本组件 `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 与
   `V09_ROLE_PERSONAS` 都由它派生。37.5 起主 Persona 改为真实
   `ka-whale-workflow:main` system-prompt 段（每个 step 重新组装，旧会话自动拿到
-  当前 `KAZ_ROLE_PROMPTS.main`，不再受 one-time user message / `hasInjectedBefore`
-  阻挡）；受控 v0.9 子代理的 `request.persona` 携带当前
+  当前 `KAZ_MAIN_ROLE_BODY`，不再受 one-time user message / `hasInjectedBefore`
+  阻挡）；`KAZ_MAIN_ROLE_BODY` 派生自 `KAZ_ROLE_PROMPTS.main`，去掉 DeepSeek base
+  首句/末句，因为 `deployment:persona` 已先逐字携带完整 base prompt——真实 system
+  里 role guidance 只出现一次，不再重复 `You are a helpful software engineer assistant`
+  header 或 final-white-response 结尾；受控 v0.9 子代理的 `request.persona` 携带当前
   `KAZ_ROLE_PROMPTS.subagent.*`，`kaz-system-prompt` 会原样保留该角色 Persona。
 - 子代理 report 的 round-display 摘要（37.5）：父主线 `agent/pre-step` 收到
   `subagent-report` / `subagent-settled` 后以 category=`subagent-report` 同时记录到

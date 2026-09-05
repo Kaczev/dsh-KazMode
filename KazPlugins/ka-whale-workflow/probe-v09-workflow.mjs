@@ -20,7 +20,7 @@ import {
   canAdvance,
 } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
-import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
+import { KAZ_MAIN_ROLE_BODY } from "../kaz-shared/lib/tool-lists.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -157,8 +157,8 @@ const kaSubWhale = registeredTools.get(KA_SUB_WHALE_TOOL);
   );
   const mainText = typeof mainSection?.text === "function" ? mainSection.text({ agent }) : "";
   check(
-    "37.5 system section resolves to current KAZ_ROLE_PROMPTS.main for Kaz main agent",
-    mainText === KAZ_ROLE_PROMPTS.main,
+    "37.5 system section resolves to KAZ_MAIN_ROLE_BODY for Kaz main agent (base boilerplate de-duplicated)",
+    mainText === KAZ_MAIN_ROLE_BODY,
   );
   const childForSection = {
     id: "s-child-system",

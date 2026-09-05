@@ -40,6 +40,7 @@ import {
   KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH,
   KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH,
   KAZ_ROLE_PROMPTS,
+  KAZ_MAIN_ROLE_BODY,
   KAZ_V09_MAIN_TOOLS,
   KAZ_V09_SUB_WHALE_REPORT_TOOLS,
   KAZ_V09_SUBAGENT_ROLE_TOOLS,
@@ -140,7 +141,9 @@ const MANUAL_COMMAND_NAMES = ["goal"];
 /** v0.9 主流程上下文文案（v0.9 §9.1 Persona Goal-active 口径；阶段注入另行按 run 追加）。
  *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.main，避免双源漂移。
  *  37.5：运行时的主 Persona 已注册为 `ka-whale-workflow:main` system-prompt 段；
- *  本常量仅保留给探针/兼容引用，不再作为主会话 user message 注入。 */
+ *  本代去重：该真实 system 段只放 KAZ_MAIN_ROLE_BODY（完整 Persona 去掉 DeepSeek base
+ *  首句/末句），因为 `deployment:persona` 已先逐字携带 base prompt；本常量仅保留给
+ *  探针/兼容引用，不再作为主会话 user message 注入。 */
 export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
 >
 ${KAZ_ROLE_PROMPTS.main}`;
@@ -1002,10 +1005,12 @@ export default {
       },
     });
 
-    // 37.5 persona-application: KAZ_ROLE_PROMPTS.main is the real main
-    // system-prompt section. It is assembled on every step, so existing
-    // sessions receive persona updates immediately instead of being blocked by
-    // the old one-time main-flow user-message + hasInjectedBefore logic.
+    // 37.5 persona-application: the main role system section is assembled on
+    // every step, so existing sessions receive persona updates immediately
+    // instead of being blocked by the old one-time main-flow user-message +
+    // hasInjectedBefore logic. The section emits KAZ_MAIN_ROLE_BODY (the
+    // KAZ_ROLE_PROMPTS.main role text minus the DeepSeek base header/footer);
+    // deployment:persona already carries the base prompt verbatim first.
     ctx.effect(
       () =>
         ctx.systemPrompt.section({
@@ -1023,7 +1028,7 @@ export default {
                 kazMode !== null &&
                 typeof kazMode.kazEnabled === "function"
               ) {
-                return kazMode.kazEnabled(agent) === true ? KAZ_ROLE_PROMPTS.main : "";
+                return kazMode.kazEnabled(agent) === true ? KAZ_MAIN_ROLE_BODY : "";
               }
               return "";
             } catch {

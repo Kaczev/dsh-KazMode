@@ -9,8 +9,9 @@
  *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
  *     Kaz 主会话真实 system = deployment:persona（DeepSeek 基础提示词，逐字、
- *     最前）+ ka-whale-workflow:main（KAZ_ROLE_PROMPTS.main，37.5 起由
- *     ka-whale-workflow 注册为真实 system 段）；受控子代理保留 request.persona
+ *     最前）+ ka-whale-workflow:main（KAZ_MAIN_ROLE_BODY —— KAZ_ROLE_PROMPTS.main
+ *     去掉 base 首句/末句的 role body；37.5 起由 ka-whale-workflow 注册为真实
+ *     system 段，本代去重后不再重复 base 首/末行）；受控子代理保留 request.persona
  *     带入的 KAZ_ROLE_PROMPTS.subagent.*，不再被本控制器覆盖成基础 persona。
  *     原生 plan:policy / tool:goal 段不再注入——v0.8 Step B1 已实际移除）；
  *   - agent/pre-step 扫描上报：
