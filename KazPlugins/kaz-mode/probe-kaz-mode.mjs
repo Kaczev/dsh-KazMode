@@ -254,8 +254,10 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   const asDefault = await rpc("setExternalToolPluginsAsDefault", { cwd: TMP });
   check("①.6 setExternalToolPluginsAsDefault 返回 read-only", asDefault !== null && asDefault.ok === false && asDefault.error?.code === "read-only");
   const priv = await rpc("addPrivatePluginCandidate", { cwd: TMP, tool: "safe_json_write", description: "Safely write JSON files", source: "KazPrivatePlugins/test", available: true });
-  check("①.6 addPrivatePluginCandidate 写入 schema v2 candidates", priv !== null && priv.ok === true && Array.isArray(priv.value.privatePluginCandidates) && priv.value.privatePluginCandidates.some((c) => c.tool === "safe_json_write" && c.available === true));
+  check("①.6 addPrivatePluginCandidate 返回 read-only（用户不可添加私有候选）", priv !== null && priv.ok === false && priv.error?.code === "read-only");
+  const getPriv = await rpc("getExternalToolPlugins", { cwd: TMP });
   check("①.6 私有插件候选不进入 Stable Main Surface", kazMode.toolVisible(sKaz, "safe_json_write") === false);
+  check("①.6 面板只读拒绝后私有候选未新增", getPriv !== null && Array.isArray(getPriv.value.privatePluginCandidates) && getPriv.value.privatePluginCandidates.some((c) => c.tool === "safe_json_write" && c.source === "KazPrivatePlugins/test") === false);
   const getAfter = await rpc("getExternalToolPlugins", { cwd: TMP });
   check("①.6 旧 four-file JSON 兼容读仍通过（getExternalToolPlugins 返回 user/project/effective）", getAfter !== null && getAfter.ok === true && typeof getAfter.value.userEnable === "object" && typeof getAfter.value.userOtherCatalog === "object" && typeof getAfter.value.effective === "object");
 }

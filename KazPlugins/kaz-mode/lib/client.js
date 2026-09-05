@@ -1249,25 +1249,6 @@ window.__ModuleLoader__.load({
 					if (res !== null) setData(res);
 				};
 
-				const addPrivateCandidate = async () => {
-					const tool = window.prompt("输入私有插件候选工具名（tool）");
-					if (tool === null || tool.trim().length === 0) return;
-					const description = window.prompt("输入一句英文用途描述（可留空）", "");
-					const source = window.prompt("输入来源路径（例如 KazPrivatePlugins/<plugin>，可留空）", "");
-					const res = await rpcCall("addPrivatePluginCandidate", {
-						sessionId: sessionId || "",
-						cwd: targetCwd(),
-						tool: tool.trim(),
-						description: description === null ? "" : description.trim(),
-						source: source === null ? "" : source.trim(),
-						available: true,
-					});
-					if (res !== null && typeof res.privatePluginCandidates === "object") {
-						const layers = await rpcCall("getExternalToolPlugins", { sessionId: sessionId || "", cwd: targetCwd() });
-						if (layers !== null) setData(layers);
-					}
-				};
-
 				if (data === null) {
 					return createElement("div", { className: "kzm-state-section" }, createElement("p", { className: "kzm-note" }, "工具控制面板（当前项目）加载中…"));
 				}
@@ -1349,10 +1330,9 @@ window.__ModuleLoader__.load({
 					renderToolChips(workflowTools.length > 0 ? workflowTools : ["(none)"]),
 					createElement("p", { className: "kzm-tp-group-title" }, "tool-jobs（固定集合 · 只读）"),
 					renderToolChips(toolJobs.length > 0 ? toolJobs : ["(none)"]),
-					createElement("p", { className: "kzm-tp-group-title" }, "私有插件候选（查看/添加 · 不直接进主面）"),
+					createElement("p", { className: "kzm-tp-group-title" }, "私有插件候选（查看 · 仅生命周期写入 · 不直接进主面）"),
 					privatePluginCandidates.length === 0 && createElement("p", { className: "kzm-note" }, "暂无私有插件候选。"),
 					privatePluginCandidates.map((candidate) => renderCandidateRow(candidate)),
-					createElement("div", { className: "kzm-tp-add" }, createElement("button", { type: "button", className: "kzm-cfg-btn", disabled: !writable || busy, onClick: () => void addPrivateCandidate() }, "＋ 添加私有插件候选")),
 					createElement("p", { className: "kzm-tp-group-title" }, "外置插件候选（查看/添加 · 不直接进主面）"),
 					externalKeys.length === 0 && createElement("p", { className: "kzm-note" }, "暂无外置插件候选。"),
 					externalKeys.map((key) => renderExternalRow(key)),

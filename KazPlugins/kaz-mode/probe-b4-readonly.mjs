@@ -36,15 +36,15 @@ check("ToolPluginsSection 不包含删除按钮", toolSection.includes("applyDel
 check("ToolPluginsSection 不包含恢复/设为默认写处理函数", toolSection.includes("applySetAsDefault") === false && toolSection.includes("resetLayer") === false);
 check("ToolPluginsSection 不调用 resetExternalToolPlugins/setExternalToolPluginsAsDefault", toolSection.includes("resetExternalToolPlugins") === false && toolSection.includes("setExternalToolPluginsAsDefault") === false);
 
-// R-B4-2：三类候选查看/添加
-check("ToolPluginsSection 保留私有插件候选添加", toolSection.includes("addPrivatePluginCandidate") && toolSection.includes("私有插件候选"));
+// R-B4-2/6.0.3：三类候选查看；私有候选只读不可用户添加
+check("ToolPluginsSection 不再暴露私有插件候选添加按钮", toolSection.includes("addPrivateCandidate") === false && toolSection.includes("添加私有插件候选") === false);
+check("ToolPluginsSection 保留私有插件候选只读展示", toolSection.includes("私有插件候选") && toolSection.includes("仅生命周期写入"));
 check("ToolPluginsSection 保留 tool-jobs 固定集合展示", toolSection.includes("tool-jobs"));
 check("ToolPluginsSection 保留外置插件候选添加", toolSection.includes("addExternalPlugin") && toolSection.includes("外置插件候选"));
 
 // R-B4-3/R-B4-5：server 只读拒绝 + 候选写入
 check("index.js 提供只读错误语义", indexText.includes("function rpcReadOnly") && indexText.includes('code: "read-only"'));
-check("index.js 写入口包含只读拒绝（reset/as-default）", indexText.includes("不再提供恢复/重置入口") && indexText.includes("不再提供设为默认设置入口"));
-check("index.js 仍支持 addPrivatePluginCandidate", indexText.includes('endpoint === "addPrivatePluginCandidate"'));
+check("index.js 写入口包含只读拒绝（reset/as-default/私有候选添加）", indexText.includes("不再提供恢复/重置入口") && indexText.includes("不再提供设为默认设置入口") && indexText.includes("私有插件候选不可由用户在工具面板添加"));
 check("index.js 读取 schema v2 私有插件候选", indexText.includes("normalizeAgentManagedCandidateRegistry") && indexText.includes("privatePluginCandidates"));
 check("index.js 返回只读展示固定面/工具集", indexText.includes("stableMainTools") && indexText.includes("workflowTools") && indexText.includes("toolJobs"));
 check("index.js 保留旧 four-file 兼容读取路径", indexText.includes("loadExternalToolPluginLayers") && indexText.includes("getExternalToolPlugins"));

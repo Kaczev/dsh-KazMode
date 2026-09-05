@@ -1789,25 +1789,9 @@ export default {
         }
 
         if (endpoint === "addPrivatePluginCandidate") {
-          const tool = typeof input.tool === "string" ? input.tool.trim() : "";
-          const description = typeof input.description === "string" ? input.description.trim() : "";
-          const source = typeof input.source === "string" ? input.source.trim() : "";
-          if (tool.length === 0) return rpcFail("缺少 tool");
-          const result = upsertPrivatePluginCandidateFile(
-            { tool, description, source, available: input.available === true },
-            ctx.logger,
-          );
-          if (result.ok !== true) return rpcFail(result.error || "无法写入私有插件候选注册表");
-          const registry = loadAgentManagedRegistry(ctx.logger);
-          return {
-            ok: true,
-            value: {
-              registry,
-              privatePluginCandidates: Array.isArray(registry.candidates)
-                ? registry.candidates.map((candidate) => ({ ...candidate }))
-                : [],
-            },
-          };
+          // 6.0.3：私有插件候选不由用户在面板添加；写入只允许 pluginCreator /
+          // pluginMaintainer 生命周期内部完成。此端点保持存在但只读拒绝。
+          return rpcReadOnly("私有插件候选不可由用户在工具面板添加；请通过 pluginCreator/pluginMaintainer 生命周期管理。");
         }
 
         if (endpoint === "resetExternalToolPlugins") {

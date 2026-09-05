@@ -54,13 +54,14 @@ Kaz 工具面由代码级固定面（`KAZ_STABLE_MAIN_TOOLS` / workflow 面）�
 - **只读展示**：Stable Main Surface、Workflow Carrier Tools、`tool-jobs` 固定集合，
   以及当前四文件模型生效状态；
 - **用户可操作范围**：
-  1. 私有插件候选：查看 / 添加（写入 `kaz-agent-managed-tools.json` 的
-     `candidates` schema v2；不直接进主面，需经受控委派/任务计划选择）；
+  1. 私有插件候选：**只读查看**（`kaz-agent-managed-tools.json` 的 `candidates`
+     schema v2；用户不可添加，写入只由 pluginCreator / pluginMaintainer 生命周期完成）；
   2. `tool-jobs`：只读查看官方固定集合 `job_list / job_output / job_kill`；
   3. 外置插件候选：查看 / 添加（沿用用户 `other-*` 四文件作为候选层；
      不直接进主面）。
 - 旧写 RPC（`setExternalToolPlugin` 的开关/删除、`resetExternalToolPlugins`、
-  `setExternalToolPluginsAsDefault`）保留入口但返回 `read-only` 拒绝语义。
+  `setExternalToolPluginsAsDefault`、`addPrivatePluginCandidate`）保留入口但返回
+  `read-only` 拒绝语义。
 
 ```jsonc
 // 插件启用字典（tool-plugin.json / other-tool-plugin.json）——兼容读
@@ -115,7 +116,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 - 旧 four-file JSON（`tool-plugin*.json` / `other-tool-plugin*.json`）继续兼容读取，
   只作为面板只读状态来源；
 - 面板可操作范围仅剩：
-  - 私有插件候选（查看/添加到 `kaz-agent-managed-tools.json` 的 `candidates` schema v2）；
+  - 私有插件候选（**只读查看**；用户不可添加，写入只由 pluginCreator/pluginMaintainer 生命周期完成）；
   - `tool-jobs` 固定集合查看；
   - 外置插件候选（查看/添加，仍写用户 `other-*` 候选层）；
 - 添加候选**不会直接进入 Stable Main/Sub Surface**，后续经受控委派/任务计划选择；
@@ -185,8 +186,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    assignedTools 显示，旧/未知子代理回落到保守 Base；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
-5. Kaz 面板「工具控制面板」只读展示 Stable Main/workflow 面与三类候选
-   （私有插件候选、`tool-jobs`、外置插件候选）；无启用/停用/删除/恢复/设为默认控件；
+5. Kaz 面板「工具控制面板」只读展示 Stable Main/workflow 面；私有插件候选只读、
+   `tool-jobs` 只读、外置插件候选可添加；无启用/停用/删除/恢复/设为默认控件；
 6. 旧 four-file JSON 兼容读取仍通过；UI 不写启用状态。工具控制面板之外的插件设置
    （output-beep / round-display / deepseek-default-model 等项目状态）仍可正常调整，
    不新增/改写被管理插件的 settings.yaml 段，改动只落在 `kaz-defaults.json`、

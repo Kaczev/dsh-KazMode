@@ -36,10 +36,11 @@ check(
     !/const PLUGINS = \[\s*\{\s*id: "ka-whale-memory"/.test(clientSrc),
 );
 check(
-  "B4 三类候选添加/查看通道保留（外置插件、外置工具、私有插件候选）",
+  "B4/6.0.3 候选查看通道保留（私有只读 + 外置插件/工具可添加）",
   clientSrc.includes("＋ 添加外置插件") &&
     clientSrc.includes("＋ 添加工具") &&
-    clientSrc.includes("＋ 添加私有插件候选") &&
+    clientSrc.includes("添加私有插件候选") === false &&
+    clientSrc.includes("私有插件候选") &&
     clientSrc.includes("tool-jobs"),
 );
 
