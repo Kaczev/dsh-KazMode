@@ -1,7 +1,7 @@
 {
   "name": "round-minimal",
   "version": "0.3.0",
-  "description": "首阶段极简：首次工具调用前按 kaz-memory 自动暴露极简工具集（开=memory_search；关=pwsh/read/edit），首次工具调用后恢复全量工具；第一轮开始注入精简工具解锁提示（Kaz 默认开）；并把 minimal→stable 的稳定边界（category=stable-boundary）上报 round-display 显示。",
+  "description": "首阶段极简：首次工具调用前按 kaz-memory 自动暴露极简工具集（开=memory_search；关=pwsh/read/edit），首次工具调用后恢复全量工具；第一轮开始注入精简工具解锁提示（Kaz 默认开）；并把每次 assemble 可见工具面增删明细（category=tool-surface）上报 round-display 显示。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

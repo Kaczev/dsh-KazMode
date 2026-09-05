@@ -147,10 +147,14 @@ check("create-plugin 注入格式含 lifecyclePath", stageInjectionText("pluginM
 check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity", "working") === false);
 {
   const challengeDef = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
+  const workerChallengeDef = stageDefinitionFor("worker", "challenge-plan");
   const workingText = stageInjectionText(MAIN_ROLE, "working", { taskPlanPath: "C:/plan.json" });
   const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
   check("36.5 challenge-plan 不持有 ka_sub_whale 且任务禁止写/定稿 plan", !challengeDef?.allowedTools.includes("ka_sub_whale") && typeof challengeDef?.task === "string" && challengeDef.task.includes("Do not write or finalize task plans") && challengeDef.task.includes("do not call ka_sub_whale"));
+  check("36.7 主 challenge-plan task 含批评纪律", typeof challengeDef?.task === "string" && challengeDef.task.includes("Critique the user's approach first") && challengeDef.task.includes("identify real weaknesses") && challengeDef.task.includes("do not manufacture criticism"));
+  check("36.7 worker challenge-plan task 含批评纪律", typeof workerChallengeDef?.task === "string" && workerChallengeDef.task.includes("Critique the delegation first") && workerChallengeDef.task.includes("do not manufacture criticism"));
   check("36.5 working 委派/维护路由语义文本", typeof workingDef?.task === "string" && workingDef.task.includes("persona=main plan items on the main line") && workingDef.task.includes("delegate subagent-persona plan items via ka_sub_whale") && workingDef.task.includes("pass through memory-maintenance/plugin-maintenance first"));
+  check("36.7 主 working task 批判性评估子代理批评", typeof workingDef?.task === "string" && workingDef.task.includes("critically evaluates subagent reports and their critiques") && workingDef.task.includes("instead of accepting them blindly"));
   check("36.5 working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
 }
 

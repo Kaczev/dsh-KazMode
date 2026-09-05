@@ -1,15 +1,21 @@
-// round-display + kaz-system-prompt 探针（2026-08-28；v0.8 Step B1 移除 Plan/tool:goal 段）
+// round-display + kaz-system-prompt 探针（2026-08-28；v0.8 Step B1 移除 Plan/tool:goal 段；
+// v0.9 36.7 白名单扩展：system-prompt/tool-surface）
 // 覆盖：
 //   ① kaz-system-prompt.mjs：system-prompt/assemble 后上报“真实系统提示词”
 //     （persona + ka-whale-workflow 段；plan:policy 与 tool:goal 一律丢弃；"\n\n" 连接，
-//     空段过滤）；
+//     空段过滤；category=system-prompt）；
 //   ② kaz-system-prompt.mjs：agent/pre-step 上报 goal-round-driver <goal_round>、
 //      tool-goal <goal_complete>/<goal_blocked>；plan-mode 通知不再上报；
 //      reject 的 step 不上报；
-//   ③ round-display：list / history 内条目按 at 降序（新消息排上）+ 同轮去重。
+//   ③ round-display：list / history 内条目按 at 降序（新消息排上）+ 同轮去重；
+//   ④ round-display：36.7 白名单显式接受 system-prompt/tool-surface，仍滤除 stage 噪音；
+//   ⑤ round-display：不带 category 的旧上报按来源回退分类（kaz-system-prompt → system-prompt，
+//      round-minimal 工具变化 → tool-surface/stable-boundary），噪音仍被过滤；
+//   ⑥ round-minimal：极简阶段 assemble 的工具面变化实际上报 category=tool-surface。
 // 运行：node KazPlugins/round-display/probe-round-display.mjs
 import { apply as kspApply } from "file:///C:/Users/Kaczev/Documents/GitHub/dsh-KazMode/kaz/kaz-system-prompt.mjs";
 import rdPlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/round-display/lib/index.js";
+import roundMinimalPlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/round-minimal/lib/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -158,6 +164,7 @@ function makeSettings() {
       "①.a plan/tool:goal/其它段被丢弃，真实 system 只有 persona",
       systemReport !== undefined && systemReport.content === BASE_PROMPT,
     );
+    check("①.a systemReport 携带 category=system-prompt", systemReport?.category === "system-prompt");
     check("①.a assemble 返回值原样透传", result === assembly);
     check("①.a 过滤后 sections 只剩 persona", assembly.sections.length === 1 && assembly.sections[0].name === "deployment:persona");
   }
@@ -362,8 +369,8 @@ function makeSettings() {
 }
 
 // ---------------------------------------------------------------------------
-// ④ round-display：v0.9 输出白名单（R-B6-2）——系统提示词快照/非白名单丢弃；
-//    Goal 上下文（goal-round-driver/tool-goal）保留；同轮不同内容保留 + 重复去重。
+// ④ round-display：v0.9 36.7 白名单（R-B6-2）——显式接受 system-prompt /
+//    tool-surface / goal-context；同轮不同内容保留 + 重复去重；stage 噪音仍滤除。
 // ---------------------------------------------------------------------------
 {
   const AGENT_SYS = { id: "s-rd-sys", session: { events: [{ type: "turn/start", data: { turn: 1 } }] } };
@@ -381,14 +388,18 @@ function makeSettings() {
   const realNow = Date.now;
   let nowTick = 2000000;
   Date.now = () => nowTick++;
+  const toolSurfaceContent = "工具面变化（来自 system-prompt/assemble）\n极简阶段（首次工具调用前）\n- 当前工具（1）：memory_search\n- 移除（19）：...\n+ 新增（1）：memory_search";
   try {
-    // 非白名单：真实 system 提示词快照不再展示。
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "assess-complexity prompt" });
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "working prompt" });
+    // 36.7 白名单：真实 system 提示词快照、工具面变化都展示。
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", category: "system-prompt", content: "assess-complexity prompt" });
+    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", category: "system-prompt", content: "working prompt" });
+    rd.report({ agent: AGENT_SYS, plugin: "round-minimal", title: "本轮工具变化", category: "tool-surface", content: toolSurfaceContent });
     // 白名单：Goal 上下文通知（同一轮不同内容应都保留；重复只留一条）。
     rd.report({ agent: AGENT_SYS, plugin: "goal-round-driver", title: "goal round", content: "<goal_round>round-1</goal_round>" });
     rd.report({ agent: AGENT_SYS, plugin: "tool-goal", title: "goal wrapup", content: "<goal_complete>done</goal_complete>" });
     rd.report({ agent: AGENT_SYS, plugin: "tool-goal", title: "goal wrapup", content: "<goal_complete>done</goal_complete>" });
+    // 非白名单：stage/whale_report 噪音仍被过滤。
+    rd.report({ agent: AGENT_SYS, plugin: "ka-whale-workflow", title: "stage-switch", category: "stage-switch", content: "whale_report: working -> communication" });
   } finally {
     Date.now = realNow;
   }
@@ -396,15 +407,32 @@ function makeSettings() {
   const listRes = await rpc("list", { sessionId: AGENT_SYS.id });
   const listEntries = Array.isArray(listRes?.value?.entries) ? listRes.value.entries : [];
   const listContents = listEntries.map((e) => e.content);
+  const listCategories = listEntries.map((e) => e.category);
   check(
-    "④ 白名单过滤 system prompt，保留 Goal 上下文且同轮去重（新在上）",
-    listEntries.length === 2 &&
-      JSON.stringify(listContents) === JSON.stringify(["<goal_complete>done</goal_complete>", "<goal_round>round-1</goal_round>"]),
+    "④ 36.7 白名单接受 system-prompt/tool-surface + Goal，且同轮去重（新在上）",
+    listEntries.length === 5 &&
+      JSON.stringify(listContents) ===
+        JSON.stringify([
+          "<goal_complete>done</goal_complete>",
+          "<goal_round>round-1</goal_round>",
+          toolSurfaceContent,
+          "working prompt",
+          "assess-complexity prompt",
+        ]),
+  );
+  check(
+    "④ 类别为 system-prompt/tool-surface/goal-context，无 stage 噪音",
+    listCategories.includes("system-prompt") &&
+      listCategories.includes("tool-surface") &&
+      listCategories.filter((c) => c === "goal-context").length === 2 &&
+      !listContents.some((c) => c.includes("whale_report")),
   );
 }
 
 // ---------------------------------------------------------------------------
 // ⑤ round-display：旧/未带 category 的上报按“注入源分类”兼容进白名单；
+//    36.7：kaz-system-prompt → system-prompt，round-minimal 工具变化 →
+//    tool-surface（旧“恢复全量”仍归 stable-boundary）；
 //    记忆指引、阶段切换、first-round guidance 等非白名单内容被过滤。
 // ---------------------------------------------------------------------------
 {
@@ -428,11 +456,12 @@ function makeSettings() {
     rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-memory", title: "guidance", content: "[ka-whale-memory Auto-Load]\n>\n- id: 1 | summary: s\n<" });
     rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-workflow", title: "阶段 goal-active", content: "[ka-whale-workflow goal-active]\n>\nMode: Goal is active\n<" });
     rd.report({ agent: AGENT_LEGACY, plugin: "round-minimal", title: "本轮工具变化", content: "工具面变化\n恢复全量（首次工具调用后）\n- 当前工具（19）…" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "round-minimal", title: "本轮工具变化", content: "工具面变化\n工具面变化\n- 当前工具（1）：memory_search\n- 移除（19）：…\n+ 新增（1）：memory_search" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "kaz-system-prompt", title: "system prompt", content: "real prompt" });
     // 非白名单噪音（不带 category）应被过滤：
     rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-memory", title: "guidance", content: "[ka-whale-memory guidance]\n>\nWe need to search memory\n<" });
     rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-workflow", title: "阶段切换", content: "whale_report：working → communication" });
     rd.report({ agent: AGENT_LEGACY, plugin: "round-minimal", title: "guidance", content: "[round-minimal guidance]\n>\nfirst round\n<" });
-    rd.report({ agent: AGENT_LEGACY, plugin: "kaz-system-prompt", title: "system prompt", content: "real prompt" });
   } finally {
     Date.now = realNow;
   }
@@ -442,14 +471,58 @@ function makeSettings() {
   const categories = listEntries.map((e) => e.category);
   const contents = listEntries.map((e) => e.content);
   check(
-    "⑤ 旧上报按来源分类进白名单（memory-snapshot/goal-context/stable-boundary），噪音被过滤",
-    listEntries.length === 3 &&
+    "⑤ 旧上报按来源分类进白名单（system-prompt/tool-surface/stable-boundary/memory-snapshot/goal-context），噪音被过滤",
+    listEntries.length === 5 &&
       categories.includes("memory-snapshot") &&
       categories.includes("goal-context") &&
       categories.includes("stable-boundary") &&
+      categories.includes("tool-surface") &&
+      categories.includes("system-prompt") &&
       !contents.some((c) => c.includes("memory guidance")) &&
-      !contents.some((c) => c.includes("whale_report")) &&
-      !contents.some((c) => c.includes("real prompt")),
+      !contents.some((c) => c.includes("whale_report")),
+  );
+  check("⑤ kaz-system-prompt 旧上报回退为 system-prompt", contents.includes("real prompt"));
+  check(
+    "⑤ round-minimal 非恢复工具变化回退为 tool-surface",
+    categories.includes("tool-surface"),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑥ round-minimal 运行时：首次极简阶段 assemble 产生工具面变化时，
+//    上报 payload 必须携带 category=tool-surface。
+// ---------------------------------------------------------------------------
+{
+  const AGENT_RM = { id: "s-rd-rm", session: { events: [] } };
+  const settings = makeSettings();
+  const rmReports = [];
+  const rmMock = makeMockCtx({
+    settings,
+    agents: { get: (id) => (id === AGENT_RM.id ? AGENT_RM : undefined) },
+    provided: {
+      kazMode: {
+        kazEnabled: () => true,
+        pluginEnabled: () => true,
+        pluginConfig: () => ({ enabled: true, firstRoundTools: ["memory_search"], includeSubagents: false, guidanceHeadEnabled: false, guidanceHead: "" }),
+      },
+      roundDisplay: { report: (payload) => rmReports.push(payload) },
+    },
+  });
+  roundMinimalPlugin.apply(rmMock.ctx, { enabled: true, firstRoundTools: ["memory_search"], includeSubagents: false });
+
+  const assemble = rmMock.listeners.get("system-prompt/assemble")[0];
+  const assembly = {
+    tools: [{ name: "read" }, { name: "write" }, { name: "memory_search" }],
+    sections: [],
+  };
+  const beforeCount = rmReports.length;
+  await assemble(assembly, { agent: AGENT_RM }, async () => assembly);
+  const toolSurfaceReports = rmReports
+    .slice(beforeCount)
+    .filter((payload) => payload?.plugin === "round-minimal" && payload?.title === "本轮工具变化");
+  check(
+    "⑥ round-minimal 极简工具面变化上报 category=tool-surface",
+    toolSurfaceReports.length > 0 && toolSurfaceReports.every((payload) => payload.category === "tool-surface"),
   );
 }
 

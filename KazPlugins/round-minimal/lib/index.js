@@ -29,7 +29,8 @@
 //
 // 工具变化显示：每次 system-prompt/assemble 时记录过滤前后的可见工具面，
 // 把当前轮的增删明细（移除/新增工具名）主动上报给 roundDisplay 服务，
-// 由 round-display 的「本轮注入」面板展示。
+// 由 round-display 的「本轮注入」面板展示。36.7 起所有工具面变化都带
+// category=tool-surface，不再只上报 minimal→stable 的“恢复全量”边界。
 //
 // 配置（热重载，写入 ~/.dsh/settings.yaml 的 round-minimal: 命名空间即可，
 // 无需重启；组合行 cordis.patch.yml 的 config 作为 base 层，用户设置优先）：
@@ -522,9 +523,9 @@ export default {
             plugin: "round-minimal",
             title: "本轮工具变化",
             content,
-            // v0.9 B6：只有 minimal→stable 的“恢复全量”边界进入 round-display 白名单；
-            // 极简基线/后续普通工具面变化不再展示。
-            ...(phase === "恢复全量（首次工具调用后）" ? { category: "stable-boundary" } : {}),
+            // 36.7：所有可见工具面增删/恢复变化都上报 tool-surface；
+            // 不再只把“恢复全量”边界当白名单内容。
+            category: "tool-surface",
           });
         }
       } catch (error) {

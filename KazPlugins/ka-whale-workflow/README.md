@@ -1,6 +1,6 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律）。
 
 ## 范围
 
@@ -72,6 +72,10 @@
   消息到达主会话再继续。`list_agents` / `send_message` 不是等待原语；主 Persona、
   working/plugin-preflight/memory-maintenance/plugin-maintenance 注入与
   `ka_sub_whale` description/output 都明确该口径。
+- 36.7 challenge-plan 批评纪律：主/worker 的 challenge-plan 阶段要求先批评、
+  识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
+  批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与
+  `KAZ_ROLE_PROMPTS` 同步更新，避免文档/代码漂移。
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 四个 `*_sub_whale_report`

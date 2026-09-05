@@ -1,6 +1,6 @@
 # round-minimal —— 首阶段极简（首次工具调用后恢复）
 
-> **作用**：首次工具调用前只暴露极简工具集，模型第一次调用工具后就恢复全部工具——首轮工具按 `kaz-memory` 是否启用自动切换（启用 → 只 `memory_search`；关闭 → `pwsh` / `read` / `edit`），避免首轮就乱调工具、浪费上下文；第一轮开始时注入一条精简的「先用首轮工具，之后才能用其它工具」提示（类似 kaz-memory 的 guidance_head，Kaz 模式默认开）；并把当前轮 assemble 可见的工具面**稳定边界（minimal → stable）**上报给 round-display 显示。
+> **作用**：首次工具调用前只暴露极简工具集，模型第一次调用工具后就恢复全部工具——首轮工具按 `kaz-memory` 是否启用自动切换（启用 → 只 `memory_search`；关闭 → `pwsh` / `read` / `edit`），避免首轮就乱调工具、浪费上下文；第一轮开始时注入一条精简的「先用首轮工具，之后才能用其它工具」提示（类似 kaz-memory 的 guidance_head，Kaz 模式默认开）；并把每次 assemble 可见工具面的**增删明细（category=`tool-surface`）**上报给 round-display 显示。
 
 宿主侧插件：按「会话里是否已发生第一次工具调用」切换工具集（2026-08 重构，
 替代旧的按对话轮次判定）：
@@ -25,7 +25,7 @@
 - **首轮工具解锁提示**：第一轮开始时注入一条精简提示（`[round-minimal guidance]`），
   告诉模型先使用首轮工具、之后才能使用其它工具；`guidanceHead` 留空时按
   `firstRoundTools` 自动拼装（Kaz 默认开，非 Kaz 默认关）；
-- **工具变化显示（v0.9 B6 白名单）**：每次 `system-prompt/assemble` 后，把当前轮可见工具面的**稳定边界**（首次工具调用后的“恢复全量”）主动上报给 `roundDisplay`（category=`stable-boundary`）；极简基线与后续普通工具面变化不上报白名单，round-display 不再显示阶段级抖动；
+- **工具变化显示（v0.9 B6 + 36.7 白名单）**：每次 `system-prompt/assemble` 后，只要过滤前后可见工具面有增删，就把当前轮可见工具面的**增删明细**主动上报给 `roundDisplay`（category=`tool-surface`）；不再是只上报 minimal→stable 的“恢复全量”边界，round-display 可看到每次真实工具面变化；
 - **子代理排除**：默认不受影响（`includeSubagents: false`）——subagent / workflow /
   ralph 的子会话始终走全量模式；
 - **对外信号**：发布 `roundMinimal` 服务（`enabled` / `firstRoundTools` /
@@ -77,6 +77,7 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\round-minimal\probe-round-mi
 3. 重启续接旧对话（已有工具调用）直接全量模式；
 4. 子代理（`includeSubagents: false` 时）始终全量模式；
 5. round-display「本轮注入」面板能看到 round-minimal 上报的本轮工具增删明细
-   （极简阶段移除哪些、首次工具调用后新增哪些）；
+   （category=`tool-surface`；极简阶段移除哪些、首次工具调用后新增哪些、
+   普通工具面变化也一样）；
 6. 新对话第一轮开始时注入 `[round-minimal guidance]`：Kaz 模式默认出现，
    非 Kaz 模式默认不出现；提示内容按首轮工具自动拼装（`guidanceHead` 可覆盖）。

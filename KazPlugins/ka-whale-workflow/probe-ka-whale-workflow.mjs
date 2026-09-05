@@ -58,6 +58,8 @@ check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
 check("主流程文案已导出且非空", typeof MAIN_FLOW_TEXT === "string" && MAIN_FLOW_TEXT.trim().length > 0);
 check("主流程文案含 v0.9 §9.1 Goal-active 语义", MAIN_FLOW_TEXT.includes("working (or goal-active)") && MAIN_FLOW_TEXT.includes("do not use create_goal directly") && MAIN_FLOW_TEXT.includes("After Goal ends, proceed as if working ended"));
 check("36.6 主 Persona 含事件驱动等待语义", MAIN_FLOW_TEXT.includes("must NOT use pwsh sleep") && MAIN_FLOW_TEXT.includes("poll list_agents") && MAIN_FLOW_TEXT.includes("end the current turn and wait for the subagent's report/finished message") && MAIN_FLOW_TEXT.includes("list_agents and send_message are not wait primitives"));
+check("36.7 主 Persona 含批评纪律", MAIN_FLOW_TEXT.includes("Critique first") && MAIN_FLOW_TEXT.includes("do not manufacture criticism") && MAIN_FLOW_TEXT.includes("Critically evaluate subagent reports and critiques instead of accepting them blindly"));
+check("36.7 worker 流程含批评纪律", SUBAGENT_FLOW_TEXT.includes("critique the delegation first") && SUBAGENT_FLOW_TEXT.includes("identify real weaknesses") && SUBAGENT_FLOW_TEXT.includes("do not blindly accept"));
 check("36.6 子代理流程文案已导出且非空", typeof SUBAGENT_FLOW_TEXT === "string" && SUBAGENT_FLOW_TEXT.includes("work_sub_whale_report") && SUBAGENT_FLOW_TEXT.includes("subagent flow"));
 check("goal-active 常量不在 MAIN_STAGE_IDS", GOAL_ACTIVE_STAGE === "goal-active" && !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE));
 check("goal-active/working-resumed 文本导出", GOAL_ACTIVE_CONTEXT_TEXT.includes("[ka-whale-workflow goal-active]") && workingResumedContextText("C:/plan.json").includes("taskPlanPath: C:/plan.json"));
@@ -111,6 +113,30 @@ check("v0.9 stage 常量导出", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length =
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && workingDef?.canAdvance.includes("write-plan"));
+{
+  const mainChallenge = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
+  const workerChallenge = stageDefinitionFor("worker", "challenge-plan");
+  check(
+    "36.7 主 challenge-plan task 先批评/识别真弱点/不制造批评",
+    typeof mainChallenge?.task === "string" &&
+      mainChallenge.task.includes("Critique the user's approach first") &&
+      mainChallenge.task.includes("identify real weaknesses") &&
+      mainChallenge.task.includes("do not manufacture criticism"),
+  );
+  check(
+    "36.7 worker challenge-plan task 先批评/识别真弱点/不制造批评",
+    typeof workerChallenge?.task === "string" &&
+      workerChallenge.task.includes("Critique the delegation first") &&
+      workerChallenge.task.includes("identify real weaknesses") &&
+      workerChallenge.task.includes("do not manufacture criticism"),
+  );
+  check(
+    "36.7 主 working task 批判性评估子代理批评而非盲从",
+    typeof workingDef?.task === "string" &&
+      workingDef.task.includes("critically evaluates subagent reports and their critiques") &&
+      workingDef.task.includes("instead of accepting them blindly"),
+  );
+}
 check("decide-goal 定义含 working 与 goal-active", canAdvance(MAIN_ROLE, "decide-goal", "working") === true && canAdvance(MAIN_ROLE, "decide-goal", GOAL_ACTIVE_STAGE) === true);
 check("子代理 role stage 定义齐全", ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"].every((role) => stageIdsForRole(role).length >= 4));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });

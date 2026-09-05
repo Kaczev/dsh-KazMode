@@ -108,7 +108,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["decide-tools", "communication"],
       task:
-        "Challenge the user's approach. Find the smallest workable solution. Do not write or finalize task plans here (decide-tools/write-plan own plan persistence) and do not call ka_sub_whale. Then advance.",
+        "Critique the user's approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write or finalize task plans here (decide-tools/write-plan own plan persistence) and do not call ka_sub_whale. Then advance.",
     },
     "decide-tools": {
       allowedTools: ["whale_report"],
@@ -148,7 +148,7 @@ const DEFINITIONS = {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["write-plan", "memory-maintenance", "plugin-maintenance", "communication"],
       task:
-        "Execute persona=main plan items on the main line; delegate subagent-persona plan items via ka_sub_whale. After ka_sub_whale, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Review the task plan whenever needed via taskPlanPath. Main monitors, verifies subagent reports, amends only through write-plan, and asks only for decisions outside the plan. Before advancing to communication, if any memoryMaintainer/pluginMaintainer/pluginCreator plan items or candidate suggestions remain, pass through memory-maintenance/plugin-maintenance first.",
+        "Execute persona=main plan items on the main line; delegate subagent-persona plan items via ka_sub_whale. After ka_sub_whale, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Review the task plan whenever needed via taskPlanPath. Main critically evaluates subagent reports and their critiques instead of accepting them blindly, verifies results, amends only through write-plan, and asks only for decisions outside the plan. Before advancing to communication, if any memoryMaintainer/pluginMaintainer/pluginCreator plan items or candidate suggestions remain, pass through memory-maintenance/plugin-maintenance first.",
     },
     "memory-maintenance": {
       allowedTools: [
@@ -203,7 +203,7 @@ const DEFINITIONS = {
         "work_sub_whale_report",
       ],
       canAdvance: ["check-tools", "communication"],
-      task: "Challenge the delegation and find the smallest workable approach.",
+      task: "Critique the delegation first; identify real weaknesses; do not manufacture criticism. Find the smallest workable approach.",
     },
     "check-tools": {
       allowedTools: ["work_sub_whale_report"],

@@ -32,10 +32,13 @@ const NAMESPACE = settingsNamespace("round-display");
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/round-display";
 
-/** v0.9 B6：round-display 输出白名单（§10.4 R-B6-2）。
- *  只显示五类内容：稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、
- *  记忆快照注入；阶段切换 / whale_report 逐次噪音 / 首轮记忆指引等一律不显示。 */
+/** v0.9 B6 + 36.7：round-display 输出白名单（§10.4 R-B6-2）。
+ *  只显示七类内容：系统提示词快照、工具面变化、稳定边界、Goal 上下文通知、
+ *  任务契约、子代理 report 摘要、记忆快照注入；阶段切换 / whale_report
+ *  逐次噪音 / 首轮记忆指引等一律不显示。 */
 export const ROUND_DISPLAY_ALLOWED_CATEGORIES = Object.freeze([
+  "system-prompt",
+  "tool-surface",
   "stable-boundary",
   "goal-context",
   "task-contract",
@@ -61,10 +64,14 @@ export function classifyRoundDisplayReport(payload) {
   const title = typeof value.title === "string" ? value.title : "";
   const content = typeof value.content === "string" ? value.content : "";
   if (plugin === "round-minimal" && title === "本轮工具变化") {
+    // 36.7：round-minimal 对每次 assemble 的工具面增删都报 tool-surface；
+    // 旧持久化里“恢复全量（首次工具调用后）”的历史边界仍按 stable-boundary 兼容。
     if (content.includes("恢复全量（首次工具调用后）")) {
       return "stable-boundary";
     }
+    return "tool-surface";
   }
+  if (plugin === "kaz-system-prompt") return "system-prompt";
   if (plugin === "goal-round-driver" || plugin === "tool-goal") return "goal-context";
   if (plugin === "ka-whale-workflow") {
     if (

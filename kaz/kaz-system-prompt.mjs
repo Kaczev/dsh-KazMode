@@ -1,4 +1,4 @@
-﻿/**
+/**
  * kaz-system-prompt —— Kaz 模式的系统提示词控制器。
  *
  * 这个脚本放在 kaz preset 目录里，专门负责“在什么情况下用哪句系统提示词”。
@@ -32,12 +32,21 @@ export const name = 'kaz-system-prompt'
 /** 只依赖事件系统；不需要额外 inject。 */
 export const inject = []
 
-/** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。 */
-function reportRoundDisplay(ctx, agent, content, plugin = "kaz-system-prompt", title = "system prompt") {
+/** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。
+ *  36.7：真实系统提示词显式带 category=system-prompt；goal 通知显式带
+ *  category=goal-context，避免依赖旧回退分类。 */
+function reportRoundDisplay(
+  ctx,
+  agent,
+  content,
+  plugin = "kaz-system-prompt",
+  title = "system prompt",
+  category = "system-prompt",
+) {
   try {
     const rd = ctx.get('roundDisplay')
     if (rd && typeof rd.report === 'function' && agent && typeof content === 'string' && content.trim().length > 0) {
-      rd.report({ agent, plugin, title, content })
+      rd.report({ agent, plugin, title, content, category })
     }
   } catch {
     // 上报失败不影响主流程
@@ -88,9 +97,9 @@ function reportInjectedMessage(ctx, agent, message) {
     const text = textOfMessage(message)
     if (text.length === 0) return
     if (source.kind === "goal" && typeof source.round === "number" && source.round > 0) {
-      reportRoundDisplay(ctx, agent, text, "goal-round-driver", "goal round")
+      reportRoundDisplay(ctx, agent, text, "goal-round-driver", "goal round", "goal-context")
     } else if (source.plugin === "tool-goal") {
-      reportRoundDisplay(ctx, agent, text, "tool-goal", "goal wrapup")
+      reportRoundDisplay(ctx, agent, text, "tool-goal", "goal wrapup", "goal-context")
     }
   } catch {
     // 上报失败不影响主流程

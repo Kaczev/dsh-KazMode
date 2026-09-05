@@ -1,7 +1,7 @@
 {
   "name": "round-display",
   "version": "0.1.0",
-  "description": "round-display：Kaz 模式轮次显示插件——v0.9 B6 起只记录/展示白名单五类注入：稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、记忆快照注入；宿主经 roundDisplay.report 主动上报（可带 category），非白名单阶段噪音不显示，按 agent × 轮次存档，经专用 RPC 通道（/round-display，loopback）供面板读取。",
+  "description": "round-display：Kaz 模式轮次显示插件——v0.9 B6 + 36.7 起只记录/展示白名单七类注入：system-prompt、tool-surface、稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、记忆快照注入；宿主经 roundDisplay.report 主动上报（可带 category），非白名单阶段噪音不显示，按 agent × 轮次存档，经专用 RPC 通道（/round-display，loopback）供面板读取。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
