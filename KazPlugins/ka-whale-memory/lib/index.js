@@ -108,10 +108,21 @@ const SEARCH_HIT_SCHEMA = {
     summary: { type: "string", required: true },
     keywords: { type: "array", required: true, items: { type: "string" } },
     score: { type: "number", required: true },
+    has_paths: { type: "boolean", required: true },
   },
 };
 
-/** memory_detail 的返回项（分片读取）。 */
+/** memory_paths 单项 schema（v0.9 R-B6-3）。 */
+const PATH_ITEM_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    path: { type: "string", required: true, description: "Absolute or project-relative file/folder path." },
+    purpose: { type: "string", required: true, description: "Short purpose/role of this path." },
+  },
+};
+
+/** memory_detail 的返回项（分片读取 + paths）。 */
 const DETAIL_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -119,6 +130,7 @@ const DETAIL_SCHEMA = {
     content_preview: { type: "string", required: true },
     total_length: { type: "number", required: true },
     has_more: { type: "boolean", required: true },
+    paths: { type: "array", items: PATH_ITEM_SCHEMA, required: true, description: "Stored file paths ([] when the memory has none); path existence is not checked." },
   },
 };
 
@@ -188,6 +200,7 @@ function searchHitValue(hit) {
     summary: typeof hit.record.summary === "string" ? hit.record.summary : "",
     keywords: Array.isArray(hit.record.keywords) ? hit.record.keywords : [],
     score: Number(hit.score),
+    has_paths: Array.isArray(hit.record.paths) && hit.record.paths.length > 0,
   };
 }
 
@@ -201,6 +214,7 @@ function detailValue(record, offset, limit) {
     content_preview: preview,
     total_length: content.length,
     has_more: start + len < content.length,
+    paths: Array.isArray(record.paths) ? record.paths : [],
   };
 }
 
@@ -667,7 +681,9 @@ export async function apply(ctx, config = {}) {
             ? record.name.trim()
             : "(no summary)";
       const id = String(record.id ?? "");
-      lines.push(`- id: ${id} | summary: ${summary.replace(/\r?\n/g, " ")}`);
+      // v0.9 R-B6-3：快照只带“含 paths”标记，不展开路径文本。
+      const hasPaths = Array.isArray(record.paths) && record.paths.length > 0;
+      lines.push(`- id: ${id} | summary: ${summary.replace(/\r?\n/g, " ")}${hasPaths ? " | has_paths: true" : ""}`);
     }
     lines.push("<");
     return createUserMessage({
@@ -893,11 +909,17 @@ export async function apply(ctx, config = {}) {
   };
   /** 尝试把本插件给模型发送的信息上报给 round-display 显示插件（best-effort）。
    *  服务不存在时静默跳过，不影响主流程。 */
-  function reportRoundDisplay(agent, content) {
+  function reportRoundDisplay(agent, content, category) {
     try {
       const rd = ctx.get("roundDisplay");
       if (rd !== undefined && rd !== null && typeof rd.report === "function" && typeof content === "string" && content.trim().length > 0) {
-        rd.report({ agent, plugin: "ka-whale-memory", title: "guidance", content });
+        rd.report({
+          agent,
+          plugin: "ka-whale-memory",
+          title: "guidance",
+          content,
+          ...(typeof category === "string" && category.trim().length > 0 ? { category: category.trim() } : {}),
+        });
       }
     } catch (error) {
       ctx.logger.debug(`[ka-whale-memory] 上报 round-display 失败：${error instanceof Error ? error.message : String(error)}`);
@@ -1104,8 +1126,8 @@ export async function apply(ctx, config = {}) {
       persistedInjected.add(String(agent.id));
       persistInjected();
     }
-    // 告诉 round-display 显示插件本轮发送了什么（best-effort）。
-    reportRoundDisplay(agent, recallTextOf(recall));
+    // 告诉 round-display 显示插件本轮发送了什么（best-effort；B6 只允许记忆快照类别）。
+    reportRoundDisplay(agent, recallTextOf(recall), "memory-snapshot");
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, recall] : decision.messages };
   });
 
@@ -1224,7 +1246,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_save",
       description:
-        'Save one cross-session memory. It takes effect immediately (status is "applied") — no manual confirmation is needed. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). You may optionally add structured metadata: type (e.g. success_pattern/error_pattern/insight), evidence (concrete source/probe/file/code/user feedback; required to set confidence high), confidence (unknown/low/medium/high; default unknown unless evidence is concrete). New memories start lifecycle_status=CANDIDATE. These metadata fields are independent of BM25 — search documents remain content + summary + keywords. namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
+        'Save one cross-session memory. It takes effect immediately (status is "applied") — no manual confirmation is needed. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). You may optionally add structured metadata: type (e.g. success_pattern/error_pattern/insight), evidence (concrete source/probe/file/code/user feedback; required to set confidence high), confidence (unknown/low/medium/high; default unknown unless evidence is concrete). New memories start lifecycle_status=CANDIDATE. These metadata fields are independent of BM25 — search documents remain content + summary + keywords. You may optionally add up to 8 paths [{path,purpose}]; paths are returned by memory_detail, never expanded in search/snapshot, and file existence is not checked. namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
       parameters: {
         name: { type: "string", required: true, description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
         keywords: { type: "array", items: { type: "string" }, required: true, description: "Anchor keywords used by memory_search (BM25)." },
@@ -1233,6 +1255,7 @@ export async function apply(ctx, config = {}) {
         type: { type: "string", description: "Structured memory type (e.g. success_pattern, error_pattern, insight, design, reference); optional." },
         evidence: { type: "string", description: "Concrete evidence supporting this memory (probe/file/code/user feedback); optional, but must be non-empty to set confidence=high." },
         confidence: { type: "string", enum: ["unknown", "low", "medium", "high"], description: "Confidence level (default unknown); never set high without concrete evidence." },
+        paths: { type: "array", items: PATH_ITEM_SCHEMA, description: "Optional file/folder paths [{path,purpose}] up to 8; stored with the memory and returned by memory_detail. Path text is not expanded in search/snapshots and file existence is not checked." },
         namespace: { type: "string", enum: ["global", "project"], description: "Scope: global (harness home) / project (current project folder); default global." },
       },
       output: {
@@ -1256,6 +1279,7 @@ export async function apply(ctx, config = {}) {
             ...(args.type === undefined ? {} : { type: args.type }),
             ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
             ...(args.confidence === undefined ? {} : { confidence: args.confidence }),
+            ...(args.paths === undefined ? {} : { paths: args.paths }),
             ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
             projectRoot: projectRootOf(exec),
           }),
@@ -1267,7 +1291,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_update",
       description:
-        'Update an existing memory by id. You can change name, summary, keywords, content, and the optional structured metadata type/evidence/confidence. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content keeps the memory applied (no re-confirmation). These metadata fields are independent of BM25 — search documents remain content + summary + keywords. On success returns { updated: true } only (no memory content).',
+        'Update an existing memory by id. You can change name, summary, keywords, content, and the optional structured metadata type/evidence/confidence. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content keeps the memory applied (no re-confirmation). These metadata fields are independent of BM25 — search documents remain content + summary + keywords. You may also replace paths with up to 8 [{path,purpose}] (pass [] to clear); paths are returned by memory_detail, never expanded in search/snapshot, and file existence is not checked. On success returns { updated: true } only (no memory content).',
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         name: { type: "string", description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
@@ -1278,6 +1302,7 @@ export async function apply(ctx, config = {}) {
         type: { type: "string", description: "Structured memory type (e.g. success_pattern, error_pattern, insight, design, reference); optional." },
         evidence: { type: "string", description: "Concrete evidence supporting this memory (probe/file/code/user feedback); optional, but must be non-empty to set confidence=high." },
         confidence: { type: "string", enum: ["unknown", "low", "medium", "high"], description: "Confidence level (default unknown); never set high without concrete evidence." },
+        paths: { type: "array", items: PATH_ITEM_SCHEMA, description: "Optional file/folder paths [{path,purpose}] up to 8; replaces existing paths when provided (pass [] to clear). Path text is not expanded in search/snapshots and file existence is not checked." },
         content: { type: "string", description: "Full memory content (plain text)." },
         edits: { type: "array", items: EDIT_SCHEMA, description: "Precise literal content edits; applied sequentially and atomically." },
       },
@@ -1292,6 +1317,7 @@ export async function apply(ctx, config = {}) {
           ...(args.type === undefined ? {} : { type: args.type }),
           ...(args.evidence === undefined ? {} : { evidence: args.evidence }),
           ...(args.confidence === undefined ? {} : { confidence: args.confidence }),
+          ...(args.paths === undefined ? {} : { paths: args.paths }),
           ...(args.keywords === undefined ? {} : { keywords: args.keywords }),
           ...(args.keywordsAdd === undefined ? {} : { keywordsAdd: args.keywordsAdd }),
           ...(args.keywordsRemove === undefined ? {} : { keywordsRemove: args.keywordsRemove }),
@@ -1343,7 +1369,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_search",
       description:
-        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score — content is NOT included; use memory_detail to read the full content of a hit. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the ka-whale-memory.bm25 settings section. DEPRECATED memories are excluded by default. Returns an empty array when nothing matches; errors when the query is empty.",
+        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score/has_paths — content and paths text are NOT included; use memory_detail to read the full content and stored paths of a hit. has_paths is a boolean marker only. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the ka-whale-memory.bm25 settings section. DEPRECATED memories are excluded by default. Returns an empty array when nothing matches; errors when the query is empty.",
       parameters: {
         query: { type: "string", required: true, description: "Search query (BM25 over content + summary + keywords)." },
         limit: { type: "number", description: "Max hits to return (default 10, max 100)." },
@@ -1381,7 +1407,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_detail",
       description:
-        "Read the full content of a single memory by id, with chunked reading. Returns content_preview (limit chars starting at offset), total_length and has_more. Errors if the id does not exist; if offset is beyond the content length, content_preview is an empty string (total_length tells you the real size) and has_more is false. Use memory_search or memory_list first to obtain ids.",
+        "Read the full content of a single memory by id, with chunked reading. Returns content_preview (limit chars starting at offset), total_length, has_more, and paths (stored [{path,purpose}] or []). Errors if the id does not exist; if offset is beyond the content length, content_preview is an empty string (total_length tells you the real size) and has_more is false. Path existence is not checked. Use memory_search or memory_list first to obtain ids.",
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         offset: { type: "number", description: "Character offset to start reading from (default 0)." },

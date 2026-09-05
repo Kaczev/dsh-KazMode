@@ -1,33 +1,36 @@
 # round-display —— 每轮注入显示插件（Kaz 模式附属）
 
-> **作用**：记录并展示每一轮 Kaz 联动/附属插件（thinking-anchor / kaz-memory /
-> first-round-hints / kaz-system-prompt 等）给模型注入了什么信息，也展示
-> round-minimal 上报的首轮工具提示与本轮工具面增删明细，以及 goal-round-driver
-> 的 `<goal_round>`、tool-goal 的 `<goal_complete>`/`<goal_blocked>`，
-> 方便你看到模型"额外看到了什么"以及工具面怎么变。
+> **作用**：记录并展示每一轮 Kaz 联动/附属插件给模型发送的**白名单信息**。
+> v0.9 B6（R-B6-2）起只显示五类：
+> 1. Minimal → Stable Main/Sub Surface 的稳定边界；
+> 2. Goal 上下文通知（进入/退出/round/wrapup）；
+> 3. 任务契约文本；
+> 4. 子代理 report 摘要；
+> 5. 记忆快照注入摘要。
+>
+> 不显示：阶段级工具面抖动、每次 stage 切换、逐 request 的 whale_report
+> 状态噪音、首轮记忆指引/系统提示词快照等非白名单内容。
 
 只负责「显示」，不向模型注入任何内容：记录每一轮开始时 Kaz 模式联动/附属插件
-（thinking-anchor / round-minimal / kaz-memory / kaz-system-prompt 等）给模型发送的
-信息，并在对话输入区右侧提供「本轮注入」按钮与面板，按下后在对话框右侧显示
-本轮注入信息（格式：[插件名]>（信息内容）<）。
+给模型发送的上述五类信息，并在对话输入区右侧提供「本轮注入」按钮与面板，
+按下后在对话框右侧显示本轮注入信息（格式：[插件名]>（信息内容）<）。
 
 ## 原理
 
 - **轮次**：每次用户发一条消息 = 一轮（会话日志中最近一个 turn/start 的 data.turn）。
-- **主动上报**：发布 `roundDisplay` 服务（`report({ agent, plugin, title, content })`），
+- **主动上报**：发布 `roundDisplay` 服务（`report({ agent, plugin, title, content, category })`），
   其它要发送信息的插件在发送时调用它告诉本插件要显示（best-effort：服务不存在
-  时静默跳过）。2026-08-21 起不再监听组装段（thinking-anchor / kaz-memory 已改为
-  消息注入，且 Kaz 模式会滤掉非 persona 段），展示内容全部来自主动上报。
-- **系统提示词快照**：同一轮内 kaz-system-prompt 可能上报多份不同内容的真实系统提示词
-  （例如 ka-whale-workflow 主/子流程段、goal 状态变化）；round-display 会全部保留，
-  只按 `(plugin, content)` 去重，不再只留“最终一条”。
-  v0.8 Step B1 后 Kaz 不再上报 plan:policy / tool:goal 段或 plan-mode 通知。
+  时静默跳过）。2026-08-21 起不再监听组装段，展示内容全部来自主动上报。
+- **输出白名单**：`category` 必须在
+  `stable-boundary / goal-context / task-contract / subagent-report / memory-snapshot`
+  五类中；不带 `category` 的旧上报按来源/内容回退分类。非白名单记录不进入内存、
+  不落盘、也不从历史恢复，阶段切换与 whale_report 噪音因此不再出现。
 - **面板通道**：专用 RPC（`/round-display`，loopback）。客户端面板打开时每 2 秒轮询：
   `list` = 当前轮；`history` = 全部轮次。
 - **持久化（2026-08-21）**：记录按 agent × 轮次落盘到
   `<DSH_HOME>/storages/round-display-records.json`（`config.recordsStore` 可覆盖），
   **dsh 重启后 history 仍能看到此前各轮的注入记录**；每个 agent 最多保留
-  200 轮，防抖 1s 落盘、卸载时 flush。
+  200 轮，防抖 1s 落盘、卸载时 flush。恢复旧记录时同样套用白名单。
 
 ## 配置
 

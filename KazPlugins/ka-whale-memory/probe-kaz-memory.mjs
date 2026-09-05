@@ -24,6 +24,11 @@ function check(label, ok) {
 // projectRoot 字段标记一条 project 记忆属于哪个项目根；list/search 按 filter.projectRoot 过滤。
 function makeMemoryEngine(records) {
   let list = [...records];
+  let seq = records.length;
+  const nextId = () => {
+    do { seq += 1; } while (list.some((r) => r.id === "new-" + seq));
+    return "new-" + seq;
+  };
   const projectRootMatch = (r, filter) =>
     r.namespace === "global" || filter.projectRoot === undefined || r.projectRoot === filter.projectRoot;
   const iso = (n) => new Date(n).toISOString();
@@ -68,9 +73,12 @@ function makeMemoryEngine(records) {
         .sort((a, b) => b.score - a.score);
     },
     remember(input) {
+      if (Array.isArray(input.paths) && input.paths.length > 8) {
+        return Promise.reject(new Error("paths must contain at most 8 items"));
+      }
       const now = Date.now();
       const rec = {
-        id: "new-" + (list.length + 1),
+        id: nextId(),
         namespace: input.namespace ?? "global",
         status: "applied",
         autoLoad: false,
@@ -78,6 +86,9 @@ function makeMemoryEngine(records) {
         summary: typeof input.summary === "string" ? input.summary : "",
         content: input.content,
         keywords: (input.keywords ?? []).map((k) => String(k).toLowerCase()),
+        paths: Array.isArray(input.paths)
+          ? input.paths.map((p) => ({ path: String(p?.path ?? "").trim(), purpose: String(p?.purpose ?? "").trim() }))
+          : [],
         created_at: iso(now),
         updated_at: iso(now),
         projectRoot: input.projectRoot,
@@ -91,6 +102,9 @@ function makeMemoryEngine(records) {
       return Promise.resolve(list.length < before);
     },
     update(id, patch = {}) {
+      if (Array.isArray(patch.paths) && patch.paths.length > 8) {
+        return Promise.reject(new Error("paths must contain at most 8 items"));
+      }
       const rec = list.find((r) => r.id === id);
       if (rec === undefined) return Promise.reject(new Error(`cannot update unknown memory '${id}'`));
       const hasFullContent = typeof patch.content === "string";
@@ -102,6 +116,11 @@ function makeMemoryEngine(records) {
       if (typeof patch.name === "string" && patch.name.trim().length > 0) rec.name = patch.name.trim();
       rec.keywords = applyKeywordPatch(rec.keywords, patch);
       if (typeof patch.summary === "string") rec.summary = patch.summary;
+      if (patch.paths !== undefined) {
+        rec.paths = Array.isArray(patch.paths)
+          ? patch.paths.map((p) => ({ path: String(p?.path ?? "").trim(), purpose: String(p?.purpose ?? "").trim() }))
+          : [];
+      }
       if (rec.status !== "ignored" && rec.status !== "suggest") rec.status = "applied";
       rec.updated_at = iso(Date.now());
       return Promise.resolve(rec);
@@ -887,6 +906,108 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   check("⑮ 重新开启后六工具恢复注册", SIX.every((n) => registeredTools.has(n)));
 }
 
+// ⑯ v0.9 R-B6-3：memory paths（save/update/detail/search/快照/旧记录/缺失文件）
+{
+  const saveTool = registeredTools.get("memory_save");
+  const updateTool = registeredTools.get("memory_update");
+  const detailTool = registeredTools.get("memory_detail");
+  const searchTool = registeredTools.get("memory_search");
+  const missingPath = join(tmpdir(), "kzm-definitely-missing-" + Date.now() + ".txt");
+
+  const saved = await saveTool.execute({
+    name: "paths test",
+    keywords: ["pathtest"],
+    content: "paths memory body",
+    summary: "paths summary",
+    paths: [
+      { path: "C:/some/file.js", purpose: "source" },
+      { path: missingPath, purpose: "missing sample" },
+    ],
+  }, execProjA);
+  check("⑯ memory_save 支持 paths", saved !== undefined && saved.saved === true);
+  const rec = (await memory.list({ projectRoot: "C:/projA" })).find((r) => r.name === "paths test");
+  check("⑯ save 后记录含 paths", rec !== undefined && Array.isArray(rec.paths) && rec.paths.length === 2);
+
+  const detail = await detailTool.execute({ id: rec.id }, execProjA);
+  check(
+    "⑯ memory_detail 返回 paths，缺失文件不硬错误",
+    detail !== undefined &&
+      Array.isArray(detail.paths) &&
+      detail.paths.length === 2 &&
+      detail.paths.some((p) => p.path === missingPath && p.purpose === "missing sample"),
+  );
+
+  const hits = await searchTool.execute({ query: "pathtest" }, execProjA);
+  const hit = hits.find((h) => h.id === rec.id);
+  check(
+    "⑯ memory_search 只带 has_paths 标记，不展开路径文本",
+    hit !== undefined &&
+      hit.has_paths === true &&
+      !JSON.stringify(hit).includes("C:/some/file.js") &&
+      !JSON.stringify(hit).includes(missingPath),
+  );
+
+  const oldDetail = await detailTool.execute({ id: "m1" }, execProjA);
+  check("⑯ 旧记忆缺 paths 视为空", oldDetail !== undefined && Array.isArray(oldDetail.paths) && oldDetail.paths.length === 0);
+
+  const updated = await updateTool.execute({ id: rec.id, paths: [] }, execProjA);
+  const recAfter = await memory.get(rec.id);
+  check("⑯ memory_update 支持 paths（清空）", updated !== undefined && updated.updated === true && Array.isArray(recAfter?.paths) && recAfter.paths.length === 0);
+
+  const nine = Array.from({ length: 9 }, (_, i) => ({ path: `C:/p${i}.txt`, purpose: "x" }));
+  const overSave = await saveTool.execute({ name: "too many", keywords: ["x"], content: "x", summary: "x", paths: nine }, execProjA).then(() => null, () => "rejected");
+  check("⑯ 单条 >8 paths 在 memory_save 被拒绝", overSave === "rejected");
+  const overUpdate = await updateTool.execute({ id: rec.id, paths: nine }, execProjA).then(() => null, () => "rejected");
+  check("⑯ 单条 >8 paths 在 memory_update 被拒绝", overUpdate === "rejected");
+
+  // 任务开始快照：只带 has_paths 标记，不展开路径文本。
+  const autoStore = join(tmpdir(), "km-paths-auto-" + Date.now() + ".json");
+  const autoRecords = [
+    {
+      id: "auto-paths",
+      namespace: "global",
+      status: "applied",
+      autoLoad: true,
+      name: "Paths Auto",
+      content: "Paths auto content",
+      summary: "Paths auto summary",
+      paths: [{ path: "C:/hidden/path.txt", purpose: "hidden" }],
+      created_at: iso(Date.now() - 10),
+      updated_at: iso(Date.now() - 10),
+    },
+  ];
+  const autoEngine = makeMemoryEngine(autoRecords);
+  const autoListeners = new Map();
+  const autoCtx = {
+    fiber: { state: 0 },
+    logger: { info: () => {}, warn: (...a) => console.log("[mock:warn]", ...a), debug: () => {} },
+    async plugin() { return; },
+    on(event, fn) { if (!autoListeners.has(event)) autoListeners.set(event, []); autoListeners.get(event).push(fn); return () => {}; },
+    inject(deps, cb) { if (deps.includes("settings")) cb({ ...autoCtx, settings: makeSettings() }); },
+    effect(fn) { fn(); return () => {}; },
+    get(name) {
+      if (name === "settings") return makeSettings();
+      if (name === "memory") return autoEngine;
+      if (name === "agents") return { roots: () => [], list: () => [], currentInitiator: () => undefined };
+      if (name === "tools") return { register: () => () => {}, schemas: () => [{ name: "memory_search" }] };
+      return undefined;
+    },
+    systemPrompt: { section() { return () => {}; } },
+    tools: { register: () => () => {} },
+  };
+  await apply(autoCtx, { autoInjectedStore: autoStore });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const preAuto = autoListeners.get("agent/pre-step")[0];
+  const decision = await preAuto(
+    { step: 1, agent: { id: "session-paths-auto", session: { header: { cwd: "C:/projA" }, events: [] } } },
+    async () => ({ kind: "enter", messages: [] }),
+  );
+  const autoText = JSON.stringify(decision?.messages ?? []);
+  check(
+    "⑯ 任务开始快照只带 has_paths 标记，不展开路径文本",
+    autoText.includes("has_paths: true") && !autoText.includes("C:/hidden/path.txt"),
+  );
+}
 // ⑭ BM25 评分单元检查（vendored okapibm25 + lib/bm25.js）
 {
   const { bm25Scores, bm25ScoresAsync, tokenize } = await import("./lib/bm25.js");

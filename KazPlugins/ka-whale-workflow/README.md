@@ -1,6 +1,6 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾）。
 
 ## 范围
 
@@ -25,6 +25,10 @@
   阶段注入携带实际 `lifecyclePath`。受控角色不再注入旧通用 `SUBAGENT_FLOW_TEXT`
   （role Persona 已由 ka_sub_whale 提供）；旧/未知子代理仍仅在
   `includeSubagents=true` 时使用通用 subagent-flow。
+- B6 收口：`KAZ_ROLE_PROMPTS`（v0.9 §9.1–9.5）作为全量 Persona 唯一源存放在
+  `kaz-shared`，本组件 `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 与
+  `V09_ROLE_PERSONAS` 都由它派生；`*_sub_whale_report` 会向 round-display 上报
+  子代理 report 摘要（白名单类别 `subagent-report`）。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/working/maintenance 阶段携带
   `taskPlanPath`，在 create/update/retire-plugin 阶段携带 `lifecyclePath`，
@@ -62,8 +66,9 @@
 - B5 旧代码清理由 35 世完成：`enable_tool` / `reconstructionTools` /
   `taskToolSelectionEnabled` / 旧 optional_tools 路径 / 旧 stage 字符串与旧
   `subagent`/`create_goal`/旧角色常量已退役。
-- 未做：B6 KAZ_ROLE_PROMPTS 全量终稿/round-display/paths/热重载。
-- 33 世只做 `KAZ_ROLE_PROMPTS.main` 的 Goal-active 最小同步；全量 Persona 终稿留给 B6/36 世。
+- B6（36 世已完成本世代子集）：KAZ_ROLE_PROMPTS 全量终稿入 `kaz-shared`、
+  round-display 输出白名单、memory paths；热重载（B6-4~B6-8）不属于 36 世，
+  仍留给 37 世探针 / 38 世实现。
 
 ## 设置
 

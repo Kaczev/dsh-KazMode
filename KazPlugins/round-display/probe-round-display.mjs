@@ -333,15 +333,18 @@ function makeSettings() {
   check("③ /round-display RPC 通道已注册", typeof rpc === "function");
 
   // 用递增 Date.now 保证 at 严格有序（first < second < third）。
+  // v0.9 B6：generic 排序/去重测试使用白名单类别 subagent-report。
   const realNow = Date.now;
   let nowTick = 1000000;
   Date.now = () => nowTick++;
   try {
-    rd.report({ agent: AGENT_RD, plugin: "a", title: "", content: "first" });
-    rd.report({ agent: AGENT_RD, plugin: "b", title: "", content: "second" });
-    rd.report({ agent: AGENT_RD, plugin: "a", title: "", content: "third" });
-    // 同轮去重：与 "a|first" 完全相同的上报应被忽略。
-    rd.report({ agent: AGENT_RD, plugin: "a", title: "", content: "first" });
+    rd.report({ agent: AGENT_RD, plugin: "a", category: "subagent-report", title: "", content: "first" });
+    rd.report({ agent: AGENT_RD, plugin: "b", category: "subagent-report", title: "", content: "second" });
+    rd.report({ agent: AGENT_RD, plugin: "a", category: "subagent-report", title: "", content: "third" });
+    // 同轮去重：与 "a|third" 相同（同类别同内容）的上报应被忽略。
+    rd.report({ agent: AGENT_RD, plugin: "a", category: "subagent-report", title: "", content: "third" });
+    // 非白名单类别应被过滤，不进列表。
+    rd.report({ agent: AGENT_RD, plugin: "noise", category: "stage-switch", title: "", content: "noise" });
   } finally {
     Date.now = realNow;
   }
@@ -359,7 +362,8 @@ function makeSettings() {
 }
 
 // ---------------------------------------------------------------------------
-// ④ round-display：同一轮保留所有不同内容的系统提示词快照（重复去重）
+// ④ round-display：v0.9 输出白名单（R-B6-2）——系统提示词快照/非白名单丢弃；
+//    Goal 上下文（goal-round-driver/tool-goal）保留；同轮不同内容保留 + 重复去重。
 // ---------------------------------------------------------------------------
 {
   const AGENT_SYS = { id: "s-rd-sys", session: { events: [{ type: "turn/start", data: { turn: 1 } }] } };
@@ -378,11 +382,13 @@ function makeSettings() {
   let nowTick = 2000000;
   Date.now = () => nowTick++;
   try {
-    // 同一轮内系统提示词发生变化（例如 ka-whale-workflow assess → working）：
-    // 两个不同内容的快照都应保留；完全相同的重复上报只保留一条。
+    // 非白名单：真实 system 提示词快照不再展示。
     rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "assess-complexity prompt" });
     rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "working prompt" });
-    rd.report({ agent: AGENT_SYS, plugin: "kaz-system-prompt", title: "system prompt", content: "working prompt" });
+    // 白名单：Goal 上下文通知（同一轮不同内容应都保留；重复只留一条）。
+    rd.report({ agent: AGENT_SYS, plugin: "goal-round-driver", title: "goal round", content: "<goal_round>round-1</goal_round>" });
+    rd.report({ agent: AGENT_SYS, plugin: "tool-goal", title: "goal wrapup", content: "<goal_complete>done</goal_complete>" });
+    rd.report({ agent: AGENT_SYS, plugin: "tool-goal", title: "goal wrapup", content: "<goal_complete>done</goal_complete>" });
   } finally {
     Date.now = realNow;
   }
@@ -391,9 +397,59 @@ function makeSettings() {
   const listEntries = Array.isArray(listRes?.value?.entries) ? listRes.value.entries : [];
   const listContents = listEntries.map((e) => e.content);
   check(
-    "④ 同轮保留所有不同系统提示词快照（新在上、重复去重）",
+    "④ 白名单过滤 system prompt，保留 Goal 上下文且同轮去重（新在上）",
     listEntries.length === 2 &&
-      JSON.stringify(listContents) === JSON.stringify(["working prompt", "assess-complexity prompt"]),
+      JSON.stringify(listContents) === JSON.stringify(["<goal_complete>done</goal_complete>", "<goal_round>round-1</goal_round>"]),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑤ round-display：旧/未带 category 的上报按“注入源分类”兼容进白名单；
+//    记忆指引、阶段切换、first-round guidance 等非白名单内容被过滤。
+// ---------------------------------------------------------------------------
+{
+  const AGENT_LEGACY = { id: "s-rd-legacy", session: { events: [{ type: "turn/start", data: { turn: 1 } }] } };
+  const settings = makeSettings();
+  const recordsStore = join(TMP, "round-display-records-legacy.json");
+  const mock = makeMockCtx({
+    settings,
+    agents: { get: (id) => (id === AGENT_LEGACY.id ? AGENT_LEGACY : undefined) },
+    provided: {},
+  });
+  rdPlugin.apply(mock.ctx, { enabled: true, recordsStore });
+
+  const rd = mock.provided["roundDisplay"];
+  const rpc = mock.rpcHandlers.get("/round-display");
+  const realNow = Date.now;
+  let nowTick = 3000000;
+  Date.now = () => nowTick++;
+  try {
+    // 白名单兼容识别（不带 category）：
+    rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-memory", title: "guidance", content: "[ka-whale-memory Auto-Load]\n>\n- id: 1 | summary: s\n<" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-workflow", title: "阶段 goal-active", content: "[ka-whale-workflow goal-active]\n>\nMode: Goal is active\n<" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "round-minimal", title: "本轮工具变化", content: "工具面变化\n恢复全量（首次工具调用后）\n- 当前工具（19）…" });
+    // 非白名单噪音（不带 category）应被过滤：
+    rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-memory", title: "guidance", content: "[ka-whale-memory guidance]\n>\nWe need to search memory\n<" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-workflow", title: "阶段切换", content: "whale_report：working → communication" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "round-minimal", title: "guidance", content: "[round-minimal guidance]\n>\nfirst round\n<" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "kaz-system-prompt", title: "system prompt", content: "real prompt" });
+  } finally {
+    Date.now = realNow;
+  }
+
+  const listRes = await rpc("list", { sessionId: AGENT_LEGACY.id });
+  const listEntries = Array.isArray(listRes?.value?.entries) ? listRes.value.entries : [];
+  const categories = listEntries.map((e) => e.category);
+  const contents = listEntries.map((e) => e.content);
+  check(
+    "⑤ 旧上报按来源分类进白名单（memory-snapshot/goal-context/stable-boundary），噪音被过滤",
+    listEntries.length === 3 &&
+      categories.includes("memory-snapshot") &&
+      categories.includes("goal-context") &&
+      categories.includes("stable-boundary") &&
+      !contents.some((c) => c.includes("memory guidance")) &&
+      !contents.some((c) => c.includes("whale_report")) &&
+      !contents.some((c) => c.includes("real prompt")),
   );
 }
 

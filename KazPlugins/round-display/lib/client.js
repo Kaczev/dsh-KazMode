@@ -249,7 +249,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "rd-note" },
-						"Kaz 模式联动/附属插件在本轮（每次用户消息 = 一轮）给模型发送的信息，含 kaz-system-prompt 上报的真实系统提示词（同一轮内系统提示词变化时会保留多个快照；v0.8 Step B1 起不含 plan:policy/tool:goal 段）、goal-round-driver 的 <goal_round> 与 tool-goal 的 <goal_complete>/<goal_blocked>，以及 round-minimal 上报的首轮工具提示与工具面增删明细。格式：[插件名]>（信息内容）<。",
+						"Kaz 模式联动/附属插件在本轮（每次用户消息 = 一轮）给模型发送的白名单信息（v0.9 B6）：稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、记忆快照注入。阶段切换 / whale_report 逐次噪音 / 系统提示词快照 / 记忆指引不再显示。格式：[插件名]>（信息内容）<。",
 						lastRpcError.length > 0 && createElement("span", { className: "rd-note" }, "  RPC 通道未就绪：" + lastRpcError),
 					),
 					createElement(

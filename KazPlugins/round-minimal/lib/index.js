@@ -522,6 +522,9 @@ export default {
             plugin: "round-minimal",
             title: "本轮工具变化",
             content,
+            // v0.9 B6：只有 minimal→stable 的“恢复全量”边界进入 round-display 白名单；
+            // 极简基线/后续普通工具面变化不再展示。
+            ...(phase === "恢复全量（首次工具调用后）" ? { category: "stable-boundary" } : {}),
           });
         }
       } catch (error) {

@@ -73,6 +73,33 @@ function lifecycleDefaultsOf(block) {
         lifecycle_status: normalizeLifecycleStatus(block.lifecycle_status),
     };
 }
+/** 单条记忆 paths 上限（v0.9 R-B6-3）。 */
+export const MEMORY_PATHS_MAX = 8;
+/** 旧/宽容读取：paths 缺省/损坏 → []；超出上限时只保留前 8 条。 */
+function normalizeMemoryPaths(value) {
+    if (!Array.isArray(value)) return [];
+    const items = [];
+    for (const raw of value) {
+        if (raw === null || typeof raw !== 'object') continue;
+        const path = typeof raw.path === 'string' ? raw.path.trim() : '';
+        if (path.length === 0) continue;
+        items.push({ path, purpose: typeof raw.purpose === 'string' ? raw.purpose.trim() : '' });
+    }
+    return items.slice(0, MEMORY_PATHS_MAX);
+}
+/** 写路径（save/update）：必须是 ≤8 的 [{path,purpose}] 数组；非法/超限抛错。 */
+function normalizeMemoryPathsInput(value) {
+    if (!Array.isArray(value)) throw new Error('paths must be an array of { path, purpose }');
+    if (value.length > MEMORY_PATHS_MAX) {
+        throw new Error(`paths must contain at most ${MEMORY_PATHS_MAX} items`);
+    }
+    return value.map((raw) => {
+        if (raw === null || typeof raw !== 'object') throw new Error('each paths item must be an object { path, purpose }');
+        const path = typeof raw.path === 'string' ? raw.path.trim() : '';
+        if (path.length === 0) throw new Error('each paths item must have a non-empty path string');
+        return { path, purpose: typeof raw.purpose === 'string' ? raw.purpose.trim() : '' };
+    });
+}
 const blockSchema = z.object({
     namespace: z.enum(['global', 'project']),
     // 同时接受旧值，保证旧 JSON 可读；对外统一返回 applied/ignored（pending/suggested 归一为 applied）。
@@ -89,6 +116,8 @@ const blockSchema = z.object({
     usage_count: z.number().int().min(0).optional(),
     last_used_at: z.string().optional(),
     lifecycle_status: z.enum(['UNKNOWN', 'CANDIDATE', 'ACTIVE', 'DEPRECATED']).optional(),
+    // v0.9 R-B6-3：可选文件路径/用途（[{path,purpose}]，单条记忆 ≤8）。
+    paths: z.array(z.object({ path: z.string(), purpose: z.string() })).max(8).optional(),
     // 新时间戳格式（2026-08 升级）：ISO 字符串（created_at / updated_at）。
     created_at: z.string().optional(),
     updated_at: z.string().optional(),
@@ -282,6 +311,8 @@ function toRecord(id, block, projectRoot) {
         name: typeof rest.name === 'string' ? rest.name : '',
         // 方向1字段：缺省规整（type=unknown / confidence=unknown / usage=0 / lifecycle_status=UNKNOWN）。
         ...lifecycleDefaultsOf(rest),
+        // v0.9 R-B6-3：旧记忆缺 paths 视为空；不强制迁移 JSON。
+        paths: normalizeMemoryPaths(rest.paths),
         created_at,
         updated_at,
         ...(projectRoot === undefined ? {} : { projectRoot }),
@@ -408,6 +439,8 @@ export class MemoryEngine extends Service {
             summary: typeof input.summary === 'string' ? input.summary : '',
             content: input.content,
             keywords: (input.keywords ?? []).map(keyword => keyword.toLowerCase()),
+            // v0.9 R-B6-3：新记忆写盘时始终有 paths（缺省为空数组）。
+            paths: normalizeMemoryPathsInput(input.paths ?? []),
             // 方向1结构化字段：新记忆默认 CANDIDATE（review/consolidate 后可升级 ACTIVE）。
             ...lifecycleDefaultsOf({
                 type: input.type,
@@ -550,9 +583,12 @@ export class MemoryEngine extends Service {
             const usage_count = patch.usage_count === undefined ? block.usage_count : patch.usage_count;
             const last_used_at = patch.last_used_at === undefined ? block.last_used_at : patch.last_used_at;
             const lifecycle_status = patch.lifecycle_status === undefined ? block.lifecycle_status : patch.lifecycle_status;
+            // v0.9 R-B6-3：paths 整体替换；未传 paths 时保留旧值（旧记录缺省 undefined）。
+            const paths = patch.paths === undefined ? block.paths : normalizeMemoryPathsInput(patch.paths);
             return writtenBlock({
                 ...block,
                 content, name, summary, keywords, status,
+                paths,
                 ...lifecycleDefaultsOf({
                     type, evidence, confidence, usage_count, last_used_at, lifecycle_status,
                 }),

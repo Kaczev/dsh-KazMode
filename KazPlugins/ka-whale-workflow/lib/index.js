@@ -38,6 +38,7 @@ import {
   KAZ_TASK_PLAN_STORE_PATH,
   KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH,
   KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH,
+  KAZ_ROLE_PROMPTS,
   KAZ_V09_MAIN_TOOLS,
   KAZ_V09_SUB_WHALE_REPORT_TOOLS,
   KAZ_V09_SUBAGENT_ROLE_TOOLS,
@@ -134,23 +135,17 @@ export { KAZ_TASK_PLAN_STORE_PATH, KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH };
 /** 用户手动指令开启模式的命令名（v0.8 Step B1：/plan 已移除，仅剩 /goal）。 */
 const MANUAL_COMMAND_NAMES = ["goal"];
 
-/** v0.9 主流程上下文文案（v0.9 §9.1 Persona Goal-active 口径；阶段注入另行按 run 追加）。 */
+/** v0.9 主流程上下文文案（v0.9 §9.1 Persona Goal-active 口径；阶段注入另行按 run 追加）。
+ *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.main，避免双源漂移。 */
 export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
 >
-Follow the ka-whale-workflow in order: assess-complexity, challenge-plan, decide-tools, write-plan, decide-goal, working (or goal-active), memory-maintenance, plugin-maintenance, communication. Use whale_report to advance only to a legal next stage; direct no-tool communication is a legal exception. Start or resume Goal via whale_report({mode:'goal', objective}); do not use create_goal directly. While goal-active, do not use whale_report to advance ordinary stages; rely on official Goal context and get_goal/update_goal. After Goal ends, proceed as if working ended. Delegate specialized subtasks to subagents instead of expanding your own tool surface. Persist the task plan during write-plan and review it whenever needed in later stages. If working reveals that the task plan must change, advance back to write-plan for explicit amendment, then return to working. Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
+${KAZ_ROLE_PROMPTS.main}`;
 
-During working, execute the main line and verify subagent reports. During memory-maintenance and plugin-maintenance, delegate writes to maintenance subagents; you never hold memory/plugin write tools.
-
-The final white response should be crisp and to the point, and only appear after reasoning and working.`;
-
-/** v0.9 worker 子代理流程上下文文案（§9.2；其它 role 由各自 stage 注入覆盖）。 */
+/** v0.9 worker 子代理流程上下文文案（§9.2；其它 role 由各自 stage 注入覆盖）。
+ *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.subagent.worker。 */
 export const SUBAGENT_FLOW_TEXT = `[ka-whale-workflow subagent flow]
 >
-Follow the ka-whale-workflow in order: assess-complexity, challenge-plan, check-tools, working, communication. Use work_sub_whale_report to advance. Work as a delegated worker subagent: assess the delegation, challenge it when needed, verify assigned tools, then work and report. Do not start goals and do not ask the user directly. If assigned tools are insufficient, report to the parent main agent. Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the parent main agent and stop the work immediately.
-
-Do not write memories or private plugins yourself.
-
-The final white response should be crisp and to the point, and only appear after reasoning and working.`;
+${KAZ_ROLE_PROMPTS.subagent.worker}`;
 
 /** v0.9 受控子代理 role → 首个 workflow stage（§4 worker；§5–§7 其它 role）。 */
 export const V09_SUBAGENT_ROLE_INITIAL_STAGES = Object.freeze({
@@ -1048,7 +1043,7 @@ export default {
       if (stageStore.set(sessionId, "working") !== true) return false;
       stageStore.setPendingStageInjection(sessionId, WORKING_RESUMED_STAGE);
       stageStore.addWorkflowRunStage(sessionId, WORKING_RESUMED_STAGE);
-      reportRoundDisplay(agent, "Goal 已结束：等价于 working 结束，进入 working-resumed 边界。", "工作流切换");
+      reportRoundDisplay(agent, "Goal 已结束：等价于 working 结束，进入 working-resumed 边界。", "工作流切换", "goal-context");
       return true;
     }
 
@@ -1466,12 +1461,20 @@ export default {
       return isSubagent(agent) ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
     }
 
-    /** 尝试把本插件给模型发送的信息上报给 round-display（best-effort）。 */
-    function reportRoundDisplay(agent, content, title) {
+    /** 尝试把本插件给模型发送的信息上报给 round-display（best-effort）。
+     *  v0.9 B6：只给白名单类别显式 category；阶段切换/whale_report 噪音不带
+     *  category，由 round-display 统一过滤。 */
+    function reportRoundDisplay(agent, content, title, category) {
       try {
         const rd = ctx.get("roundDisplay");
         if (rd !== undefined && rd !== null && typeof rd.report === "function" && typeof content === "string" && content.trim().length > 0) {
-          rd.report({ agent, plugin: "ka-whale-workflow", title: title || "工作流", content });
+          rd.report({
+            agent,
+            plugin: "ka-whale-workflow",
+            title: title || "工作流",
+            content,
+            ...(typeof category === "string" && category.trim().length > 0 ? { category: category.trim() } : {}),
+          });
         }
       } catch (error) {
         ctx.logger?.debug?.(`[ka-whale-workflow] 上报 round-display 失败：${error instanceof Error ? error.message : String(error)}`);
@@ -1983,6 +1986,10 @@ export default {
             delivery: "next-step",
             signal: exec.signal,
           });
+          // v0.9 B6：子代理 report 摘要进入 round-display 白名单（不显示每次阶段切换）。
+          const oneLine = output.replace(/\r?\n/g, " ").trim();
+          const summary = oneLine.length > 240 ? oneLine.slice(0, 240) + "…" : oneLine;
+          reportRoundDisplay(agent, `${reportTool}: ${role} 汇报摘要：${summary}`, "子代理汇报", "subagent-report");
           return {
             messageId,
             role,

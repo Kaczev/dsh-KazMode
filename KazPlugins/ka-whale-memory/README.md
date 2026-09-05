@@ -31,8 +31,9 @@
 | `usage_count` | number | 使用次数（可选；默认 `0`，由 consolidate/检索侧维护） |
 | `last_used_at` | string | 最后使用时间（ISO 字符串，可选） |
 | `lifecycle_status` | string | 生命周期 `UNKNOWN` / `CANDIDATE` / `ACTIVE` / `DEPRECATED`（独立于 storage `status`；新记忆默认 `CANDIDATE`，旧记忆缺省 `UNKNOWN`） |
+| `paths` | `{path,purpose}[]` | 可选文件/文件夹路径与用途（v0.9 B6），单条记忆 ≤8；仅由 `memory_detail` 返回全文，`memory_search` / 自动载入快照只带 `has_paths` 标记，不默认展开路径文本；旧记忆缺 `paths` 视为空 |
 
-**兼容性**：旧 JSON 里的 `createdAt` / `updatedAt`（毫秒数字）读取时自动迁移为 ISO 字符串对外暴露；写回时落新格式（旧数字键不再保留）。无 `summary` 的旧记录按空串读取，`memory_update` 可补写摘要。方向1字段全部可选，**独立于 BM25**——search 文档仍只由 `content + summary + keywords` 组成。
+**兼容性**：旧 JSON 里的 `createdAt` / `updatedAt`（毫秒数字）读取时自动迁移为 ISO 字符串对外暴露；写回时落新格式（旧数字键不再保留）。无 `summary` 的旧记录按空串读取，`memory_update` 可补写摘要。方向1字段全部可选，**独立于 BM25**——search 文档仍只由 `content + summary + keywords` 组成。旧记忆缺 `paths` 视为空，不强制迁移。
 
 ## 方向1 巩固/淘汰（2026-09）
 
@@ -44,8 +45,9 @@
 ## 设计要点
 
 - **BM25 检索（2026-08 升级）**：`memory_search` 对每条记忆的 `content`（主要）+ `summary` + `keywords` 实时计算 **BM25 相关性分数**（vendored [okapibm25](https://github.com/FurkanToprak/OkapiBM25)，MIT，见 `lib/okapibm25.js` 与 `LICENSE-okapibm25`——**随插件内置，安装无需联网**），按分数降序返回，支持 `limit`（默认 10，上限 100）与 `offset`（默认 0，上限 1000）分页。分数参数 `k1`（默认 1.2）、`b`（默认 0.75）在 `settings.yaml` 的 `ka-whale-memory.bm25` 段调整（见下「配置」），无需暴露 UI。每次搜索实时重算（记忆量 ≤1000 时性能可接受），保证结果与当前记忆库一致；**评分异步分块计算**（每 200 条让出一次事件循环），不阻塞主线程。无命中返回**空数组**（不是错误）；`query` 为空报错。
-- **memory_search 只回摘要（2026-08 升级）**：命中项只含 `id / name / summary / keywords / score`，**不返回 content**；要看全文用 `memory_detail`。旧版「search 返回全文」的行为不再保留。
-- **memory_detail（2026-08 新增）**：按 `id` 读取单条记忆的完整正文，支持分片：`offset`（默认 0）+ `limit`（默认 500，上限 5000）返回 `content_preview`，并给出 `total_length` 与 `has_more`（`offset + limit < total_length`）。`id` 不存在时报错；`offset` 超出正文长度时返回空串（`total_length` 提示真实长度）且 `has_more=false`。
+- **memory_search 只回摘要（2026-08 升级；v0.9 B6 加 has_paths）**：命中项只含 `id / name / summary / keywords / score / has_paths`，**不返回 content，也不展开 paths 文本**；`has_paths` 只是布尔标记。要看全文与路径用 `memory_detail`。旧版「search 返回全文」的行为不再保留。
+- **memory_detail（2026-08 新增；v0.9 B6 返回 paths）**：按 `id` 读取单条记忆的完整正文，支持分片：`offset`（默认 0）+ `limit`（默认 500，上限 5000）返回 `content_preview`，并给出 `total_length` 与 `has_more`（`offset + limit < total_length`），以及 `paths`（`[{path,purpose}]`，无则空数组）。`id` 不存在时报错；`offset` 超出正文长度时返回空串（`total_length` 提示真实长度）且 `has_more=false`；路径文件存在性不检查（缺失不硬错误）。
+- **memory paths（v0.9 B6 新增）**：`memory_save` / `memory_update` 可传可选 `paths: [{path,purpose}]`（单条 ≤8，>8 拒绝）；`memory_detail` 返回完整 paths；`memory_search` 与任务开始自动载入快照**不默认展开路径文本**，最多带“含 paths”标记；旧记忆缺 paths 视为空，不强制迁移；文件不存在不报硬错误，由模型按“可能移动/损坏”处理。
 - **memory_save 必填四件套（2026-08 升级）**：`name` / `keywords` / `content` / `summary` 全部必填（缺任一报错），`namespace` 可选（默认 global）。`name` 建议 ≤80 字 / 5–10 词；`summary` 由调用方（模型）提供，插件不生成。
 - **memory_save / memory_update 只回成功（2026-08）**：成功时分别只返回 `{ "saved": true }` / `{ "updated": true }`，**不回传记忆正文或元数据**，避免把刚写的内容重新灌进模型上下文；失败仍照常报错。
 - **memory_update 精确小改（2026-08）**：正文可继续用 `content` 整段重写，也可用 `edits` 做字面量精确编辑：`replace` / `insertAfter` / `insertBefore` / `append` / `prepend`。`replace` 与 `insert*` 可用 `before` / `after` 上下文锚定；未指定 `occurrence` 时要求匹配唯一，多匹配会拒绝执行；`occurrence` 支持 1-based 数字或 `"all"`。`name` 不传就继承旧标题（**不再自动推导**）。`keywords` 新增 `keywordsAdd` / `keywordsRemove` 增量增删（与整体替换 `keywords` 互斥）。正文变化也保持 `applied`，无需再确认。

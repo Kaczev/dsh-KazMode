@@ -150,6 +150,39 @@ check("engine: content 整段重写不传 name 也继承旧标题", fullNoName.n
 const conflict = await memory.update(editReal.id, { content: "x", edits: [{ type: "replace", find: "x", replace: "y" }] }).then(() => null, () => "rejected");
 check("engine: content 与 edits 同时传会拒绝", conflict === "rejected");
 
+// v0.9 R-B6-3：paths 引擎层读写与 ≤8 校验
+const pathsRec = await memory.remember({
+  name: "paths 引擎测试",
+  keywords: ["paths"],
+  summary: "paths summary",
+  content: "paths engine body",
+  namespace: "global",
+  paths: [
+    { path: "C:/some/exists.txt", purpose: "source" },
+    { path: join(root, "definitely-missing.txt"), purpose: "missing sample" },
+  ],
+});
+check("engine: remember 返回 paths", Array.isArray(pathsRec.paths) && pathsRec.paths.length === 2 && pathsRec.paths[0].path === "C:/some/exists.txt");
+const pathsRead = await memory.get(pathsRec.id);
+check("engine: get 返回 paths，缺失文件不硬错误", Array.isArray(pathsRead.paths) && pathsRead.paths.some((p) => p.path === join(root, "definitely-missing.txt")));
+const pathsSearch = await memory.search("paths", { namespace: "global" });
+check("engine: search 命中记录带 paths（不展开过滤由工具层负责）", pathsSearch.some((h) => h.record.id === pathsRec.id && Array.isArray(h.record.paths) && h.record.paths.length === 2));
+const pathsCleared = await memory.update(pathsRec.id, { paths: [] });
+check("engine: update 可清空 paths", Array.isArray(pathsCleared.paths) && pathsCleared.paths.length === 0);
+const overPaths = await memory.remember({
+  name: "too many",
+  keywords: ["x"],
+  summary: "x",
+  content: "x",
+  namespace: "global",
+  paths: Array.from({ length: 9 }, (_, i) => ({ path: "C:/p" + i + ".txt", purpose: "x" })),
+}).then(() => null, () => "rejected");
+check("engine: 单条 >8 paths 在 remember 被拒绝", overPaths === "rejected");
+const overUpdatePaths = await memory.update(pathsRec.id, {
+  paths: Array.from({ length: 9 }, (_, i) => ({ path: "C:/p" + i + ".txt", purpose: "x" })),
+}).then(() => null, () => "rejected");
+check("engine: 单条 >8 paths 在 update 被拒绝", overUpdatePaths === "rejected");
+
 await engineFiber.dispose();
 await storageFiber.dispose();
 rmSync(root, { recursive: true, force: true });

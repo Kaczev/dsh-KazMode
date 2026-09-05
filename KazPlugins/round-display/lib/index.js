@@ -32,6 +32,65 @@ const NAMESPACE = settingsNamespace("round-display");
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/round-display";
 
+/** v0.9 B6：round-display 输出白名单（§10.4 R-B6-2）。
+ *  只显示五类内容：稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、
+ *  记忆快照注入；阶段切换 / whale_report 逐次噪音 / 首轮记忆指引等一律不显示。 */
+export const ROUND_DISPLAY_ALLOWED_CATEGORIES = Object.freeze([
+  "stable-boundary",
+  "goal-context",
+  "task-contract",
+  "subagent-report",
+  "memory-snapshot",
+]);
+const ALLOWED_CATEGORY_SET = new Set(ROUND_DISPLAY_ALLOWED_CATEGORIES);
+
+/** 归一化上报类别：白名单外返回 null（不显示）。 */
+function normalizeCategory(value) {
+  if (typeof value !== "string") return null;
+  const category = value.trim();
+  return ALLOWED_CATEGORY_SET.has(category) ? category : null;
+}
+
+/** 从一条上报/持久化条目推断允许的 v0.9 类别；白名单外返回 null。
+ *  优先使用显式 category；旧数据无 category 时按“注入源分类”回退识别。 */
+export function classifyRoundDisplayReport(payload) {
+  const value = payload !== null && typeof payload === "object" ? payload : {};
+  const explicit = normalizeCategory(value.category);
+  if (explicit !== null) return explicit;
+  const plugin = typeof value.plugin === "string" ? value.plugin : "";
+  const title = typeof value.title === "string" ? value.title : "";
+  const content = typeof value.content === "string" ? value.content : "";
+  if (plugin === "round-minimal" && title === "本轮工具变化") {
+    if (content.includes("恢复全量（首次工具调用后）")) {
+      return "stable-boundary";
+    }
+  }
+  if (plugin === "goal-round-driver" || plugin === "tool-goal") return "goal-context";
+  if (plugin === "ka-whale-workflow") {
+    if (
+      content.includes("[ka-whale-workflow goal-active]") ||
+      content.includes("[ka-whale-workflow working-resumed]") ||
+      content.includes("Goal 已结束") ||
+      content.includes("Goal 模式激活") ||
+      content.includes("收到新一轮消息：Goal active")
+    ) {
+      return "goal-context";
+    }
+  }
+  if (plugin === "ka-whale-memory" && content.includes("[ka-whale-memory Auto-Load]")) {
+    return "memory-snapshot";
+  }
+  if (
+    title.includes("任务契约") ||
+    content.includes("任务契约") ||
+    title.toLowerCase().includes("task contract") ||
+    content.toLowerCase().includes("task contract")
+  ) {
+    return "task-contract";
+  }
+  return null;
+}
+
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
 });
@@ -182,10 +241,15 @@ export default {
               const content = typeof item.content === "string" ? item.content : "";
               if (content.trim().length === 0) continue;
               const plugin = typeof item.plugin === "string" ? item.plugin : "";
+              const title = typeof item.title === "string" ? item.title : "";
+              // v0.9 B6：恢复旧记录时也应用输出白名单；不允许的旧条目不再展示。
+              const category = classifyRoundDisplayReport({ plugin, title, content });
+              if (category === null) continue;
               const entry = {
-                key: plugin + "|" + content,
+                key: plugin + "|" + category + "|" + content,
+                category,
                 plugin,
-                title: typeof item.title === "string" ? item.title : "",
+                title,
                 content,
                 at: typeof item.at === "number" ? item.at : Date.now(),
               };
@@ -216,6 +280,7 @@ export default {
             const turns = {};
             for (const [turn, entries] of byTurn) {
               turns[turn] = entries.map((item) => ({
+                category: item.category,
                 plugin: item.plugin,
                 title: item.title,
                 content: item.content,
@@ -236,14 +301,15 @@ export default {
       }, 1000);
     }
 
-    /** 记录一条注入：agent + 当前轮次 + (plugin, content) 去重（title 仅展示用）。
-     *  注意：round-display.enabled 只控制面板是否显示，不影响接收/记录/持久化——
-     *  关闭状态下也必须继续收消息，否则发现问题后再打开面板就看不到之前的信息了。 */
-    function record(agent, plugin, title, content) {
+    /** 记录一条注入：agent + 当前轮次 + (category, plugin, content) 去重。
+     *  只记录 v0.9 白名单类别；不允许类别在此前已被 report 过滤。 */
+    function record(agent, plugin, title, content, category) {
       if (agent === null || typeof agent !== "object") return;
       const id = agent.id;
       if (id === undefined) return;
       if (typeof content !== "string" || content.trim().length === 0) return;
+      const normalizedCategory = normalizeCategory(category);
+      if (normalizedCategory === null) return;
       const turn = currentTurnOf(agent);
       let byTurn = byAgent.get(id);
       if (byTurn === undefined) {
@@ -257,10 +323,11 @@ export default {
       }
       const normalizedPlugin = String(plugin ?? "");
       const normalizedTitle = typeof title === "string" ? title : "";
-      const key = normalizedPlugin + "|" + content;
+      const key = normalizedPlugin + "|" + normalizedCategory + "|" + content;
       if (entries.some((item) => item.key === key)) return;
       entries.push({
         key,
+        category: normalizedCategory,
         plugin: normalizedPlugin,
         title: normalizedTitle,
         content,
@@ -278,7 +345,9 @@ export default {
       report(payload) {
         try {
           const value = payload !== null && typeof payload === "object" ? payload : {};
-          record(value.agent, value.plugin, value.title, value.content);
+          const category = classifyRoundDisplayReport(value);
+          if (category === null) return;
+          record(value.agent, value.plugin, value.title, value.content, category);
         } catch (error) {
           ctx.logger.debug("[round-display] report 失败：" + (error instanceof Error ? error.message : String(error)));
         }
@@ -310,7 +379,7 @@ export default {
       return { ok: false, error: { code: "internal", message: String(message), details: {} } };
     }
     function toPublic(entry) {
-      return { plugin: entry.plugin, title: entry.title, content: entry.content };
+      return { category: entry.category, plugin: entry.plugin, title: entry.title, content: entry.content };
     }
     const rpcHandler = async (endpoint, payload) => {
       try {
@@ -408,6 +477,7 @@ export default {
           const turns = {};
           for (const [turn, entries] of byTurn) {
             turns[turn] = entries.map((item) => ({
+              category: item.category,
               plugin: item.plugin,
               title: item.title,
               content: item.content,
