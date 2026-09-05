@@ -1,0 +1,24 @@
+{
+  "name": "whale-summarizer",
+  "version": "0.1.0",
+  "description": "Kaz-only internal whaleSummarizer Cordis service: model-invisible auxiliary LLM summarization for Kaz tree close/promote with direct-children evidence and source ids.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/index.js",
+    "lib/core.mjs",
+    "lib/llm-call.mjs",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.8"
+  }
+}

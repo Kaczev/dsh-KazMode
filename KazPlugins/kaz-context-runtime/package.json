@@ -1,0 +1,25 @@
+{
+  "name": "kaz-context-runtime",
+  "version": "0.3.1",
+  "description": "Kaz-only tree runtime driver: mirrors real DSH session events into a persisted Kaz session tree, closes completed structural boundaries through whaleSummarizer, registers read-only whale_expand, bridges ka-whale-workflow planItem/goal open-close signals via kazContextBoundary, and at structural milestones persists newest-branch render() checkpoints through the official DSH surface-replace seam.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./lib/core.mjs": "./lib/core.mjs"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/core.mjs",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  }
+}
