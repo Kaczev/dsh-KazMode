@@ -701,3 +701,13 @@ export {
   compressionRatioPass,
   renderOrderValid,
 } from "./context-compress.js";
+
+/** Kaz7.0 M1 纯 ESM 树形会话模型（见 session-tree.js；不可变 reducer + 只读 render，无 DSH 运行时接线）。 */
+export {
+  createSession,
+  append,
+  open,
+  close,
+  promote,
+  render,
+} from "./session-tree.js";
