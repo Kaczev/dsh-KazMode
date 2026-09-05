@@ -1,9 +1,10 @@
 // ka-whale-workflow —— 鲸鱼工作流（v0.9：主/受控子代理阶段机 + 工具面稳定）
 // ===========================================================================
 // 流程：
-//   1) 主模型注入 [ka-whale-workflow main flow]（一次/新会话）与各 v0.9 阶段入口。
-//   2) 受控 v0.9 子代理注入 role 专属 stage；普通旧未知子代理（includeSubagents=true）
-//      注入旧通用 subagent-flow。
+//   1) 主模型 Persona 由 ka-whale-workflow:main system-prompt 段承载（每个 step
+//      重新组装）；各 v0.9 阶段入口按 pending run 注入。
+//   2) 受控 v0.9 子代理经 ka_sub_whale request.persona 获得 role Persona；普通旧
+//      未知子代理（includeSubagents=true）注入旧通用 subagent-flow。
 //   3) whale_report 在 Stable Main Surface 常驻，是主模型 stage 推进与 task plan
 //      持久化的唯一 bookkeeping 入口。
 //   4) v0.9 Goal 由 whale_report({mode:'goal'}) 启动/恢复；goal-active 是外部模式。
@@ -137,7 +138,9 @@ export { KAZ_TASK_PLAN_STORE_PATH, KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH };
 const MANUAL_COMMAND_NAMES = ["goal"];
 
 /** v0.9 主流程上下文文案（v0.9 §9.1 Persona Goal-active 口径；阶段注入另行按 run 追加）。
- *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.main，避免双源漂移。 */
+ *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.main，避免双源漂移。
+ *  37.5：运行时的主 Persona 已注册为 `ka-whale-workflow:main` system-prompt 段；
+ *  本常量仅保留给探针/兼容引用，不再作为主会话 user message 注入。 */
 export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
 >
 ${KAZ_ROLE_PROMPTS.main}`;
@@ -346,6 +349,10 @@ function isSubagent(agent) {
         if (event !== null && typeof event === "object" && event.type === "subagent/descriptor") return true;
       }
     }
+    const header = agent?.session?.header;
+    if (header !== null && header !== undefined && typeof header === "object") {
+      return header.origin === "subagent" || typeof header.parentSession === "string";
+    }
   } catch {
     // fall through
   }
@@ -412,6 +419,29 @@ export function isSubagentReportMessage(message) {
 export function subagentReportSummaryOf(message) {
   if (!isSubagentReportMessage(message)) return "";
   return oneLineSummary(messageTextOf(message));
+}
+
+/** 提取子代理 report/settled 消息的 child session id；非该类消息返回空串。
+ *  DSH continuable-subagent 消息 source 固定携带 senderSessionId。 */
+export function subagentReportChildSessionIdOf(message) {
+  try {
+    if (!isSubagentReportMessage(message)) return "";
+    const source = message?.source;
+    if (source !== null && typeof source === "object") {
+      const sender = source.senderSessionId;
+      if (typeof sender === "string" && sender.length > 0) return sender;
+      const sessionId = source.sessionId;
+      if (typeof sessionId === "string" && sessionId.length > 0) return sessionId;
+    }
+    const session = message?.session;
+    if (session !== null && typeof session === "object") {
+      const id = typeof session.id === "string" ? session.id : session.sessionId;
+      if (typeof id === "string" && id.length > 0) return id;
+    }
+    return "";
+  } catch {
+    return "";
+  }
 }
 
 /** 会话里是否已发生第一次工具调用。 */
@@ -972,6 +1002,38 @@ export default {
       },
     });
 
+    // 37.5 persona-application: KAZ_ROLE_PROMPTS.main is the real main
+    // system-prompt section. It is assembled on every step, so existing
+    // sessions receive persona updates immediately instead of being blocked by
+    // the old one-time main-flow user-message + hasInjectedBefore logic.
+    ctx.effect(
+      () =>
+        ctx.systemPrompt.section({
+          name: "ka-whale-workflow:main",
+          order: 10,
+          text: (context) => {
+            try {
+              if (source().enabled === false) return "";
+              const agent = context?.agent;
+              if (agent === null || agent === undefined || typeof agent !== "object") return "";
+              if (isSubagent(agent)) return "";
+              const kazMode = ctx.get("kazMode");
+              if (
+                kazMode !== undefined &&
+                kazMode !== null &&
+                typeof kazMode.kazEnabled === "function"
+              ) {
+                return kazMode.kazEnabled(agent) === true ? KAZ_ROLE_PROMPTS.main : "";
+              }
+              return "";
+            } catch {
+              return "";
+            }
+          },
+        }),
+      "ka-whale-workflow: register main persona system section",
+    );
+
     /** 阶段状态存储：插件自己的 JSON（config.stageStore 可覆盖，探针用临时文件）。
      *  绝不写会话事件——自定义事件会让 dsh 重载会话日志时拒绝整条日志。 */
     const stageStore = createStageStore(
@@ -1514,11 +1576,6 @@ export default {
       lifecycle.updatedAt = nowIso;
       scheduleLifecyclePersist();
       return true;
-    }
-
-    /** v0.8 Step A：主/子流程上下文文案（按代理类型选择；不再按 stage 渲染工具清单）。 */
-    function flowTextFor(agent) {
-      return isSubagent(agent) ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
     }
 
     /** 尝试把本插件给模型发送的信息上报给 round-display（best-effort）。
@@ -2093,9 +2150,10 @@ export default {
             delivery: "next-step",
             signal: exec.signal,
           });
-          // 36.6: child-side round-display report removed. The report message is
-          // delivered to the parent main line and captured in agent/pre-step there,
-          // so it is recorded under the parent/main agent, not this child session.
+          // 37.5: this tool intentionally does not write round-display itself.
+          // The report message is delivered to the parent main line and captured
+          // in agent/pre-step there, which records it under BOTH the parent/main
+          // agent and this child subagent session (child id from senderSessionId).
           return {
             messageId,
             role,
@@ -2383,6 +2441,28 @@ export default {
       return undefined;
     }
 
+    /** 解析子代理 round-display 落点：优先 live agent，回退 session 对象。
+     *  37.5：subagent-report/settled 到达父进程时 child 可能刚释放，session
+     *  对象仍足以让 round-display 按 child session id + events 记录。 */
+    function roundDisplayTargetOf(sessionId) {
+      try {
+        if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+        const agents = ctx.get("agents");
+        if (agents !== undefined && agents !== null && typeof agents.get === "function") {
+          const agent = agents.get(sessionId);
+          if (agent !== undefined && agent !== null && typeof agent === "object") return agent;
+        }
+        const sessions = ctx.get("sessions");
+        if (sessions !== undefined && sessions !== null && typeof sessions.get === "function") {
+          const session = sessions.get(sessionId);
+          if (session !== undefined && session !== null && typeof session === "object") return session;
+        }
+      } catch {
+        // fall through
+      }
+      return null;
+    }
+
     ctx.on("session/event", (session, event) => {
       if (event === null || typeof event !== "object" || event.type !== "tool/call") return;
       const sessionId = session !== null && typeof session === "object" && typeof session.id === "string"
@@ -2415,7 +2495,9 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // 上下文注入：主/子流程与 Goal 继续确认按 turn 去重注入一次。
+    // 上下文注入：主 Persona 是 ka-whale-workflow:main system 段（不在此注入）；
+    // 旧/未知子代理的 SUBAGENT_FLOW_TEXT 按 turn 去重注入一次；v0.9 阶段与
+    // Goal 边界注入按 pending 精确一次。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
       const agent = payload?.agent;
@@ -2479,7 +2561,8 @@ export default {
       if (liveFor(agent).enabled !== true) return decision;
       if (isBypassed(agent)) return decision;
       // 上下文注入：
-      //   - 主模型 / 旧未知子代理（includeSubagents=true）的 flow Persona 首次注入一次；
+      //   - 主 Persona 已是 ka-whale-workflow:main system 段，不再注入 user message；
+      //   - 旧未知子代理（includeSubagents=true）的 SUBAGENT_FLOW_TEXT 首次注入一次；
       //   - 受控 v0.9 子代理只注入 role-specific stage，不注入旧通用 subagent-flow；
       //   - v0.9 stage 注入按 pendingStageInjection 精确一次（同一 run 内重新
       //     进入某 stage 会再次 pending，因此会再次注入）。
@@ -2491,10 +2574,11 @@ export default {
       const sessionIdNow = sessionIdOf(agent);
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
       const messages = Array.isArray(decision.messages) ? decision.messages : [];
-      // 36.6: main-side subagent report capture. The child-side *_sub_whale_report
-      // no longer writes to round-display; when the parent main agent receives a
-      // DSH subagent-report/subagent-settled message, record one line here under
-      // the parent/main agent with the whitelisted subagent-report category.
+      // 37.5 subagent round-display routing: when the parent main agent receives
+      // a DSH subagent-report/subagent-settled message, record the summary under
+      // BOTH the parent/main agent and the child subagent session (resolved from
+      // message.source.senderSessionId), so child pages show their own reports
+      // while the main session keeps its existing summary.
       if (
         liveNow.enabled === true &&
         controlledRoleNow === null &&
@@ -2504,21 +2588,33 @@ export default {
       ) {
         for (const message of messages) {
           const summary = subagentReportSummaryOf(message);
-          if (summary.length > 0) {
-            reportRoundDisplay(agent, summary, "子代理汇报", "subagent-report");
+          if (summary.length === 0) continue;
+          reportRoundDisplay(agent, summary, "子代理汇报", "subagent-report");
+          const childId = subagentReportChildSessionIdOf(message);
+          if (childId.length > 0 && childId !== sessionIdNow) {
+            const childTarget = roundDisplayTargetOf(childId);
+            if (childTarget !== null) {
+              reportRoundDisplay(childTarget, summary, "子代理汇报", "subagent-report");
+            }
           }
         }
       }
       let appended = false;
       if (liveNow.enabled === true && !skipSubagentNow && !isBypassed(agent)) {
-        // 受控 v0.9 子代理的 Persona 已由 ka_sub_whale 带入对应 role flow；
-        // 不再注入旧通用 SUBAGENT_FLOW_TEXT，只注入 role-specific pending stage。
-        if (controlledRoleNow === null) {
-          const form = subagentNow ? "subagent-flow" : "main-flow";
+        // 37.5 persona-application:
+        //   - main persona is now the ka-whale-workflow:main system section,
+        //     assembled fresh each step; no one-time MAIN_FLOW_TEXT user message
+        //     is appended, so old sessions are never blocked by hasInjectedBefore.
+        //   - controlled v0.9 subagents receive KAZ_ROLE_PROMPTS.subagent.* via
+        //     request.persona; do not inject the old generic SUBAGENT_FLOW_TEXT.
+        //   - only old/unknown subagents (includeSubagents=true) still get the
+        //     generic SUBAGENT_FLOW_TEXT once.
+        if (controlledRoleNow === null && subagentNow) {
+          const form = "subagent-flow";
           const alreadyInjectedTurn = hasInjectedInTurn(agent, form, turn);
           const alreadyInjectedBefore = hasInjectedBefore(agent, form);
           if (!alreadyInjectedTurn && !alreadyInjectedBefore) {
-            const text = subagentNow ? SUBAGENT_FLOW_TEXT : MAIN_FLOW_TEXT;
+            const text = SUBAGENT_FLOW_TEXT;
             try {
               const message = createUserMessage({
                 content: [{ type: "text", text }],
@@ -2526,14 +2622,10 @@ export default {
               });
               messages.push(message);
               appended = true;
-              reportRoundDisplay(
-                agent,
-                text,
-                subagentNow ? "子代理流程" : "主流程",
-              );
+              reportRoundDisplay(agent, text, "子代理流程");
             } catch (error) {
               ctx.logger.warn(
-                `[ka-whale-workflow] 构造主/子流程上下文消息失败：${error instanceof Error ? error.message : String(error)}`,
+                `[ka-whale-workflow] 构造子代理流程上下文消息失败：${error instanceof Error ? error.message : String(error)}`,
               );
             }
           }

@@ -20,6 +20,7 @@ import {
   canAdvance,
 } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
+import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,6 +57,9 @@ planStore.persistFinalPayload({
 });
 
 const rdReports = [];
+const promptSections = [];
+const agentRegistry = new Map();
+const sessionsRegistry = new Map();
 // --- minimal plugin mock ---
 const listeners = new Map();
 const registeredTools = new Map();
@@ -84,6 +88,7 @@ const toolsMock = {
   },
 };
 const mockKazMode = {
+  kazEnabled: () => true,
   pluginConfig: () => ({ enabled: true, includeSubagents: false }),
   toolVisible: () => true,
 };
@@ -110,6 +115,8 @@ const base = {
     if (name === "kazMode") return mockKazMode;
     if (name === "goals") return { get: () => undefined };
     if (name === "roundDisplay") return { report: (payload) => rdReports.push(payload) };
+    if (name === "agents") return { get: (id) => agentRegistry.get(id) };
+    if (name === "sessions") return { get: (id) => sessionsRegistry.get(id) };
     if (name === "subagents") {
       return {
         startContinuable: async () => ({ childId: "child-v09-365" }),
@@ -118,7 +125,12 @@ const base = {
     }
     return undefined;
   },
-  systemPrompt: { section() { return () => {}; } },
+  systemPrompt: {
+    section(section) {
+      promptSections.push(section);
+      return () => {};
+    },
+  },
   tools: toolsMock,
 };
 
@@ -135,6 +147,27 @@ const claimed = listeners.get("agent/inbox/claimed")?.[0];
 const preExecute = listeners.get("tools/pre-execute")?.[0];
 const whaleReport = registeredTools.get("whale_report");
 const kaSubWhale = registeredTools.get(KA_SUB_WHALE_TOOL);
+
+// 37.5 persona-application: ka-whale-workflow registers a real system section.
+{
+  const mainSection = promptSections.find((section) => section?.name === "ka-whale-workflow:main");
+  check(
+    "37.5 main persona system section registered as ka-whale-workflow:main",
+    mainSection !== undefined && mainSection.order === 10,
+  );
+  const mainText = typeof mainSection?.text === "function" ? mainSection.text({ agent }) : "";
+  check(
+    "37.5 system section resolves to current KAZ_ROLE_PROMPTS.main for Kaz main agent",
+    mainText === KAZ_ROLE_PROMPTS.main,
+  );
+  const childForSection = {
+    id: "s-child-system",
+    options: { subagentDepth: 1 },
+    session: { id: "s-child-system", events: [], header: { origin: "subagent", parentSession: agent.id } },
+  };
+  const childText = typeof mainSection?.text === "function" ? mainSection.text({ agent: childForSection }) : "";
+  check("37.5 system section is empty for subagents", childText === "");
+}
 
 // 纯函数层
 check("主 stage ids 与 v0.9 37.5 一致", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools","write-plan","decide-goal","working","memory-maintenance","plugin-maintenance","communication"]));
@@ -257,38 +290,58 @@ check("v0.9 工具已注册", registeredTools.has("whale_report") && registeredT
 check("36.6 ka_sub_whale description 含异步等待提示", typeof kaSubWhale?.description === "string" && kaSubWhale.description.includes("end the current turn and await its report/finished message") && kaSubWhale.description.includes("do not use pwsh sleep or poll list_agents"));
 check("36.6 ka_sub_whale 成功输出含 notice", workerInWorking?.ok === true && typeof workerInWorking?.notice === "string" && workerInWorking.notice.includes("End the current turn and await its report/finished message") && workerInWorking.notice.includes("not wait primitives"));
 
-// 36.6 main-side subagent-report capture: parent agent receives subagent report
-// and settled messages, and ka-whale-workflow reports one-line summaries to
-// round-display keyed to the parent agent.
+// 37.5 subagent-report routing: parent agent receives subagent report/settled
+// messages, and ka-whale-workflow reports one-line summaries to round-display
+// under BOTH the parent/main agent and the child subagent session.
 {
   const preStep = listeners.get("agent/pre-step")?.[0];
-  const parent = { id: "s-parent-366", session: { id: "s-parent-366", events: [] } };
+  const parent = { id: "s-parent-375", session: { id: "s-parent-375", events: [] } };
+  const child = {
+    id: "child-v09-375",
+    options: { subagentDepth: 1 },
+    session: {
+      id: "child-v09-375",
+      events: [{ type: "turn/start", data: { turn: 1 } }],
+      header: { origin: "subagent", parentSession: parent.id },
+    },
+  };
+  agentRegistry.set(child.id, child);
   const reportMessage = {
     role: "user",
     content: [{ type: "text", text: "parent report\nsecond line" }],
-    source: { kind: "subagent-report", form: "relay" },
+    source: { kind: "subagent-report", form: "relay", senderSessionId: child.id },
   };
   const settledMessage = {
     role: "user",
     content: [],
-    source: { kind: "subagent-settled", form: "notice", summary: "settled summary here" },
+    source: {
+      kind: "subagent-settled",
+      form: "notice",
+      summary: "settled summary here",
+      senderSessionId: child.id,
+    },
   };
   const before = rdReports.length;
   const preDecision = { kind: "enter", messages: [reportMessage, settledMessage] };
   await preStep({ agent: parent, turn: 1 }, async () => preDecision);
-  const subagentReports = rdReports
-    .slice(before)
-    .filter(
-      (payload) =>
-        payload?.category === "subagent-report" &&
-        payload?.plugin === "ka-whale-workflow" &&
-        payload?.agent?.id === parent.id,
-    );
+  const reports = rdReports.slice(before).filter(
+    (payload) =>
+      payload?.category === "subagent-report" && payload?.plugin === "ka-whale-workflow",
+  );
+  const parentReports = reports.filter((payload) => payload?.agent?.id === parent.id);
+  const childReports = reports.filter((payload) => payload?.agent?.id === child.id);
   check(
-    "36.6 父代理 pre-step 收到 subagent-report/settled 产生主会话 round-display 记录",
-    subagentReports.length === 2 &&
-      subagentReports.some((payload) => payload.content === "parent report second line") &&
-      subagentReports.some((payload) => payload.content === "settled summary here"),
+    "37.5 父代理 pre-step 收到 subagent-report/settled 同时写主会话与 child 会话 round-display 记录",
+    parentReports.length === 2 &&
+      parentReports.some((payload) => payload.content === "parent report second line") &&
+      parentReports.some((payload) => payload.content === "settled summary here") &&
+      childReports.length === 2 &&
+      childReports.some((payload) => payload.content === "parent report second line") &&
+      childReports.some((payload) => payload.content === "settled summary here"),
+  );
+  check(
+    "37.5 main-flow 不再作为一次性 user message 注入",
+    reports.length === 4 && !reports.some((payload) => payload.title === "主流程"),
   );
 }
 

@@ -28,6 +28,7 @@ import plugin, {
   MAIN_STAGE_IDS,
   V09_SUBAGENT_ROLES,
   V09_STAGE_IDS,
+  subagentReportChildSessionIdOf,
 } from "./lib/index.js";
 import {
   stageDefinitionFor,
@@ -86,6 +87,7 @@ check("goalModeActiveOf complete/无 goal/无服务为 false", goalModeActiveOf(
 check("真实用户消息判定", isUserMessage({ content: [], source: { kind: "user" } }) === true && isUserMessage({ content: [] }) === true);
 check("plugin/goal/tool 消息判定为假", isUserMessage({ content: [], source: { kind: "plugin", plugin: "ka-whale-workflow" } }) === false && isUserMessage({ content: [], source: { kind: "goal" } }) === false && isUserMessage({ content: [], source: { kind: "tool" } }) === false);
 check("subagent report/settled 消息判定为假", isUserMessage({ content: [], source: { kind: "subagent-report", form: "relay" } }) === false && isUserMessage({ content: [], source: { kind: "subagent-settled", form: "notice" } }) === false);
+check("37.5 从 subagent-report/settled 提取 child session id", subagentReportChildSessionIdOf({ content: [], source: { kind: "subagent-report", senderSessionId: "child-1" } }) === "child-1" && subagentReportChildSessionIdOf({ content: [], source: { kind: "subagent-settled", senderSessionId: "child-2" } }) === "child-2" && subagentReportChildSessionIdOf({ content: [], source: { kind: "user" } }) === "");
 
 {
   const cmdEvents = [

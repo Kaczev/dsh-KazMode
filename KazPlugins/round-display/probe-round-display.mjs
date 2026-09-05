@@ -19,6 +19,7 @@ import kazModePlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
 
 /** Kaz 5.0 Step1：kaz-system-prompt 恒为 DeepSeek 基础提示词（不再有短 persona 变体）。 */
 const BASE_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
@@ -194,6 +195,57 @@ function makeSettings() {
     );
   }
 
+  // ①.b3 37.5 persona-application: ka-whale-workflow:main section carrying
+  // current KAZ_ROLE_PROMPTS.main is preserved after the DeepSeek base persona.
+  {
+    const assemble = mock.listeners.get("system-prompt/assemble")[0];
+    const assembly = {
+      sections: [
+        { name: "ka-whale-workflow:main", text: KAZ_ROLE_PROMPTS.main },
+        { name: "deployment:persona", text: "ignored" },
+      ],
+      contexts: [],
+      variables: {},
+    };
+    const before = kspReports.length;
+    await assemble(assembly, { agent: AGENT }, async () => assembly);
+    const reports = kspReports.slice(before);
+    const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
+    check(
+      "①.b3 37.5 真实 system = base persona + 当前 KAZ_ROLE_PROMPTS.main",
+      systemReport !== undefined &&
+        systemReport.content === BASE_PROMPT + "\n\n" + KAZ_ROLE_PROMPTS.main &&
+        assembly.sections.length === 2 &&
+        assembly.sections[0].name === "deployment:persona" &&
+        assembly.sections[1].name === "ka-whale-workflow:main",
+    );
+  }
+
+  // ①.b4 37.5 controlled subagents: request.persona role text is preserved,
+  // not overwritten by the DeepSeek base persona.
+  {
+    const assemble = mock.listeners.get("system-prompt/assemble")[0];
+    const subAgent = {
+      id: "s-kaz-sub",
+      options: { subagentDepth: 1 },
+      session: {
+        events: [{ type: "subagent/descriptor", data: {} }],
+        header: { origin: "subagent", parentSession: "s-kaz", agentPreset: "kaz" },
+      },
+    };
+    const assembly = {
+      sections: [{ name: "deployment:persona", text: KAZ_ROLE_PROMPTS.subagent.worker }],
+      contexts: [],
+      variables: {},
+    };
+    await assemble(assembly, { agent: subAgent }, async () => assembly);
+    check(
+      "①.b4 受控子代理 request.persona 保留 KAZ_ROLE_PROMPTS.subagent.worker",
+      assembly.sections.length === 1 &&
+        assembly.sections[0].text === KAZ_ROLE_PROMPTS.subagent.worker,
+    );
+  }
+
   // ②.a v0.8 Step B1：plan-mode 通知不再上报（原生 Plan 已移除）
   {
     const preStep = mock.listeners.get("agent/pre-step")[0];
@@ -366,6 +418,91 @@ function makeSettings() {
   const turns = Array.isArray(historyRes?.value?.turns) ? historyRes.value.turns : [];
   const turnContents = turns.length > 0 && Array.isArray(turns[0].entries) ? turns[0].entries.map((e) => e.content) : [];
   check("③ history 轮内条目新消息排上", JSON.stringify(turnContents) === JSON.stringify(["third", "second", "first"]));
+}
+
+// ---------------------------------------------------------------------------
+// ③.b 37.5：round-display 接受 session-shaped child（live agent 已释放时，
+//  通过 sessions 服务回退）；child 页面 list 能显示自己的 subagent-report 摘要。
+// ---------------------------------------------------------------------------
+{
+  const AGENT_CHILD_SESSION = {
+    id: "s-rd-child-session",
+    events: [{ type: "turn/start", data: { turn: 1 } }],
+  };
+  const settings = makeSettings();
+  const recordsStore = join(TMP, "round-display-records-child-session.json");
+  const mock = makeMockCtx({
+    settings,
+    agents: null,
+    provided: {
+      sessions: { get: (id) => (id === AGENT_CHILD_SESSION.id ? AGENT_CHILD_SESSION : undefined) },
+    },
+  });
+  rdPlugin.apply(mock.ctx, { enabled: true, recordsStore });
+  const rd = mock.provided["roundDisplay"];
+  const rpc = mock.rpcHandlers.get("/round-display");
+  rd.report({
+    agent: AGENT_CHILD_SESSION,
+    plugin: "ka-whale-workflow",
+    category: "subagent-report",
+    title: "子代理汇报",
+    content: "child session own report summary",
+  });
+  const listRes = await rpc("list", { sessionId: AGENT_CHILD_SESSION.id });
+  const listEntries = Array.isArray(listRes?.value?.entries) ? listRes.value.entries : [];
+  check(
+    "③.b session-shaped child 记录可由 child 页面 list 读取",
+    listRes?.ok === true &&
+      listRes?.value?.turn === 1 &&
+      listEntries.length === 1 &&
+      listEntries[0].content === "child session own report summary" &&
+      listEntries[0].category === "subagent-report",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ③.c 37.5：child agent 销毁后 round-display 仍保留 child 自己的汇报记录。
+// ---------------------------------------------------------------------------
+{
+  const childAgentForDispose = {
+    id: "s-rd-child-disposed",
+    options: { subagentDepth: 1 },
+    session: {
+      id: "s-rd-child-disposed",
+      events: [{ type: "turn/start", data: { turn: 1 } }],
+      header: { origin: "subagent", parentSession: "s-parent" },
+    },
+  };
+  const settings = makeSettings();
+  const recordsStore = join(TMP, "round-display-records-child-disposed.json");
+  const mock = makeMockCtx({
+    settings,
+    agents: null,
+    provided: {
+      sessions: { get: (id) => (id === childAgentForDispose.id ? childAgentForDispose : undefined) },
+    },
+  });
+  rdPlugin.apply(mock.ctx, { enabled: true, recordsStore });
+  const rd = mock.provided["roundDisplay"];
+  const rpc = mock.rpcHandlers.get("/round-display");
+  rd.report({
+    agent: childAgentForDispose,
+    plugin: "ka-whale-workflow",
+    category: "subagent-report",
+    title: "子代理汇报",
+    content: "child report after disposal still visible",
+  });
+  const disposeListener = mock.listeners.get("agent/disposed")?.[0];
+  check("③.c round-display 注册了 agent/disposed 清理", typeof disposeListener === "function");
+  disposeListener?.({ agent: childAgentForDispose });
+  const listRes = await rpc("list", { sessionId: childAgentForDispose.id });
+  const listEntries = Array.isArray(listRes?.value?.entries) ? listRes.value.entries : [];
+  check(
+    "③.c child agent 销毁不删除自身 subagent-report 记录",
+    listRes?.ok === true &&
+      listEntries.length === 1 &&
+      listEntries[0].content === "child report after disposal still visible",
+  );
 }
 
 // ---------------------------------------------------------------------------

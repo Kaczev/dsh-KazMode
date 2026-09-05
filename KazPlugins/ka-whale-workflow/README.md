@@ -1,6 +1,6 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting + 37.5 移除 plugin-preflight / 收紧 task-plan 创建与图）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting + 37.5 移除 plugin-preflight / 收紧 task-plan 创建与图 / 主 Persona 系统段与子代理 report 双写）。
 
 ## 范围
 
@@ -26,14 +26,21 @@
   注入 role 专属 `[ka-whale-workflow <role-stage>]` 文本，并由 `tools/pre-execute`
   按该 role/stage 的 Allowed tools 软闸门约束；plugin 的 create/update/retire
   阶段注入携带实际 `lifecyclePath`。受控角色不再注入旧通用 `SUBAGENT_FLOW_TEXT`
-  （role Persona 已由 ka_sub_whale 提供）；旧/未知子代理仍仅在
+  （role Persona 已由 ka_sub_whale 的 `request.persona` 提供，并被
+  kaz-system-prompt 原样保留）；旧/未知子代理仍仅在
   `includeSubagents=true` 时使用通用 subagent-flow。
 - B6 收口：`KAZ_ROLE_PROMPTS`（v0.9 §9.1–9.5）作为全量 Persona 唯一源存放在
   `kaz-shared`，本组件 `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 与
-  `V09_ROLE_PERSONAS` 都由它派生；36.6 起子代理 report 的 round-display 摘要改由
-  父主线 `agent/pre-step` 捕获（`subagent-report` / `subagent-settled` →
-  category=`subagent-report`，记在主 agent 名下），child-side 不再直接写
-  round-display。
+  `V09_ROLE_PERSONAS` 都由它派生。37.5 起主 Persona 改为真实
+  `ka-whale-workflow:main` system-prompt 段（每个 step 重新组装，旧会话自动拿到
+  当前 `KAZ_ROLE_PROMPTS.main`，不再受 one-time user message / `hasInjectedBefore`
+  阻挡）；受控 v0.9 子代理的 `request.persona` 携带当前
+  `KAZ_ROLE_PROMPTS.subagent.*`，`kaz-system-prompt` 会原样保留该角色 Persona。
+- 子代理 report 的 round-display 摘要（37.5）：父主线 `agent/pre-step` 收到
+  `subagent-report` / `subagent-settled` 后以 category=`subagent-report` 同时记录到
+  主 agent 与 child subagent session（child id 取自 `source.senderSessionId`），
+  因此主会话和 child 页面都能看到该次汇报；child agent 结束后 round-display 仍保留
+  child 记录；child-side `*_sub_whale_report` 自身仍不直接写 round-display。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/working/memory-maintenance/
   plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带

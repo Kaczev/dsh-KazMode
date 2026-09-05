@@ -8,9 +8,11 @@
  * 同时也负责把展示信息上报 round-display（best-effort）：
  *   - system-prompt/assemble 后上报“真实系统提示词”（过滤后的最终 sections，
  *     与 dsh-system-prompt 的 renderPrompt 一致：空段过滤、"\n\n" 连接；
- *     Kaz 收敛后的真实 system = persona 段 + ka-whale-workflow 段，不再注入
- *     plan:policy / tool:goal 段——v0.8 Step B1 已实际移除原生 Plan 与
- *     tool:goal 自定义文本逻辑）；
+ *     Kaz 主会话真实 system = deployment:persona（DeepSeek 基础提示词，逐字、
+ *     最前）+ ka-whale-workflow:main（KAZ_ROLE_PROMPTS.main，37.5 起由
+ *     ka-whale-workflow 注册为真实 system 段）；受控子代理保留 request.persona
+ *     带入的 KAZ_ROLE_PROMPTS.subagent.*，不再被本控制器覆盖成基础 persona。
+ *     原生 plan:policy / tool:goal 段不再注入——v0.8 Step B1 已实际移除）；
  *   - agent/pre-step 扫描上报：
  *       - dsh-goal-round-driver 的 <goal_round>（source.kind === "goal"）；
  *       - dsh-tool-goal 的 <goal_complete>/<goal_blocked>
@@ -20,10 +22,12 @@
  * session/event 从 host 根 scope 派发，agent scope 监听器收不到（output-beep
  * 能收是因为它在 host 平面）。
  *
- * 规则：Kaz 任何状态下 persona 都等于 DeepSeek 基础提示词（逐字、最前），
+ * 规则：Kaz 主会话 persona = DeepSeek 基础提示词（逐字、最前），
  * 不再按 kaz-memory/ka-whale-memory 插件开关切换 persona 变体（C12/R-C12）；
  * 记忆搜索/保存指引改由追加消息承担。
- * 角色/任务类型特化段若需要，固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS，
+ * 受控子代理的 request.persona 是完整的 KAZ_ROLE_PROMPTS.subagent.* 角色
+ * Persona，必须原样保留；普通/未知子代理没有显式 role persona 时才回退基础词。
+ * 角色/任务类型特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS，
  * 代码级维护，禁止按具体任务实例动态生成 system。
  */
 
@@ -116,6 +120,47 @@ Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentence
 
 The final white response should be crisp and to the point, and only appear after reasoning and working.`
 
+/** kaz/agent.cordis.yml 的 persona 行原始短文本（未受 kaz-system-prompt 覆盖前）。 */
+const PRESET_PERSONA_TEXT = 'You are a helpful software engineer assistant.'
+
+/** 是否为默认/基础 persona 文本（preset 短兜底或本控制器完整 base）。
+ *  子代理只有 request.persona 带来的显式 role persona 才需要保留。 */
+function isDefaultPersonaText(text) {
+  return (
+    text === PRESET_PERSONA_TEXT ||
+    text === BASE_PROMPT ||
+    text.trim() === PRESET_PERSONA_TEXT.trim()
+  )
+}
+
+/** 从 agent 形状判断子代理会话。 */
+function isSubagentAgent(agent) {
+  try {
+    const depth = agent?.options?.subagentDepth
+    if (typeof depth === 'number' && depth > 0) return true
+    const events = agent?.session?.events
+    if (Array.isArray(events)) {
+      for (const event of events) {
+        if (event !== null && typeof event === 'object' && event.type === 'subagent/descriptor') return true
+      }
+    }
+    const header = agent?.session?.header
+    if (header !== null && header !== undefined && typeof header === 'object') {
+      return header.origin === 'subagent' || typeof header.parentSession === 'string'
+    }
+  } catch {
+    // fall through
+  }
+  return false
+}
+
+/** 是否为受控 v0.9 角色 Persona 文本（KAZ_ROLE_PROMPTS.subagent.*）。
+ *  子代理只要带着非默认 persona，就视为请求方注入的显式 role persona，应保留；
+ *  只有预设短 persona / 完整 base 才由本控制器回填。 */
+function isSubagentRolePersonaText(text) {
+  return typeof text === 'string' && !isDefaultPersonaText(text)
+}
+
 /** 取当前会话命中的系统提示词：恒为 DeepSeek 基础提示词。 */
 function resolvePrompt() {
   return BASE_PROMPT
@@ -153,7 +198,14 @@ export function apply(ctx, _config) {
       if (section === null || typeof section !== 'object' || section.name !== PERSONA_SECTION) {
         continue
       }
-      if (typeof section.text === 'string') section.text = prompt
+      // 37.5: controlled subagents receive KAZ_ROLE_PROMPTS.subagent.* through
+      // request.persona (deployment:persona). Preserve that explicit role text;
+      // only replace default/base persona with BASE_PROMPT.
+      const preserveSubagentRolePersona =
+        isSubagentAgent(agent) && isSubagentRolePersonaText(section.text)
+      if (typeof section.text === 'string' && !preserveSubagentRolePersona) {
+        section.text = prompt
+      }
       kept.push(section)
       personaKept = true
     }

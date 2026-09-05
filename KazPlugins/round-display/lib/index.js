@@ -177,10 +177,11 @@ export function ensureSettingsDefaults(settings, ns, defaults, logger) {
 
 
 /** 读取代理当前轮次：会话日志中最近一个 turn/start 的 data.turn；无则 0。
- *  与 kaz-mode / kaz-memory 同款判定。 */
+ *  与 kaz-mode / kaz-memory 同款判定。37.5 兼容 agent-shaped 与 session-shaped
+ *  输入（child 可能已不在 live agents，只剩 session 对象）。 */
 function currentTurnOf(agent) {
   try {
-    const events = agent?.session?.events;
+    const events = agent?.session?.events ?? agent?.events;
     if (!Array.isArray(events)) return 0;
     let turn = 0;
     for (const event of events) {
@@ -312,8 +313,8 @@ export default {
      *  只记录 v0.9 白名单类别；不允许类别在此前已被 report 过滤。 */
     function record(agent, plugin, title, content, category) {
       if (agent === null || typeof agent !== "object") return;
-      const id = agent.id;
-      if (id === undefined) return;
+      const id = agent.id ?? agent.session?.id ?? agent.sessionId;
+      if (typeof id !== "string" || id.length === 0) return;
       if (typeof content !== "string" || content.trim().length === 0) return;
       const normalizedCategory = normalizeCategory(category);
       if (normalizedCategory === null) return;
@@ -367,13 +368,36 @@ export default {
       };
     }, "round-display: 发布 roundDisplay 上报服务");
 
-    // ---- agent 销毁时清理记录（内存删除 + 落盘同步，避免重启后回退） ----
+    // ---- agent 销毁时清理记录（内存删除 + 落盘同步，避免重启后回退）。
+    // 37.5: child subagent 记录必须保留，供已结束的 child 页面继续显示自己的
+    // subagent-report 摘要；只有普通 agent 销毁才清空该 agent 的记录。 ----
     ctx.on("agent/disposed", (payload) => {
-      const id = payload !== null && typeof payload === "object" ? payload.agent?.id : undefined;
-      if (id !== undefined) {
-        byAgent.delete(id);
-        schedulePersist();
+      const agent = payload !== null && typeof payload === "object" ? payload.agent : undefined;
+      const id = agent?.id;
+      if (typeof id !== "string" || id.length === 0) return;
+      try {
+        const depth = agent?.options?.subagentDepth;
+        if (typeof depth === "number" && depth > 0) return;
+        const header = agent?.session?.header;
+        if (
+          header !== null &&
+          header !== undefined &&
+          typeof header === "object" &&
+          (header.origin === "subagent" || typeof header.parentSession === "string")
+        ) {
+          return;
+        }
+        const events = agent?.session?.events;
+        if (Array.isArray(events)) {
+          for (const event of events) {
+            if (event !== null && typeof event === "object" && event.type === "subagent/descriptor") return;
+          }
+        }
+      } catch {
+        // fall through to normal cleanup
       }
+      byAgent.delete(id);
+      schedulePersist();
     });
 
     // 启动时恢复持久化记录（dsh 重启后 history 仍可见）。
@@ -388,6 +412,24 @@ export default {
     function toPublic(entry) {
       return { category: entry.category, plugin: entry.plugin, title: entry.title, content: entry.content };
     }
+    /** 解析 RPC 目标：live agent 优先；已释放 child 回退 session 对象。 */
+    function resolveAgentOrSession(sessionId) {
+      try {
+        const agents = ctx.get("agents");
+        if (agents !== undefined && agents !== null && typeof agents.get === "function") {
+          const agent = agents.get(sessionId);
+          if (agent !== undefined && agent !== null && typeof agent === "object") return agent;
+        }
+        const sessions = ctx.get("sessions");
+        if (sessions !== undefined && sessions !== null && typeof sessions.get === "function") {
+          const session = sessions.get(sessionId);
+          if (session !== undefined && session !== null && typeof session === "object") return session;
+        }
+      } catch {
+        // fall through
+      }
+      return undefined;
+    }
     const rpcHandler = async (endpoint, payload) => {
       try {
         if (endpoint === "list") {
@@ -398,14 +440,11 @@ export default {
           let turn = 0;
           let entries = [];
           if (typeof sessionId === "string" && sessionId.length > 0) {
-            const agents = ctx.get("agents");
-            const agent =
-              agents !== undefined && agents !== null && typeof agents.get === "function"
-                ? agents.get(sessionId)
-                : undefined;
+            const agent = resolveAgentOrSession(sessionId);
             if (agent !== undefined) {
+              const id = agent.id ?? agent.session?.id ?? agent.sessionId ?? sessionId;
               turn = currentTurnOf(agent);
-              const byTurn = byAgent.get(agent.id);
+              const byTurn = byAgent.get(id);
               const list = byTurn !== undefined ? byTurn.get(turn) : undefined;
               if (Array.isArray(list)) {
                 // 2026-08-28：新消息排上（at 降序），与「越新越靠上」一致。
@@ -425,13 +464,10 @@ export default {
               : undefined;
           let turns = [];
           if (typeof sessionId === "string" && sessionId.length > 0) {
-            const agents = ctx.get("agents");
-            const agent =
-              agents !== undefined && agents !== null && typeof agents.get === "function"
-                ? agents.get(sessionId)
-                : undefined;
+            const agent = resolveAgentOrSession(sessionId);
             if (agent !== undefined) {
-              const byTurn = byAgent.get(agent.id);
+              const id = agent.id ?? agent.session?.id ?? agent.sessionId ?? sessionId;
+              const byTurn = byAgent.get(id);
               if (byTurn !== undefined) {
                 turns = [...byTurn.entries()]
                   .sort((a, b) => a[0] - b[0])
