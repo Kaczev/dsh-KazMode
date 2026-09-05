@@ -1,11 +1,13 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围）。
 
 ## 范围
 
 - 主/子阶段机：英文 stage id，Allowed tools / Can advance to / Task 与 v0.9
-  表格一致；`decide-goal` 可推进 `working` 或外部模式 `goal-active`。
+  表格一致；`decide-goal` 可推进 `working` 或外部模式 `goal-active`；
+  36.5 新增 `plugin-preflight`：`decide-tools → plugin-preflight → decide-tools`，
+  只 pre-finalize/委派 `pluginCreator` plan item。
 - Goal-active 外部模式：`whale_report({mode:'goal', objective, max_goal_rounds?})`
   从 decide-goal 或非主 stage（idle/done/end）进入 `goal-active`；该值写入 stage
   state，但不加入 `MAIN_STAGE_IDS`；goal-active 期间普通 `whale_report` 推进返回
@@ -30,25 +32,39 @@
   `V09_ROLE_PERSONAS` 都由它派生；`*_sub_whale_report` 会向 round-display 上报
   子代理 report 摘要（白名单类别 `subagent-report`）。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
-  Allowed / Can advance / Task，并在 write-plan/working/maintenance 阶段携带
-  `taskPlanPath`，在 create/update/retire-plugin 阶段携带 `lifecyclePath`，
-  在 decide-tools 阶段携带当前私有插件候选目录。
+  Allowed / Can advance / Task，并在 write-plan/plugin-preflight/working/maintenance
+  阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
+  `lifecyclePath`，在 decide-tools 阶段携带当前私有插件候选目录。
 - B2.5 重启语义：Minimal 只在整段 session 第一次 tool/call 前发生；后续
   workflow-run 重新进入 `assess-complexity` 但不重复 Minimal；Goal 存在时不重复
   assess；`assess-complexity -> communication (no-tool-call)` 是合法路径。
+- 36.5 用户消息路由：真实用户消息在非终态活动阶段保留当前阶段，不重置成
+  `assess-complexity`；只有 `idle`/`done`/`end`/`communication` 才重置。
+- 36.5 verification-gap follow-up：`current === 'goal-active'` 但 Goal 已不在
+  active/paused（stale goal-active）时，新一轮真实用户消息回到
+  `assess-complexity`，不再保留失效的 `goal-active`；Goal 仍激活时仍保持
+  `goal-active`。
 - 子代理回传不触发新一轮：DSH `subagent-report` / `subagent-settled` 等内部消息
   不是真实用户消息，`isUserMessage` 返回 false，不会把主模型 working 重置成
   `assess-complexity`。
 - Task plan：独立 `ka-whale-workflow-task-plan.json`；
   `decide-tools` 通过 `whale_report(draftPlanItems)` 第一次持久化（draft）；
-  `write-plan` 通过 `whale_report(finalPlanPayload)` 第二次定稿（finalized）；
-  `ka_sub_whale` 只接受 finalized planItemId。
+  `plugin-preflight` 通过 `whale_report(finalPlanPayload)` 只 pre-finalize
+  `pluginCreator` items（完整 create + 登记候选）；
+  `write-plan` 通过 `whale_report(finalPlanPayload)` 第二次完整定稿（finalized）；
+  plan item `persona` 允许 `main` + 四子代理角色；`ka_sub_whale` 只接受
+  finalized planItemId 且 persona 必须是四子代理角色之一，`persona=main` 返回
+  结构化 `main-persona-delegation-denied`。
 - B3 受控委派：`ka_sub_whale` 按 finalized `planItemId` 读取
   persona/task/assignedTools，校验 assignedTools 来源
   （tool-jobs + available 私有插件候选）与数量（>6 提醒、>8 拒绝），
   计算 role Stable Base + assignedTools 最终 toolFilter，再通过
   `ctx.subagents.startContinuable({ provider: 'spawn', maxDepth: 1 })` 创建
   continuable child；模型只能传 `planItemId`。
+- 36.5 working 委派语义：`persona=main` 由主线执行，子代理 persona 经
+  `ka_sub_whale` 委派；主线监控/验证/改约并只在计划外提问；working 后若仍有
+  `memoryMaintainer`/`pluginMaintainer`/`pluginCreator` items 或候选建议，必须先
+  走 `memory-maintenance`/`plugin-maintenance` 再 communication。
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 四个 `*_sub_whale_report`

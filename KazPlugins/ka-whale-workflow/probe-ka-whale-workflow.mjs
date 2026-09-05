@@ -73,9 +73,10 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
   check("阶段状态已持久化到 JSON 存储", parsed.sessions?.["s-whale"] === "done" && parsed.taskToolState === undefined);
 }
 
-check("新轮普通消息进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity");
-check("goal active 时进入/保持 goal-active", nextStageOnUserMessage("done", 2, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage("idle", 1, { goalActive: true }) === GOAL_ACTIVE_STAGE);
-check("goal 结束后新消息回 assess", nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2, { goalActive: false }) === "assess-complexity");
+check("36.5 终态新消息进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity" && nextStageOnUserMessage("end", 3) === "assess-complexity" && nextStageOnUserMessage("idle", 1) === "assess-complexity");
+check("36.5 活动阶段新消息保留当前阶段", nextStageOnUserMessage("working", 2) === "working" && nextStageOnUserMessage("challenge-plan", 3) === "challenge-plan" && nextStageOnUserMessage("decide-tools", 2) === "decide-tools" && nextStageOnUserMessage("plugin-preflight", 2) === "plugin-preflight" && nextStageOnUserMessage("memory-maintenance", 2) === "memory-maintenance");
+check("goal active 时进入/保持 goal-active", nextStageOnUserMessage("done", 2, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage("idle", 1, { goalActive: true }) === GOAL_ACTIVE_STAGE && nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2, { goalActive: true }) === GOAL_ACTIVE_STAGE);
+check("stale goal-active（goalActive=false/缺省）回到 assess-complexity", nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2, { goalActive: false }) === "assess-complexity" && nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2) === "assess-complexity");
 check("goalModeActiveOf active/paused 为 true", goalModeActiveOf(agent, { get: () => ({ phase: "active" }) }) === true && goalModeActiveOf(agent, { get: () => ({ phase: "paused" }) }) === true);
 check("goalModeActiveOf complete/无 goal/无服务为 false", goalModeActiveOf(agent, { get: () => ({ phase: "complete" }) }) === false && goalModeActiveOf(agent, { get: () => undefined }) === false && goalModeActiveOf(agent, null) === false);
 
@@ -104,7 +105,7 @@ check("subagent report/settled 消息判定为假", isUserMessage({ content: [],
 }
 
 check("v0.9 工具名", KA_SUB_WHALE_TOOL === "ka_sub_whale" && WORK_SUB_WHALE_REPORT_TOOL === "work_sub_whale_report" && MEMORY_SUB_WHALE_REPORT_TOOL === "memory_sub_whale_report" && PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL === "plugin_maintainer_sub_whale_report" && PLUGIN_CREATOR_SUB_WHALE_REPORT_TOOL === "plugin_creator_sub_whale_report");
-check("v0.9 stage 常量导出", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 9 && V09_SUBAGENT_ROLES.length === 4 && V09_STAGE_IDS.length > 0);
+check("v0.9 stage 常量导出", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 10 && MAIN_STAGE_IDS.includes("plugin-preflight") && V09_SUBAGENT_ROLES.length === 4 && V09_STAGE_IDS.length > 0);
 
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");

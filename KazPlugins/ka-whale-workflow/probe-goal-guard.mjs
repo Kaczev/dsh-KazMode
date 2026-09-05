@@ -1,9 +1,10 @@
-// ka-whale-workflow Goal 守卫探针（v0.9 B5 口径）：
+// ka-whale-workflow Goal 守卫探针（v0.9 B5 口径 + 36.5 follow-up）：
 //   - active/paused goal 的新轮真实用户消息保持 goal-active，不进入 assess；
+//   - stale goal-active（无 active/paused goal）回到 assess-complexity；
 //   - blocked/complete/无 goal 时新轮真实用户消息进入 assess-complexity；
 //   - 不写 / 不读旧 goal-recovery / reconstruction / classification 阶段。
 // 运行：node KazPlugins/ka-whale-workflow/probe-goal-guard.mjs
-import plugin, { createStageStore, GOAL_ACTIVE_STAGE } from "./lib/index.js";
+import plugin, { createStageStore, GOAL_ACTIVE_STAGE, nextStageOnUserMessage } from "./lib/index.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ store.set("s-active", "done");
 store.set("s-paused", "done");
 store.set("s-blocked", "done");
 store.set("s-none", "done");
+store.set("s-stale", GOAL_ACTIVE_STAGE);
 
 const listeners = new Map();
 const registeredTools = new Map();
@@ -123,6 +125,13 @@ goalPhase = undefined;
 const noneAgent = { id: "s-none", session: { id: "s-none", events: [] }, steer() {} };
 await claimedHandler({ agent: noneAgent, message: userMessage(), turn: 2 });
 check("无 goal 时新轮消息进入 assess-complexity", stageFromFile("s-none") === "assess-complexity");
+
+// 5) stale goal-active state without an active/paused goal -> assess-complexity.
+goalPhase = undefined;
+const staleAgent = { id: "s-stale", session: { id: "s-stale", events: [] }, steer() {} };
+await claimedHandler({ agent: staleAgent, message: userMessage(), turn: 2 });
+check("stale goal-active（无 active/paused goal）新轮消息回到 assess-complexity", stageFromFile("s-stale") === "assess-complexity");
+check("nextStageOnUserMessage stale goal-active 缺省 context 回 assess-complexity", nextStageOnUserMessage(GOAL_ACTIVE_STAGE, 2) === "assess-complexity");
 
 // Stage store rejects old strings.
 check("旧 reconstruction 不再可写入", store.set("s-x", "reconstruction") === false && store.set("s-x", "goal-recovery") === false && store.set("s-x", "classification") === false);

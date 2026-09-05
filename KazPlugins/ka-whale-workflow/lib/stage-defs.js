@@ -23,6 +23,7 @@ export const MAIN_STAGE_IDS = Object.freeze([
   "assess-complexity",
   "challenge-plan",
   "decide-tools",
+  "plugin-preflight",
   "write-plan",
   "decide-goal",
   "working",
@@ -106,13 +107,30 @@ const DEFINITIONS = {
         "whale_report",
       ],
       canAdvance: ["decide-tools", "communication"],
-      task: "Challenge the user's approach. Find the smallest workable solution. Then advance.",
+      task:
+        "Challenge the user's approach. Find the smallest workable solution. Do not write or finalize task plans here (decide-tools/write-plan own plan persistence) and do not call ka_sub_whale. Then advance.",
     },
     "decide-tools": {
       allowedTools: ["whale_report"],
-      canAdvance: ["write-plan"],
+      canAdvance: ["plugin-preflight", "write-plan"],
       task:
-        "Decide required tools and whether a pluginCreator persona must create a new private plugin now. Create draft plan items via whale_report (first persistence; each gets planItemId). Do not execute ka_sub_whale here; execution happens after write-plan finalization. Candidate assignedTools list (system-injected actual names with descriptions): <candidate tools: name: description>.",
+        "Decide required tools and whether a pluginCreator persona must create a new private plugin now. Create draft plan items via whale_report (first persistence; each gets planItemId). If a pluginCreator preflight is needed, advance to plugin-preflight before write-plan; otherwise advance to write-plan. Do not execute ka_sub_whale here. Candidate assignedTools list (system-injected actual names with descriptions): <candidate tools: name: description>.",
+    },
+    "plugin-preflight": {
+      allowedTools: [
+        "whale_report",
+        "ka_sub_whale",
+        "list_agents",
+        "send_message",
+        "interrupt_agent",
+        "read",
+        "memory_search",
+        "memory_detail",
+        "memory_list",
+      ],
+      canAdvance: ["decide-tools"],
+      task:
+        "Preflight pluginCreator-only plan items. Finalize only persona=pluginCreator items via whale_report(finalPlanPayload), delegate them via ka_sub_whale for full create+register candidate, then return to decide-tools. Other personas must not be pre-finalized or delegated in this stage.",
     },
     "write-plan": {
       allowedTools: ["whale_report", "read"],
@@ -130,7 +148,7 @@ const DEFINITIONS = {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["write-plan", "memory-maintenance", "plugin-maintenance", "communication"],
       task:
-        "For each planItem, delegate execution to a subagent via ka-sub-whale. The main line only monitors, verifies reports, and handles plan amendments via write-plan when needed. Ask the user only for decisions outside the plan.",
+        "Execute persona=main plan items on the main line; delegate subagent-persona plan items via ka_sub_whale. Review the task plan whenever needed via taskPlanPath. Main monitors, verifies subagent reports, amends only through write-plan, and asks only for decisions outside the plan. Before advancing to communication, if any memoryMaintainer/pluginMaintainer/pluginCreator plan items or candidate suggestions remain, pass through memory-maintenance/plugin-maintenance first.",
     },
     "memory-maintenance": {
       allowedTools: [
@@ -425,6 +443,7 @@ export function canAdvance(role, stage, nextStage) {
 export function stageNeedsTaskPlanPath(stage) {
   return (
     stage === "write-plan" ||
+    stage === "plugin-preflight" ||
     stage === "working" ||
     stage === "memory-maintenance" ||
     stage === "plugin-maintenance"

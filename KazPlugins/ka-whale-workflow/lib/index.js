@@ -817,11 +817,12 @@ export function hasInjectedInTurn(agent, form, turn) {
 }
 
 /** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）的路由。
- *  v0.9 语义：
+ *  36.5 语义：
  *  - Goal 激活时不重新开启 assess-complexity，保持 goal-active；
- *  - 普通新任务始终进入 assess-complexity（Minimal 不再重复，由 round-minimal
- *    按“会话第一次 tool/call”判定）；
- *  - 用户插话不改变当前阶段由调用方自行处理（此函数只处理新一轮消息）。
+ *  - stale goal-active（Goal 已不在 active/paused）回到 assess-complexity；
+ *  - 真实用户消息出现在非终态活动阶段时保留当前阶段，不重置为 assess-complexity；
+ *  - 只有 idle/done/end/communication 等终态或未开始状态才进入 assess-complexity
+ *    （Minimal 不再重复，由 round-minimal 按“会话第一次 tool/call”判定）。
  */
 export function nextStageOnUserMessage(current, _turn, context = {}) {
   if (context?.goalActive === true) {
@@ -829,10 +830,23 @@ export function nextStageOnUserMessage(current, _turn, context = {}) {
     return GOAL_ACTIVE_STAGE;
   }
   if (current === GOAL_ACTIVE_STAGE) {
-    // Goal 已结束且新一轮真实用户消息到来：等价于 working 结束后收到新消息，重入 assess。
+    // 36.5 verification-gap follow-up：stale goal-active（无 active/paused goal）
+    // 不应停留在失效的外部模式，恢复为重新进入 assess-complexity。
     return "assess-complexity";
   }
-  return "assess-complexity";
+  if (
+    current === "idle" ||
+    current === "done" ||
+    current === "end" ||
+    current === "communication"
+  ) {
+    return "assess-complexity";
+  }
+  if (typeof current !== "string" || current.trim().length === 0) {
+    return "assess-complexity";
+  }
+  // 非终态活动阶段（含 working-resumed；goal-active 仅在仍激活时由上方分支保持）。
+  return current;
 }
 
 /** 检测 /goal 命令触发的消息：最后一个 turn/end 之后有成功的 command/run。
@@ -1540,7 +1554,7 @@ export default {
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in write-plan pass finalPlanPayload with status finalized for second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'.",
+        "Report v0.9 workflow bookkeeping or mode to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. In decide-tools pass draftPlanItems for first (draft) task-plan persistence; in plugin-preflight pass finalPlanPayload containing only pluginCreator items for pre-finalization; in write-plan pass finalPlanPayload with status finalized for full second persistence. Pass mode='goal' to create/resume a Goal; that enters goal-active from decide-goal. While goal-active, ordinary stage progression is suspended, so whale_report only accepts mode='goal'.",
       parameters: {
         mode: {
           type: "string",
@@ -1550,7 +1564,7 @@ export default {
         nextStage: {
           type: "string",
           description:
-            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, write-plan, decide-goal, working, goal-active, memory-maintenance, plugin-maintenance. In decide-tools/write-plan it may be omitted when the payload implies the only/default transition.",
+            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, plugin-preflight, write-plan, decide-goal, working, goal-active, memory-maintenance, plugin-maintenance. In decide-tools/write-plan/plugin-preflight it may be omitted when the payload implies the only/default transition.",
         },
         objective: {
           type: "string",
@@ -1567,7 +1581,7 @@ export default {
         },
         finalPlanPayload: {
           type: "json",
-          description: "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, assignedTools }] } to persist/finalize the complete task plan (second persistence).",
+          description: "Used in plugin-preflight: { items: [{ planItemId, persona: 'pluginCreator', task, assignedTools }] } to pre-finalize only pluginCreator items. Used in write-plan: { status: 'finalized', items: [...] } to persist/finalize the complete task plan (second persistence).",
         },
       },
       output: {
@@ -1624,11 +1638,59 @@ export default {
           return Promise.reject(new Error(reason));
         }
 
-        // v0.9 task plan persistence at decide-tools / write-plan.
-        if (current === "decide-tools" && Array.isArray(args?.draftPlanItems)) {
+        // v0.9 task plan persistence stage guards.
+        // challenge-plan / decide-tools cannot write or finalize task plans outside
+        // their own persistence stages; plugin-preflight only pre-finalizes pluginCreator.
+        const hasDraftPlanItems = Array.isArray(args?.draftPlanItems);
+        const hasFinalPlanPayload =
+          args?.finalPlanPayload !== null && args?.finalPlanPayload !== undefined;
+        if (hasDraftPlanItems && current !== "decide-tools") {
+          return Promise.reject(
+            new Error(
+              `workflow-stage-deny: draftPlanItems can only be persisted in decide-tools (current="${current}"). ` +
+                `Writing/finalizing task plans here is not allowed.`,
+            ),
+          );
+        }
+        if (hasFinalPlanPayload && current !== "write-plan" && current !== "plugin-preflight") {
+          return Promise.reject(
+            new Error(
+              `workflow-stage-deny: finalPlanPayload can only be used in write-plan or plugin-preflight (current="${current}"). ` +
+                `Writing/finalizing task plans here is not allowed.`,
+            ),
+          );
+        }
+        if (current === "decide-tools" && hasDraftPlanItems) {
           const persisted = taskPlanStore.persistDraftItems(args.draftPlanItems);
           if (persisted.ok !== true) {
             return Promise.reject(new Error("whale_report failed to persist draft task plan items; task plan store write failed."));
+          }
+        }
+        if (current === "plugin-preflight") {
+          const payload = args?.finalPlanPayload;
+          if (payload === null || payload === undefined || typeof payload !== "object") {
+            const def = stageDefinitionFor(MAIN_ROLE, "plugin-preflight");
+            return Promise.reject(
+              new Error(
+                `workflow-stage-deny: plugin-preflight requires whale_report(finalPlanPayload) with only persona=pluginCreator items to pre-finalize; ` +
+                  `current allowed tools: [${def.allowedTools.join(", ")}].`,
+              ),
+            );
+          }
+          const items = Array.isArray(payload.items) ? payload.items : [];
+          const hasNonPluginCreator = items.some(
+            (item) => item === null || typeof item !== "object" || item.persona !== "pluginCreator",
+          );
+          if (items.length === 0 || hasNonPluginCreator) {
+            return Promise.reject(
+              new Error(
+                "workflow-stage-deny: plugin-preflight accepts finalPlanPayload only when every item has persona=pluginCreator; other personas must be finalized later in write-plan.",
+              ),
+            );
+          }
+          const persisted = taskPlanStore.persistFinalPayload(payload);
+          if (persisted.ok !== true) {
+            return Promise.reject(new Error("whale_report failed to persist pluginCreator pre-finalization; task plan store write failed."));
           }
         }
         if (current === "write-plan") {
@@ -1656,13 +1718,15 @@ export default {
               ? "decide-tools"
               : current === "decide-tools"
                 ? "write-plan"
-                : current === "write-plan"
-                  ? "decide-goal"
-                  : current === "decide-goal"
-                    ? args?.mode === "goal"
-                      ? GOAL_ACTIVE_STAGE
-                      : "working"
-                    : "communication";
+                : current === "plugin-preflight"
+                  ? "decide-tools"
+                  : current === "write-plan"
+                    ? "decide-goal"
+                    : current === "decide-goal"
+                      ? args?.mode === "goal"
+                        ? GOAL_ACTIVE_STAGE
+                        : "working"
+                      : "communication";
         const requested =
           typeof args?.nextStage === "string" && args.nextStage.trim().length > 0
             ? args.nextStage.trim()
@@ -1769,12 +1833,28 @@ export default {
           });
         }
         const item = resolved.item;
+        if (item.persona === "main") {
+          // 36.5：persona=main plan items are executed by the main line, not delegated.
+          return Promise.resolve({
+            ok: false,
+            code: "main-persona-delegation-denied",
+            reason: `ka_sub_whale rejected plan item "${item.planItemId}": persona=main plan items are executed by the main line and must not be delegated via ka_sub_whale.`,
+          });
+        }
         const role = normalizeV09Role(item.persona);
         if (role === null) {
           return Promise.resolve({
             ok: false,
             code: "unknown-v09-role",
             reason: `ka_sub_whale rejected plan item "${item.planItemId}": persona "${item.persona}" is not in the v0.9 role set.`,
+          });
+        }
+        if (stageOfAgent(agent) === "plugin-preflight" && role !== "pluginCreator") {
+          // 36.5：plugin-preflight may pre-finalize/delegate only pluginCreator items.
+          return Promise.resolve({
+            ok: false,
+            code: "plugin-preflight-persona-denied",
+            reason: `ka_sub_whale rejected plan item "${item.planItemId}" in plugin-preflight: persona "${role}" is not pluginCreator. Only pluginCreator items may be pre-finalized and delegated in this stage.`,
           });
         }
 
@@ -2222,8 +2302,8 @@ export default {
       manualBypassSessions.delete(sessionId);
       const current = stageOfAgent(agent);
       const goalActive = goalModeActive(agent);
-      // 第 2、3、4……轮（turn>=2，模型不在运行）：Goal 激活保持外部模式；
-      // 普通新任务重新进入 assess-complexity（v0.9）。
+      // 第 2、3、4……轮（turn>=2，模型不在运行）：非终态活动阶段保留当前阶段；
+      // 只有 idle/done/end/communication 才重新进入 assess-complexity（36.5）。
       if (typeof turn === "number" && turn >= 2) {
         const next = nextStageOnUserMessage(current, turn, { goalActive });
         if (setStageAgent(agent, next)) {
@@ -2231,9 +2311,9 @@ export default {
             agent,
             next === GOAL_ACTIVE_STAGE
               ? "收到新一轮消息：Goal active，保持 goal-active。"
-              : next === "working"
-                ? "收到新一轮消息：Goal 存在，直接进入 working。"
-                : "收到新一轮消息，重新进入 assess-complexity。",
+              : next === "assess-complexity"
+                ? "收到新一轮消息：从终态重新进入 assess-complexity。"
+                : `收到新一轮消息：保留当前活动阶段 ${next}。`,
             "阶段切换",
           );
         }
@@ -2341,9 +2421,9 @@ export default {
                   agent,
                   next === GOAL_ACTIVE_STAGE
                     ? "收到新一轮消息：Goal active，保持 goal-active（pre-step 兜底）。"
-                    : next === "working"
-                      ? "收到新一轮消息：Goal 存在，直接进入 working（pre-step 兜底）。"
-                      : "收到新一轮消息，重新进入 assess-complexity（pre-step 兜底）。",
+                    : next === "assess-complexity"
+                      ? "收到新一轮消息：从终态重新进入 assess-complexity（pre-step 兜底）。"
+                      : `收到新一轮消息：保留当前活动阶段 ${next}（pre-step 兜底）。`,
                   "阶段切换",
                 );
               }

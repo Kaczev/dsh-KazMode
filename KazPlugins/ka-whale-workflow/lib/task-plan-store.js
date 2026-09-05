@@ -3,8 +3,10 @@
 // 存储文件：ka-whale-workflow-task-plan.json（与 stage store 同目录）。
 // 生命周期：
 //   decide-tools whale_report(draftPlanItems) → 草稿 draft；
-//   write-plan  whale_report(finalPlanPayload) → 定稿 finalized；
-//   ka_sub_whale 只接受 finalized planItemId。
+//   plugin-preflight whale_report(finalPlanPayload) → pluginCreator 子集 finalized；
+//   write-plan  whale_report(finalPlanPayload) → 完整计划定稿 finalized；
+//   persona=main 表示主线执行；ka_sub_whale 只接受 finalized planItemId 且只放行
+//   四个 v0.9 子代理角色，persona=main 由主线执行并拒绝委派。
 // ===========================================================================
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,8 +18,9 @@ export const TASK_PLAN_STORE_VERSION = 1;
 /** 允许的 plan item 状态。 */
 export const PLAN_ITEM_STATUSES = Object.freeze(["draft", "finalized"]);
 
-/** 允许的 v0.9 子代理 persona。 */
+/** 允许的 plan item persona：main（主线执行） + v0.9 四个子代理角色。 */
 export const PLAN_PERSONAS = Object.freeze([
+  "main",
   "worker",
   "memoryMaintainer",
   "pluginMaintainer",
