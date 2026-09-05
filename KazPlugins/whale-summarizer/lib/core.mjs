@@ -18,7 +18,7 @@ export const EVIDENCE_KINDS = Object.freeze(["leaf", "block"]);
 export const REF_KINDS = Object.freeze(["leaf", "block"]);
 
 export const DEFAULT_OPTIONS = Object.freeze({
-  maxEvidenceChars: 24000,
+  maxEvidenceChars: 1000000,
   maxSummaryChars: 2000,
   maxAttempts: 3,
   language: "zh",
@@ -241,8 +241,8 @@ function validateEvidenceRefs(evidence, refs) {
   if (!Array.isArray(evidence) || evidence.length === 0) {
     return errorResult(ERROR_CODES.INVALID_INPUT, "evidence must be a non-empty array of direct children");
   }
-  if (evidence.length > 256) {
-    return errorResult(ERROR_CODES.INVALID_INPUT, "evidence exceeds 256 direct children");
+  if (evidence.length > 10000) {
+    return errorResult(ERROR_CODES.INVALID_INPUT, "evidence exceeds 10000 direct children");
   }
   if (!Array.isArray(refs) || refs.length === 0) {
     return errorResult(ERROR_CODES.INVALID_INPUT, "refs must be a non-empty array");

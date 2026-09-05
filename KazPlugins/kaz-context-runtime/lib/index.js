@@ -60,6 +60,7 @@ import {
   renderCheckpointText,
 } from "./core.mjs";
 
+
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -196,6 +197,8 @@ export default {
         // logging must never break the driver
       }
     }
+
+
 
     function resolveAgent(sessionId) {
       try {
@@ -521,9 +524,11 @@ export default {
           signal,
           allowCheckpoint: true,
         });
+
         if (result.closed === true || result.reason === "no-open-scope" || result.reason === "empty-scope") {
           state.pendingClose = false;
         } else if (result.reason === "summarizer-unavailable") {
+
           state.pendingClose = true;
         }
         return result;
@@ -534,6 +539,7 @@ export default {
           return { closed: false, reason: "aborted" };
         }
         logWarn(`close round failed for ${sessionId}; boundary stays open and pending retry: ${errorMessage(error)}`);
+
         state.pendingClose = true;
         return { closed: false, reason: "summary-failed" };
       } finally {
@@ -606,6 +612,14 @@ export default {
       }
     }
 
+    function lastChildIsAssistantLeaf(session) {
+      const innermost = findInnermostOpenScope(session);
+      if (!innermost) return false;
+      const children = Array.isArray(innermost.scope.children) ? innermost.scope.children : [];
+      if (children.length === 0) return false;
+      const last = children[children.length - 1];
+      return last?.nodeType === "leaf" && last?.kind === "assistant";
+    }
     async function retryPendingClose(agent) {
       const sessionId = sessionIdOf(agent);
       if (!sessionId) return { retried: false };
@@ -937,6 +951,7 @@ export default {
     }, `${PLUGIN_ID}: 发布 kazContextBoundary 服务`);
 
     ctx.on("session/event", (session, event) => {
+
       const sessionId = sessionIdOf(session);
       if (!sessionId || !isPlainObject(event)) return;
       try {
@@ -990,11 +1005,19 @@ export default {
     // are logged, so retrying a failed boundary close here never folds the new
     // step into the old open scope. No claimed/unlogged message is mirrored.
     ctx.on("agent/pre-step", async (payload, next) => {
+
       const agent = payload?.agent;
       if (agent !== null && agent !== undefined && typeof agent === "object") {
         try {
           syncWorkflowBoundaries(agent, { scheduleCloses: false });
-          await retryPendingClose(agent);
+          const sessionId = sessionIdOf(agent);
+          const state = sessionId ? bySession.get(sessionId) : undefined;
+          if (state && !state.busy && lastChildIsAssistantLeaf(state.currentSession)) {
+
+            await closeRound(sessionId, { agent, signal: agent?.session?.signal });
+          } else if (state && state.pendingClose && !state.busy) {
+            await retryPendingClose(agent);
+          }
         } catch (error) {
           logDebug(`pre-step pending close retry error: ${errorMessage(error)}`);
         }
@@ -1003,6 +1026,7 @@ export default {
     });
 
     ctx.on("agent/turn-stopping", async (payload) => {
+
       const agent = payload?.agent;
       const sessionId = sessionIdOf(agent);
       if (!sessionId) return;
