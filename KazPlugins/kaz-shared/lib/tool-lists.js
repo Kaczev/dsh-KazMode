@@ -87,7 +87,7 @@ export const KAZ_FIRST_ROUND_TOOLS = Object.freeze({
 /** kaz-memory/ka-whale-memory 开启时的首轮工具白名单：第一轮先查记忆，触发首次工具调用后再恢复。 */
 export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = ["memory_search"];
 
-/** kaz-memory/ka-whale-memory 关闭时的首轮工具白名单：read + pwsh（≤2，2026-09 收编 round-minimal）。 */
+/** kaz-memory/ka-whale-memory 关闭时的首轮工具白名单：read + pwsh（≤2，2026-09 起由 kaz-mode 核心直接拥有）。 */
 export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = ["read", "pwsh"];
 
 /** 兜底默认（kaz-memory 状态未知时）：read + pwsh（≤2）。 */
@@ -390,12 +390,11 @@ export const KAZ_MAINTENANCE_ONLY_TOOLS = Object.freeze([
 /** Kaz 模式默认系统提示词。 */
 export const FIXED_PERSONA = "You are a helpful software engineer assistant.";
 
-/** 被管理插件目录（Kaz 5.0：两个旧首轮提示组件已删除；面板只显示 3 个组件，
- *  但内部状态模型仍保留 ka-whale-workflow / ka-whale-memory / round-minimal /
- *  plugin-filter 等隐藏组件，供状态联动与回滚）。
+/** 被管理插件目录（Kaz 5.0：旧首轮提示组件已删除；面板只显示 3 个组件，
+ *  但内部状态模型仍保留 plugin-filter / ka-whale-memory / ka-whale-workflow 等
+ *  隐藏组件供状态联动；36.9：round-minimal 已完全删除，不再列入。
  *  v0.8 Step B2：create-plan 插件目录已删除，不再列入。 */
 export const MANAGED_PLUGINS = [
-  { id: "round-minimal", label: "round-minimal（首阶段极简 · 已收编进核心机制，面板隐藏）" },
   { id: "plugin-filter", label: "plugin-filter（工具过滤 · 已收编进 kaz-shared/preset，面板隐藏）" },
   { id: "output-beep", label: "output-beep（输出完成提示音）" },
   { id: "round-display", label: "round-display（每轮注入显示）" },

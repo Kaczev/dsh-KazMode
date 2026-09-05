@@ -10,7 +10,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | 插件 | 角色 |
 | --- | --- |
 | `thinking-anchor` | 思考锚点（**消息注入**）：新对话开始时把完整思考协议作为一条合成用户消息注入，此后每轮开头注入短提醒；不触碰系统提示词 |
-| `round-minimal` | 首阶段极简：**首次工具调用前**按 kaz-memory 自动暴露（Kaz 恒开=`memory_search`；非 Kaz 且记忆关=`pwsh`/`read`/`edit`），首次工具调用后恢复 Stable Main Surface（固定集） |
+| 首阶段极简（核心能力，36.9 起无独立插件） | **首次工具调用前**由 kaz-mode 直接暴露 `memory_search`（Kaz 恒开 ka-whale-memory），首次工具调用后恢复 Stable Main Surface（固定集） |
 | `plugin-filter`（原 tool-filter） | 工具过滤：按名单移除 / 禁用指定工具 |
 | `output-beep` | 输出完成提示音：模型输出完毕时响提示音（可配频率/时长/子代理） |
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
@@ -23,12 +23,11 @@ Kaz 模式同时具备两个入口，双向同步：
 1. **系统提示词由 `kaz` 预设的 `kaz-system-prompt.mjs` 控制**。默认是
    `You are a helpful software engineer assistant.`。组装层把提示段收敛为
    persona + ka-whale-workflow 段；v0.8 Step B1 起不再保留 plan:policy / tool:goal 段，
-   其余任何提示段（thinking-anchor / round-minimal 轮次提示 / kaz-memory 指引 /
+   其余任何提示段（thinking-anchor / 首阶段 guidance / kaz-memory 指引 /
    tool:* 指导段 / 运行时上下文…）一律过滤。**kaz-mode 插件不再控制系统提示词。**
-2. **工具面两阶段（v0.8 Step A/B1 固定集）**：
-   - 首次工具调用前（round-minimal 首阶段信号）：只保留 round-minimal 首轮工具集
-     （为空时自动：Kaz 下 `ka-whale-memory` 恒开 → `memory_search`；
-     非 Kaz 记忆关 → `pwsh` + `read` + `edit`）；
+2. **工具面两阶段（v0.8 Step A/B1 固定集；36.9 起无 round-minimal 插件）**：
+   - 首次工具调用前：kaz-mode 核心 Minimal 直接保留首轮工具集
+     （Kaz 下 `ka-whale-memory` 恒开 → `memory_search`；≤2）；
    - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 19 项，含
      `get_goal/update_goal/whale_report/ka_sub_whale/list_agents/send_message/
      interrupt_agent`，不含旧 `create_goal/subagent`）。
@@ -125,12 +124,12 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
   非 Kaz 仍按项目状态过滤。
 - v0.8 Step B2：`kaz_tool_auto_on` 已退役，工具自动启用区块/RPC/JSON 读写已删除。
 
-### 5. round-minimal 信号（首阶段极简）
+### 5. 首阶段 Minimal（36.9 起由 kaz-mode 核心直接拥有）
 
-round-minimal 发布 `roundMinimal` 服务并推送 `round-minimal/state` 事件。kaz-mode
-据此在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集（为空时自动：
-Kaz 下 `ka-whale-memory` 恒开 → `memory_search`；非 Kaz 记忆关 → `pwsh` + `read` + `edit`）；
+kaz-mode 在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集：Kaz 下
+`ka-whale-memory` 恒开 → `memory_search`；受控子代理按 v0.9 role Minimal；
 首次工具调用后恢复 Stable Main Surface（v0.8 Step A 固定集，不由工具控制面板 JSON 决定）。
+每次 assemble 后的真实工具面增删由本插件以 `category=tool-surface` 上报 round-display。
 
 ### 6. 设置（`~/.dsh/settings.yaml`，热重载）
 
@@ -158,8 +157,8 @@ Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里�
 
 ## 依赖契约
 
-kaz-mode 存在时，`round-minimal` / `plugin-filter` / `kaz-memory` 三个前置插件必须
-存在。
+kaz-mode 存在时，`plugin-filter` / `ka-whale-memory` 等被管理插件按需存在；
+36.9 起 `round-minimal` 不再是前置或独立插件。
 
 ## 安装（与其它插件一致）
 
@@ -180,7 +179,6 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    真实 system = persona + ka-whale-workflow 段（v0.8 Step B1 后不再含
    plan:policy / tool:goal）；
 2. 首次工具调用前工具面：Kaz = `memory_search`（ka-whale-memory 恒开）；
-   非 Kaz 记忆关 = `pwsh` + `read` + `edit`；
    第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 19 项，
    不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +

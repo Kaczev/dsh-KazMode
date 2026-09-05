@@ -170,8 +170,8 @@ export function apply(ctx, _config) {
     for (const section of whaleSections) kept.push(section)
 
     assembly.sections = kept
-    // 等后续监听器（kaz-mode 只过滤工具段；round-minimal 首轮还会按首轮工具
-    // 白名单过滤 tool:* 段）跑完，
+    // 等后续监听器（kaz-mode 只过滤工具段；36.9 起首轮 Minimal 由 kaz-mode 核心
+    // 处理）跑完，
     // 取最终 sections 组装“真实系统提示词”再上报（与 dsh-system-prompt 的
     // renderPrompt 一致：空段过滤、"\n\n" 连接）。persona 在最前；
     // ka-whale-workflow 段在 persona 之后。这正是模型真实看到的 system 字段。

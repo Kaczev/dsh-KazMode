@@ -91,19 +91,6 @@ window.__ModuleLoader__.load({
 		 */
 		const ALL_PLUGINS = [
 			{
-				id: "round-minimal",
-				namespace: "round-minimal",
-				name: "round-minimal",
-				tag: "首阶段极简 · 首次工具调用后恢复",
-				fields: [
-					{ key: "enabled", kind: "boolean", label: "enabled（总开关）" },
-					{ key: "firstRoundTools", kind: "list", nonEmpty: true, label: "firstRoundTools（首次工具调用前的工具白名单，逗号分隔。为空则是默认工具）" },
-					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走首阶段极简）" },
-					{ key: "guidanceHeadEnabled", kind: "boolean", label: "guidanceHeadEnabled（第一轮工具解锁提示开关；Kaz 默认开、非 Kaz 默认关）" },
-					{ key: "guidanceHead", kind: "textarea", label: "guidanceHead（第一轮工具解锁提示文本；留空 = 内置默认，按首轮工具自动拼装）" },
-				],
-			},
-			{
 				id: "plugin-filter",
 				namespace: "plugin-filter",
 				name: "plugin-filter",

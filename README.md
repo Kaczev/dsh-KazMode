@@ -99,7 +99,7 @@
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（10 个插件 + kaz-shared 依赖包）
+├── KazPlugins/                     # 插件全家桶（含 kaz-shared 依赖包；36.9 已删除 round-minimal）
 │   ├── create-plan/
 │   ├── deepseek-default-model/
 │   ├── ka-whale-workflow/
@@ -110,7 +110,6 @@ dsh-KazMode/
 │   ├── output-beep/
 │   ├── plugin-filter/
 │   ├── round-display/
-│   ├── round-minimal/
 ├── kaz/                            # kaz 预设（不是 KazPlugins/kaz-mode/kaz-preset）
 │   ├── preset.yml
 │   └── agent.cordis.yml
@@ -129,7 +128,6 @@ dsh-KazMode/
 | 插件目录 | 插件 id / name | 作用 |
 | --- | --- | --- |
 | `kaz-mode` | `kaz-mode` | Kaz 模式超级模式：预设联动 + 会话头部按钮 + 集中管理面板 |
-| `round-minimal` | `round-minimal` | 首阶段极简（Kaz 5.0 已收编进核心机制，本目录保留回滚）：首次工具调用前 ≤2（ka-whale-memory 开=`memory_search`；关=`read`+`pwsh`）；当前轮工具面增删明细上报 round-display 显示 |
 | `plugin-filter` | `plugin-filter` | 工具过滤：移除或禁用指定工具 |
 | `kaz-agent-preset-display` | `kaz-agent-preset-display` | 修正新对话 hero 上 agent preset 按钮显示；默认常驻开启，不受 Kaz 模式开关影响 |
 | `output-beep` | `output-beep` | 模型输出完毕 / 提问 / 提交 plan 方案时播放提示音 |

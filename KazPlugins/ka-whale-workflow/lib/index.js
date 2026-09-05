@@ -159,7 +159,7 @@ export const V09_SUBAGENT_ROLE_INITIAL_STAGES = Object.freeze({
 /** 设置 schema（同时驱动设置页 UI）。 */
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
-  /** 子代理是否也走鲸鱼工作流；默认关（与 round-minimal 的语义一致）。 */
+  /** 子代理是否也走鲸鱼工作流；默认关（与首阶段 Minimal 的默认语义一致）。 */
   includeSubagents: z.boolean().default(false),
   /** 自主 skill 管理总开关；关闭后回到一阶段“按需自升级”。 */
   skillAutonomyEnabled: z.boolean().default(true),
@@ -874,7 +874,7 @@ export function hasInjectedInTurn(agent, form, turn) {
  *  - stale goal-active（Goal 已不在 active/paused）回到 assess-complexity；
  *  - 真实用户消息出现在非终态活动阶段时保留当前阶段，不重置为 assess-complexity；
  *  - 只有 idle/done/end/communication 等终态或未开始状态才进入 assess-complexity
- *    （Minimal 不再重复，由 round-minimal 按“会话第一次 tool/call”判定）。
+ *    （Minimal 不再重复，由 kaz-mode/ka-whale-workflow 按“会话第一次 tool/call”判定）。
  */
 export function nextStageOnUserMessage(current, _turn, context = {}) {
   if (context?.goalActive === true) {
@@ -1127,17 +1127,11 @@ export default {
       return source();
     }
 
-    /** 是否处于 round-minimal 极简阶段（服务缺失按 false 处理）。 */
+    /** 是否处于首阶段极简（36.9：round-minimal 服务已删除，直接按本插件核心
+     *  hasToolCall 判定；调用处已排除 includeSubagents=false 的子代理与受控角色）。 */
     function isMinimal(agent) {
-      try {
-        const rm = ctx.get("roundMinimal");
-        if (rm !== undefined && rm !== null && typeof rm.isMinimal === "function") {
-          return rm.isMinimal(agent) === true;
-        }
-      } catch {
-        // fall through
-      }
-      return false;
+      if (agent === null || agent === undefined || typeof agent !== "object") return false;
+      return !hasToolCall(agent);
     }
 
     /** 该 agent 会话是否处于 goal 模式（active/paused；与 kaz-mode 同源）。 */
@@ -2316,7 +2310,7 @@ export default {
     // -----------------------------------------------------------------------
     // 启动：真实用户消息被 inbox claim 后、assembly 之前进入对应阶段。
     //   - /goal 命令触发的消息：旁路鲸鱼工作流（不进入重构），
-    //     round-minimal 极简过滤仍照常生效。（v0.8 Step B1：/plan 已移除）
+    //     首阶段 Minimal（kaz-mode 核心）仍照常生效。（v0.8 Step B1：/plan 已移除）
     //   - 用户插话不改变当前阶段；仅首轮/未开始且已解除极简时进入任务重构。
     // -----------------------------------------------------------------------
     const pendingStart = new Set();
@@ -2352,7 +2346,7 @@ export default {
       if (!isUserMessage(message)) return;
       const sessionId = agent?.session?.id || agent?.id;
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
-      // /goal 命令触发的消息：只跳过鲸鱼工作流，round-minimal 极简仍生效。
+      // /goal 命令触发的消息：只跳过鲸鱼工作流，首阶段 Minimal 仍生效。
       const manual = consumeManualCommand(agent);
       if (manual !== null) {
         manualBypassSessions.add(sessionId);
@@ -2427,7 +2421,7 @@ export default {
       const agent = sessionAgentOf(session);
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
-      // 受控 v0.9 子代理同样在 round-minimal 解除后进入 role 专属首阶段。
+      // 受控 v0.9 子代理同样在首阶段 Minimal 解除后进入 role 专属首阶段。
       const controlledRole = controlledSubagentRoleOfAgent(agent);
       if (controlledRole !== null) {
         ensureControlledSubagentStarted(agent);
@@ -2439,12 +2433,12 @@ export default {
       // Goal 模式激活时直接进入 goal-active（不开启 assess-complexity）。
       if (goalModeActive(agent)) {
         if (setStageAgent(agent, GOAL_ACTIVE_STAGE)) {
-          reportRoundDisplay(agent, "round-minimal 已解除：Goal 模式激活，直接进入 goal-active。", "阶段切换");
+          reportRoundDisplay(agent, "首阶段 Minimal 已解除：Goal 模式激活，直接进入 goal-active。", "阶段切换");
         }
         return;
       }
       if (setStageAgent(agent, "assess-complexity")) {
-        reportRoundDisplay(agent, "round-minimal 已解除，进入 assess-complexity。", "阶段切换");
+        reportRoundDisplay(agent, "首阶段 Minimal 已解除，进入 assess-complexity。", "阶段切换");
       }
     });
 
@@ -2500,7 +2494,7 @@ export default {
             if (setStageAgent(agent, "assess-complexity")) {
               reportRoundDisplay(
                 agent,
-                "round-minimal 已解除，进入 assess-complexity（pre-step 兜底）。",
+                "首阶段 Minimal 已解除，进入 assess-complexity（pre-step 兜底）。",
                 "阶段切换",
               );
             }

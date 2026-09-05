@@ -92,7 +92,7 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 
 1. **删除**所有旧的 Kaz 依赖行（包括 `kaz-diag`、旧版 `kaz-*` 行）。
    - **保留**以 `file:KazPrivatePlugins/...` 开头的用户私有依赖行（如 `"kaz-skill-safe-json": "file:KazPrivatePlugins/kaz-skill-safe-json"`），它们不在公共 repo 里，整目录删除 `KazPlugins` 不会碰到。
-2. **合并**下面 13 行（保留 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等其它依赖，只加不删其它项）：
+2. **合并**下面依赖行（保留 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等其它依赖，只加不删其它项）：
 
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
@@ -105,10 +105,9 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 "output-beep": "file:KazPlugins/output-beep",
 "plugin-filter": "file:KazPlugins/plugin-filter",
 "round-display": "file:KazPlugins/round-display",
-"round-minimal": "file:KazPlugins/round-minimal",
 ```
 
-注意：`kaz-shared` 是必需依赖，漏装会导致 kaz-mode / ka-whale-memory / round-minimal / plugin-filter 加载失败。
+注意：`kaz-shared` 是必需依赖，漏装会导致 kaz-mode / ka-whale-memory / plugin-filter 加载失败；36.9 起不再需要 `round-minimal`。
 
 文件用 UTF-8 **无 BOM** 保存。用 edit 工具改即可；若必须用 PowerShell 写文件，用（不要用 `Set-Content -Encoding UTF8`）：
 
@@ -173,7 +172,6 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
    - `memory`
    - `plugin-filter`
    - `kaz-agent-preset-display`
-   - `round-minimal`
    - `kaz-mode`
    - `output-beep`
    - `round-display`
@@ -207,12 +205,6 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 - insert:
     - id: kaz-agent-preset-display
       name: kaz-agent-preset-display
-      config:
-        enabled: true
-
-- insert:
-    - id: round-minimal
-      name: round-minimal
       config:
         enabled: true
 

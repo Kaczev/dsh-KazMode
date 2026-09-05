@@ -67,6 +67,7 @@ check("① resolveFirstRoundTools ka-whale-memory 开", JSON.stringify(resolveFi
 check("① resolveFirstRoundTools kaz-memory 关", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: false })) === JSON.stringify(["read", "pwsh"]));
 check("① TOOL_WHITELIST 含基础工具", ["pwsh", "read", "write", "edit", "glob", "grep", "web_search", "memory_search"].every((t) => TOOL_WHITELIST.includes(t)));
 check("① ka-whale-workflow 是被管理插件但不是工具白名单插件", MANAGED_PLUGINS.some((p) => p.id === "ka-whale-workflow") && TOOL_PLUGIN_CATALOG["ka-whale-workflow"] === undefined && TOOL_PLUGINS["ka-whale-workflow"] === undefined);
+check("① 36.9 MANAGED_PLUGINS 不含 round-minimal", !MANAGED_PLUGINS.some((p) => p.id === "round-minimal"));
 check("① MANAGED_CARRIER_TOOLS 覆盖 v0.9 workflow 工具，MANAGED_PLUGINS 无 create-plan", MANAGED_CARRIER_TOOLS["ka-whale-workflow"]?.includes("whale_report") === true && MANAGED_CARRIER_TOOLS["ka-whale-workflow"]?.includes("ka_sub_whale") === true && MANAGED_CARRIER_TOOLS["create-plan"] === undefined && !MANAGED_PLUGINS.some((p) => p.id === "create-plan"));
 
 check("② normalizeExternalKey", normalizeExternalKey("Dsh_Pixel Art") === "dsh-pixel-art");

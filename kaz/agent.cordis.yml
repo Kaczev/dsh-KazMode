@@ -1,4 +1,4 @@
-﻿# The `kaz` agent preset: Kaz 模式 —— Kaczev 的专属模式。
+# The `kaz` agent preset: Kaz 模式 —— Kaczev 的专属模式。
 #
 # 组合基底 = shipped `cordis` 预设的完整副本（完整工具面），persona 行保留为
 # 默认兜底（complete: false、includeRuntimeContext: false——运行时上下文快照
@@ -14,8 +14,8 @@
 # skill 工具与技能目录已从本预设整体移除（Kaczev 2026-08：Kaz 模式不需要
 # skill-catalog 合成消息，直接删掉 skill 能力）。
 #
-# 依赖契约：kaz-mode 存在时，round-minimal / plugin-filter / ka-whale-memory 三个
-# 前置插件必须存在（kaz_mode_status 工具会报告，由 kaz-diag 插件注册）。
+# 依赖契约：kaz-mode 存在时，plugin-filter / ka-whale-memory 等被管理插件按需存在；
+# 36.9 起 round-minimal 已删除，不再是前置插件。
 #
 # 以下内容与 shipped `cordis` 逐行一致（其 TRUST 声明同样适用于本预设）：
 # `cordis_mount` evaluates model-written JavaScript against the live runtime,
@@ -91,9 +91,9 @@
 
 # ── RL-shape editor（首阶段极简的第二个工具）──────────────────────────────────
 #
-# 首阶段极简（round-minimal）只保留 pwsh + str_replace_editor；str_replace_editor
-# 由本行注册（与 router-standard 预设同款）。首次工具调用后恢复全部工具时，
-# kaz-mode.toolWhitelist 默认仍保留它。
+# 首阶段极简（36.9 起由 kaz-mode 核心 Minimal 处理）只保留 memory_search；
+# str_replace_editor 由本行注册（与 router-standard 预设同款）。首次工具调用后
+# 恢复 Stable Main Surface 时仍会按 kaz-mode 固定面放行。
 - id: tool-str-replace-editor
   name: '@deepseek-ai/dsh-tool-str-replace-editor'
 

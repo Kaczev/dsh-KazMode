@@ -1,5 +1,5 @@
 // round-display + kaz-system-prompt 探针（2026-08-28；v0.8 Step B1 移除 Plan/tool:goal 段；
-// v0.9 36.7 白名单扩展：system-prompt/tool-surface）
+// v0.9 36.7 白名单扩展：system-prompt/tool-surface；36.9 round-minimal 已删除）
 // 覆盖：
 //   ① kaz-system-prompt.mjs：system-prompt/assemble 后上报“真实系统提示词”
 //     （persona + ka-whale-workflow 段；plan:policy 与 tool:goal 一律丢弃；"\n\n" 连接，
@@ -10,12 +10,12 @@
 //   ③ round-display：list / history 内条目按 at 降序（新消息排上）+ 同轮去重；
 //   ④ round-display：36.7 白名单显式接受 system-prompt/tool-surface，仍滤除 stage 噪音；
 //   ⑤ round-display：不带 category 的旧上报按来源回退分类（kaz-system-prompt → system-prompt，
-//      round-minimal 工具变化 → tool-surface/stable-boundary），噪音仍被过滤；
-//   ⑥ round-minimal：极简阶段 assemble 的工具面变化实际上报 category=tool-surface。
+//      round-minimal 历史记录 → tool-surface/stable-boundary），噪音仍被过滤；
+//   ⑥ kaz-mode：极简阶段 assemble 的工具面变化实际上报 category=tool-surface（无 round-minimal）。
 // 运行：node KazPlugins/round-display/probe-round-display.mjs
 import { apply as kspApply } from "file:///C:/Users/Kaczev/Documents/GitHub/dsh-KazMode/kaz/kaz-system-prompt.mjs";
 import rdPlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/round-display/lib/index.js";
-import roundMinimalPlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/round-minimal/lib/index.js";
+import kazModePlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/kaz-mode/lib/index.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -489,39 +489,40 @@ function makeSettings() {
 }
 
 // ---------------------------------------------------------------------------
-// ⑥ round-minimal 运行时：首次极简阶段 assemble 产生工具面变化时，
-//    上报 payload 必须携带 category=tool-surface。
+// ⑥ kaz-mode 运行时（36.9）：首次极简阶段 assemble 产生工具面变化时，
+//    上报 payload 必须携带 category=tool-surface（不依赖 round-minimal 插件）。
 // ---------------------------------------------------------------------------
 {
-  const AGENT_RM = { id: "s-rd-rm", session: { events: [] } };
+  const AGENT_KZM = {
+    id: "s-rd-kzm",
+    session: {
+      header: { id: "s-rd-kzm", cwd: join(TMP, "kzm-project"), agentPreset: "kaz" },
+      events: [],
+    },
+  };
   const settings = makeSettings();
-  const rmReports = [];
-  const rmMock = makeMockCtx({
+  const kzmReports = [];
+  const kzmMock = makeMockCtx({
     settings,
-    agents: { get: (id) => (id === AGENT_RM.id ? AGENT_RM : undefined) },
+    agents: { get: (id) => (id === AGENT_KZM.id ? AGENT_KZM : undefined) },
     provided: {
-      kazMode: {
-        kazEnabled: () => true,
-        pluginEnabled: () => true,
-        pluginConfig: () => ({ enabled: true, firstRoundTools: ["memory_search"], includeSubagents: false, guidanceHeadEnabled: false, guidanceHead: "" }),
-      },
-      roundDisplay: { report: (payload) => rmReports.push(payload) },
+      roundDisplay: { report: (payload) => kzmReports.push(payload) },
     },
   });
-  roundMinimalPlugin.apply(rmMock.ctx, { enabled: true, firstRoundTools: ["memory_search"], includeSubagents: false });
+  kazModePlugin.apply(kzmMock.ctx, { enabled: true, storageDir: join(TMP, "kaz-storage") });
 
-  const assemble = rmMock.listeners.get("system-prompt/assemble")[0];
+  const assemble = kzmMock.listeners.get("system-prompt/assemble")[0];
   const assembly = {
     tools: [{ name: "read" }, { name: "write" }, { name: "memory_search" }],
     sections: [],
   };
-  const beforeCount = rmReports.length;
-  await assemble(assembly, { agent: AGENT_RM }, async () => assembly);
-  const toolSurfaceReports = rmReports
+  const beforeCount = kzmReports.length;
+  await assemble(assembly, { agent: AGENT_KZM }, async () => assembly);
+  const toolSurfaceReports = kzmReports
     .slice(beforeCount)
-    .filter((payload) => payload?.plugin === "round-minimal" && payload?.title === "本轮工具变化");
+    .filter((payload) => payload?.plugin === "kaz-mode" && payload?.title === "本轮工具变化");
   check(
-    "⑥ round-minimal 极简工具面变化上报 category=tool-surface",
+    "⑥ kaz-mode 极简工具面变化上报 category=tool-surface（无 round-minimal）",
     toolSurfaceReports.length > 0 && toolSurfaceReports.every((payload) => payload.category === "tool-surface"),
   );
 }

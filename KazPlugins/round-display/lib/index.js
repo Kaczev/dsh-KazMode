@@ -64,8 +64,8 @@ export function classifyRoundDisplayReport(payload) {
   const title = typeof value.title === "string" ? value.title : "";
   const content = typeof value.content === "string" ? value.content : "";
   if (plugin === "round-minimal" && title === "本轮工具变化") {
-    // 36.7：round-minimal 对每次 assemble 的工具面增删都报 tool-surface；
-    // 旧持久化里“恢复全量（首次工具调用后）”的历史边界仍按 stable-boundary 兼容。
+    // 36.9：round-minimal 插件已删除；此分支只兼容旧持久化历史记录。
+    // 新记录由 kaz-mode 以 category=tool-surface 主动上报，不再需要回退。
     if (content.includes("恢复全量（首次工具调用后）")) {
       return "stable-boundary";
     }
@@ -177,7 +177,7 @@ export function ensureSettingsDefaults(settings, ns, defaults, logger) {
 
 
 /** 读取代理当前轮次：会话日志中最近一个 turn/start 的 data.turn；无则 0。
- *  与 round-minimal / kaz-memory 同款判定。 */
+ *  与 kaz-mode / kaz-memory 同款判定。 */
 function currentTurnOf(agent) {
   try {
     const events = agent?.session?.events;

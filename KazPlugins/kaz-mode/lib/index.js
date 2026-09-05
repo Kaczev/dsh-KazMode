@@ -1,18 +1,20 @@
 // kaz-mode
 // ===========================================================================
 // 「Kaz 模式」超级模式插件 —— 统一管理并联动本工作区插件：
-//   round-minimal（首阶段极简 · 已收编核心）、plugin-filter（工具过滤 · 已收编
-//   kaz-shared/preset）、output-beep（提示音）、round-display（注入显示）、
-//   deepseek-default-model（DeepSeek 采样参数）、ka-whale-memory（独立记忆组件）、
+//   plugin-filter（工具过滤 · 已收编 kaz-shared/preset）、output-beep（提示音）、
+//   round-display（注入显示）、deepseek-default-model（DeepSeek 采样参数）、
+//   ka-whale-memory（独立记忆组件）、ka-whale-workflow（工作流），
 //   并提供集中管理面板与头部开关按钮（客户端半）。
+//   36.9：round-minimal 已删除；首阶段极简与工具面变化上报已收编进本插件核心。
 //
 // Kaz 模式的语义（Kaz 5.0 Step 1 后；v0.8 Step B1 移除原生 Plan）：
 //   1) 系统提示词由 kaz 预设的 kaz-system-prompt.mjs 收敛为 DeepSeek 基础提示词
 //      （逐字、最前；不再按记忆插件开关切换 persona 变体；不再注入 plan/goal
 //      system 段）。角色特化段固定存放于 kaz-shared 的 KAZ_ROLE_PROMPTS；本插件
 //      不再负责系统提示词。
-//   2) 工具面两阶段（v0.8 Step A 固定集，工具清单由 kaz-shared 的 tool-lists.js 管理）：
-//        - 首次工具调用前（round-minimal）：仅保留首轮工具集（≤2）；
+//   2) 工具面两阶段（v0.8 Step A 固定集，工具清单由 kaz-shared 的 tool-lists.js 管理；
+//      36.9 round-minimal 已删除，本插件直接拥有首阶段 Minimal）：
+//        - 首次工具调用前：仅保留首轮工具集（≤2）；
 //        - 首次工具调用后：Stable Main Surface = KAZ_STABLE_MAIN_TOOLS（v0.9
 //          §1.1 固定 19 项，不含旧 subagent/create_goal）。
 //          不再恢复“工具面板 JSON 全量”；旧 JSON 只作兼容读；纯
@@ -94,13 +96,6 @@ const FALLBACK_PRESET_ID = "cordis";
 
 /** 出厂默认（非 Kaz 模式）：Kaz 插件初始默认全关。 */
 const FACTORY_NON_KAZ_DEFAULTS = {
-  "round-minimal": {
-    enabled: false,
-    firstRoundTools: [],
-    includeSubagents: false,
-    guidanceHeadEnabled: false,
-    guidanceHead: "",
-  },
   "plugin-filter": {
     enabled: false,
     mode: "remove",
@@ -127,8 +122,6 @@ const FACTORY_NON_KAZ_DEFAULTS = {
 
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
 /** 默认不开启kaz-memory的guidanceHeadEnabled，因为有系统提示词 */
-/** 20260831默认不开启round-minimal，因为发现现在关闭也可以WeNeed */
-/** 20260831发现关闭round-minimal之后，模型表现不稳定，出现Let me思维链，所以重新开启 */
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
@@ -762,8 +755,8 @@ function safeMessage(error) {
 export default {
   name: "kaz-mode",
   // systemPrompt：组装层工具面过滤 + 固定提示词挂在瀑布上；connection：面板
-  // RPC 通道；tools：工具注册信息（面板/工具面用）；settings /
-  // roundMinimal 为可选依赖（惰性解析）。
+  // RPC 通道；tools：工具注册信息（面板/工具面用）；settings 为可选依赖
+  // （惰性解析）。round-minimal 服务已随 36.9 删除，不再消费。
   inject: ["systemPrompt", "connection", "tools"],
   apply(ctx, config = {}) {
     // 组合行 config 作为 base 层；settings.yaml 用户层优先（热重载）。
@@ -1032,7 +1025,7 @@ export default {
       }
     }
 
-    /** 会话里是否已发生第一次工具调用（round-minimal 能力收编进核心机制后使用）。 */
+    /** 会话里是否已发生第一次工具调用（36.9：首阶段 Minimal 由 kaz-mode 核心判定）。 */
     function hasToolCallEvent(agent) {
       try {
         const events = agent?.session?.events;
@@ -1043,21 +1036,44 @@ export default {
       }
     }
 
-    /** 该代理此刻是否处于首阶段极简（round-minimal 能力收编进核心机制）：
-     *  1) 兼容期：round-minimal 服务仍在时以其判定为准（回滚/旧会话）；
-     *  2) 核心兜底：Kaz 模式主模型与子代理在第一次 tool/call 前都保持极简，
-     *     保证首次工具调用前工具面 ≤2（硬边界 2；v0.8 Step A 子代理同样适用）。
+    /** 读取代理当前轮次（供工具面变化上报使用）：会话日志中最近 turn/start 的 data.turn。 */
+    function currentTurnOf(agent) {
+      try {
+        const events = agent?.session?.events;
+        if (!Array.isArray(events)) return 0;
+        let turn = 0;
+        for (const event of events) {
+          if (event === null || typeof event !== "object") continue;
+          if (event.type !== "turn/start") continue;
+          const value = event.data?.turn;
+          if (typeof value === "number" && value > turn) turn = value;
+        }
+        return turn;
+      } catch {
+        return 0;
+      }
+    }
+
+    /** 提取 assembly.tools 里的工具名（去重、保留顺序）。 */
+    function toolNamesOf(tools) {
+      const names = [];
+      const seen = new Set();
+      for (const tool of Array.isArray(tools) ? tools : []) {
+        if (tool === null || typeof tool !== "object") continue;
+        const name = tool.name;
+        if (typeof name !== "string" || name.length === 0 || seen.has(name)) continue;
+        seen.add(name);
+        names.push(name);
+      }
+      return names;
+    }
+
+    /** 该代理此刻是否处于首阶段极简（36.9：round-minimal 已删除，纯核心判定）：
+     *  Kaz 模式主模型与子代理在第一次 tool/call 前都保持极简，
+     *  保证首次工具调用前工具面 ≤2（硬边界 2；v0.8 Step A 子代理同样适用）。
      *  注意：kazSurfaceFor 只用于 Kaz 会话，因此这里不会误伤非 Kaz 模式。 */
     function isMinimalAgent(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
-      const roundMinimal = ctx.get("roundMinimal");
-      if (roundMinimal !== undefined && roundMinimal !== null && typeof roundMinimal.isMinimal === "function") {
-        try {
-          if (roundMinimal.isMinimal(agent) === true) return true;
-        } catch {
-          // 服务异常时回落到核心判定
-        }
-      }
       return !hasToolCallEvent(agent);
     }
 
@@ -1199,20 +1215,14 @@ export default {
 
       const subagent = isSubagent(agent) === true;
       const minimalPhase = isMinimalAgent(agent) === true;
-      let firstRoundTools = [];
-      if (minimalPhase) {
-        try {
-          const rm = ctx.get("roundMinimal");
-          if (rm !== undefined && rm !== null && typeof rm.firstRoundTools === "function") {
-            const tools = rm.firstRoundTools(agent);
-            if (Array.isArray(tools)) firstRoundTools = tools;
-          }
-        } catch {
-          // 保持空数组（computeSurface 按 kaz-memory 自动解析）
-        }
-      }
 
       if (minimalPhase) {
+        // 36.9：round-minimal 服务已删除，firstRoundTools 由 kaz-mode 直接解析：
+        //   - 受控 v0.9 子代理：role Minimal（V09_SUBAGENT_ROLE_MINIMAL_TOOLS）；
+        //   - 其它子代理：memory_search 兜底；
+        //   - 主模型：firstRoundTools 保持空，computeSurface 按 Kaz 恒开
+        //     ka-whale-memory 自动解析为 memory_search（≤2）。
+        let firstRoundTools = [];
         const subagentMinimalTools = ["memory_search"];
         if (subagent) {
           const roleRecord = controlledSubagentRoleOf(agent);
@@ -1225,9 +1235,7 @@ export default {
           firstRoundTools =
             roleMinimal !== null
               ? [...roleMinimal]
-              : firstRoundTools.length > 0
-                ? firstRoundTools
-                : subagentMinimalTools;
+              : subagentMinimalTools;
         }
         return computeSurface({
           toolWhitelist: [...whitelist],
@@ -1327,11 +1335,71 @@ export default {
     //   非 Kaz 会话：只移除该会话禁用的记忆工具（kaz-memory 的工具常驻注册，
     //   标准模式不能露出），其余工具交还宿主标准工具面。
     //   每个请求组装时实时计算 → 后台运行的会话不受切换对话影响。
-    ctx.on("system-prompt/assemble", function (assembly, context, next) {
+    //   36.9：round-minimal 的 assemble 工具面变化上报已收编进本监听器——等所有
+    //   监听器跑完后取最终可见工具面，按 agent × 轮次记录上次面并把真实增删
+    //   以 category=tool-surface 上报 round-display。
+    const lastToolSurfaces = new WeakMap();
+    function reportToolSurfaceChange(agent, before, after, minimal) {
+      try {
+        if (agent === null || agent === undefined || typeof agent !== "object") return;
+        if (agent.id === undefined) return;
+        const turn = currentTurnOf(agent);
+        let state = lastToolSurfaces.get(agent);
+        if (state === undefined || state.turn !== turn) {
+          // 新一轮的第一条基线：
+          //  - 全新会话且还在极简阶段：用过滤前的原始面，让面板能展示极简收窄；
+          //  - 轮次切换或历史缺失：用当前真实最终工具面，避免把其它过滤器的
+          //    原始全量误当作上一轮状态。
+          const useRawBaseline = state === undefined && minimal === true;
+          state = { turn, names: useRawBaseline ? before : after };
+          lastToolSurfaces.set(agent, state);
+        }
+        const prev = state.names;
+        const added = after.filter((name) => !prev.includes(name));
+        const removed = prev.filter((name) => !after.includes(name));
+        if (added.length === 0 && removed.length === 0) return;
+        state.names = after;
+
+        let phase;
+        if (minimal) {
+          phase = "极简阶段（首次工具调用前）";
+        } else if (added.length > 0 && removed.length === 0) {
+          phase = "恢复全量（首次工具调用后）";
+        } else {
+          phase = "工具面变化";
+        }
+        const content =
+          "工具面变化（来自 system-prompt/assemble）\n" +
+          phase + "\n" +
+          "- 当前工具（" + after.length + "）：" + (after.length > 0 ? after.join(", ") : "（无）") + "\n" +
+          "- 移除（" + removed.length + "）：" + (removed.length > 0 ? removed.join(", ") : "（无）") + "\n" +
+          "+ 新增（" + added.length + "）：" + (added.length > 0 ? added.join(", ") : "（无）");
+        const roundDisplay = ctx.get("roundDisplay");
+        if (
+          roundDisplay !== null &&
+          roundDisplay !== undefined &&
+          typeof roundDisplay.report === "function"
+        ) {
+          roundDisplay.report({
+            agent,
+            plugin: "kaz-mode",
+            title: "本轮工具变化",
+            content,
+            category: "tool-surface",
+          });
+        }
+      } catch (error) {
+        ctx.logger?.debug?.("[kaz-mode] 工具面变化上报失败：" + (error instanceof Error ? error.message : String(error)));
+      }
+    }
+
+    ctx.on("system-prompt/assemble", async function (assembly, context, next) {
       const current = source();
       const agent = context?.agent;
       const hasAgent = agent !== null && agent !== undefined && typeof agent === "object";
       const kazEnabled = hasAgent ? agentKazEnabled(agent) : current.enabled === true;
+      const before = hasAgent ? toolNamesOf(assembly?.tools) : [];
+      const minimal = hasAgent && kazEnabled && isMinimalAgent(agent) === true;
 
       if (kazEnabled) {
         const states = hasAgent ? agentEffectiveStates(agent) : {};
@@ -1340,30 +1408,35 @@ export default {
           if (tool === null || typeof tool !== "object") return false;
           return allowed.has(tool.name);
         });
-        return next();
-      }
-
-      // 非 Kaz 会话：仅剔除该会话禁用的记忆工具。
-      // 状态缺失按禁用处理（`!== true`），与新会话判定保持一致。
-      if (hasAgent) {
-        const states = agentEffectiveStates(agent);
-        const remove = new Set();
-        if (states["ka-whale-memory"]?.enabled !== true) {
-          for (const tool of MEMORY_TOOLS) remove.add(tool);
-        }
-        for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
-          if (states[pluginId]?.enabled !== true) {
-            for (const tool of tools) remove.add(tool);
+      } else {
+        // 非 Kaz 会话：仅剔除该会话禁用的记忆工具。
+        // 状态缺失按禁用处理（`!== true`），与新会话判定保持一致。
+        if (hasAgent) {
+          const states = agentEffectiveStates(agent);
+          const remove = new Set();
+          if (states["ka-whale-memory"]?.enabled !== true) {
+            for (const tool of MEMORY_TOOLS) remove.add(tool);
+          }
+          for (const [pluginId, tools] of Object.entries(MANAGED_CARRIER_TOOLS)) {
+            if (states[pluginId]?.enabled !== true) {
+              for (const tool of tools) remove.add(tool);
+            }
+          }
+          if (remove.size > 0) {
+            assembly.tools = assembly.tools.filter((tool) => {
+              if (tool === null || typeof tool !== "object") return true;
+              return !remove.has(tool.name);
+            });
           }
         }
-        if (remove.size > 0) {
-          assembly.tools = assembly.tools.filter((tool) => {
-            if (tool === null || typeof tool !== "object") return true;
-            return !remove.has(tool.name);
-          });
-        }
       }
-      return next();
+
+      const result = await next();
+      if (hasAgent && kazEnabled) {
+        const finalAssembly = result ?? assembly;
+        reportToolSurfaceChange(agent, before, toolNamesOf(finalAssembly?.tools), minimal);
+      }
+      return result;
     });
 
     // 执行层：按 agent 会话拒绝工具面外调用（纵深防御）。内部调用（无 agent）

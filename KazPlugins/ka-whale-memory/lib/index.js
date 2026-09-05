@@ -292,23 +292,17 @@ function toolAvailable(name, grouping, kazSettings) {
  * 判断 memory_search 在当前代理环境是否真的可调用：
  *   1) 注册 + Kaz 工具面检查（toolAvailable）——不在注册表 / 不在 Kaz
  *      白名单即视为不可用；
- *   2) 首轮极简（round-minimal isMinimal）——执行层拒绝 memory_search，
- *      即使 schemas 里有也不能调用（与自动载入的 turn>1 兜底同一语义）；
+ *   2) 方案 A：kazMode 服务存在时按 agent 会话的工具面判定（该会话
+ *      ka-whale-memory 关闭 / 不在白名单 / 首阶段极简都会被 kaz-mode 排除；
+ *      36.9 起不再单独依赖 round-minimal 服务）；
  *   3) schemas(agent) 实际包含 memory_search——原生模式即直接工具面；
  *      Code Mode 下 wire 折叠为 run_code，schemas(agent) 返回的正是
  *      run_code SDK 可绑定的全部可见工具（含 memory_search），因此
  *      "在 schemas 里" 即代表"当前环境能经 run_code 调用"。
  *  读不到的服务 / 设置一律按"不受限制"处理；判定失败按"不可用"处理。
  */
-function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc, kazModeSvc) {
-  if (roundMinimalSvc !== undefined && roundMinimalSvc !== null && typeof roundMinimalSvc.isMinimal === "function") {
-    try {
-      if (roundMinimalSvc.isMinimal(agent) === true) return false;
-    } catch {
-      // 判定失败不阻断，交给工具面检查兜底
-    }
-  }
-  // 方案 A：kazMode 服务存在时按 agent 会话的工具面判定（该会话 ka-whale-memory
+function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, kazModeSvc) {
+  // kazMode 服务存在时按 agent 会话的工具面判定（该会话 ka-whale-memory
   // 关闭 / 不在白名单 / 首阶段极简都会被排除）；服务缺失时回退旧逻辑。
   if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.toolVisible === "function") {
     try {
@@ -342,7 +336,7 @@ function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinim
  *
  *  overrides.head：总述行覆盖（空 = 内置默认 GUIDANCE_HEAD）。
  */
-function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc, kazModeSvc) {
+function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, kazModeSvc) {
   const head =
     overrides !== null &&
     typeof overrides === "object" &&
@@ -350,7 +344,7 @@ function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc,
     overrides.head.trim().length > 0
       ? overrides.head.trim()
       : GUIDANCE_HEAD;
-  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc, kazModeSvc)) return "";
+  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, kazModeSvc)) return "";
   return ["[ka-whale-memory guidance]", ">", head, "<"].join("\n");
 }
 
@@ -361,8 +355,8 @@ function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc,
  *
  *  overrides.forget：guidanceForget 覆盖（留空 = 内置默认）。
  */
-function composeForgetGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, roundMinimalSvc, kazModeSvc) {
-  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, roundMinimalSvc, kazModeSvc)) return "";
+function composeForgetGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, kazModeSvc) {
+  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, kazModeSvc)) return "";
   if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.toolVisible === "function") {
     try {
       if (kazModeSvc.toolVisible(agent, "memory_forget") !== true) return "";
@@ -877,7 +871,7 @@ export async function apply(ctx, config = {}) {
       current !== null && typeof current === "object" && typeof current.guidanceHead === "string"
         ? current.guidanceHead
         : "";
-    return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), ctx.get("roundMinimal"), kazModeSvc);
+    return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), kazModeSvc);
   };
   /** 每轮首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
    *  整段覆盖时不再追加（兼容旧配置）；guidanceForgetEnabled 开关默认开，
@@ -905,7 +899,7 @@ export async function apply(ctx, config = {}) {
       current !== null && typeof current === "object" && typeof current.guidanceForget === "string"
         ? current.guidanceForget
         : "";
-    return composeForgetGuidance(ctx.get("toolGrouping"), kazSettings, { forget }, agent, ctx.get("tools"), ctx.get("roundMinimal"), kazModeSvc);
+    return composeForgetGuidance(ctx.get("toolGrouping"), kazSettings, { forget }, agent, ctx.get("tools"), kazModeSvc);
   };
   /** 尝试把本插件给模型发送的信息上报给 round-display 显示插件（best-effort）。
    *  服务不存在时静默跳过，不影响主流程。 */

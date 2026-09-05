@@ -82,7 +82,6 @@ const base = {
     if (name === "goals") return goalsMock;
     if (name === "agents") return { roots: () => [], list: () => [], currentInitiator: () => undefined };
     if (name === "roundDisplay") return { report: () => {} };
-    if (name === "roundMinimal") return undefined;
     return undefined;
   },
   systemPrompt: { section() { return () => {}; } },

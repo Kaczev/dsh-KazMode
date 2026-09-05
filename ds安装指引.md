@@ -65,7 +65,7 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 
 ## 第 4 步 在 package.json 注册依赖
 
-打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中**合并**下面 13 行：
+打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中**合并**下面依赖行：
 
 ```json
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
@@ -78,13 +78,12 @@ Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
 "output-beep": "file:KazPlugins/output-beep",
 "plugin-filter": "file:KazPlugins/plugin-filter",
 "round-display": "file:KazPlugins/round-display",
-"round-minimal": "file:KazPlugins/round-minimal",
 ```
 
 规则：
 - **保留** `dependencies` 里已有的其它依赖（如 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等），只加不删其它项。
-- 若已存在旧的 Kaz 依赖行（例如 `kaz-diag`，或上面 13 行里的旧版本写法），用上面 13 行**替换**旧行，不要重复。
-- `kaz-shared` 是必需依赖：kaz-mode / ka-whale-memory / round-minimal / plugin-filter 都 import 它，漏装会导致插件加载失败。
+- 若已存在旧的 Kaz 依赖行（例如 `kaz-diag`，或上面依赖行里的旧版本写法），用上面依赖行**替换**旧行，不要重复。
+- `kaz-shared` 是必需依赖：kaz-mode / ka-whale-memory / plugin-filter 都 import 它，漏装会导致插件加载失败；36.9 起不再需要 `round-minimal`。
 - 文件用 UTF-8 **无 BOM** 保存。用你的 edit 工具改即可；若必须用 PowerShell 写文件，用下面的写法（不要用 `Set-Content -Encoding UTF8`，它会写 BOM 破坏 JSON 解析）：
 
 ```powershell
@@ -139,7 +138,6 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
    - `memory`
    - `plugin-filter`
    - `kaz-agent-preset-display`
-   - `round-minimal`
    - `kaz-mode`
    - `output-beep`
    - `round-display`
@@ -172,12 +170,6 @@ npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
 - insert:
     - id: kaz-agent-preset-display
       name: kaz-agent-preset-display
-      config:
-        enabled: true
-
-- insert:
-    - id: round-minimal
-      name: round-minimal
       config:
         enabled: true
 
