@@ -277,3 +277,11 @@
 # skill 工具（tool-skill）与技能发现行（skill-filesystem / customSkillDirs）及
 # skills/ 目录已从本预设删除：Kaz 模式不需要 skill-catalog 合成消息，直接移除
 # skill 能力（工具面白名单 kaz-mode.toolWhitelist 中也已去掉 skill）。
+
+# ── Kaz 私有技能（Kaczev 专属，仅本 preset 装载）────────────────────────────
+# kaz-skill-safe-json：safe_json_write 工具。插件本体在 profile 的
+# KazPrivatePlugins/kaz-skill-safe-json，经 profile package.json file: 依赖安装；
+# 只挂在本 Kaz preset，不挂 profile 全局 cordis.patch.yml，因此非 Kaz 预设不装载。
+- id: kaz-skill-safe-json
+  name: ../../profiles/web/KazPrivatePlugins/kaz-skill-safe-json/lib/index.js
+  config: {}

@@ -37,6 +37,16 @@ Before implementation, create/update `CANDIDATE.md` inside the plugin folder
   `.mjs/.js` modules when it is only a tool implementation.
 - Keep public `KazPlugins/` untouched.
 
+### Mounting scope (default policy)
+
+- Future self-built private plugins default to the Kaz-only preset mount:
+  add the row to `~/.dsh/.agent-presets/kaz/agent.cordis.yml`, using a relative
+  path such as `../../profiles/web/KazPrivatePlugins/<plugin>/lib/index.js`.
+- Do NOT add Kaz-only private plugins to the profile-global
+  `cordis.patch.yml`: that layer loads in every agent preset.
+- The profile-global layer is reserved for plugins that are explicitly meant to
+  be resident across modes (a documented cross-mode exception).
+
 ## 4. Probe and syntax gate
 
 Every change must pass before registration/versioning:
