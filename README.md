@@ -130,7 +130,7 @@ dsh-KazMode/
 | `kaz-mode` | `kaz-mode` | Kaz 模式超级模式：预设联动 + 会话头部按钮 + 集中管理面板 |
 | `plugin-filter` | `plugin-filter` | 工具过滤：移除或禁用指定工具 |
 | `kaz-agent-preset-display` | `kaz-agent-preset-display` | 修正新对话 hero 上 agent preset 按钮显示；默认常驻开启，不受 Kaz 模式开关影响 |
-| `output-beep` | `output-beep` | 模型需要用户输入（提问 / 提交 plan 方案）时播放提示音；`idleBeep` 可恢复输出完毕提示 |
+| `output-beep` | `output-beep` | 用户介入 / Kaz 收尾提示音：主模型 `communication`/`done` 收尾完成、`ask_user_question`、`exit_plan_mode` 时响；无 idleBeep |
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `ka-whale-memory` | `ka-whale-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
@@ -142,7 +142,7 @@ dsh-KazMode/
 - **默认关闭、按需开启**：
   - `round-display`：显示每轮 Kaz 联动/附属插件给模型注入了什么信息。
 - **`kaz-agent-preset-display`**：显示补丁。官方新对话预设按钮在「先选模式 A、设置里默认 B、刷新页面」后会错显成 B；本插件让按钮优先显示该对话自己的预设。
-- **`output-beep`**：模型需要用户输入（提问 / 提交 plan 方案）时“滴”一声；默认输出完毕不响，`idleBeep` 可恢复（作者摸鱼专用 🐳）。
+- **`output-beep`**：主模型 Kaz `communication`/`done` 收尾完成、`ask_user_question` 提问或 `exit_plan_mode` 提交时“滴”一声；普通输出完毕不响（作者摸鱼专用 🐳）。
 
 ---
 

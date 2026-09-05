@@ -1,11 +1,11 @@
 // output-beep 宿主半探针：在 mock ctx 上运行插件（execFile 已 mock，不真响），验证：
 //   ① 插件可加载、导出 apply；
 //   ② apply 注册 agent/status 与 session/event 监听；
-//   ③ 默认（idleBeep=false）主会话 idle 不播放提示音；
-//   ④ 默认子代理 idle 也不播放；
-//   ⑤ ask_user_question / exit_plan_mode 事件仍触发播放；
-//   ⑥ idleBeep=true 后主会话 idle 恢复播放（旧版输出完毕行为）；
-//   ⑦ enabled=false 后 idleBeep=true 也不播放。
+//   ③ 主会话 idle 但不在 communication/done（无 kaWhaleWorkflow 收尾阶段）不播放；
+//   ④ 子代理 idle 不播放；
+//   ⑤ ask_user_question / exit_plan_mode 事件触发播放；
+//   ⑥ Kaz 主模型 communication 收尾后 idle 播放；done 阶段也播放；
+//   ⑦ enabled=false 后全部静默。
 // 运行：node output-beep/probe-output-beep.mjs
 import childProcess from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
@@ -83,6 +83,16 @@ const base = {
   },
   get(name) {
     if (name === "settings") return settings;
+    if (name === "kaWhaleWorkflow") {
+      return {
+        stageOf: (agent) => {
+          const id = agent?.id ?? agent?.session?.id ?? "";
+          if (id === "main-comm") return "communication";
+          if (id === "main-done") return "done";
+          return "";
+        },
+      };
+    }
     return undefined;
   },
 };
@@ -91,7 +101,7 @@ check("插件名 = output-beep", name === "output-beep");
 check("导出 apply", typeof apply === "function");
 
 try {
-  apply(base, { enabled: true, idleBeep: false, includeSubagents: false, frequency: 880, duration: 250 });
+  apply(base, { enabled: true, includeSubagents: false, frequency: 880, duration: 250 });
 } catch (error) {
   console.log("[probe] apply 失败:", error);
   process.exit(1);
@@ -102,33 +112,33 @@ check("已注册 session/event 监听", (listeners.get("session/event") ?? []).l
 const statusListeners = listeners.get("agent/status") ?? [];
 const eventListeners = listeners.get("session/event") ?? [];
 
-console.log("  → 默认主会话 idle（idleBeep=false）不播放…");
+console.log("  → 主会话 idle（非 communication/done）不播放…");
 beepCalls.length = 0;
 for (const fn of statusListeners) {
   try {
-    fn({ status: "idle", agent: { id: "main-1", session: { header: {} } } });
+    fn({ status: "idle", agent: { id: "main-normal", session: { header: {} } } });
   } catch (error) {
-    check("默认主会话 idle 触发不抛错", false);
+    check("普通主会话 idle 触发不抛错", false);
     console.log("    error:", error);
   }
 }
-check("默认主会话 idle 不播放提示音", beepCalls.length === 0);
-check("默认主会话 idle 触发不抛错", true);
+check("普通主会话 idle 不播放提示音", beepCalls.length === 0);
+check("普通主会话 idle 触发不抛错", true);
 
-console.log("  → 默认子代理 idle 不播放…");
+console.log("  → 子代理 idle（即使 communication）不播放…");
 beepCalls.length = 0;
 for (const fn of statusListeners) {
   try {
-    fn({ status: "idle", agent: { id: "sub-1", session: { header: { origin: "subagent" } } } });
+    fn({ status: "idle", agent: { id: "main-comm", session: { header: { origin: "subagent" } } } });
   } catch (error) {
     check("子代理 idle 触发不抛错", false);
     console.log("    error:", error);
   }
 }
-check("默认子代理 idle 不播放提示音", beepCalls.length === 0);
+check("子代理 idle 不播放提示音", beepCalls.length === 0);
 check("子代理 idle 触发不抛错", true);
 
-console.log("  → ask_user_question 事件仍触发播放…");
+console.log("  → ask_user_question 事件触发播放…");
 beepCalls.length = 0;
 for (const fn of eventListeners) {
   try {
@@ -143,7 +153,7 @@ check("ask_user_question 事件触发不抛错", true);
 
 await delay(250); // 清防抖窗口
 
-console.log("  → exit_plan_mode 事件仍触发播放…");
+console.log("  → exit_plan_mode 事件触发播放…");
 beepCalls.length = 0;
 for (const fn of eventListeners) {
   try {
@@ -158,43 +168,39 @@ check("exit_plan_mode 事件触发不抛错", true);
 
 await delay(250); // 清防抖窗口
 
-console.log("  → idleBeep=true 后主会话 idle 恢复播放…");
-try {
-  await settings.update("output-beep", { idleBeep: true });
-} catch (error) {
-  check("启用 idleBeep 不抛错", false);
-  console.log("    error:", error);
-}
+console.log("  → Kaz 主模型 communication 收尾 idle 播放…");
 beepCalls.length = 0;
 for (const fn of statusListeners) {
   try {
-    fn({ status: "idle", agent: { id: "main-2", session: { header: {} } } });
+    fn({ status: "idle", agent: { id: "main-comm", session: { header: {} } } });
   } catch (error) {
-    check("idleBeep=true idle 触发不抛错", false);
+    check("communication idle 触发不抛错", false);
     console.log("    error:", error);
   }
 }
-check("idleBeep=true 恢复输出完毕提示音", beepCalls.length === 1);
-check("idleBeep=true idle 触发不抛错", true);
-
-console.log("  → idleBeep=true 时子代理仍默认静音…");
-beepCalls.length = 0;
-for (const fn of statusListeners) {
-  try {
-    fn({ status: "idle", agent: { id: "sub-2", session: { header: { origin: "subagent" } } } });
-  } catch (error) {
-    check("idleBeep=true 子代理触发不抛错", false);
-    console.log("    error:", error);
-  }
-}
-check("idleBeep=true 子代理仍不播放提示音", beepCalls.length === 0);
-check("idleBeep=true 子代理触发不抛错", true);
+check("communication 收尾 idle 播放提示音", beepCalls.length === 1);
+check("communication idle 触发不抛错", true);
 
 await delay(250); // 清防抖窗口
 
-console.log("  → enabled=false 后 idleBeep=true 也不播放…");
+console.log("  → Kaz 主模型 done 状态 idle 播放…");
+beepCalls.length = 0;
+for (const fn of statusListeners) {
+  try {
+    fn({ status: "idle", agent: { id: "main-done", session: { header: {} } } });
+  } catch (error) {
+    check("done idle 触发不抛错", false);
+    console.log("    error:", error);
+  }
+}
+check("done 状态 idle 播放提示音", beepCalls.length === 1);
+check("done idle 触发不抛错", true);
+
+await delay(250); // 清防抖窗口
+
+console.log("  → enabled=false 后全部静默…");
 try {
-  await settings.update("output-beep", { enabled: false, idleBeep: true });
+  await settings.update("output-beep", { enabled: false });
 } catch (error) {
   check("禁用 enabled 不抛错", false);
   console.log("    error:", error);
@@ -202,14 +208,22 @@ try {
 beepCalls.length = 0;
 for (const fn of statusListeners) {
   try {
-    fn({ status: "idle", agent: { id: "main-3", session: { header: {} } } });
+    fn({ status: "idle", agent: { id: "main-comm", session: { header: {} } } });
   } catch (error) {
     check("enabled=false 后 idle 触发不抛错", false);
     console.log("    error:", error);
   }
 }
-check("enabled=false 后 idle 不播放提示音", beepCalls.length === 0);
-check("enabled=false 后 idle 触发不抛错", true);
+for (const fn of eventListeners) {
+  try {
+    fn({ id: "main-1", header: {} }, { type: "tool/call", data: { name: "ask_user_question" } });
+  } catch (error) {
+    check("enabled=false 后提问触发不抛错", false);
+    console.log("    error:", error);
+  }
+}
+check("enabled=false 后不播放提示音", beepCalls.length === 0);
+check("enabled=false 后事件触发不抛错", true);
 
 // 还原 execFile（进程即将退出，仅作卫生处理）。
 childProcess.execFile = originalExecFile;

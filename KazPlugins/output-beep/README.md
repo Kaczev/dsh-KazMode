@@ -1,41 +1,27 @@
-# output-beep —— 模型需要用户输入时提示音
+# output-beep —— 用户介入 / Kaz 收尾提示音
 
-> **作用**：默认只在模型真正需要你输入时让电脑"滴"一声：`ask_user_question`
-> 提问弹窗、`exit_plan_mode` 提交方案（Plan review 弹窗）。旧版“模型输出完毕
-> （agent 回到 idle）就响”默认关闭，需要时打开 `idleBeep: true` 恢复（作者
-> 摸鱼专用 🐳）。
+> **作用**：在模型真正需要用户介入时，或 Kaz 主模型收尾完成时，让电脑“滴”一声。
+> 默认**不会**在普通“模型输出完毕”时响。
 
-宿主侧插件：监听 `session/event` 的 `ask_user_question` / `exit_plan_mode`
-工具调用，用户输入弹窗或 Plan review 弹窗出现时播放一次 **Windows 系统提示音**
-（PowerShell `[console]::beep`，频率/时长可配）。`agent/status` idle（输出完毕）
-提示默认不再播放；`idleBeep: true` 可恢复旧版行为。
+## 触发时机
 
-## 特性
+1. **Kaz 主模型收尾完成**：主模型 workflow 处于 `communication` / `done` 且 agent 回到 idle 时响；
+2. **提问弹窗**：模型调用 `ask_user_question` 时立即响；
+3. **Plan 方案提交**：模型调用 `exit_plan_mode` 时响（Kaz 模式已无 plan 模式，但 output-beep 独立使用/非 Kaz 仍兼容）。
 
-- **独立工作**：不依赖 Kaz 模式。装了就能用（默认 `enabled: true`）。
-- **用户输入提醒**：模型调用 `ask_user_question` 提问、或 `exit_plan_mode`
-  提交方案时立即响一声，提醒你回来操作。
-- **idleBeep（旧版输出完毕提示，默认关）**：`idleBeep: false` 时输出完毕
-  不响；`idleBeep: true` 恢复“任意 agent 回到 idle 响一次”。
-- **Kaz 面板开关**：Kaz 模式把它作为被管理插件，Kaz 面板里有 `output-beep`
-  配置行（enabled / idleBeep / includeSubagents 开关，按会话生效）。
-- **子代理过滤**：默认只对主会话提示；子代理（background subagent / workflow /
-  ralph 的子会话）的提示事件默认忽略，避免连响。`includeSubagents: true` 开启。
-- **防抖**：同一时刻多个 agent 同时 idle 时 200ms 内只响一次。
+子代理完成、普通 stage idle、非 communication 收尾都不会触发。
 
 ## settings（纯方案 A：Kaz 会话下经 Kaz 面板/kazMode 服务生效；此处仅 standalone 兜底）
 
 ```yaml
 output-beep:
   enabled: true           # 总开关（默认开）
-  idleBeep: false         # 输出完毕（agent 回到 idle）也提示（默认关）
   includeSubagents: false # 子代理也提示（默认关）
   frequency: 1000         # 提示音频率 Hz（范围 37–32767，默认 1000）
   duration: 300           # 提示音时长 ms（默认 300）
 ```
 
-> 纯方案 A：Kaz 模式下生效配置由 kazMode 服务按会话读取，settings.yaml 段不再被
-> kaz-mode 改写、也不再自动补写。
+> 无 `idleBeep` 设置；“任意输出完毕即响”的旧版行为已移除。
 
 ## 安装（与其它插件一致，KazPlugins 目录）
 
@@ -66,8 +52,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\output-beep\probe-output-bee
 
 ## 验收要点
 
-1. 模型调用 `ask_user_question` 提问、或 `exit_plan_mode` 提交 plan 方案时响一声。
-2. 默认（`idleBeep: false`）模型输出完毕 / agent 回到 idle **不再**自动响。
-3. `idleBeep: true` 后模型输出完毕重新恢复提示音。
-4. Kaz 面板出现 `output-beep` 行，`enabled` / `idleBeep` 开关可关可开。
-5. `includeSubagents: true` 后子代理的提示事件也响。
+1. 普通模型输出完毕（非 communication/done）不响。
+2. Kaz 主模型 communication/done 收尾完成时响一次。
+3. `ask_user_question` / `exit_plan_mode` 弹窗出现时响。
+4. Kaz 面板显示 `output-beep` 行；关闭 `enabled` 后全部静默。
+5. `includeSubagents` 默认关，子代理完成不响。

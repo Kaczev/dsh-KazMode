@@ -1,21 +1,21 @@
-// output-beep —— 模型需要用户输入时提示音
+// output-beep —— 模型需要用户输入或 Kaz 收尾完成时提示音
 // ===========================================================================
-// 宿主侧插件：默认只在模型真正需要用户介入时播放一次 Windows 系统提示音
-// （PowerShell [console]::beep，频率/时长可配）：session/event 的
-// ask_user_question 提问弹窗、exit_plan_mode 提交方案（Plan review 弹窗）。
-// 旧的“任意 agent 输出完毕回到 idle 就响”默认关闭；设置 idleBeep: true 可
-// 恢复 agent/status idle 提示（模型输出完毕）。
-// 默认只对主会话提示（includeSubagents=false 时忽略子代理会话——它们完成时
-// 同样会发 agent/status，避免子代理批量完成时提示音连响）。
+// 宿主侧插件：播放一次 Windows 系统提示音（PowerShell [console]::beep，
+// 频率/时长可配）的情形：
+//   - 主模型 Kaz communication/done 收尾完成（agent/status idle + stage）；
+//   - session/event 的 ask_user_question 提问弹窗；
+//   - session/event 的 exit_plan_mode 提交方案（Plan review 弹窗，
+//     兼容非 Kaz / 独立使用；Kaz 模式本身已无 plan 模式）。
+// 普通 agent/status idle（非 communication/done）不响；子代理 idle 默认不响
+// （includeSubagents=false）。
 //
 // settings 命名空间 `output-beep`（~/.dsh/settings.yaml，热重载）：
 //   enabled          总开关（默认 true）
-//   idleBeep         输出完毕（回到 idle）也提示（默认 false）
 //   includeSubagents 子代理也提示（默认 false）
 //   frequency        提示音频率 Hz（默认 1000，范围 37–32767）
 //   duration         提示音时长 ms（默认 300）
 //
-// Kaz 模式把它作为第 6 个被管理插件（Kaz 面板开关行；进入 Kaz 联动启用、
+// Kaz 模式把它作为被管理插件（Kaz 面板开关行；进入 Kaz 联动启用、
 // 关闭 Kaz 保持当前状态）；也可独立安装使用——cordis.patch.yml 加一行即可，
 // 与 Kaz 模式完全解耦。
 // ===========================================================================
@@ -37,7 +37,6 @@ const BEEP_DEBOUNCE_MS = 200;
 
 const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
-  idleBeep: z.boolean().default(false),
   includeSubagents: z.boolean().default(false),
   frequency: z.number().default(DEFAULT_FREQUENCY),
   duration: z.number().default(DEFAULT_DURATION),
@@ -46,7 +45,6 @@ const SETTINGS_SCHEMA = z.object({
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
 export const DEFAULT_SECTION = {
   enabled: true,
-  idleBeep: false,
   includeSubagents: false,
   frequency: DEFAULT_FREQUENCY,
   duration: DEFAULT_DURATION,
@@ -169,7 +167,6 @@ function playBeep(frequency, duration, logger) {
 export function apply(ctx, config = {}) {
   const entry = {
     enabled: config.enabled !== false,
-    idleBeep: config.idleBeep === true,
     includeSubagents: config.includeSubagents === true,
     frequency: Number.isFinite(config.frequency) ? config.frequency : DEFAULT_FREQUENCY,
     duration: Number.isFinite(config.duration) ? config.duration : DEFAULT_DURATION,
@@ -247,11 +244,23 @@ export function apply(ctx, config = {}) {
     playBeep(current.frequency, current.duration, ctx.logger);
   }
 
-  /** 旧版“输出完毕”行为：仅在 idleBeep=true 时对 agent/status idle 响一声。 */
+  /** Kaz 主模型 communication 收尾完成时响：agent 回到 idle 且当前 workflow
+   *   stage 是 communication/done，且不是子代理。非 Kaz / 非收尾阶段不响。 */
   function handleIdle(agent) {
+    if (isSubagent(agent)) return;
     const current = liveFor(agent);
-    if (current === null || typeof current !== "object" || current.idleBeep !== true) return;
-    handleBeep(current, isSubagent(agent));
+    if (current === null || typeof current !== "object" || current.enabled !== true) return;
+    let stage = "";
+    try {
+      const svc = ctx.get("kaWhaleWorkflow");
+      if (svc !== null && svc !== undefined && typeof svc.stageOf === "function") {
+        stage = svc.stageOf(agent);
+      }
+    } catch {
+      stage = "";
+    }
+    if (stage !== "communication" && stage !== "done") return;
+    handleBeep(current, false);
   }
 
   /** 模型提问或提交 plan 方案（ask_user_question / exit_plan_mode）时立即响一声（不等整轮结束 idle）。 */
@@ -259,8 +268,8 @@ export function apply(ctx, config = {}) {
     handleBeep(liveFor(sessionAgentOf(session)), isSubagentSession(session));
   }
 
-  // agent 回到 idle = 整个驱动循环结束（可能含多个 turn/step）。该路径只在
-  // idleBeep=true（用户显式恢复旧版“输出完毕”提示）时播放。
+  // agent 回到 idle = 整个驱动循环结束。只有 Kaz 主模型处于
+  // communication/done 收尾阶段时该路径播放；子代理与普通 idle 不响。
   ctx.on("agent/status", ({ agent, status }) => {
     if (status !== "idle") return;
     handleIdle(agent);
@@ -283,7 +292,7 @@ export function apply(ctx, config = {}) {
     onChange: () => {
       const current = source();
       ctx.logger.info(
-        `[output-beep] 配置已生效: enabled=${current?.enabled !== false}, idleBeep=${current?.idleBeep === true}, includeSubagents=${current?.includeSubagents === true}, ` +
+        `[output-beep] 配置已生效: enabled=${current?.enabled !== false}, includeSubagents=${current?.includeSubagents === true}, ` +
           `frequency=${current?.frequency}, duration=${current?.duration}`,
       );
     },
