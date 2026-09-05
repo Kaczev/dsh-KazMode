@@ -1,14 +1,16 @@
-// kaz-shared 探针：Kaz7.0 M1 纯 ESM 树形会话模型（lib/session-tree.js）。
+// kaz-shared 探针：Kaz7.0 M1 纯 ESM 树形会话模型 + newest-branch 剖面渲染
+// （lib/session-tree.js）。
 // ===========================================================================
 // 依据：不入库文件/Kaz7.0更新规划/Kaz7.0-M1树形会话模型设计报告.md
+//       与 Kaz7.0-M1最新分支剖面渲染设计报告.md（P1-P8 / §9）。
 // 覆盖：
 //   A1  leaf / level1(round) / level2(planItem) / level3(goal) / level4+(sublimed)
 //       在“多回合、多 planItem、多 Goal”合成会话中层级正确；
 //   A2  append 只产生 leaf；无显式边界不自动 close；
 //   A3  round/planItem/goal 显式 close 生成对应 closed block；
 //   A4  同一父容器可混合多级 closed block + 当前未闭合 leaf；
-//   A5  render 只含最外层 block 描述 + 当前未闭合原信息；
-//   A6  渲染顺序：高层→低层、同层老→新、原信息最后；renderOrderValid true；
+//   A5/A6  render 为 newest-branch 剖面：旧 sibling 块/最新路径块带 role/path，
+//       历史 leaf 不常驻、当前未闭合 raw 最后；renderOrderValid true；
 //   A7  同输入两次 render 逐条目一致；
 //   A8  N=4：3 个同层兄弟不升华，第 4 个闭合后生成父块；
 //   A9  增量语义：追加不影响已落定 summary/fingerprint，未变子树保持对象引用；
@@ -16,13 +18,16 @@
 //   A11 无 token 预算：无 MC/token/budget/trigger 导出，树节点无 token 字段；
 //   A12 不实现持久化/归档/whale_expand 工具导出；
 //   A13 与 context-compress.js 共享常量，不复制为 session-tree 自己的导出；
-//   A14 按 kaz-shared probe 约定（根目录、PASS/FAIL、退出码、SESSION-TREE PROBE OK）。
+//   A14 按 kaz-shared probe 约定（根目录、PASS/FAIL、退出码、SESSION-TREE PROBE OK）；
+//   P1-P8 newest-branch 剖面专测（§9.2）：natural path / open scopes / sublimed /
+//       root leaf+scope / role-path 稳定 / renderOrderValid / 导出面 / stoppedAt。
 // 冻结决策：
 //   - open 只允许严格更小 level 嵌套（round < planItem < goal）；
 //   - close 强制 LIFO，只能先闭合最内层 open scope；
 //   - close/promote 必须提供非空 summary；
 //   - 自动升华 = 同一容器的“最老连续同层 closed 兄弟组”，每组恰好取前 N 个；
-//   - render 顺序与 context-compress.renderOrderValid 对齐。
+//   - render 顺序与 context-compress.renderOrderValid 对齐；
+//   - block entry 带 role/path；raw 带 path；导出面仍只六个纯函数。
 // 运行：node KazPlugins/kaz-shared/probe-session-tree.mjs
 // ===========================================================================
 
@@ -202,11 +207,22 @@ check(
   s.rootChildren.filter((node) => node.nodeType === "block").map((node) => node.level).sort((a, b) => a - b).join(",") === "1,2,3" &&
     s.rootChildren.some((node) => node.nodeType === "leaf" && node.id === mixedRawIds[0]),
 );
+const mixedBlockEntries = mixedRender1.entries.filter(
+  (entry) => entry.kind === "block",
+);
 check(
-  "③ A5 render 只含最外层 block 描述 + 未闭合 raw，不含 closed block 内部原信息",
+  "③ A5 newest-branch 剖面：根级 closed block 均为 old-sibling、带 role/path，不含 closed block 内部原信息",
   mixedBlockIds.join(",") === "mixed-goal,mixed-plan,mixed-round" &&
+    mixedBlockEntries.every(
+      (entry) =>
+        entry.role === "old-sibling" &&
+        typeof entry.path === "string" &&
+        entry.path === entry.id,
+    ) &&
     mixedRawIds.length === 1 &&
     mixedRender1.stats.outermostBlockCount === 3 &&
+    mixedRender1.stats.oldSiblingBlockCount === 3 &&
+    mixedRender1.stats.newestPathBlockCount === 0 &&
     mixedRender1.stats.currentRawCount === 1 &&
     typeof mixedText1 === "string" &&
     !mixedText1.includes("hidden-round-raw") &&
@@ -215,7 +231,7 @@ check(
     mixedText1.includes("visible-root-raw"),
 );
 check(
-  "③ A6 渲染顺序：高层→低层、同层老→新、原信息最后；renderOrderValid true",
+  "③ A6 newest-branch 渲染顺序：高层→低层、同层老→新、raw 最后；renderOrderValid true",
   mixedBlockIds.join(",") === "mixed-goal,mixed-plan,mixed-round" &&
     mixedRender1.entries[mixedRender1.entries.length - 1]?.kind === "current-unclosed-raw" &&
     mixedRender1.orderValid === true &&
@@ -477,6 +493,210 @@ check(
   ["whale_expand", "persist", "archive", "register", "cordis"].every(
     (name) => !Object.prototype.hasOwnProperty.call(publicNs, name),
   ),
+);
+
+// ---------------------------------------------------------------------------
+// ⑨ M1-P1..P8：newest-branch 剖面专测
+// ---------------------------------------------------------------------------
+function closeOneRoundSession(session, id, summary) {
+  session = opened(session, 1, "round", id);
+  session = appended(session, "user", `u:${id}`);
+  return closed(session, summary).session;
+}
+
+function closeOneGoalChain(session, goalId, planId, roundId, tag) {
+  session = opened(session, 3, "goal", goalId);
+  session = opened(session, 2, "planItem", planId);
+  session = opened(session, 1, "round", roundId);
+  session = appended(session, "user", `u:${tag}`);
+  session = closed(session, `${tag} round summary`).session;
+  session = closed(session, `${tag} planItem summary`).session;
+  return closed(session, `${tag} goal summary`).session;
+}
+
+function profileEntries(session) {
+  return run(render(session)).entries;
+}
+
+function profileBlocks(entries) {
+  return entries.filter((entry) => entry.kind === "block");
+}
+
+function profileRaws(entries) {
+  return entries.filter((entry) => entry.kind === "current-unclosed-raw");
+}
+
+// P1：closed natural path —— 根 oldGoal + latestGoal 自然链（Goal→PlanItem→Round）。
+let p1 = run(createSession({ id: "p1-natural-path" })).session;
+p1 = closeOneGoalChain(p1, "oldGoal", "oldPi", "oldRound", "p1-old");
+p1 = opened(p1, 3, "goal", "latestGoal");
+p1 = opened(p1, 2, "planItem", "latestGoal-oldPi");
+p1 = closeOneRoundSession(p1, "latestGoal-oldPi-oldRound", "latestGoal-oldPi-oldRound summary");
+p1 = closed(p1, "latestGoal-oldPi planItem summary").session;
+p1 = opened(p1, 2, "planItem", "latestGoal-newestPi");
+p1 = closeOneRoundSession(p1, "newestPi-oldRound", "newestPi-oldRound summary");
+p1 = closeOneRoundSession(p1, "newestPi-newestRound", "newestPi-newestRound summary");
+p1 = closed(p1, "latestGoal-newestPi planItem summary").session;
+p1 = closed(p1, "latestGoal goal summary").session;
+const p1Entries = profileEntries(p1);
+const p1Blocks = profileBlocks(p1Entries);
+const p1BlockRoles = Object.fromEntries(
+  p1Blocks.map((entry) => [entry.id, entry.role]),
+);
+const p1BlockPaths = Object.fromEntries(
+  p1Blocks.map((entry) => [entry.id, entry.path]),
+);
+check(
+  "⑨ M1-P1 closed natural path：entries 含 newest-path 链块，不含 Round 内 leaf raw",
+  p1Blocks.map((entry) => entry.id).join(",") ===
+    "oldGoal,latestGoal,latestGoal-oldPi,latestGoal-newestPi,newestPi-oldRound,newestPi-newestRound" &&
+    p1BlockRoles.oldGoal === "old-sibling" &&
+    p1BlockRoles.latestGoal === "newest-path" &&
+    p1BlockRoles["latestGoal-oldPi"] === "old-sibling" &&
+    p1BlockRoles["latestGoal-newestPi"] === "newest-path" &&
+    p1BlockRoles["newestPi-oldRound"] === "old-sibling" &&
+    p1BlockRoles["newestPi-newestRound"] === "newest-path" &&
+    p1BlockPaths.latestGoal === "latestGoal" &&
+    p1BlockPaths["latestGoal-newestPi"] === "latestGoal/latestGoal-newestPi" &&
+    p1BlockPaths["newestPi-newestRound"] ===
+      "latestGoal/latestGoal-newestPi/newestPi-newestRound" &&
+    p1Entries.every((entry) => entry.kind !== "current-unclosed-raw"),
+);
+
+// P2：active open scopes —— 无 scope entry；old sibling block 只给 summary；raw 恒在最后。
+let p2 = run(createSession({ id: "p2-open-scopes" })).session;
+p2 = closeOneGoalChain(p2, "oldGoal", "oldPi", "oldRound", "p2-old");
+p2 = opened(p2, 3, "goal", "activeGoal");
+p2 = opened(p2, 2, "planItem", "donePi");
+p2 = closeOneRoundSession(p2, "doneRound", "doneRound summary");
+p2 = closed(p2, "donePi planItem summary").session;
+p2 = opened(p2, 2, "planItem", "activePi");
+p2 = closeOneRoundSession(p2, "doneRound2", "doneRound2 summary");
+p2 = opened(p2, 1, "round", "activeRound");
+p2 = appended(p2, "user", "user:activeRound");
+p2 = appended(p2, "assistant", "assistant:activeRound");
+const p2Entries = profileEntries(p2);
+const p2Blocks = profileBlocks(p2Entries);
+const p2Raws = profileRaws(p2Entries);
+check(
+  "⑨ M1-P2 active open scopes：无 scope 条目；旧 sibling 只 summary；user/assistant raw 最后",
+  p2Entries.every((entry) => entry.kind !== "scope") &&
+    p2Blocks.length === 3 &&
+    p2Blocks.every((entry) => entry.role === "old-sibling") &&
+    p2Raws.map((entry) => entry.message.content).join(",") ===
+      "user:activeRound,assistant:activeRound" &&
+    p2Entries[p2Entries.length - 1].kind === "current-unclosed-raw",
+);
+
+// P3：sublimed 根 —— 只输出 sublimed summary，不出现内部 level1/2/3 或 raw。
+let p3 = run(createSession({ id: "p3-sublimed" })).session;
+for (let i = 1; i <= 4; i += 1) {
+  p3 = closeRootRound(p3, `p3-r${i}`, `p3 round ${i} summary`).session;
+}
+const p3Entries = profileEntries(p3);
+check(
+  "⑨ M1-P3 sublimed 根：只有 level2 sublimed newest-path summary，无内部块/raw",
+  p3Entries.length === 1 &&
+    p3Entries[0].kind === "block" &&
+    p3Entries[0].boundary === "sublimed" &&
+    p3Entries[0].role === "newest-path" &&
+    p3Entries[0].level === 2 &&
+    p3Entries[0].path === p3Entries[0].id,
+);
+
+// P4：根级旧 leaf + open scope —— 未闭合 leaf 按 seq 汇总 raw 且恒在 block 后。
+let p4 = run(createSession({ id: "p4-root-leaf-scope" })).session;
+p4 = run(
+  append(p4, { kind: "user", content: "old-root-leaf", id: "old-root-leaf" }),
+).session;
+p4 = opened(p4, 2, "planItem", "active-plan");
+p4 = run(
+  append(p4, { kind: "user", content: "inside-leaf", id: "inside-leaf" }),
+).session;
+const p4Entries = profileEntries(p4);
+check(
+  "⑨ M1-P4 根级旧 leaf + open scope：所有未闭合 leaf 按 seq 聚合 raw，无 block 夹在 raw 后",
+  profileBlocks(p4Entries).length === 0 &&
+    profileRaws(p4Entries).map((entry) => entry.id).join(",") ===
+      "old-root-leaf,inside-leaf" &&
+    p4Entries[p4Entries.length - 1].id === "inside-leaf",
+);
+
+// P5：role/path/level/order/seq 两次 render 稳定。
+const p1RenderOnce = run(render(p1));
+const p1RenderTwice = run(render(p1));
+const p1AllEntries = [...p1RenderOnce.entries, ...p4Entries];
+check(
+  "⑨ M1-P5 role/path 稳定：同输入两次 render 的 role/path/level/order/seq 逐项一致",
+  JSON.stringify(p1RenderOnce.entries) === JSON.stringify(p1RenderTwice.entries) &&
+    p1AllEntries.every(
+      (entry) =>
+        entry.kind === "current-unclosed-raw"
+          ? typeof entry.path === "string" &&
+            Number.isInteger(entry.seq) &&
+            entry.level === 0
+          : ["old-sibling", "newest-path"].includes(entry.role) &&
+            typeof entry.path === "string" &&
+            Number.isInteger(entry.level) &&
+            Number.isInteger(entry.order),
+    ),
+);
+
+// P6：任意剖面场景均过 renderOrderValid。
+const p1Render = run(render(p1));
+const p2Render = run(render(p2));
+const p3Render = run(render(p3));
+const p4Render = run(render(p4));
+check(
+  "⑨ M1-P6 任意剖面场景 renderOrderValid=true（natural/open/sublimed/root-leaf）",
+  p1Render.orderValid === true &&
+    renderOrderValid(p1Render.entries) === true &&
+    p2Render.orderValid === true &&
+    renderOrderValid(p2Render.entries) === true &&
+    p3Render.orderValid === true &&
+    renderOrderValid(p3Render.entries) === true &&
+    p4Render.orderValid === true &&
+    renderOrderValid(p4Render.entries) === true,
+);
+
+// P7：导出面仍只六个函数；role/path 不新增公开导出。
+check(
+  "⑨ M1-P7 导出面仍六函数，role/path 不产生 renderProfile/新公共导出",
+  Object.keys(directNs).length === 6 &&
+    EXPECTED_SESSION_TREE_EXPORTS.every((name) =>
+      Object.prototype.hasOwnProperty.call(directNs, name),
+    ) &&
+    !Object.prototype.hasOwnProperty.call(directNs, "renderProfile") &&
+    !Object.keys(directNs).some((name) =>
+      /role|path|profile/i.test(name),
+    ),
+);
+
+// P8：停止条件 —— current-raw / round-boundary / sublimed-boundary / closed-leaf / no-children。
+let p8Historic = run(createSession({ id: "p8-historic-leaf" })).session;
+p8Historic = opened(p8Historic, 3, "goal", "historicGoal");
+p8Historic = run(
+  append(p8Historic, { kind: "user", content: "historical leaf", id: "historic-leaf" }),
+).session;
+p8Historic = closed(p8Historic, "historic goal summary").session;
+const p8HistoricRender = run(render(p8Historic));
+const p8EmptyRender = run(render(run(createSession({ id: "p8-empty" })).session));
+check(
+  "⑨ M1-P8 stoppedAt.reason：current-raw/round-boundary/sublimed-boundary/closed-leaf/no-children",
+  p4Render.stats.stoppedAt.reason === "current-raw" &&
+    p1Render.stats.stoppedAt.kind === "block" &&
+    p1Render.stats.stoppedAt.id === "newestPi-newestRound" &&
+    p1Render.stats.stoppedAt.reason === "round-boundary" &&
+    p3Render.stats.stoppedAt.boundary === undefined &&
+    p3Render.stats.stoppedAt.reason === "sublimed-boundary" &&
+    p8HistoricRender.stats.stoppedAt.kind === "block" &&
+    p8HistoricRender.stats.stoppedAt.id === "historicGoal" &&
+    p8HistoricRender.stats.stoppedAt.reason === "closed-leaf" &&
+    p8HistoricRender.entries.length === 1 &&
+    p8HistoricRender.entries[0].role === "newest-path" &&
+    p8EmptyRender.stats.stoppedAt.kind === "empty" &&
+    p8EmptyRender.stats.stoppedAt.reason === "no-children" &&
+    p8EmptyRender.stats.stoppedAt.path === "",
 );
 
 if (failures === 0) {

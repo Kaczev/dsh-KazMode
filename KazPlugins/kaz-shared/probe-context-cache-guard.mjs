@@ -11,10 +11,11 @@
 //   - classifyTransition：append-only / planned-invalidation / version-boundary /
 //     prefix-violation / hidden-window；
 //   - invalidationCount：close+sublime 同组不重复计、promote、fallback-hide；
-//   - renderStableAcrossAppend（S8/S9）与 windowStableAfterHidden（C1/v1.2）；
+//   - renderStableAcrossAppend（S8/S9）与 windowStableAfterHidden（C1/v1.2，
+//     hiddenRootIds 以 path-prefix + entry.id 过滤 newest-path 隐藏根）；
 //   - stablePeriodMedianH / m4Verdict（InvalidationEvents、前缀违规、A 门禁、B/C/D）；
 //   - B7 连续 10 step 的 S1–S9 纯守卫覆盖；
-//   - F14 现状缺口自述（不宣称 newest-branch 投影/真实 usage 映射已完成）。
+//   - F14 已知限制/未收口自述：真实 usage 映射未收口；renderOrderValid 不校验剖面语义。
 // 运行：node KazPlugins/kaz-shared/probe-context-cache-guard.mjs
 // ===========================================================================
 
@@ -39,10 +40,10 @@ import {
   render,
 } from "./lib/session-tree.js";
 
-// F14：本探针不自称已把尚未落地的能力包装成完成态。
+// F14：本探针不自称已把尚未收口的能力包装成完成态。
 const KNOWN_GAPS = Object.freeze([
-  "current session-tree.render 只是 outermost-blocks + current-unclosed-raw；完整 v1.2 newest-branch 剖面投影尚未落地，本探针以 entry 序列级守卫覆盖它",
   "真实 provider usage 的字段映射尚未用真实 DSH usage 样例收口；本探针只验证纯函数对 A/B/C/D 的语义，不宣称真实采样已完成",
+  "renderOrderValid 只校验 flat 顺序（不校验 newest-branch 剖面语义）；剖面语义由 session-tree probe 的 P1-P8 专测",
 ]);
 
 let failures = 0;
@@ -68,6 +69,12 @@ function appended(session, kind, content) {
 }
 
 function closedRootRound(session, id, summary) {
+  let s = opened(session, 1, "round", id);
+  s = appended(s, "user", `u:${id}`);
+  return run(close(s, { summary })).session;
+}
+
+function closeOneRoundScope(session, id, summary) {
   let s = opened(session, 1, "round", id);
   s = appended(s, "user", `u:${id}`);
   return run(close(s, { summary })).session;
@@ -454,11 +461,13 @@ check(
 // ⑥ F8/F9 renderStableAcrossAppend：S8/S9 追加后旧条目前缀稳定
 // ---------------------------------------------------------------------------
 check(
-  "⑥ F8/S9 renderStableAcrossAppend：append-only 后 prefixStable=true 且 transition=append-only",
+  "⑥ F8/S9 renderStableAcrossAppend：open scope 内 append 只加 raw 尾 → append-only/prefixStable",
   (() => {
     let sessionBefore = run(createSession({ id: "append-stable" })).session;
     sessionBefore = closedRootRound(sessionBefore, "r1", "round 1 summary");
-    const sessionAfter = appended(sessionBefore, "user", "new root raw");
+    sessionBefore = opened(sessionBefore, 3, "goal", "live-goal");
+    sessionBefore = appended(sessionBefore, "user", "live u1");
+    const sessionAfter = appended(sessionBefore, "assistant", "live a2");
     const result = renderStableAcrossAppend(sessionBefore, sessionAfter);
     return (
       result.ok === true &&
@@ -466,7 +475,9 @@ check(
       result.transition === "append-only" &&
       result.orderValidBefore === true &&
       result.orderValidAfter === true &&
-      jsonStableEqual(result.entriesBefore[0], result.entriesAfter[0])
+      jsonStableEqual(result.entriesBefore[0], result.entriesAfter[0]) &&
+      result.entriesBefore[0].role === "old-sibling" &&
+      result.entriesAfter.at(-1).kind === "current-unclosed-raw"
     );
   })(),
 );
@@ -513,6 +524,9 @@ check(
   (() => {
     let session = run(createSession({ id: "b7-ten-steps" })).session;
     session = closedRootRound(session, "b7-r0", "round 0 summary");
+    // 最新链保持在 open scope 内：后续 append 只追加 raw 尾，不改变任何 block role/path。
+    session = opened(session, 3, "goal", "b7-goal");
+    session = opened(session, 2, "planItem", "b7-plan");
     const sysTools = {
       systemText: "b7 system",
       tools: [{ name: "read" }, { name: "edit" }],
@@ -540,7 +554,8 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// ⑧ F7/C1/v1.2 windowStableAfterHidden：hiddenRootIds 只影响窗口、树不变、expand 可读
+// ⑧ F7/C1/v1.2 windowStableAfterHidden：hiddenRootIds 只影响窗口、树不变、
+//    expand 可读；newest-path 隐藏根按 path-prefix 过滤
 // ---------------------------------------------------------------------------
 let hiddenSession = run(
   createSession({ id: "hidden-window-stable" }),
@@ -609,6 +624,43 @@ check(
       "invalid-hidden-root-ids" &&
     windowStableAfterHidden(hiddenSession, ["visible-tail"])?.error?.code ===
       "invalid-hidden-root-id",
+);
+check(
+  "⑧ F7/C1/v1.2 windowStableAfterHidden path-prefix：隐藏唯一 newest-path 根会滤除其全部 path 前缀子块",
+  (() => {
+    let s = run(createSession({ id: "hidden-newest-path" })).session;
+    s = opened(s, 3, "goal", "latestGoal");
+    s = opened(s, 2, "planItem", "latestGoal-oldPi");
+    s = closeOneRoundScope(s, "latestGoal-oldPi-oldRound", "latestGoal-oldPi-oldRound summary");
+    s = run(close(s, { summary: "latestGoal-oldPi planItem summary" })).session;
+    s = opened(s, 2, "planItem", "latestGoal-newestPi");
+    s = closeOneRoundScope(s, "newestPi-oldRound", "newestPi-oldRound summary");
+    s = closeOneRoundScope(s, "newestPi-newestRound", "newestPi-newestRound summary");
+    s = run(close(s, { summary: "latestGoal-newestPi planItem summary" })).session;
+    s = run(close(s, { summary: "latestGoal goal summary" })).session;
+    const hidden = "latestGoal";
+    const fullRender = run(render(s));
+    const hiddenDescendantCount = fullRender.entries.filter(
+      (entry) =>
+        typeof entry?.path === "string" &&
+        (entry.path === hidden || entry.path.startsWith(`${hidden}/`)),
+    ).length;
+    const result = windowStableAfterHidden(s, [hidden]);
+    return (
+      fullRender.entries.some(
+        (entry) => entry.kind === "block" && entry.id === "latestGoal",
+      ) &&
+      hiddenDescendantCount > 1 &&
+      result.ok === true &&
+      result.stable === true &&
+      result.classification === "planned-invalidation" &&
+      result.subtype === "hidden-window" &&
+      result.checks.hiddenRemovedAndOrderPreserved === true &&
+      result.checks.orderValidBefore === true &&
+      result.checks.orderValidAfter === true &&
+      result.checks.expandReadable === true
+    );
+  })(),
 );
 
 // ---------------------------------------------------------------------------
@@ -894,14 +946,20 @@ check(
 );
 
 // ---------------------------------------------------------------------------
-// ⑪ F14：现状缺口自述
+// ⑪ F14：已知限制/未收口自述（newest-branch 投影已落地，故不再列为缺口）
 // ---------------------------------------------------------------------------
 check(
-  "⑪ F14 探针明确记录现状缺口：newest-branch 投影未落地、真实 usage 映射未收口",
+  "⑪ F14 已移除 newest-branch 投影未落地缺口；保留 usage 未收口与 renderOrderValid 语义边界",
   KNOWN_GAPS.length === 2 &&
-    KNOWN_GAPS[0].includes("newest-branch") &&
-    KNOWN_GAPS[0].includes("session-tree.render") &&
-    KNOWN_GAPS[1].includes("usage"),
+    KNOWN_GAPS[0].includes("usage") &&
+    KNOWN_GAPS[1].includes("renderOrderValid") &&
+    KNOWN_GAPS[1].includes("P1-P8") &&
+    KNOWN_GAPS.every((gap) => typeof gap === "string" && gap.length > 0) &&
+    !KNOWN_GAPS.some(
+      (gap) =>
+        gap.includes("尚未落地") ||
+        (gap.includes("newest-branch") && gap.includes("投影")),
+    ),
 );
 console.log(
   "\n[F14 known gaps]\n" +

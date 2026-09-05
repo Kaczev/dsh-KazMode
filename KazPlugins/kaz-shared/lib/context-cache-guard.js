@@ -686,6 +686,8 @@ function entriesEqualByCanonical(left, right) {
  * windowStableAfterHidden(session, hiddenRootIds, opts)
  * 校验：隐藏根合法、完整 Session 不变、窗口渲染确定且顺序合法、
  * 隐藏根只从窗口消失、expand 可读回完整 Session 的隐藏根。
+ * expectedVisible 使用 path-prefix 过滤（e.path===id || startsWith(id+"/")）
+ * 并保留 entry.id 兼容，以覆盖 newest-path 剖面下隐藏根内部块条目。
  * opts.expandFn? 缺省用 session-tree-expand.expand。
  */
 export function windowStableAfterHidden(session, hiddenRootIds, opts = {}) {
@@ -711,7 +713,6 @@ export function windowStableAfterHidden(session, hiddenRootIds, opts = {}) {
         "hiddenRootIds must be an array of unique non-empty strings",
       );
     }
-    const hiddenSet = new Set(hiddenRootIds);
     for (const id of hiddenRootIds) {
       if (!isDirectRootClosedBlock(session, id)) {
         return errorResult(
@@ -748,7 +749,13 @@ export function windowStableAfterHidden(session, hiddenRootIds, opts = {}) {
     );
 
     const expectedVisible = fullRender.entries.filter(
-      (entry) => !hiddenSet.has(entry?.id),
+      (entry) =>
+        !hiddenRootIds.some(
+          (id) =>
+            entry?.id === id ||
+            (typeof entry?.path === "string" &&
+              (entry.path === id || entry.path.startsWith(`${id}/`))),
+        ),
     );
     const hiddenRemovedAndOrderPreserved = entriesEqualByCanonical(
       expectedVisible,

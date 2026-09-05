@@ -723,38 +723,163 @@ export function promote(session, spec) {
 }
 
 // ---------------------------------------------------------------------------
-// render（只读；entries 与 context-compress.renderOrderValid 兼容）
+// render（只读；最新分支剖面 newest-branch profile）
+// ---------------------------------------------------------------------------
+// 剖面规则（Kaz7.0-M1最新分支剖面渲染设计报告）：
+//   * 每个容器只展开最右（newest）直接 child；其它 closed block 只给
+//     old-sibling summary，绝不递归；
+//   * open scope 透明：不输出 scope 条目，只进入其 children；
+//   * root/open scope 内的未闭合 leaf 是 current-unclosed-raw；closed block
+//     内部的历史 leaf 永不常驻；
+//   * 沿自然 Goal/planItem 链下钻；round / sublimed / historical-leaf /
+//     no-children 是停止点；
+//   * entries 顺序仍兼容 context-compress.renderOrderValid。
 // ---------------------------------------------------------------------------
 
-function collectRenderNodes(children, blockEntries, rawEntries) {
-  for (const node of children) {
+function profileBlockEntry(node, ancestors, role) {
+  const path = pathText([...ancestors, node.id]);
+  return {
+    kind: "block",
+    role,
+    level: node.level,
+    id: node.id,
+    boundary: node.boundary,
+    summary: node.summary,
+    order: node.orderSeq,
+    path,
+    depth: path.length === 0 ? 0 : path.split("/").length,
+  };
+}
+
+function profileRawEntry(node, ancestors) {
+  return {
+    kind: "current-unclosed-raw",
+    level: 0,
+    id: node.id,
+    seq: node.seq,
+    path: pathText(ancestors),
+    message: node,
+  };
+}
+
+function profileStop(kind, id, path, reason) {
+  return { kind, id, path, reason };
+}
+
+/**
+ * 沿最新分支剖面收集 block/raw entries，并记录最终下钻停止点。
+ * mode: { open, kind: "root"|"scope"|"block", id?, path? }；
+ * ancestors 是当前容器从根起的节点 id 链（含透明 scope 与已下钻 block）。
+ */
+function walkProfile(children, mode, ancestors, state) {
+  if (!Array.isArray(children) || children.length === 0) {
+    if (!state.stoppedAt) {
+      if (mode.kind === "scope") {
+        state.stoppedAt = profileStop("scope", mode.id, mode.path, "no-children");
+      } else if (mode.kind === "block") {
+        state.stoppedAt = profileStop("block", mode.id, mode.path, "no-children");
+      } else {
+        state.stoppedAt = profileStop("empty", null, "", "no-children");
+      }
+    }
+    return;
+  }
+
+  const lastIndex = children.length - 1;
+  for (let i = 0; i < lastIndex; i += 1) {
+    const node = children[i];
     if (!node || typeof node !== "object") continue;
     if (node.nodeType === "block") {
-      blockEntries.push({
-        kind: "block",
-        level: node.level,
-        id: node.id,
-        summary: node.summary,
-        order: node.orderSeq,
-      });
-    } else if (node.nodeType === "scope") {
-      collectRenderNodes(node.children, blockEntries, rawEntries);
-    } else if (node.nodeType === "leaf") {
-      rawEntries.push({
-        kind: "current-unclosed-raw",
-        level: 0,
-        id: node.id,
-        seq: node.seq,
-        message: node,
-      });
+      state.oldSiblingEntries.push(profileBlockEntry(node, ancestors, "old-sibling"));
+    } else if (node.nodeType === "leaf" && mode.open) {
+      state.rawEntries.push(profileRawEntry(node, ancestors));
     }
+    // 合法 Session 不允许旧 sibling open scope；此处不猜测、不递归。
+  }
+
+  const newest = children[lastIndex];
+  if (!newest || typeof newest !== "object") {
+    if (!state.stoppedAt) {
+      state.stoppedAt = profileStop("empty", null, pathText(ancestors), "no-children");
+    }
+    return;
+  }
+
+  if (newest.nodeType === "leaf") {
+    if (mode.open) state.rawEntries.push(profileRawEntry(newest, ancestors));
+    state.stoppedAt = profileStop(
+      "leaf",
+      newest.id,
+      pathText([...ancestors, newest.id]),
+      mode.open ? "current-raw" : "closed-leaf",
+    );
+    return;
+  }
+
+  if (newest.nodeType === "scope") {
+    if (mode.open) {
+      const scopePath = pathText([...ancestors, newest.id]);
+      walkProfile(
+        newest.children,
+        { open: true, kind: "scope", id: newest.id, path: scopePath },
+        [...ancestors, newest.id],
+        state,
+      );
+    } else if (!state.stoppedAt) {
+      // closed block 内含 open scope 属坏树；不展开，避免历史 leaf 泄出。
+      state.stoppedAt = profileStop(
+        "scope",
+        newest.id,
+        pathText([...ancestors, newest.id]),
+        "no-children",
+      );
+    }
+    return;
+  }
+
+  if (newest.nodeType === "block") {
+    const blockPath = pathText([...ancestors, newest.id]);
+    state.newestPathEntries.push(profileBlockEntry(newest, ancestors, "newest-path"));
+    if (newest.boundary === "round") {
+      state.stoppedAt = profileStop("block", newest.id, blockPath, "round-boundary");
+      return;
+    }
+    if (newest.boundary === "sublimed") {
+      state.stoppedAt = profileStop("block", newest.id, blockPath, "sublimed-boundary");
+      return;
+    }
+    if (!Array.isArray(newest.children) || newest.children.length === 0) {
+      state.stoppedAt = profileStop("block", newest.id, blockPath, "no-children");
+      return;
+    }
+    const lastChild = newest.children[newest.children.length - 1];
+    if (
+      !lastChild ||
+      typeof lastChild !== "object" ||
+      lastChild.nodeType !== "block"
+    ) {
+      state.stoppedAt = profileStop("block", newest.id, blockPath, "closed-leaf");
+      return;
+    }
+    // 自然 Goal/planItem 链还有更深的 closed block：进入 closed 容器模式。
+    walkProfile(
+      newest.children,
+      { open: false, kind: "block", id: newest.id, path: blockPath },
+      [...ancestors, newest.id],
+      state,
+    );
+    return;
+  }
+
+  if (!state.stoppedAt) {
+    state.stoppedAt = profileStop("empty", null, pathText(ancestors), "no-children");
   }
 }
 
 function renderText(entries) {
   const lines = entries.map((entry) => {
     if (entry.kind === "block") {
-      return `[block] level=${entry.level} id=${entry.id} summary=${entry.summary}`;
+      return `[block] role=${entry.role} level=${entry.level} id=${entry.id} path=${entry.path} summary=${entry.summary}`;
     }
     const message = entry.message;
     const contentText =
@@ -779,9 +904,23 @@ export function render(session, opts = {}) {
       return errorResult("invalid-mode", "render mode must be \"entries\" or \"text\"");
     }
 
-    const blockEntries = [];
-    const rawEntries = [];
-    collectRenderNodes(session.rootChildren, blockEntries, rawEntries);
+    const state = {
+      oldSiblingEntries: [],
+      newestPathEntries: [],
+      rawEntries: [],
+      stoppedAt: null,
+    };
+    walkProfile(
+      session.rootChildren,
+      { open: true, kind: "root", id: null, path: "" },
+      [],
+      state,
+    );
+
+    const oldSiblingEntries = state.oldSiblingEntries;
+    const newestPathEntries = state.newestPathEntries;
+    const rawEntries = state.rawEntries;
+    const blockEntries = [...oldSiblingEntries, ...newestPathEntries];
 
     blockEntries.sort(
       (a, b) => (b.level - a.level) || ((a.order ?? 0) - (b.order ?? 0)),
@@ -791,6 +930,8 @@ export function render(session, opts = {}) {
     const entries = [...blockEntries, ...rawEntries];
     const orderValid = renderOrderValid(entries);
     const text = mode === "text" ? renderText(entries) : undefined;
+    const stoppedAt =
+      state.stoppedAt ?? profileStop("empty", null, "", "no-children");
     return {
       session,
       changes: [],
@@ -798,8 +939,16 @@ export function render(session, opts = {}) {
       text,
       orderValid,
       stats: {
+        // 旧字段兼容：outermostBlockCount = 当前常驻可见块总数。
         outermostBlockCount: blockEntries.length,
         currentRawCount: rawEntries.length,
+        oldSiblingBlockCount: oldSiblingEntries.length,
+        newestPathBlockCount: newestPathEntries.length,
+        newestPath:
+          newestPathEntries.length > 0
+            ? newestPathEntries.map((entry) => entry.id)
+            : null,
+        stoppedAt,
       },
     };
   });
