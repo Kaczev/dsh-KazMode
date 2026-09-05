@@ -45,11 +45,16 @@ check(
     ["A", "B", "C", "D"].every((k) => Object.isFrozen(KAZ_CONTEXT_CACHE_SCENARIOS[k]))
 );
 check(
-  "① KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY 冻结且不含数值预算字段",
+  "① KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY 冻结且为 v1.2 hiddenRootIds 渲染窗口跳过语义",
   Object.isFrozen(KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY) &&
-    KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.id === "archive-nearest-root-outermost-oldest-highest" &&
-    KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.archiveFirst === true &&
+    KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.id === "hidden-root-ids-render-window-skip" &&
+    KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.windowField === "hiddenRootIds" &&
+    KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.retainsSessionTree === true &&
+    KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.whaleExpandReadable === true &&
     KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.boundaryType === "planned-invalidation" &&
+    !Object.prototype.hasOwnProperty.call(KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY, "archiveFirst") &&
+    !Object.prototype.hasOwnProperty.call(KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY, "archiveStore") &&
+    !Object.prototype.hasOwnProperty.call(KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY, "removalOrder") &&
     Object.values(KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY).every((v) => typeof v !== "number")
 );
 

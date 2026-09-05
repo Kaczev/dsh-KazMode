@@ -14,6 +14,7 @@
     "./lib/session-tree-store-core.js": "./lib/session-tree-store-core.js",
     "./lib/session-tree-store-io.js": "./lib/session-tree-store-io.js",
     "./lib/session-tree-expand.js": "./lib/session-tree-expand.js",
+    "./lib/context-cache-guard.js": "./lib/context-cache-guard.js",
     "./lib/step4-metrics.js": "./lib/step4-metrics.js",
     "./package.json": "./package.json"
   },
@@ -24,6 +25,7 @@
     "lib/session-tree-store-core.js",
     "lib/session-tree-store-io.js",
     "lib/session-tree-expand.js",
+    "lib/context-cache-guard.js",
     "lib/tool-plugin-catalog.js",
     "lib/review-guidance.js",
     "lib/skill-guidance.js",
