@@ -30,7 +30,8 @@ Kaz 模式同时具备两个入口，双向同步：
 2. **工具面两阶段（v0.8 Step A/B1 固定集；36.9 起无 round-minimal 插件）**：
    - 首次工具调用前：kaz-mode 核心 Minimal 直接保留首轮工具集
      （Kaz 下 `ka-whale-memory` 恒开 → `memory_search`；≤2）；
-   - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 19 项，含
+   - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 20 项，M6 版本边界
+     新增只读树检索工具 `whale_expand`；含
      `get_goal/update_goal/whale_report/ka_sub_whale/list_agents/send_message/
      interrupt_agent`，不含旧 `create_goal/subagent`）。
      代码级固定集不受旧 tool-plugin JSON 的 false 开关影响；外部/自创建工具不进主面。
@@ -183,7 +184,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    受控子代理逐字 `KAZ_ROLE_PROMPTS.subagent.<role>`（v0.8 Step B1 后不再含
    plan:policy / tool:goal）；
 2. 首次工具调用前工具面：Kaz = `memory_search`（ka-whale-memory 恒开）；
-   第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 19 项，
+   第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 20 项，M6 版本边界
+   新增只读树检索工具 `whale_expand`，
    不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +
    assignedTools 显示，旧/未知子代理回落到保守 Base；

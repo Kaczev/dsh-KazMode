@@ -217,7 +217,7 @@ export const KAZ_V09_SUB_WHALE_REPORT_TOOLS = Object.freeze([
   "plugin_creator_sub_whale_report",
 ]);
 
-/** v0.9 Stable Main Surface（§1.1，19 个；不含 create_goal/subagent）。 */
+/** v0.9 Stable Main Surface（§1.1，20 个；M6 版本边界新增 whale_expand；不含 create_goal/subagent）。 */
 export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "ask_user_question",
   "edit",
@@ -236,12 +236,13 @@ export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "todo_write",
   "update_goal",
   "web_search",
+  "whale_expand",
   "whale_report",
   "write",
 ]);
 
 /**
- * Stable Main Surface = v0.9 固定 19 项。
+ * Stable Main Surface = v0.9 固定 20 项（M6 版本边界新增只读树检索工具 whale_expand）。
  * B5 后不再保留旧 subagent / create_goal 常量。
  */
 export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([...KAZ_V09_MAIN_TOOLS]);
