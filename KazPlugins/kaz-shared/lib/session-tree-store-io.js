@@ -1,12 +1,14 @@
 // kaz-shared —— Kaz7.0 M2 树 store thin I/O adapter（node:fs / node:crypto 只在本层）
 // ===========================================================================
-// 依据：不入库文件/Kaz7.0更新规划/Kaz7.0-M2树store设计报告.md
+// 依据：不入库文件/Kaz7.0更新规划/Kaz7.0开放点冻结决议.md
+//       （权威最终基准 v1.2 §6.2：1M 兜底 = hiddenRootIds 渲染窗口）
 // 边界：
 //   * 纯逻辑在 lib/session-tree-store-core.js；本模块只负责目录/文件/checksum 注入；
 //   * 快照 = 同目录临时文件 + fsync + rename；替换前先备份到 backups/；
 //   * 写顺序 = 日志（raw/op/audit）先写，store.json 快照后写；
 //   * 损坏回退 = op-replay → raw-only → 显式失败（missing-logs）；
-//   * 1M fallback = 先落盘归档 → 再移除 → 再审计 → 再写快照；不删 raw/op；
+//   * 1M fallback = 计算并持久化 state.hiddenRootIds；节点保留不删除、不归档移动；
+//   * archive 读写能力保留供 M3 历史检索（可选）；fallbackTrim 不再写 archive；
 //   * archive 默认无 TTL、本模块不提供自动删除；
 //   * 不注册 cordis、不改 DSH 核心、不设 token 预算/触发字段。
 // ===========================================================================
@@ -36,11 +38,9 @@ import {
   KAZ_CONTEXT_SESSION_SCHEMA,
   KAZ_CONTEXT_STORE_FORMAT,
   KAZ_CONTEXT_STORE_FORMAT_VERSION,
-  archivePayloadForBlocks,
   canonicalStoreBody,
   normalizeStoreRecord,
-  removeOutermostBlocks,
-  selectFallbackBlocks,
+  selectHiddenRootIds,
   validateSessionForStore,
   verifyStoreRecord,
 } from "./session-tree-store-core.js";
@@ -328,6 +328,7 @@ export function createSessionTreeStore(options = {}) {
       lastAppliedOpSeq: 0,
       nextSessionSeq: session.nextSeq,
       nextSessionId: session.nextId,
+      hiddenRootIds: [],
       ...extra,
     };
   }
@@ -579,8 +580,8 @@ export function createSessionTreeStore(options = {}) {
           }
           opRows.push({ type: "promote", spec });
         }
-      } else if (change.type === "fallback-remove") {
-        // fallbackTrim 走独立归档路径；快照写前不把移除当作 reducer op。
+      } else if (change.type === "fallback-remove" || change.type === "fallback-hide") {
+        // hiddenRootIds 是 envelope state 元数据，不走 reducer op / 快照写前日志。
         continue;
       } else {
         // 未知 change 类型不静默丢：交由调用方决定；此处忽略渲染类空 changes。
@@ -770,6 +771,7 @@ export function createSessionTreeStore(options = {}) {
       }
       if (record) {
         const state = { ...record.state };
+        if (!Array.isArray(state.hiddenRootIds)) state.hiddenRootIds = [];
         let session = record.session;
         const opRead = readJsonLines(opFile);
         if (!opRead.ok) {
@@ -816,6 +818,10 @@ export function createSessionTreeStore(options = {}) {
       return JSON.parse(JSON.stringify(current.record.archiveRefs));
     }
     return scanArchiveRefs();
+  }
+
+  function hiddenRootIdsFromState(state) {
+    return Array.isArray(state?.hiddenRootIds) ? [...state.hiddenRootIds] : [];
   }
 
   function buildArchiveRecord(payload, archiveId, reason) {
@@ -867,6 +873,7 @@ export function createSessionTreeStore(options = {}) {
         lastRawSeq: Math.max(current.state.lastRawSeq, ...derived.rawRows.map((r) => r.seq)),
         lastOpSeq: current.state.lastOpSeq + derived.opRows.length,
         lastAppliedOpSeq: current.state.lastOpSeq + derived.opRows.length,
+        hiddenRootIds: hiddenRootIdsFromState(current.state),
       });
       // 日志先写（raw → op），快照后写。
       for (const row of derived.rawRows) {
@@ -904,73 +911,49 @@ export function createSessionTreeStore(options = {}) {
       }
       const ensured = ensureCurrentForWrite();
       if (!ensured.ok) return ensured;
-      const selected = selectFallbackBlocks(current.session, count);
+
+      // 不删除、不归档移动：只计算应隐藏的最老根节点 id 并持久化到 state。
+      const hiddenBefore = hiddenRootIdsFromState(current.state);
+      const refs = archiveRefsFromCurrent();
+      const selected = selectHiddenRootIds(current.session, hiddenBefore, count);
       if (!selected.ok) return selected;
-      if (selected.candidates.length === 0) {
+      if (selected.rootIds.length === 0) {
         return okResult({
-          removed: 0,
-          candidatesLeft: 0,
-          archiveRefs: archiveRefsFromCurrent(),
+          hidden: 0,
+          hiddenRootIds: hiddenBefore,
+          candidatesLeft: selected.candidatesLeft,
+          archiveRefs: refs,
           warning: "no-more-candidates",
         });
       }
       const warning =
         selected.candidates.length < count ? "no-more-candidates" : undefined;
-      const blockIds = selected.candidates.map((candidate) => candidate.id);
-      const payloadsResult = archivePayloadForBlocks(current.session, blockIds);
-      if (!payloadsResult.ok) return payloadsResult;
 
-      // 1) 先落盘 archive；绝不覆盖旧 archiveId。
-      const archiveIds = [];
-      let archiveNumber = nextArchiveNumber();
-      const refs = archiveRefsFromCurrent();
-      for (const payload of payloadsResult.payloads) {
-        const archiveId = `arc-${String(archiveNumber).padStart(6, "0")}`;
-        const archiveRecord = buildArchiveRecord(payload, archiveId, reason);
-        const written = writeJsonAtomic(join(archiveDir, `${archiveId}.json`), archiveRecord);
-        if (!written.ok) return written;
-        refs.push({
-          archiveId,
-          blockId: payload.block.id,
-          path: payload.path,
-          removedAt: archiveRecord.removedAt,
-          file: `archive/${archiveId}.json`,
-          reason,
-        });
-        archiveIds.push(archiveId);
-        archiveNumber += 1;
-      }
-
-      // 2) 内存/纯函数移除（先归档已完成）。
-      const removed = removeOutermostBlocks(current.session, blockIds);
-      if (!removed.ok) {
-        return errorResult("fallback-remove-failed", removed.error?.message ?? "remove failed");
-      }
-
-      // 3) 审计（仍属日志，快照前写）。
+      // 审计仍是日志：快照前写，记录计划内失效边界。
       const audit = appendAudit({
-        type: "fallback-archive",
+        type: "fallback-hide",
         boundaryType: KAZ_CONTEXT_NATIVE_FALLBACK_STRATEGY.boundaryType,
         reason,
-        blockIds,
-        archiveIds,
-        count: removed.changes.length,
+        rootIds: selected.rootIds,
+        hiddenRootIds: selected.hiddenRootIds,
+        count: selected.rootIds.length,
       });
       if (!audit.ok) return audit;
 
-      // 4) 原子替换快照。
-      const state = makeState(removed.session, {
+      // Session 原样保留，只替换 envelope state（hiddenRootIds + 相同计数）。
+      const state = makeState(current.session, {
         lastRawSeq: current.state.lastRawSeq,
         lastOpSeq: current.state.lastOpSeq,
         lastAppliedOpSeq: current.state.lastAppliedOpSeq,
+        hiddenRootIds: selected.hiddenRootIds,
       });
-      const written = writeStoreRecord(removed.session, state, refs);
+      const written = writeStoreRecord(current.session, state, refs);
       if (!written.ok) return written;
-      setCurrent(removed.session, state, written.record);
-      const nextCandidates = selectFallbackBlocks(removed.session, Number.MAX_SAFE_INTEGER);
+      setCurrent(current.session, state, written.record);
       return okResult({
-        removed: removed.changes.length,
-        candidatesLeft: nextCandidates.ok ? nextCandidates.candidates.length : 0,
+        hidden: selected.rootIds.length,
+        hiddenRootIds: selected.hiddenRootIds,
+        candidatesLeft: selected.candidatesLeft,
         archiveRefs: refs,
         ...(warning ? { warning } : {}),
       });

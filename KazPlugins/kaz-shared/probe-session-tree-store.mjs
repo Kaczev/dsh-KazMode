@@ -1,6 +1,6 @@
 // kaz-shared 探针：Kaz7.0 M2 树 store（lib/session-tree-store-core.js + io adapter）。
 // ===========================================================================
-// 依据：不入库文件/Kaz7.0更新规划/Kaz7.0-M2树store设计报告.md（D1-D20 验收清单）。
+// 依据：不入库文件/Kaz7.0更新规划/Kaz7.0开放点冻结决议.md（D1-D20 按冻结口径复核）。
 // 覆盖：
 //   D1  路径/Kaz 私有 storages/kaz-context；内存 rootDir 下不写源码树；
 //   D2  store.json envelope 字段与 Session 分离；
@@ -9,12 +9,12 @@
 //   D5  原子写：临时+fsync+rename+写前备份；rename 失败不产生半截快照；
 //   D6  重启/resume：快照恢复、继续 append，seq/id 不重不漏；
 //   D7  store.json 损坏回退：op-replay / raw-only 可继续；
-//   D8  raw/op append-only；树操作/归档不改已有行；
-//   D9  归档记录完整：path/leafIds/summarySourceIds/checksum/block 全量；
-//   D10 归档不丢：raw/op 不变、archive 可完整找回被移除 block 的 leaf；
-//   D11 1M 兜底选择顺序 oldest → highest-level → nearest-root，只选渲染可见最外层；
-//   D12 fallbackTrim 先归档→移除→审计→快照；移除后 renderOrderValid 保持；
-//   D13 审计含 boundaryType/blockIds/archiveIds/reason；
+//   D8  raw/op append-only；hiddenRootIds fallback 不改已有行；
+//   D9  archive 读写能力保留（listArchiveRefs/readArchive/archivePayloadForBlocks 可选）；
+//   D10 hiddenRootIds 兜底后节点保留不删除：raw/op 不变、完整 Session 原样可读；
+//   D11 1M 兜底从最老直接根节点开始选择 hiddenRootIds，open scope 不隐藏；
+//   D12 fallbackTrim 计算并持久化 hiddenRootIds；Session 不删不改、渲染窗口可跳过；
+//   D13 审计含 boundaryType/rootIds/hiddenRootIds/reason；
 //   D14 树 store 侧零自动 memory 写入/删除；
 //   D15 session-tree.js/tool-lists 公共出口无 persist/archive/load/save store API；
 //   D16 Session/store/archive/探针导出无 token/budget/MC/trigger；
@@ -638,7 +638,7 @@ function noForbiddenKeysDeep(value, forbidden = /token|budget|mc_|trigger/i) {
 }
 
 // ---------------------------------------------------------------------------
-// D8/D9/D10/D12/D13/D20：fallbackTrim、归档与审计
+// D8/D9/D10/D12/D13/D20：fallbackTrim = hiddenRootIds、审计与 archive 能力保留
 // ---------------------------------------------------------------------------
 {
   const fs = createMemoryFs();
@@ -648,85 +648,99 @@ function noForbiddenKeysDeep(value, forbidden = /token|budget|mc_|trigger/i) {
   const rawBefore = fs.read(rawFile);
   const opBefore = fs.read(opFile);
   const renderBefore = run(render(session));
+  const rootIdsBefore = session.rootChildren.map((node) => node.id);
   fs.ops.length = 0; // 只观察 fallbackTrim 的 IO 顺序
   const trimmed = store.fallbackTrim({ count: 2, reason: "native-window-emergency" });
   check(
-    "D12 fallbackTrim 返回 removed/candidatesLeft/archiveRefs",
+    "D12 fallbackTrim 返回 hidden/hiddenRootIds/candidatesLeft/archiveRefs",
     trimmed.ok === true &&
-      trimmed.removed === 2 &&
+      trimmed.hidden === 2 &&
+      Array.isArray(trimmed.hiddenRootIds) &&
+      trimmed.hiddenRootIds.length === 2 &&
       Number.isInteger(trimmed.candidatesLeft) &&
-      trimmed.archiveRefs.length === 2,
+      trimmed.candidatesLeft === 1 &&
+      Array.isArray(trimmed.archiveRefs) &&
+      trimmed.archiveRefs.length === 0,
   );
   check(
     "D8/D10 fallbackTrim 不改写 raw/op 已有完整行",
     fs.read(rawFile) === rawBefore && fs.read(opFile) === opBefore,
   );
   const ioOps = fs.ops;
-  const archive1Rename = ioOps.findIndex((op) => op.kind === "rename" && op.to.includes("/archive/arc-000001.json"));
-  const archive2Rename = ioOps.findIndex((op) => op.kind === "rename" && op.to.includes("/archive/arc-000002.json"));
+  const archiveRename = ioOps.findIndex((op) => op.kind === "rename" && op.to.includes("/archive/arc-"));
   const auditAppend = ioOps.findIndex((op) => op.kind === "append" && op.path.endsWith("/audit.jsonl"));
   const storeTemp = ioOps.findIndex((op) => op.kind === "write" && /\/store\.json\.\d+\.\d+\.tmp$/.test(op.path));
   const storeRename = ioOps.findIndex((op) => op.kind === "rename" && op.to.endsWith("/store.json"));
   check(
-    "D12 IO 顺序：两个 archive 落盘 → audit → 快照临时写 → 快照 rename",
-    archive1Rename >= 0 && archive2Rename > archive1Rename &&
-      auditAppend > archive2Rename && storeTemp > auditAppend && storeRename > storeTemp,
+    "D12 hiddenRootIds fallback 不写 archive；IO 顺序为 audit → 快照临时写 → 快照 rename",
+    archiveRename === -1 &&
+      auditAppend >= 0 &&
+      storeTemp > auditAppend &&
+      storeRename > storeTemp,
   );
   const refs = store.listArchiveRefs();
-  const arc1 = store.readArchive(refs[0].archiveId);
-  const arc2 = store.readArchive(refs[1].archiveId);
+  const missingArchive = store.readArchive("arc-000001");
+  const legacyPayloads = core.archivePayloadForBlocks(session, [
+    session.rootChildren[0].id,
+    session.rootChildren[1].id,
+  ]);
   check(
-    "D9 归档记录完整：format/version/block/path/leafIds/summarySourceIds/sourceRefs/seqRange/checksum",
-    refs.length === 2 &&
-      arc1?.format === core.KAZ_CONTEXT_ARCHIVE_FORMAT &&
-      arc1?.version === core.KAZ_CONTEXT_ARCHIVE_VERSION &&
-      typeof arc1.block?.id === "string" &&
-      Array.isArray(arc1.block.children) &&
-      typeof arc1.path === "string" &&
-      typeof arc1.removedFrom === "string" &&
-      Array.isArray(arc1.leafIds) &&
-      Array.isArray(arc1.summarySourceIds) &&
-      Array.isArray(arc1.sourceRefs) &&
-      arc1.seqRange && Number.isInteger(arc1.seqRange.closedSeq) &&
-      arc1.checksum?.algorithm === "sha256" &&
-      typeof arc1.checksum?.hex === "string" &&
-      arc2?.format === core.KAZ_CONTEXT_ARCHIVE_FORMAT,
-  );
-  const rawText = fs.read(rawFile);
-  const rawLines = rawText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const rawRows = rawLines.map((l) => JSON.parse(l));
-  const allArchives = [arc1, arc2];
-  check(
-    "D10 archive 中每个 leafId 都能在 raw 日志找回（归档不丢原始事实）",
-    allArchives.every((arc) => arc.leafIds.every((leafId) => rawRows.some((row) => row.id === leafId || row.id === undefined))),
+    "D9 archive 读写能力保留：listArchiveRefs/readArchive 可用，archivePayloadForBlocks 仍生成可选 payload",
+    Array.isArray(refs) &&
+      refs.length === 0 &&
+      missingArchive === null &&
+      legacyPayloads.ok === true &&
+      legacyPayloads.payloads.length === 2 &&
+      legacyPayloads.payloads[0].block.id === session.rootChildren[0].id,
   );
   const auditText = fs.read(fs.findFile("/audit.jsonl")) ?? "";
   const auditRows = auditText.trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const fallbackAudit = auditRows.find((row) => row.type === "fallback-archive");
+  const fallbackAudit = auditRows.find((row) => row.type === "fallback-hide");
   check(
-    "D13 fallback 审计含 boundaryType=planned-invalidation/blockIds/archiveIds/reason/count",
+    "D13 fallback 审计含 boundaryType=planned-invalidation/rootIds/hiddenRootIds/reason/count",
     !!fallbackAudit &&
       fallbackAudit.boundaryType === "planned-invalidation" &&
-      Array.isArray(fallbackAudit.blockIds) && fallbackAudit.blockIds.length === 2 &&
-      Array.isArray(fallbackAudit.archiveIds) && fallbackAudit.archiveIds.length === 2 &&
+      Array.isArray(fallbackAudit.rootIds) && fallbackAudit.rootIds.length === 2 &&
+      Array.isArray(fallbackAudit.hiddenRootIds) && fallbackAudit.hiddenRootIds.length === 2 &&
       fallbackAudit.reason === "native-window-emergency" &&
       fallbackAudit.count === 2,
   );
   const reopened = makeStore(fs, "trim-demo").load();
-  const renderAfter = reopened.ok ? run(render(reopened.session)) : null;
   check(
-    "D12 移除后快照加载成功、常驻最外层减少且 renderOrderValid 保持",
+    "D12 快照加载后 state.hiddenRootIds 持久化；完整 Session 与兜底前一致（节点保留不删除）",
     reopened.ok === true &&
-      renderAfter?.stats.outermostBlockCount < renderBefore.stats.outermostBlockCount &&
-      renderAfter?.orderValid === true &&
-      renderOrderValid(renderAfter.entries) === true,
+      Array.isArray(reopened.state?.hiddenRootIds) &&
+      reopened.state.hiddenRootIds.length === 2 &&
+      reopened.state.hiddenRootIds.every((id) => rootIdsBefore.includes(id)) &&
+      deepEqual(reopened.session, session) &&
+      reopened.session.rootChildren.map((node) => node.id).join(",") === rootIdsBefore.join(","),
+  );
+  const viewResult = core.renderWindowSession(reopened.session, reopened.state.hiddenRootIds);
+  const viewSession = viewResult.ok ? viewResult.session : null;
+  const renderWindow = viewSession ? run(render(viewSession)) : null;
+  check(
+    "D12 renderWindowSession 跳过 hiddenRootIds；窗口常驻块减少且 renderOrderValid 保持",
+    viewResult.ok === true &&
+      !!renderWindow &&
+      renderWindow.stats.outermostBlockCount < renderBefore.stats.outermostBlockCount &&
+      renderWindow.orderValid === true &&
+      renderOrderValid(renderWindow.entries) === true,
+  );
+  const fullRenderAfter = reopened.ok ? run(render(reopened.session)) : null;
+  check(
+    "D10 未过滤的完整 Session 渲染仍含被隐藏根节点（store 内容不删不减）",
+    !!fullRenderAfter &&
+      fullRenderAfter.stats.outermostBlockCount === renderBefore.stats.outermostBlockCount &&
+      fullRenderAfter.orderValid === true,
   );
   const afterAppendRaw = commitOp(makeStore(fs, "trim-demo"), append(reopened.session, { kind: "user", content: "after-trim" }));
+  const reopenedAfterAppend = makeStore(fs, "trim-demo").load();
   check(
-    "D10/D20 归档后可继续 append；archive 在新 store 重开/追加后仍存在且无自动 TTL 字段",
+    "D20 兜底后可继续 append；hiddenRootIds 在后续普通 save 后仍保留；archive 无 TTL/无自动清理 API",
     collectLeafNodes(afterAppendRaw).some((n) => n.content === "after-trim") &&
-      makeStore(fs, "trim-demo").readArchive(refs[0].archiveId)?.archiveId === refs[0].archiveId &&
-      arc1.ttl === undefined &&
+      reopenedAfterAppend.ok === true &&
+      reopenedAfterAppend.state.hiddenRootIds.length === 2 &&
+      reopenedAfterAppend.state.hiddenRootIds.join(",") === reopened.state.hiddenRootIds.join(",") &&
       Object.keys(store).every((k) => !/delete|cleanup|purge|prune|ttl/i.test(k)),
   );
   const allKeysTrim = fs.keys();
@@ -738,31 +752,57 @@ function noForbiddenKeysDeep(value, forbidden = /token|budget|mc_|trigger/i) {
 }
 
 // ---------------------------------------------------------------------------
-// D11：1M 兜底候选顺序（oldest → highest-level → nearest-root）与最外层限定
+// D11：1M 兜底从最老直接根级 closed block 选择 hiddenRootIds；open scope/leaf 不隐藏
 // ---------------------------------------------------------------------------
 {
-  const hidden = newBlock("hidden-inner", 1, [newLeaf("hl1", 1)], { orderSeq: 1 });
-  const container = newBlock("container", 2, [newLeaf("c1", 50), hidden], { orderSeq: 50 });
+  const hiddenInner = newBlock("hidden-inner", 1, [newLeaf("hl1", 1)], { orderSeq: 1 });
+  const container = newBlock("container", 2, [newLeaf("c1", 50), hiddenInner], { orderSeq: 50 });
   const session = manualSession([
     newBlock("a-root", 1, [newLeaf("al1", 1)], { orderSeq: 10 }),
-    newBlock("c-root", 2, [newLeaf("cl1", 2)], { orderSeq: 10 }),
-    newBlock("d-root", 1, [newLeaf("dl1", 3)], { orderSeq: 20 }),
-    newScope("s-live", 3, [
-      newBlock("b-scope", 2, [newLeaf("bl1", 4)], { orderSeq: 10 }),
-      newBlock("e-scope", 2, [newLeaf("el1", 5)], { orderSeq: 20 }),
-    ]),
     container,
+    newScope("s-live", 3, [
+      newBlock("inner-scope", 2, [newLeaf("bl1", 4)], { orderSeq: 10 }),
+    ]),
+    newLeaf("tail-leaf", 99, "tail", "user"),
   ]);
   const validation = core.validateSessionForStore(session);
-  const selected = core.selectFallbackBlocks(session, 100);
-  const ids = selected.ok ? selected.candidates.map((c) => c.id) : [];
+  const selected = core.selectHiddenRootIds(session, [], 100);
+  const ids = selected.ok ? selected.rootIds : [];
   check(
-    "D11 候选会话可校验；只返回渲染可见最外层 closed block（不含 closed block 内部）",
-    validation.ok === true && selected.ok === true && ids.includes("container") && !ids.includes("hidden-inner"),
+    "D11 候选只含直接根级 closed block，不含 open scope、当前 leaf 或 closed block 内部",
+    validation.ok === true &&
+      selected.ok === true &&
+      ids.join(",") === "a-root,container" &&
+      !ids.includes("hidden-inner") &&
+      !ids.includes("s-live") &&
+      !ids.includes("inner-scope") &&
+      !ids.includes("tail-leaf"),
   );
+  const firstTwo = core.selectHiddenRootIds(session, [], 2);
   check(
-    "D11 排序严格 oldest→highest-level→nearest-root（c-root,b-scope,a-root,e-scope,d-root,container）",
-    ids.join(",") === "c-root,b-scope,a-root,e-scope,d-root,container",
+    "D11 按最老直接根块顺序选择；两个候选一次选完，candidatesLeft=0",
+    firstTwo.ok === true &&
+      firstTwo.rootIds.join(",") === "a-root,container" &&
+      firstTwo.candidatesLeft === 0,
+  );
+  const second = core.selectHiddenRootIds(session, ["a-root", "container"], 1);
+  check(
+    "D11 已隐藏全部可隐藏根块后不再选择当前 leaf/open scope",
+    second.ok === true &&
+      second.rootIds.length === 0 &&
+      second.hiddenRootIds.join(",") === "a-root,container" &&
+      second.candidatesLeft === 0,
+  );
+  const hiddenByPure = core.hideRootNodes(session, [], ["a-root"]);
+  const windowView = core.renderWindowSession(session, ["a-root"]);
+  check(
+    "D11 hideRootNodes 不改 Session、只加 hiddenRootIds；renderWindowSession 过滤根块",
+    hiddenByPure.ok === true &&
+      deepEqual(hiddenByPure.session, session) &&
+      hiddenByPure.hiddenRootIds.join(",") === "a-root" &&
+      windowView.ok === true &&
+      windowView.session.rootChildren.some((node) => node.id === "a-root") === false &&
+      windowView.session.rootChildren.some((node) => node.id === "container") === true,
   );
 }
 
@@ -780,6 +820,7 @@ function noForbiddenKeysDeep(value, forbidden = /token|budget|mc_|trigger/i) {
     "createSessionTreeStore", "normalizeStoreRecord", "verifyStoreRecord",
     "canonicalStoreBody", "serializeSession", "parseSession",
     "selectFallbackBlocks", "removeOutermostBlocks", "fallbackTrim",
+    "selectHiddenRootIds", "hideRootNodes", "renderWindowSession",
     "listArchiveRefs", "readArchive", "KAZ_CONTEXT_STORE_ROOT",
   ];
   check(

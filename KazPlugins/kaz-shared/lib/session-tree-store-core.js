@@ -1,10 +1,13 @@
 // kaz-shared —— Kaz7.0 M2 树 store 纯 core（纯 ESM、零 I/O、hash 注入）
 // ===========================================================================
-// 依据：不入库文件/Kaz7.0更新规划/Kaz7.0-M2树store设计报告.md
+// 依据：不入库文件/Kaz7.0更新规划/Kaz7.0开放点冻结决议.md
+//       （权威最终基准 v1.2 §6.2：1M 兜底 = hiddenRootIds 渲染窗口）
 // 边界：
 //   * 本模块不 import node:fs / node:crypto / node:path；不读写文件；
 //   * checksum 所需 sha256 由 I/O adapter（或探针）注入 hash(text)->hex；
 //   * Session 本体保持 M1 JSON 兼容，store 元数据只在 envelope，不混入 Session；
+//   * 1M 兜底只把最老根节点 id 记入 hiddenRootIds，节点保留不删除、不归档移动；
+//   * archive payload/读取能力保留供 M3 历史检索，不再作为 fallbackTrim 路径；
 //   * 坏输入返回 { error: { code, message } }（normalize/validate 另按报告返回
 //     { ok:false, errors: [] }），不抛异常。
 // 不设项：无 token 预算 / MC / trigger 字段，无 DSH 核心改动，无 cordis 注册。
@@ -45,6 +48,7 @@ const SESSION_STORE_FORBIDDEN = Object.freeze([
   "removedAt",
   "removedFrom",
   "archiveId",
+  "hiddenRootIds",
 ]);
 const TOKEN_LIKE_PATTERN = /token|budget|mc_|trigger/i;
 
@@ -253,6 +257,21 @@ export function validateSessionForStore(session) {
 // normalizeStoreRecord / canonicalStoreBody / verifyStoreRecord
 // ---------------------------------------------------------------------------
 
+function validateHiddenRootIdsValue(value, errors, where = "state.hiddenRootIds") {
+  if (!Array.isArray(value)) {
+    errors.push(`${where} must be an array`);
+    return;
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    if (!isNonEmptyString(value[i])) {
+      errors.push(`${where}[${i}] must be a non-empty string`);
+    }
+  }
+  if (new Set(value).size !== value.length) {
+    errors.push(`${where} must not contain duplicates`);
+  }
+}
+
 function validateState(state, errors) {
   if (!isPlainObject(state)) {
     errors.push("state must be a plain object");
@@ -276,6 +295,9 @@ function validateState(state, errors) {
     state.lastAppliedOpSeq > state.lastOpSeq
   ) {
     errors.push("state.lastAppliedOpSeq cannot exceed state.lastOpSeq");
+  }
+  if (state.hiddenRootIds !== undefined) {
+    validateHiddenRootIdsValue(state.hiddenRootIds, errors);
   }
 }
 
@@ -445,7 +467,8 @@ export function parseSession(text) {
 }
 
 // ---------------------------------------------------------------------------
-// 1M 兜底纯函数：渲染可见最外层 closed block
+// 1M 兜底 = hiddenRootIds 渲染窗口（节点保留不删除、不归档移动）
+// 可选 archive 能力保留在下方（供 M3 历史检索，不参与 hiddenRootIds fallback）。
 // ---------------------------------------------------------------------------
 
 function collectVisibleBlockCandidates(session) {
@@ -478,38 +501,6 @@ function collectVisibleBlockCandidates(session) {
   };
   visit(session.rootChildren, [], []);
   return candidates;
-}
-
-function sortCandidates(candidates) {
-  return [...candidates].sort((a, b) => {
-    const ta = a.orderSeq ?? a.closedSeq ?? a.openedSeq ?? Number.MAX_SAFE_INTEGER;
-    const tb = b.orderSeq ?? b.closedSeq ?? b.openedSeq ?? Number.MAX_SAFE_INTEGER;
-    return (
-      (ta - tb) ||
-      (b.level - a.level) ||
-      (a.depth - b.depth) ||
-      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-    );
-  });
-}
-
-/** 按 oldest → highest-level → nearest-root 选择渲染可见最外层 closed block。 */
-export function selectFallbackBlocks(session, count) {
-  return tryCatch(() => {
-    const validation = validateSessionForStore(session);
-    if (!validation.ok) {
-      return errorResult("invalid-session", validation.errors.join("; "));
-    }
-    if (!Number.isInteger(count) || count < 0) {
-      return errorResult("invalid-count", "count must be a non-negative integer");
-    }
-    const all = sortCandidates(collectVisibleBlockCandidates(session));
-    const chosen = count === 0 ? [] : all.slice(0, count);
-    return {
-      ok: true,
-      candidates: chosen.map(({ id, path, level, depth }) => ({ id, path, level, depth })),
-    };
-  });
 }
 
 function collectArchiveFacts(block) {
@@ -585,60 +576,164 @@ export function archivePayloadForBlocks(session, blockIds) {
   });
 }
 
-function removeNodesImmutable(children, containerPath, index) {
-  if (containerPath.length === 0) {
-    return children.filter((_, i) => i !== index);
+function normalizeHiddenRootIds(hiddenRootIds) {
+  if (!Array.isArray(hiddenRootIds)) {
+    return errorResult(
+      "invalid-hidden-root-ids",
+      "hiddenRootIds must be an array of unique non-empty strings",
+    );
   }
-  const [head, ...rest] = containerPath;
-  return children.map((child, i) => {
-    if (i !== head || child?.nodeType !== "scope") return child;
-    return { ...child, children: removeNodesImmutable(child.children, rest, index) };
+  for (const id of hiddenRootIds) {
+    if (!isNonEmptyString(id)) {
+      return errorResult(
+        "invalid-hidden-root-ids",
+        "hiddenRootIds must be an array of unique non-empty strings",
+      );
+    }
+  }
+  if (new Set(hiddenRootIds).size !== hiddenRootIds.length) {
+    return errorResult(
+      "invalid-hidden-root-ids",
+      "hiddenRootIds must not contain duplicates",
+    );
+  }
+  return { ok: true, ids: [...hiddenRootIds] };
+}
+
+function collectRootHideCandidates(session, hiddenRootIds) {
+  const hidden = new Set(hiddenRootIds);
+  const candidates = [];
+  session.rootChildren.forEach((node, index) => {
+    if (!node || typeof node !== "object" || typeof node.id !== "string") return;
+    // 只隐藏最老根级 closed block；open scope 与当前未闭合 leaf 不隐藏。
+    if (node.nodeType !== "block" || node.state !== "closed") return;
+    if (hidden.has(node.id)) return;
+    candidates.push({
+      id: node.id,
+      nodeType: node.nodeType,
+      path: node.id,
+      level:
+        node.nodeType === "block" && Number.isInteger(node.level) ? node.level : 0,
+      index,
+      node,
+    });
+  });
+  // rootChildren 已按老 → 新排列；保留该顺序，不按 level/深度重排。
+  return candidates;
+}
+
+/**
+ * 按“最老根级 closed block 优先”选择应加入 hiddenRootIds 的直接根块。
+ * open scope 与当前未闭合 leaf 不作为候选；只返回 id 集合，不删除/不搬移节点。
+ */
+export function selectHiddenRootIds(session, hiddenRootIds = [], count) {
+  return tryCatch(() => {
+    const validation = validateSessionForStore(session);
+    if (!validation.ok) {
+      return errorResult("invalid-session", validation.errors.join("; "));
+    }
+    const normalized = normalizeHiddenRootIds(hiddenRootIds);
+    if (!normalized.ok) return normalized;
+    if (!Number.isInteger(count) || count < 0) {
+      return errorResult("invalid-count", "count must be a non-negative integer");
+    }
+    const all = collectRootHideCandidates(session, normalized.ids);
+    const chosen = count === 0 ? [] : all.slice(0, count);
+    const nextIds = [...normalized.ids];
+    for (const candidate of chosen) {
+      if (!nextIds.includes(candidate.id)) nextIds.push(candidate.id);
+    }
+    return {
+      ok: true,
+      rootIds: chosen.map((candidate) => candidate.id),
+      hiddenRootIds: nextIds,
+      candidates: chosen.map(({ id, path, nodeType, level }) => ({
+        id,
+        path,
+        nodeType,
+        level,
+      })),
+      candidatesLeft: all.length - chosen.length,
+    };
   });
 }
 
-/** 移除渲染可见最外层 closed block（先由调用方完成归档落盘；不递归进 closed block）。 */
-export function removeOutermostBlocks(session, blockIds) {
+/** 把直接根级 closed block 加入 hiddenRootIds；Session 原样返回（节点保留不删除）。 */
+export function hideRootNodes(session, hiddenRootIds = [], rootIds = []) {
   return tryCatch(() => {
-    const payloadResult = archivePayloadForBlocks(session, blockIds);
-    if (!payloadResult.ok) return payloadResult;
-    const byId = new Map(collectVisibleBlockCandidates(session).map((c) => [c.id, c]));
-    const plans = [];
-    for (const id of blockIds) {
+    const validation = validateSessionForStore(session);
+    if (!validation.ok) {
+      return errorResult("invalid-session", validation.errors.join("; "));
+    }
+    const normalized = normalizeHiddenRootIds(hiddenRootIds);
+    if (!normalized.ok) return normalized;
+    if (
+      !Array.isArray(rootIds) ||
+      rootIds.length === 0 ||
+      rootIds.some((id) => typeof id !== "string" || id.length === 0)
+    ) {
+      return errorResult(
+        "invalid-root-ids",
+        "rootIds must be a non-empty array of non-empty strings",
+      );
+    }
+    if (new Set(rootIds).size !== rootIds.length) {
+      return errorResult("duplicate-root-id", "rootIds must not contain duplicates");
+    }
+    const byId = new Map(
+      collectRootHideCandidates(session, []).map((candidate) => [candidate.id, candidate]),
+    );
+    const nextIds = [...normalized.ids];
+    const added = [];
+    for (const id of rootIds) {
       const candidate = byId.get(id);
       if (!candidate) {
-        return errorResult("block-not-outermost", `block is not a render-visible outermost closed block: ${id}`);
+        return errorResult(
+          "root-not-hideable",
+          `root id is not a direct closed root block: ${id}`,
+        );
       }
-      plans.push(candidate);
-    }
-    const keyOf = (path) => path.join("/");
-    const groups = new Map();
-    for (const candidate of plans) {
-      const key = keyOf(candidate.containerPath);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(candidate);
-    }
-    let nextRootChildren = session.rootChildren;
-    const changes = [];
-    for (const [pathText, group] of groups) {
-      const containerPath = pathText.length === 0 ? [] : pathText.split("/").map(Number);
-      const sorted = [...group].sort((a, b) => b.index - a.index);
-      for (const candidate of sorted) {
-        nextRootChildren = removeNodesImmutable(nextRootChildren, containerPath, candidate.index);
-        changes.push({
-          type: "fallback-remove",
-          blockId: candidate.id,
-          path: candidate.path,
-          level: candidate.level,
-          boundaryType: "planned-invalidation",
-        });
+      if (!nextIds.includes(id)) {
+        nextIds.push(id);
+        added.push(candidate);
       }
     }
-    const nextSession = { ...session, rootChildren: nextRootChildren };
+    const changes = added.map((candidate) => ({
+      type: "fallback-hide",
+      rootId: candidate.id,
+      path: candidate.id,
+      nodeType: candidate.nodeType,
+      boundaryType: "planned-invalidation",
+    }));
     return {
       ok: true,
-      session: nextSession,
+      session,
+      hiddenRootIds: nextIds,
       changes,
-      payloads: payloadResult.payloads,
+      hidden: added.map((candidate) => candidate.id),
+    };
+  });
+}
+
+/** 返回渲染窗口可见的 Session 视图：仅按 hiddenRootIds 从 rootChildren 过滤，不修改原 Session。 */
+export function renderWindowSession(session, hiddenRootIds = []) {
+  return tryCatch(() => {
+    const validation = validateSessionForStore(session);
+    if (!validation.ok) {
+      return errorResult("invalid-session", validation.errors.join("; "));
+    }
+    const normalized = normalizeHiddenRootIds(hiddenRootIds);
+    if (!normalized.ok) return normalized;
+    const hidden = new Set(normalized.ids);
+    return {
+      ok: true,
+      session: {
+        ...session,
+        rootChildren: session.rootChildren.filter(
+          (node) => !(node && typeof node.id === "string" && hidden.has(node.id)),
+        ),
+      },
+      hiddenRootIds: normalized.ids,
     };
   });
 }
