@@ -11,6 +11,8 @@
     "./lib/context-compress.js": "./lib/context-compress.js",
     "./lib/session-tree.js": "./lib/session-tree.js",
     "./lib/safe-json-file.js": "./lib/safe-json-file.js",
+    "./lib/session-tree-store-core.js": "./lib/session-tree-store-core.js",
+    "./lib/session-tree-store-io.js": "./lib/session-tree-store-io.js",
     "./lib/step4-metrics.js": "./lib/step4-metrics.js",
     "./package.json": "./package.json"
   },
@@ -18,6 +20,8 @@
     "lib/tool-lists.js",
     "lib/context-compress.js",
     "lib/session-tree.js",
+    "lib/session-tree-store-core.js",
+    "lib/session-tree-store-io.js",
     "lib/tool-plugin-catalog.js",
     "lib/review-guidance.js",
     "lib/skill-guidance.js",
