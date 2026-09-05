@@ -285,3 +285,11 @@
 - id: kaz-skill-safe-json
   name: ../../profiles/web/KazPrivatePlugins/kaz-skill-safe-json/lib/index.js
   config: {}
+
+# ── Kaz7.0 whale_summarizer 内部 service（Kaczev 专属，仅本 preset 装载）─────
+# whale-summarizer：ctx.provide("whaleSummarizer") 内部摘要服务；不注册工具/
+# 提示段，模型不可见。插件本体在 profile 的 KazPrivatePlugins/whale-summarizer；
+# 只挂本 Kaz preset，不挂 profile 全局 cordis.patch.yml，因此非 Kaz 预设不装载。
+- id: whale-summarizer
+  name: ../../profiles/web/KazPrivatePlugins/whale-summarizer/lib/index.js
+  config: {}
