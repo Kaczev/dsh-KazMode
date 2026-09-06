@@ -228,7 +228,7 @@ Communication rules:
       ],
       canAdvance: ["check-tools"],
       task:
-        "Critique the delegation first; identify real weaknesses; do not manufacture criticism. Find the smallest workable approach. The full working file-tool set (edit, write, pwsh, read) is granted in working, not here. Then advance to check-tools.",
+        "Critique the approach first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose some concrete enhancements that would make the result more polished, practical, or delightful — without overcomplicating. Present these ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.",
     },
     "check-tools": {
       allowedTools: ["context_search", "context_read", "work_sub_whale_report"],
