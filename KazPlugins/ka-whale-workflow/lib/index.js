@@ -120,6 +120,13 @@ export const WORK_SUB_WHALE_REPORT_TOOL = "work_sub_whale_report";
 export const MEMORY_SUB_WHALE_REPORT_TOOL = "memory_sub_whale_report";
 export const PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL = "plugin_maintainer_sub_whale_report";
 
+/** *_sub_whale_report 成功后的硬等门提示（工具结果文案追加；子代理应结束回合等待父主模型）。 */
+export const SUB_WHALE_REPORT_WAIT_NOTICE =
+  "Report delivered. Now waiting for the parent main model's reply; end your turn and do not call further tools.";
+
+/** tools/pre-execute 对 awaitingParent 受控子代理的结构化拒绝 code。 */
+export const SUB_WHALE_REPORT_WAIT_DENY_CODE = "subagent-report-wait-deny";
+
 /** v0.9 stage 常量（再导出，便于探针/下游引用）。 */
 export { MAIN_ROLE, MAIN_STAGE_IDS, V09_SUBAGENT_ROLES, V09_STAGE_IDS };
 
@@ -414,6 +421,19 @@ export function isSubagentReportMessage(message) {
   }
 }
 
+/** 是否为父主模型经 DSH send_message（ctx.subagents.followup）投递给受控子代理的消息。
+ *  dsh-tool-subagent-control 的 source 固定为 { kind: "coordinator", form: "relay",
+ *  senderSessionId: parent.id }。 */
+export function isParentMainSendMessage(message) {
+  try {
+    const source = message?.source;
+    if (source === null || source === undefined || typeof source !== "object") return false;
+    return source.kind === "coordinator" && source.form === "relay";
+  } catch {
+    return false;
+  }
+}
+
 /** 提取子代理 report/settled 消息的单行摘要；非该类消息返回空串。 */
 export function subagentReportSummaryOf(message) {
   if (!isSubagentReportMessage(message)) return "";
@@ -556,6 +576,8 @@ export function normalizeSubagentRoleRecord(raw) {
     persona,
     assignedTools: normalizeToolList(raw.assignedTools),
     finalTools: normalizeToolList(raw.finalTools),
+    // schema-compatible：旧记录没有该字段时按 false 读取；写入时总是归一化为布尔。
+    awaitingParent: raw.awaitingParent === true,
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
   };
@@ -580,8 +602,9 @@ const KNOWN_SESSION_STAGES = new Set([
  *        workflowRuns: { "<sessionId>": { runId, enteredStages } },
  *        pendingStageInjection: { "<sessionId>": "<stage>" },
  *        subagentRoles: { "<childSessionId>": { planItemId, persona,
- *          assignedTools, finalTools, createdAt, updatedAt } } }
- * 旧文件缺少 contractState / workflowRuns 时仍按旧版读取；taskToolState 字段 B5 起不再读。
+ *          assignedTools, finalTools, awaitingParent, createdAt, updatedAt } } }
+ * 旧文件缺少 contractState / workflowRuns 时仍按旧版读取；subagentRoles 记录缺
+ *  awaitingParent 时按 false 兼容（version 保持 6）。
  */
 export function createStageStore(file) {
   const sessions = {};
@@ -762,6 +785,20 @@ export function createStageStore(file) {
         ...normalized,
         createdAt: previous?.createdAt || timestamp,
         updatedAt: timestamp,
+      };
+      return persist();
+    },
+    /** 硬等门：设置/清除受控子代理角色记录的 awaitingParent 标志。 */
+    setSubagentRoleAwaitingParent(sessionId, awaitingParent) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const current = subagentRoles[sessionId];
+      if (current === undefined || current === null) return false;
+      const flag = awaitingParent === true;
+      if (current.awaitingParent === flag) return true;
+      subagentRoles[sessionId] = {
+        ...current,
+        awaitingParent: flag,
+        updatedAt: new Date().toISOString(),
       };
       return persist();
     },
@@ -1177,20 +1214,57 @@ export default {
       }
     }
 
-    /** 受控 v0.9 子代理检测：stageStore.subagentRoles 中存在该 session 的角色记录。
-     *  这类子代理即使 includeSubagents=false 也必须走 ka-whale-workflow。 */
-    function controlledSubagentRoleOfAgent(agent) {
+    /** 受控 v0.9 子代理角色记录（含 awaitingParent 硬等门标志）。 */
+    function controlledSubagentRecordOfAgent(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return null;
       const sessionId = sessionIdOf(agent);
       if (typeof sessionId !== "string" || sessionId.length === 0) return null;
       try {
-        const record = stageStore.getSubagentRole(sessionId);
-        return record !== null && V09_SUBAGENT_ROLES.includes(record.persona)
-          ? record.persona
-          : null;
+        return stageStore.getSubagentRole(sessionId);
       } catch {
         return null;
       }
+    }
+
+    /** 受控 v0.9 子代理检测：stageStore.subagentRoles 中存在该 session 的角色记录。
+     *  这类子代理即使 includeSubagents=false 也必须走 ka-whale-workflow。 */
+    function controlledSubagentRoleOfAgent(agent) {
+      const record = controlledSubagentRecordOfAgent(agent);
+      return record !== null && V09_SUBAGENT_ROLES.includes(record.persona)
+        ? record.persona
+        : null;
+    }
+
+    /** 父主模型 send_message（coordinator/relay）到达受控子代理时清门：
+     *  - communication 终态：stage 重置为该角色初始阶段（新的一轮）；
+     *  - 非终态：仅清 awaitingParent，stage 保持不变（继续当前轮）。
+     *  只有 awaitingParent=true 且确实是父主 relay 时才动作。 */
+    function clearAwaitingParentOnParentReply(agent, message) {
+      if (!isParentMainSendMessage(message)) return false;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const record = stageStore.getSubagentRole(sessionId);
+      if (record === null || record.awaitingParent !== true) return false;
+      const role = record.persona;
+      const current = stageOfAgent(agent);
+      if (current === "communication") {
+        const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role] ?? current;
+        if (setStageAgent(agent, initial)) {
+          reportRoundDisplay(
+            agent,
+            `父主模型 send_message 到达：${role} 从 communication 重置到 ${initial}（新的一轮）。`,
+            "阶段切换",
+          );
+        }
+      } else {
+        reportRoundDisplay(
+          agent,
+          `父主模型 send_message 到达：清除 ${role} awaitingParent，继续当前 ${current}。`,
+          "等待门",
+        );
+      }
+      stageStore.setSubagentRoleAwaitingParent(sessionId, false);
+      return true;
     }
 
     /** 受控 v0.9 子代理 idle 时初始化其 role 专属首阶段：
@@ -2080,9 +2154,12 @@ export default {
               role: { type: "string" },
               stage: { type: "string" },
               advanced: { type: "boolean" },
+              notice: { type: "string" },
             },
           },
-          render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
+          render: (_args, value) => [
+            { type: "text", text: `${JSON.stringify(value)}\n${SUB_WHALE_REPORT_WAIT_NOTICE}` },
+          ],
         },
         async execute(args, exec) {
           const agent = exec?.agent;
@@ -2143,11 +2220,19 @@ export default {
           // under the main agent and attempts the child-session write too. Child-side
           // writing above plus parent-side capture make the child page reliable
           // even when the parent-side child resolution is delayed or unavailable.
+          // 硬等门：reportFrom 已成功送达后才置 awaitingParent=true（无论是否带
+          // nextStage）。同一轮若子代理再尝试任何工具（含再次 report），
+          // tools/pre-execute 会以 SUB_WHALE_REPORT_WAIT_DENY_CODE 拒绝。
+          const childId = sessionIdOf(agent);
+          if (typeof childId === "string" && childId.length > 0) {
+            stageStore.setSubagentRoleAwaitingParent(childId, true);
+          }
           return {
             messageId,
             role,
             stage: nextStage.length > 0 ? nextStage : current,
             advanced,
+            notice: SUB_WHALE_REPORT_WAIT_NOTICE,
           };
         },
       });
@@ -2231,12 +2316,29 @@ export default {
       if (liveFor(agent).enabled !== true) return next();
       const controlledRole = controlledSubagentRoleOfAgent(agent);
       if (controlledRole !== null) {
+        const roleRecord = controlledSubagentRecordOfAgent(agent);
+        const name = typeof exec?.name === "string" ? exec.name : "(unknown)";
+        // 硬等门：report 已送达后禁止继续调任何工具（含再次 report），直到父主
+        // 模型 send_message 到达清门。放在 stage Allowed 检查之前，保证没有旁路。
+        if (roleRecord !== null && roleRecord.awaitingParent === true) {
+          ctx.logger.info(
+            `[ka-whale-workflow] ${SUB_WHALE_REPORT_WAIT_DENY_CODE}: "${name}" blocked for ${controlledRole} subagent (awaitingParent=true)`,
+          );
+          return {
+            kind: "deny",
+            code: SUB_WHALE_REPORT_WAIT_DENY_CODE,
+            reason:
+              `${SUB_WHALE_REPORT_WAIT_DENY_CODE}: "${name}" is blocked because ${controlledRole} ` +
+              `subagent report 已送达，等待主代理回复（awaitingParent=true）。No further tool calls ` +
+              `(including ${V09_ROLE_REPORT_TOOLS[controlledRole] ?? "the role report tool"}) are allowed ` +
+              `until the parent main model replies via send_message. End your turn and do not call further tools.`,
+          };
+        }
         ensureControlledSubagentStarted(agent);
         const current = stageOfAgent(agent);
         const def = stageDefinitionFor(controlledRole, current);
         if (def === null) return next();
-        const name = exec?.name;
-        if (typeof name !== "string" || def.allowedTools.includes(name)) return next();
+        if (typeof exec?.name !== "string" || def.allowedTools.includes(exec.name)) return next();
         ctx.logger.info(
           `[ka-whale-workflow] workflow-stage-deny: "${name}" not allowed in ${controlledRole} stage "${current}"`,
         );
@@ -2358,6 +2460,9 @@ export default {
       // 受控 v0.9 子代理不受 includeSubagents=false 跳过：idle 时先进入其 role 首阶段。
       const controlledRole = controlledSubagentRoleOfAgent(agent);
       if (controlledRole !== null) {
+        // 父主模型 send_message（coordinator/relay）到达：终态 communication 重置新轮，
+        // 非终态仅清门；先清门再 ensure，保证新轮从 role 初始阶段开始。
+        clearAwaitingParentOnParentReply(agent, message);
         ensureControlledSubagentStarted(agent);
         return;
       }
@@ -2493,8 +2598,13 @@ export default {
       if (agent !== null && agent !== undefined && typeof agent === "object") {
         const live = liveFor(agent);
         const controlledRole = controlledSubagentRoleOfAgent(agent);
-        // 受控 v0.9 子代理：先确保其 role 专属首阶段已初始化，不走主模型 Goal/新任务路由。
+        // 受控 v0.9 子代理：先清父主 send_message 硬等门（claimed 已处理时此处幂等），
+        // 再确保 role 专属首阶段已初始化，不走主模型 Goal/新任务路由。
         if (controlledRole !== null && live.enabled === true) {
+          const relayMessages = Array.isArray(payload?.messages) ? payload.messages : [];
+          for (const relayMessage of relayMessages) {
+            clearAwaitingParentOnParentReply(agent, relayMessage);
+          }
           ensureControlledSubagentStarted(agent);
         }
         const skipSubagent =
@@ -2564,6 +2674,13 @@ export default {
       const sessionIdNow = sessionIdOf(agent);
       const turn = typeof payload?.turn === "number" ? payload.turn : currentTurnOf(agent);
       const messages = Array.isArray(decision.messages) ? decision.messages : [];
+      // 兜底：若 claimed 未先清门（例如测试/内部投递直接进 pre-step），这里仍会在
+      // 上下文注入前处理父主 send_message。claimed 已处理时本循环幂等无副作用。
+      if (liveNow.enabled === true && controlledRoleNow !== null) {
+        for (const message of messages) {
+          clearAwaitingParentOnParentReply(agent, message);
+        }
+      }
       // 6.0.2 subagent round-display: child-side *_sub_whale_report already writes
       // a summary under the child; when the parent main agent additionally receives
       // a DSH subagent-report/subagent-settled message, record the summary under

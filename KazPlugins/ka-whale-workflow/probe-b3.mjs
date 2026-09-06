@@ -284,6 +284,10 @@ const kaSubWhale = registeredTools.get("ka_sub_whale");
   const reportResult = await reportDef.execute({ output: "Work complete." }, { agent: childAgent, signal });
   check("*_sub_whale_report 真实调用 reportFrom（非空壳）", reportResult?.messageId === "report-1" && capturedReports.length === 1);
   check("*_sub_whale_report 传 delivery=next-step", capturedReports[0]?.options?.delivery === "next-step");
+  check("report 成功后返回硬等门 notice", typeof reportResult?.notice === "string" && reportResult.notice.includes("Report delivered. Now waiting for the parent main model's reply") && reportResult.notice.includes("end your turn and do not call further tools"));
+  const storedAfterReport = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.[childId];
+  check("report 成功后角色记录 awaitingParent=true", storedAfterReport?.awaitingParent === true);
+  check("ka_sub_whale 新建角色记录缺省 awaitingParent=false（schema 兼容）", capturedStarts[0]?.roleAtStart?.awaitingParent === false);
 }
 
 rmSync(TMP, { recursive: true, force: true });

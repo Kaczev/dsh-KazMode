@@ -1,6 +1,6 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting + 37.5 移除 plugin-preflight / 收紧 task-plan 创建与图 / 主 Persona 系统段与子代理 report 双写）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting + 37.5 移除 plugin-preflight / 收紧 task-plan 创建与图 / 主 Persona 系统段与子代理 report 双写 + 子代理 report 硬等门 awaitingParent）。
 
 ## 范围
 
@@ -130,6 +130,15 @@
   父主模型；`nextStage` 用于推进，省略 `nextStage` 时只原生汇报）；
   `list_agents / send_message / interrupt_agent` 由 DSH subagent-control 提供，
   ka-whale-workflow/kaz-shared 负责 Stable Main Surface 放行。
+- 子代理 report 硬等门：`*_sub_whale_report` 成功送达 reportFrom 后把
+  subagentRoles 记录的 `awaitingParent` 置 true（无论是否带 `nextStage`），工具
+  结果追加 `Report delivered. Now waiting...` 文案；受控子代理
+  `awaitingParent=true` 期间 tools/pre-execute 拒绝其继续调用任何工具（含再次
+  report），返回结构化 `subagent-report-wait-deny`；父主模型 `send_message`
+  （DSH source `kind=coordinator`/`form=relay`）到达时清门——当前 stage 为
+  `communication` 终态则重置为该角色初始阶段（worker=assess-complexity、
+  memoryMaintainer/pluginMaintainer=assess-delegation）开始新的一轮，非终态仅清
+  `awaitingParent`、stage 保持不变继续当前轮。
 - `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` /
   `KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH` 由 `kaz-shared` 定义；
   `PLUGIN_LIFECYCLE.md` 放本组件目录并受 Git 跟踪。
@@ -156,8 +165,9 @@
 
 - 阶段状态：`~/.dsh/storages/ka-whale-workflow-stage.json`（version 6，
   含 sessions / contractState / workflowRuns /
-  pendingStageInjection / subagentRoles；sessions 可存 `goal-active`，
-  pendingStageInjection 可挂 `goal-active` / `working-resumed` 边界；
+  pendingStageInjection / subagentRoles；subagentRoles 每条记录含可选布尔
+  `awaitingParent`（旧记录缺省按 false 读，version 保持 6）；sessions 可存
+  `goal-active`，pendingStageInjection 可挂 `goal-active` / `working-resumed` 边界；
   B5 起不再读写 taskToolState 与旧 reconstruction/classification/goal-recovery）。
 - Task plan：`~/.dsh/storages/ka-whale-workflow-task-plan.json`。
 - 生命周期参考：`KazPlugins/ka-whale-workflow/PLUGIN_LIFECYCLE.md`。

@@ -23,6 +23,9 @@ import plugin, {
   manualCommandIdOf,
   nextStageOnUserMessage,
   goalModeActiveOf,
+  isParentMainSendMessage,
+  SUB_WHALE_REPORT_WAIT_NOTICE,
+  SUB_WHALE_REPORT_WAIT_DENY_CODE,
   MAIN_ROLE,
   MAIN_STAGE_IDS,
   V09_SUBAGENT_ROLES,
@@ -81,6 +84,14 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
   const raw = readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, "");
   const parsed = JSON.parse(raw);
   check("阶段状态已持久化到 JSON 存储", parsed.sessions?.["s-whale"] === "done" && parsed.taskToolState === undefined);
+  store.setSubagentRole("child-wait-gate", {
+    planItemId: "p-gate",
+    persona: "worker",
+    assignedTools: [],
+    finalTools: ["work_sub_whale_report"],
+  });
+  check("subagentRoles 新记录缺省 awaitingParent=false（schema 兼容）", store.getSubagentRole("child-wait-gate")?.awaitingParent === false && store.getSubagentRole("child-wait-gate")?.persona === "worker");
+  check("setSubagentRoleAwaitingParent true/false 持久化", store.setSubagentRoleAwaitingParent("child-wait-gate", true) === true && store.getSubagentRole("child-wait-gate")?.awaitingParent === true && store.setSubagentRoleAwaitingParent("child-wait-gate", false) === true && store.getSubagentRole("child-wait-gate")?.awaitingParent === false);
 }
 
 check("36.5 终态新消息进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity" && nextStageOnUserMessage("end", 3) === "assess-complexity" && nextStageOnUserMessage("idle", 1) === "assess-complexity");
@@ -94,6 +105,8 @@ check("真实用户消息判定", isUserMessage({ content: [], source: { kind: "
 check("plugin/goal/tool 消息判定为假", isUserMessage({ content: [], source: { kind: "plugin", plugin: "ka-whale-workflow" } }) === false && isUserMessage({ content: [], source: { kind: "goal" } }) === false && isUserMessage({ content: [], source: { kind: "tool" } }) === false);
 check("subagent report/settled 消息判定为假", isUserMessage({ content: [], source: { kind: "subagent-report", form: "relay" } }) === false && isUserMessage({ content: [], source: { kind: "subagent-settled", form: "notice" } }) === false);
 check("37.5 从 subagent-report/settled 提取 child session id", subagentReportChildSessionIdOf({ content: [], source: { kind: "subagent-report", senderSessionId: "child-1" } }) === "child-1" && subagentReportChildSessionIdOf({ content: [], source: { kind: "subagent-settled", senderSessionId: "child-2" } }) === "child-2" && subagentReportChildSessionIdOf({ content: [], source: { kind: "user" } }) === "");
+check("父主 send_message 判定：coordinator/relay 为真，其它 source 为假", isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "relay", senderSessionId: "parent" } }) === true && isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "other" } }) === false && isParentMainSendMessage({ content: [], source: { kind: "user" } }) === false && isParentMainSendMessage({ content: [] }) === false);
+check("报告硬等门常量导出", SUB_WHALE_REPORT_WAIT_NOTICE.includes("Report delivered. Now waiting for the parent main model's reply") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("end your turn and do not call further tools") && SUB_WHALE_REPORT_WAIT_DENY_CODE === "subagent-report-wait-deny");
 
 {
   const cmdEvents = [

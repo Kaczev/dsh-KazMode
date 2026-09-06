@@ -104,6 +104,10 @@ function stageFromFile(file, sessionId) {
   const raw = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
   return JSON.parse(raw).sessions?.[sessionId] ?? null;
 }
+function roleRecordFromFile(file, sessionId) {
+  const raw = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
+  return JSON.parse(raw).subagentRoles?.[sessionId] ?? null;
+}
 function pendingFromFile(file, sessionId) {
   const raw = readFileSync(file, "utf8").replace(/^\uFEFF/, "");
   return JSON.parse(raw).pendingStageInjection?.[sessionId] ?? null;
@@ -233,6 +237,17 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     "6.0.2 work_sub_whale_report child-side 写 child round-display 摘要",
     childRdReports.length >= 1 && childRdReports.some((payload) => payload?.content === "assessed: complex delegation"),
   );
+  // report 成功已置 awaitingParent=true；先由父主 send_message 清门，才能验证
+  // challenge-plan 本身的 stage 软闸门（read 放行、write 拒绝）。
+  await claimed({
+    agent,
+    message: {
+      content: [{ type: "text", text: "continue after challenge report" }],
+      source: { kind: "coordinator", form: "relay", senderSessionId: "main-parent-session" },
+    },
+    turn: 1,
+  });
+  check("父主 send_message 清门后 stage 保持 challenge-plan", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false);
   const readAllow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const writeDeny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
   check("推进后 challenge-plan 软闸门：read 放行、write 拒绝", readAllow?.kind === "allow" && writeDeny?.kind === "deny");
@@ -256,6 +271,43 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     earlyCommError = error;
   }
   check("36.8 worker challenge-plan 不可直接推进 communication", earlyCommError !== null && String(earlyCommError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+
+  // 硬等门：report 成功后 awaitingParent=true；等待期任何工具（含再次 report）被拒；
+  // 父主 send_message 到达非终态仅清门；到达 communication 终态则重置新初始阶段。
+  const parentRelay = {
+    content: [{ type: "text", text: "continue" }],
+    source: { kind: "coordinator", form: "relay", senderSessionId: "main-parent-session" },
+  };
+  const toCheckTools = await workReport.execute(
+    { output: "tools verified", nextStage: "check-tools" },
+    { agent, signal: new AbortController().signal },
+  );
+  check("report+nextStage 到 check-tools 后返回等待 notice", toCheckTools?.stage === "check-tools" && typeof toCheckTools?.notice === "string" && toCheckTools.notice.includes("Report delivered. Now waiting for the parent main model's reply") && toCheckTools.notice.includes("end your turn and do not call further tools"));
+  check("report 成功后角色记录 awaitingParent=true", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true);
+  const waitDenyAgainReport = await preExecute({ name: "work_sub_whale_report", agent }, async () => ({ kind: "allow" }));
+  const waitDenyAllowedTool = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
+  check("awaitingParent 等待期任何工具（含再次 report）被结构化拒绝", waitDenyAgainReport?.kind === "deny" && waitDenyAgainReport?.code === "subagent-report-wait-deny" && String(waitDenyAgainReport.reason).includes("report 已送达，等待主代理回复") && waitDenyAllowedTool?.kind === "deny" && waitDenyAllowedTool?.code === "subagent-report-wait-deny");
+  await claimed({ agent, message: parentRelay, turn: 2 });
+  check("父主 send_message 到达非终态：仅清 awaitingParent、stage 保持不变", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && stageFromFile(STORE_FILE, "child-worker") === "check-tools");
+  const reportAllowedAfterClear = await preExecute({ name: "work_sub_whale_report", agent }, async () => ({ kind: "allow" }));
+  check("清门后允许继续调用 report（继续当前轮）", reportAllowedAfterClear?.kind === "allow");
+  const toWorking = await workReport.execute(
+    { output: "working started", nextStage: "working" },
+    { agent, signal: new AbortController().signal },
+  );
+  check("继续轮 report→working 且再次置 awaitingParent", toWorking?.stage === "working" && stageFromFile(STORE_FILE, "child-worker") === "working" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true);
+  await claimed({ agent, message: parentRelay, turn: 3 });
+  check("父主 send_message 到达非终态 working：清门且 stage 仍 working", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && stageFromFile(STORE_FILE, "child-worker") === "working");
+  const toCommunication = await workReport.execute(
+    { output: "done", nextStage: "communication" },
+    { agent, signal: new AbortController().signal },
+  );
+  check("report→communication 终态且 awaitingParent=true", toCommunication?.stage === "communication" && stageFromFile(STORE_FILE, "child-worker") === "communication" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true);
+  await claimed({ agent, message: parentRelay, turn: 4 });
+  check("父主 send_message 到达 communication 终态：重置 worker 初始 assess-complexity 并清门", stageFromFile(STORE_FILE, "child-worker") === "assess-complexity" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && pendingFromFile(STORE_FILE, "child-worker") === "assess-complexity");
+  const newRoundDecision = await preStep({ agent, turn: 4, messages: [] }, nextEnter);
+  const newRoundText = messageText(newRoundDecision?.messages ?? []);
+  check("终态父消息后的新轮注入初始 stage 文本", newRoundText.includes("[ka-whale-workflow assess-complexity]") && newRoundText.includes("work_sub_whale_report"));
 }
 
 // memoryMaintainer: idle 进入 assess-delegation 并注入 role 专属文本。

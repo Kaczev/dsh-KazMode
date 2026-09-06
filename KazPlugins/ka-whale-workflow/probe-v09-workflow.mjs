@@ -4,6 +4,9 @@ import plugin, {
   createStageStore,
   KA_SUB_WHALE_TOOL,
   WORK_SUB_WHALE_REPORT_TOOL,
+  SUB_WHALE_REPORT_WAIT_NOTICE,
+  SUB_WHALE_REPORT_WAIT_DENY_CODE,
+  isParentMainSendMessage,
 } from "./lib/index.js";
 import {
   MAIN_ROLE,
@@ -389,6 +392,12 @@ check("36.6 ka_sub_whale 成功输出含 notice", workerInWorking?.ok === true &
     "37.5 main-flow 不再作为一次性 user message 注入",
     reports.length === 4 && !reports.some((payload) => payload.title === "主流程"),
   );
+}
+
+// 子代理 report 硬等门纯常量/消息判定（完整行为覆盖在 probe-subagent-workflow.mjs）。
+{
+  check("report 硬等门常量/拒绝 code 导出", SUB_WHALE_REPORT_WAIT_NOTICE.includes("Report delivered. Now waiting for the parent main model's reply") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("end your turn and do not call further tools") && SUB_WHALE_REPORT_WAIT_DENY_CODE === "subagent-report-wait-deny");
+  check("父主 send_message（coordinator/relay）判定可用", isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "relay", senderSessionId: "parent" } }) === true && isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "notice" } }) === false);
 }
 
 rmSync(TMP, { recursive: true, force: true });
