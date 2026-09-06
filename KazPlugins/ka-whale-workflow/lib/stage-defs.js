@@ -506,7 +506,7 @@ export const STAGE_CONTEXT_NOTES = Object.freeze({
     "challenge-plan":
       "Before critiquing, if the critique involves earlier session content, first use context_search then context_read to grasp the background.",
     communication:
-      "Before the final reply, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read. If the session is very long and about to close, first preview with context_compress suggest; manual compression comes first, auto compression is only a safety net.",
+      "Before the final reply, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read.",
   }),
   worker: Object.freeze({
     "assess-complexity":
