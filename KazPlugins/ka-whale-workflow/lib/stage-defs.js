@@ -157,7 +157,11 @@ Communication rules:
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["decide-tools-before-writing-plan", "write-plan", "memory-maintenance"],
       task:
-        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn; the child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. Reply once with send_message to resume it cause it must have a response in order to proceed. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.",
+        `Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance.
+
+After ka_sub_whale, end the turn. The child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. When the report arrives, reply with send_message to resume it — the child must have a response to proceed. Let the child run its own workflow at its own pace; we do not rush it. We wait for the report, verify it, and decide the next step.
+
+Amend plans only through write-plan. When complete, advance to memory-maintenance before communication. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.`,
     },
     "memory-maintenance": {
       allowedTools: [
