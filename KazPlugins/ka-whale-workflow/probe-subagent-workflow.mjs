@@ -1,16 +1,16 @@
 // ka-whale-workflow v0.9 受控子代理 workflow 探针：
 //   - includeSubagents=false 时受控 v0.9 子代理仍被治理（不跳过）；
 //   - idle 初始化 role 首阶段（worker=assess-complexity，其余=assess-delegation）；
-//   - role 专属 [ka-whale-workflow <stage>] 按 pending 注入一次；
+//   - role 专属 [ka-whale-workflow <stage>] 按 pending 注入一次；首轮 Minimal（尚无
+//     工具调用）时正文含 Minimal (first round only) 行，首次工具调用后不再出现；
 //   - report 后等待期（awaitingParent=true）pre-step 不注入/不清 pending，
 //     父主 send_message 清门后的下一 pre-step 才注入新 stage 文本；
 //   - plugin create/update/retire 注入携带 lifecyclePath；
-//   - 受控角色不注入旧通用 SUBAGENT_FLOW_TEXT；旧/未知子代理仅在 includeSubagents=true 时注入。
+//   - 受控角色不注入旧通用 subagent-flow；旧/未知子代理的通用 subagent-flow 注入已删除。
 //   - tools/pre-execute 按 role/stage Allowed tools 软闸门。
 // 运行：node KazPlugins/ka-whale-workflow/probe-subagent-workflow.mjs
 import plugin, {
   createStageStore,
-  SUBAGENT_FLOW_TEXT,
   V09_SUBAGENT_ROLE_INITIAL_STAGES,
 } from "./lib/index.js";
 import { stageDefinitionFor, stageInjectionText, STAGE_CONTEXT_NOTES } from "./lib/stage-defs.js";
@@ -122,6 +122,9 @@ function messageText(messages) {
 function subagentAgent(id) {
   return { id, session: { id, events: [] }, options: { subagentDepth: 1 } };
 }
+function withToolCall(agent) {
+  agent.session.events.push({ type: "tool/call", data: { name: "memory_search" } });
+}
 
 {
   const roles = ["worker", "memoryMaintainer", "pluginMaintainer"];
@@ -141,6 +144,18 @@ function subagentAgent(id) {
   check(
     "受控子代理初始 stage allowedTools 仍不含 read",
     roles.every((role) => !stageDefinitionFor(role, V09_SUBAGENT_ROLE_INITIAL_STAGES[role])?.allowedTools.includes("read")),
+  );
+  check(
+    "Minimal 提示由 stageInjectionText 可选 minimalTools 参数承载（memory/plugin 初始 stage）",
+    roles.every((role) => {
+      const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role];
+      return (
+        stageInjectionText(role, initial, { minimalTools: ["memory_search", "context_search"] }).includes(
+          "Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.",
+        ) &&
+        !stageInjectionText(role, initial).includes("Minimal (first round only):")
+      );
+    }),
   );
 }
 
@@ -197,7 +212,8 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   const decision = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
   const text = messageText(decision?.messages ?? []);
   check("worker 注入 role stage 文本", text.includes("[ka-whale-workflow assess-complexity]") && text.includes("work_sub_whale_report"));
-  check("worker 不注入旧通用 SUBAGENT_FLOW_TEXT", !text.includes("[ka-whale-workflow subagent flow]"));
+  check("worker 首轮（尚无工具调用）stage 正文含 Minimal (first round only) 行", text.includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock."));
+  check("worker 不注入旧通用 subagent-flow 文本", !text.includes("[ka-whale-workflow subagent flow]"));
   check("worker 注入后 pending 已清除", pendingFromFile(STORE_FILE, "child-worker") === null);
   check(
     "Context 注记：worker/maintenance 目标 stage 注入注记，无注记 stage 不输出",
@@ -231,6 +247,9 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     { agent, signal: new AbortController().signal },
   );
   check("report+nextStage 推进 worker assess-complexity → challenge-plan", result?.stage === "challenge-plan" && result?.role === "worker" && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  // 真实受控子代理中 report 是一次 tool/call；模拟它，让后续 pre-step 证明
+  // Minimal (first round only) 提示在首次工具调用后不再出现。
+  withToolCall(agent);
   check("report+nextStage 仍调用原生 reportFrom 汇报给主模型", result?.messageId === "report-1" && h1.capturedReports.length === beforeReports + 1);
   check("reportFrom 收到输出内容与 delivery=next-step", h1.capturedReports.at(-1)?.options?.delivery === "next-step" && JSON.stringify(h1.capturedReports.at(-1)?.content ?? []).includes("assessed: complex delegation"));
   const childRdReports = h1.roundReports
@@ -267,9 +286,10 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   const relayedStep = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
   const relayedText = messageText(relayedStep?.messages ?? []);
   check(
-    "父 relay 清门后的下一 pre-step 才注入 challenge-plan 文本并清 pending",
+    "父 relay 清门后的下一 pre-step 才注入 challenge-plan 文本并清 pending；首次工具调用后不再含 Minimal 行",
     relayedText.includes("[ka-whale-workflow challenge-plan]") &&
       relayedText.includes("work_sub_whale_report") &&
+      !relayedText.includes("Minimal (first round only):") &&
       pendingFromFile(STORE_FILE, "child-worker") === null,
   );
   const readAllow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
@@ -356,7 +376,8 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   const decision = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
   const text = messageText(decision?.messages ?? []);
   check("memoryMaintainer 注入 role stage 文本", text.includes("[ka-whale-workflow assess-delegation]") && text.includes("memory_sub_whale_report"));
-  check("memoryMaintainer 不注入旧通用 SUBAGENT_FLOW_TEXT", !text.includes("[ka-whale-workflow subagent flow]"));
+  check("memoryMaintainer 首轮（尚无工具调用）stage 正文含 Minimal (first round only) 行", text.includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock."));
+  check("memoryMaintainer 不注入旧通用 subagent-flow 文本", !text.includes("[ka-whale-workflow subagent flow]"));
   const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const allow = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
   check("memoryMaintainer assess-delegation 软闸门：read 拒绝、memory_search 放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow");
@@ -368,7 +389,7 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   const decision = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
   const text = messageText(decision?.messages ?? []);
   check("pluginMaintainer create-plugin 注入含 lifecyclePath", text.includes("[ka-whale-workflow create-plugin]") && text.includes(`lifecyclePath: ${LIFECYCLE_FILE}`));
-  check("pluginMaintainer create-plugin 不注入旧通用 SUBAGENT_FLOW_TEXT", !text.includes("[ka-whale-workflow subagent flow]"));
+  check("pluginMaintainer create-plugin 不注入旧通用 subagent-flow 文本", !text.includes("[ka-whale-workflow subagent flow]"));
   check("create-plugin 注入后 pending 已清除", pendingFromFile(STORE_FILE, "child-plugin-maintainer-create") === null);
   const allow = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
   const deny = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
@@ -376,7 +397,8 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
 }
 
 // ---------------------------------------------------------------------------
-// Harness 2：includeSubagents=true 时旧/未知子代理仍使用通用 SUBAGENT_FLOW_TEXT。
+// Harness 2：includeSubagents=true 的旧/未知子代理仍可进入 stage 外壳，但
+// 不再注入旧通用 subagent-flow 文本（常量与注入路径已删除）。
 // ---------------------------------------------------------------------------
 const GEN_DIR = join(TMP, "generic");
 const GEN_STORE = join(GEN_DIR, "stage.json");
@@ -392,8 +414,7 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
   check("includeSubagents=true：旧/未知子代理可进入通用主 stage 外壳", stageFromFile(GEN_STORE, "legacy-child") === "assess-complexity");
   const decision = await preStep2({ agent, turn: 2, messages: [] }, nextEnter);
   const text = messageText(decision?.messages ?? []);
-  check("includeSubagents=true：旧/未知子代理注入 SUBAGENT_FLOW_TEXT", text.includes("[ka-whale-workflow subagent flow]"));
-  check("SUBAGENT_FLOW_TEXT 常量未被删除", typeof SUBAGENT_FLOW_TEXT === "string" && SUBAGENT_FLOW_TEXT.includes("work_sub_whale_report"));
+  check("includeSubagents=true：旧/未知子代理不再注入通用 subagent-flow 文本", !text.includes("[ka-whale-workflow subagent flow]"));
 }
 
 rmSync(TMP, { recursive: true, force: true });

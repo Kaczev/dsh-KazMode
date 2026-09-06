@@ -3,8 +3,9 @@
 // 流程：
 //   1) 主模型 Persona 由 kaz-system-prompt 把 deployment:persona 设为
 //      KAZ_ROLE_PROMPTS.main 全文（每个 step 重新组装）；各 v0.9 阶段入口按 pending run 注入。
-//   2) 受控 v0.9 子代理经 ka_sub_whale request.persona 获得 role Persona；普通旧
-//      未知子代理（includeSubagents=true）注入旧通用 subagent-flow。
+//   2) 受控 v0.9 子代理经 ka_sub_whale request.persona 获得 role Persona；旧
+//      未知子代理在 includeSubagents=true 时仅走 workflow stage 外壳，不再注入
+//      通用 subagent-flow 常量。
 //   3) whale_report 在 Stable Main Surface 常驻，是主模型 stage 推进与 task plan
 //      持久化的唯一 bookkeeping 入口。
 //   4) v0.9 Goal 由 whale_report({mode:'goal'}) 启动/恢复；goal-active 是外部模式。
@@ -39,7 +40,6 @@ import {
   KAZ_TASK_PLAN_STORE_PATH,
   KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH,
   KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH,
-  KAZ_ROLE_PROMPTS,
   KAZ_V09_MAIN_TOOLS,
   KAZ_V09_SUB_WHALE_REPORT_TOOLS,
   KAZ_V09_SUBAGENT_ROLE_TOOLS,
@@ -143,20 +143,6 @@ export { KAZ_TASK_PLAN_STORE_PATH, KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH };
 
 /** 用户手动指令开启模式的命令名（v0.8 Step B1：/plan 已移除，仅剩 /goal）。 */
 const MANUAL_COMMAND_NAMES = ["goal"];
-
-/** v0.9 主流程上下文文案（v0.9 §9.1 Persona Goal-active 口径；阶段注入另行按 run 追加）。
- *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.main，避免双源漂移。
- *  当前运行时的主 Persona 已由 kaz-system-prompt 整段设为 deployment:persona；
- *  本常量仅保留给探针/兼容引用，不再作为主会话 user message 注入。 */
-export const MAIN_FLOW_TEXT = `[ka-whale-workflow main flow]
->
-${KAZ_ROLE_PROMPTS.main}`;
-
-/** v0.9 worker 子代理流程上下文文案（§9.2；其它 role 由各自 stage 注入覆盖）。
- *  正文取自 kaz-shared 的 KAZ_ROLE_PROMPTS.subagent.worker。 */
-export const SUBAGENT_FLOW_TEXT = `[ka-whale-workflow subagent flow]
->
-${KAZ_ROLE_PROMPTS.subagent.worker}`;
 
 /** v0.9 受控子代理 role → 首个 workflow stage（§4 worker；§5–§7 其它 role）。 */
 export const V09_SUBAGENT_ROLE_INITIAL_STAGES = Object.freeze({
@@ -2593,8 +2579,7 @@ export default {
 
     // -----------------------------------------------------------------------
     // 上下文注入：主 Persona 已由 kaz-system-prompt 作为 deployment:persona
-    // 整段携带（不在此注入）；旧/未知子代理的 SUBAGENT_FLOW_TEXT 按 turn 去重
-    // 注入一次；v0.9 阶段与 Goal 边界注入按 pending 精确一次。
+    // 整段携带（不在此注入）；v0.9 阶段与 Goal 边界注入按 pending 精确一次。
     // -----------------------------------------------------------------------
     ctx.on("agent/pre-step", async (payload, next) => {
       const agent = payload?.agent;
@@ -2665,8 +2650,7 @@ export default {
       // 上下文注入：
       //   - 主 Persona 已是 kaz-system-prompt 整段 deployment:persona
       //     （KAZ_ROLE_PROMPTS.main），不再注入 user message；
-      //   - 旧未知子代理（includeSubagents=true）的 SUBAGENT_FLOW_TEXT 首次注入一次；
-      //   - 受控 v0.9 子代理只注入 role-specific stage，不注入旧通用 subagent-flow；
+      //   - 受控 v0.9 子代理只注入 role-specific stage；
       //   - v0.9 stage 注入按 pendingStageInjection 精确一次（同一 run 内重新
       //     进入某 stage 会再次 pending，因此会再次注入）。
       const liveNow = liveFor(agent);
@@ -2714,36 +2698,10 @@ export default {
       }
       let appended = false;
       if (liveNow.enabled === true && !skipSubagentNow && !isBypassed(agent)) {
-        // persona application:
-        //   - main persona is now the deployment:persona section text
-        //     KAZ_ROLE_PROMPTS.main, assembled fresh each step by
-        //     kaz-system-prompt; no one-time MAIN_FLOW_TEXT user message is
-        //     appended, so old sessions are never blocked by hasInjectedBefore.
-        //   - controlled v0.9 subagents receive KAZ_ROLE_PROMPTS.subagent.* via
-        //     request.persona; do not inject the old generic SUBAGENT_FLOW_TEXT.
-        //   - only old/unknown subagents (includeSubagents=true) still get the
-        //     generic SUBAGENT_FLOW_TEXT once.
-        if (controlledRoleNow === null && subagentNow) {
-          const form = "subagent-flow";
-          const alreadyInjectedTurn = hasInjectedInTurn(agent, form, turn);
-          const alreadyInjectedBefore = hasInjectedBefore(agent, form);
-          if (!alreadyInjectedTurn && !alreadyInjectedBefore) {
-            const text = SUBAGENT_FLOW_TEXT;
-            try {
-              const message = createUserMessage({
-                content: [{ type: "text", text }],
-                source: { kind: "plugin", plugin: "ka-whale-workflow", form },
-              });
-              messages.push(message);
-              appended = true;
-              reportRoundDisplay(agent, text, "子代理流程");
-            } catch (error) {
-              ctx.logger.warn(
-                `[ka-whale-workflow] 构造子代理流程上下文消息失败：${error instanceof Error ? error.message : String(error)}`,
-              );
-            }
-          }
-        }
+        // persona application（无双源/无一次性流程常量注入）：
+        //   - main persona 由 kaz-system-prompt 每 step 以 deployment:persona 组装；
+        //   - controlled v0.9 subagents 经 request.persona 携带 KAZ_ROLE_PROMPTS.subagent.*；
+        //   - 旧 unknown-subagent 通用 SUBAGENT_FLOW_TEXT 注入路径已删除。
 
         // v0.9 阶段入口注入 + goal-active/working-resumed 边界注入：
         // 每次进入 v0.9 stage 或跨越 Goal 边界时 pending 一次，注入后即清除。
@@ -2784,9 +2742,18 @@ export default {
             controlledRoleRecordNow.awaitingParent !== true
           ) {
             // 受控子代理：注入 role 专属 stage 文本；plugin 生命周期阶段附实际 lifecyclePath。
-            const options = stageNeedsLifecyclePath(pendingStage)
-              ? { lifecyclePath: lifecycleReferencePath }
-              : {};
+            // Minimal 首轮提示仅在会话尚未发生首次工具调用时随 stage 正文输出。
+            const minimalTools = isMinimal(agent)
+              ? [...(V09_SUBAGENT_ROLE_MINIMAL_TOOLS[controlledRoleNow] ?? [])]
+              : undefined;
+            const options = {
+              ...(Array.isArray(minimalTools) && minimalTools.length > 0
+                ? { minimalTools }
+                : {}),
+              ...(stageNeedsLifecyclePath(pendingStage)
+                ? { lifecyclePath: lifecycleReferencePath }
+                : {}),
+            };
             const text = stageInjectionText(controlledRoleNow, pendingStage, options);
             if (text.length > 0) {
               try {
@@ -2813,7 +2780,14 @@ export default {
             isMainWorkflowStage(pendingStage) &&
             !subagentNow
           ) {
+            // Minimal 首轮提示：仅当会话尚未发生首次工具调用时随 main stage 正文输出。
+            const mainMinimalTools = isMinimal(agent)
+              ? ["memory_search", "context_search"]
+              : undefined;
             const options = {
+              ...(Array.isArray(mainMinimalTools) && mainMinimalTools.length > 0
+                ? { minimalTools: mainMinimalTools }
+                : {}),
               ...(stageNeedsTaskPlanPath(pendingStage)
                 ? { taskPlanPath: taskPlanStore.file }
                 : {}),

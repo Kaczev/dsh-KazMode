@@ -28,7 +28,10 @@
   `challenge-plan`）。真正的首轮 Minimal 由 kaz-mode `firstRoundTools` /
   `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 在“首次工具调用前”独立收口：
   主 = `memory_search` + `context_search`；受控子代理 =
-  `memory_search` + `context_search` + 各自 report。各角色 `communication`
+  `memory_search` + `context_search`。live pre-step 在尚未发生首次工具调用时，
+  会在主/受控子代理的 stage 正文里额外输出
+  `Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.`；
+  首次工具调用后不再传入 `minimalTools`，该行不再出现。各角色 `communication`
   阶段允许工具为 `context_search` + `context_read` + `context_compress`。
 - 受控 v0.9 子代理：`ka_sub_whale` 创建的
   `worker`/`memoryMaintainer`/`pluginMaintainer` 不受
@@ -36,13 +39,14 @@
   （`worker=assess-complexity`，其余 `=assess-delegation`），按 pending stage
   注入 role 专属 `[ka-whale-workflow <role-stage>]` 文本，并由 `tools/pre-execute`
   按该 role/stage 的 Allowed tools 软闸门约束；plugin 的 create/update/retire
-  阶段注入携带实际 `lifecyclePath`。受控角色不再注入旧通用 `SUBAGENT_FLOW_TEXT`
+  阶段注入携带实际 `lifecyclePath`。受控角色不再注入通用 subagent-flow 常量
   （role Persona 已由 ka_sub_whale 的 `request.persona` 提供，并被
-  kaz-system-prompt 原样保留）；旧/未知子代理仍仅在
-  `includeSubagents=true` 时使用通用 subagent-flow。
+  kaz-system-prompt 原样保留）；旧/未知子代理在
+  `includeSubagents=true` 时只进入 workflow stage 外壳，不再注入旧通用
+  subagent-flow。
 - B6 收口：`KAZ_ROLE_PROMPTS`（v0.9 §9.1–9.5）作为全量 Persona 唯一源存放在
-  `kaz-shared`，本组件 `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 与
-  `V09_ROLE_PERSONAS` 都由它派生。当前主 Persona 应用：`kaz-system-prompt` 每个
+  `kaz-shared`，本组件 `V09_ROLE_PERSONAS` 由它派生；旧的一次性
+  `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 导出已删除。当前主 Persona 应用：`kaz-system-prompt` 每个
   step 把 `deployment:persona` 整段设为 `KAZ_ROLE_PROMPTS.main`（含完整首句/末句），
   ka-whale-workflow 不再注册 `ka-whale-workflow:main` system 段，旧
   `KAZ_MAIN_ROLE_BODY` 机制已退役；受控 v0.9 子代理的 `request.persona` 携带当前

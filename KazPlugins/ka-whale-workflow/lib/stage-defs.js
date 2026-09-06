@@ -74,12 +74,14 @@ export const V09_STAGE_IDS = Object.freeze([
   ]),
 ]);
 
-/** 阶段定义（Task 文本来自 v0.9 表格；{KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH} 占位由注入层替换）。 */
+/** 阶段定义（Task 文本来自 Kaz7.0v2 候选稿 §2–§5 精简正文；
+ *  taskPlanPath / lifecyclePath 由 stageInjectionText 按 options 追加）。 */
 const DEFINITIONS = {
   [MAIN_ROLE]: {
     // assess-complexity 的 allowedTools 是“该阶段软闸门”，不是首轮 Minimal 列表。
-    // Minimal 由 kaz-mode firstRoundTools（主）/ V09_SUBAGENT_ROLE_MINIMAL_TOOLS
-    // （受控子代理）在“首次工具调用前”独立收口；这里不再承担 Minimal 语义。
+    // Minimal 执行语义由 kaz-mode firstRoundTools（主）/ V09_SUBAGENT_ROLE_MINIMAL_TOOLS
+    // （受控子代理）在“首次工具调用前”独立收口；stageInjectionText 仅在调用方传入
+    // options.minimalTools 时输出一行描述性 Minimal 提示，不参与工具面收口。
     // 不加 ask_user_question：需要澄清的任务推进 challenge-plan（其持有该工具）。
     "assess-complexity": {
       allowedTools: [
@@ -91,7 +93,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["challenge-plan", "communication"],
       task:
-        "Judge whether the request is simple or complex. Minimal is a separate first-round behavior (before this workflow-run's first tool/call) enforced by kaz-mode firstRoundTools / role Minimal, not by this stage's allowedTools; while Minimal is active, the visible schema is only memory_search + context_search for main. This stage's allowedTools are the workflow soft gate used once Minimal is lifted: memory_search/context_search/context_read/context_compress/whale_report; other calls return workflow-stage-deny. ask_user_question is intentionally not added here: ambiguous tasks advance to challenge-plan, which owns ask_user_question. If simple, advance to communication (no-tool-call is a legal exception). If complex, advance to challenge-plan.",
+        "Judge whether the request is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan.",
     },
     "challenge-plan": {
       allowedTools: [
@@ -110,31 +112,31 @@ const DEFINITIONS = {
       ],
       canAdvance: ["decide-tools", "communication"],
       task:
-        "Critique the user's approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write or finalize task plans here (write-plan owns task-plan persistence) and do not call ka_sub_whale. Then advance.",
+        "Critique the approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write task plans here and do not call ka_sub_whale.",
     },
     "decide-tools": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
       canAdvance: ["write-plan"],
       task:
-        "Decide required tools. Do not write or draft task plans here; task-plan creation and finalization happens only in write-plan. Then advance to write-plan. Do not execute ka_sub_whale here. Candidate assignedTools list (system-injected actual names with descriptions): <candidate tools: name: description>.",
+        "Decide required tools for the work. Do not write task plans here (write-plan owns persistence). Advance to write-plan. Candidate assignedTools list (system-injected): <candidate tools: name: description>.",
     },
     "write-plan": {
       allowedTools: ["whale_report", "read", "context_search", "context_read", "context_compress"],
       canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"],
       task:
-        "Create and finalize the complete task plan here via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan via taskPlanPath, persist the revised plan, then advance to the appropriate next stage (working, memory-maintenance, plugin-maintenance, or communication). Do not rely on plain-text-only persistence.",
+        "Create and finalize the complete task plan via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan first, persist the revised plan, then advance.",
     },
     "decide-goal": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
       canAdvance: ["working", GOAL_ACTIVE_STAGE],
       task:
-        "Decide whether to use Goal or normal. Choose normal when the task can be completed in this workflow-run and does not need official Goal-driver cross-round auto-continuation or resume; multi-step is still normal when the task plan can manage it in working. Choose goal when the objective is clear but naturally requires multi-round autonomous iteration, progress tracking/resume, or an active/paused Goal already exists and the user wants to continue it. If Goal is needed, call whale_report({mode:'goal', objective, max_goal_rounds?}); that enters goal-active. If normal, call whale_report with normal/default mode to advance to working.",
+        "Decide whether to use Goal or normal. NORMAL: completable in this workflow-run, no cross-round auto-continuation; multi-step is still normal when the task plan can manage it. GOAL: clear objective that naturally needs multi-round autonomous iteration, progress tracking/resume, or an already active/paused Goal you want to continue. Note: Goal mode and normal mode expose the SAME Allowed tools; choosing Goal never changes your tool surface. If Goal is needed, call whale_report({mode:'goal', objective, max_goal_rounds?}) to enter goal-active; if normal, call whale_report to advance to working.",
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["write-plan", "memory-maintenance"],
       task:
-        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memoryMaintainer/pluginMaintainer plan items in working; memory/plugin items are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Each *_sub_whale_report pauses the child until you reply; after reviewing the report, send_message to resume it (or to start a fresh round if the child is at terminal communication). Do not assume the child keeps running after a report. Review the task plan whenever needed via taskPlanPath. Main critically evaluates subagent reports and their critiques instead of accepting them blindly, verifies results, amends only through write-plan, and asks only for decisions outside the plan. After working is complete, always advance to memory-maintenance before any communication; advance to plugin-maintenance from memory-maintenance only when plugin work remains.",
+        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn and wait for the child report; each *_sub_whale_report pauses the child until you send_message. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication.",
     },
     "memory-maintenance": {
       allowedTools: [
@@ -153,7 +155,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan"],
       task:
-        "Delegate a memoryMaintainer persona to write memories. Delegate only persona=memoryMaintainer plan items in this stage. After each ka_sub_whale delegation, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Read taskPlanPath when needed to review the plan. If task-plan changes are required, advance to write-plan first; otherwise advance to plugin-maintenance only when plugin work remains, or communication.",
+        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; after each report, wait and reply with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance.",
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -169,7 +171,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["write-plan", "communication"],
       task:
-        "Delegate a pluginMaintainer persona to create/update/retire private plugins as needed. Delegate only persona=pluginMaintainer plan items in this stage. After each ka_sub_whale delegation, end the current turn and wait for the subagent's report/finished message; do not use pwsh sleep or poll list_agents to wait (list_agents/send_message are not wait primitives). Read taskPlanPath to review the plan. If a new plan item is needed, advance to write-plan first.",
+        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; after each report, wait and reply with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first.",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],
@@ -205,13 +207,13 @@ const DEFINITIONS = {
       ],
       canAdvance: ["check-tools"],
       task:
-        "Critique the delegation first; identify real weaknesses; do not manufacture criticism. Find the smallest workable approach. Planning here uses read-only access; the full working file-tool set (edit, write, pwsh, read) is granted in the working stage, not in challenge-plan or check-tools. Do not report tool insufficiency before reaching working. Then advance to check-tools.",
+        "Critique the delegation first; identify real weaknesses; do not manufacture criticism. Find the smallest workable approach. The full working file-tool set (edit, write, pwsh, read) is granted in working, not here. Then advance to check-tools.",
     },
     "check-tools": {
       allowedTools: ["context_search", "context_read", "context_compress", "work_sub_whale_report"],
       canAdvance: ["working", "communication"],
       task:
-        "Verify whether assigned tools are enough for the work. The full working file-tool set (edit, write, pwsh, read) is granted in the working stage, not here; do not report tool insufficiency before reaching working. Advance to working, or advance to communication only for a genuine blocker.",
+        "Verify whether assigned tools are enough. Advance to working, or to communication only for a genuine blocker. Do not report tool insufficiency before reaching working.",
     },
     working: {
       allowedTools: [
@@ -232,7 +234,8 @@ const DEFINITIONS = {
         "work_sub_whale_report",
       ],
       canAdvance: ["communication"],
-      task: "Execute the delegated work. Do not write memories or plugins.",
+      task:
+        "Execute the delegated work. Do not write memories or plugins. When done, report with work_sub_whale_report, then stop and wait for the parent reply.",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],
@@ -352,7 +355,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["communication"],
       task:
-        "Create a new private plugin under KazPrivatePlugins with lifecyclePath: {KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH}. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry.",
+        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry.",
     },
     "update-plugin": {
       allowedTools: [
@@ -370,7 +373,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["communication"],
       task:
-        "Update/version existing private plugin with probe discipline. Plugin lifecycle checklist: 1) record change/CANDIDATE; 2) edit under KazPrivatePlugins/<plugin>/; 3) probes + node --check; 4) version/register; 5) sync candidate registry; 6) hot reload only if probe passed, otherwise next task/restart. Read detailed rules from lifecyclePath: {KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH}.",
+        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed.",
     },
     "retire-plugin": {
       allowedTools: [
@@ -385,7 +388,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["communication"],
       task:
-        "Retire/delete only plugins explicitly listed in the delegation brief. Plugin lifecycle checklist: 1) backup/audit; 2) remove only KazPrivatePlugins/<plugin>/ in brief; 3) sync candidate registry; 4) no public KazPlugins/official deletions. Read detailed rules from lifecyclePath: {KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH}.",
+        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions.",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],
@@ -511,7 +514,9 @@ export const STAGE_CONTEXT_NOTES = Object.freeze({
  * 构造 v0.9 阶段入口注入文本。
  * @param {string} role
  * @param {string} stage
- * @param {{taskPlanPath?: string, lifecyclePath?: string, candidateToolDirectory?: string}} options
+ * @param {{taskPlanPath?: string, lifecyclePath?: string, candidateToolDirectory?: string, minimalTools?: string[]}} options
+ * options.minimalTools：可选；提供时在 `Can advance to:` 行后、`Task:` 行前输出
+ * `Minimal (first round only): [...] until your first tool call; then the Allowed tools above unlock.`
  * @returns {string} 注入文本；role/stage 未知时返回空串。
  */
 export function stageInjectionText(role, stage, options = {}) {
@@ -522,6 +527,15 @@ export function stageInjectionText(role, stage, options = {}) {
   lines.push(">");
   lines.push(`Allowed tools: [${def.allowedTools.join(", ")}]`);
   lines.push(`Can advance to: [${def.canAdvance.join(", ")}]`);
+  if (
+    options &&
+    Array.isArray(options.minimalTools) &&
+    options.minimalTools.length > 0
+  ) {
+    lines.push(
+      `Minimal (first round only): [${options.minimalTools.join(", ")}] until your first tool call; then the Allowed tools above unlock.`,
+    );
+  }
   let task = def.task;
   if (
     stage === "decide-tools" &&
@@ -552,6 +566,7 @@ export const GOAL_ACTIVE_CONTEXT_TEXT = `[ka-whale-workflow goal-active]
 Mode: Goal is active; ka-whale-workflow ordinary stage progression is suspended.
 Allowed tools: [main stable surface minus whale_report progression usage]
 Use get_goal/update_goal per official Goal rules. Goal context and rounds are driven by the official Goal driver. Persona is unchanged.
+Context: Before continuing, if earlier exact goal/session content may have been summarized, use context_search then context_read; if the Goal session is very long, preview with context_compress suggest before folding.
 <`;
 
 /**
@@ -569,6 +584,7 @@ export function workingResumedContextText(taskPlanPath) {
 Mode: Goal ended; workflow resumes as if working finished.
 Allowed tools: [main stable surface]
 Can advance to: [write-plan (amendment), memory-maintenance]
+Task: Continue as working-ended: execute/amend remaining plan items under the same semantics as the end of working, then advance.
 taskPlanPath: ${path}
 <`;
 }

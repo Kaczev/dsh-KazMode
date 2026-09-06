@@ -1,5 +1,5 @@
 // ka-whale-workflow 探针（v0.9 B5 口径）：
-//   - 主/子流程文案与 v0.9 stage 常量；
+//   - v0.9 stage 常量与注入文本（含 minimalTools 可选首轮提示）；
 //   - stage store 只接受 v0.9 / goal-active / working-resumed / 状态壳；
 //   - 不再读写旧 reconstruction / classification / goal-recovery；
 //   - 新轮 Goal 路由与 /goal 命令；task plan 草稿/定稿；
@@ -11,8 +11,6 @@ import plugin, {
   WORK_SUB_WHALE_REPORT_TOOL,
   MEMORY_SUB_WHALE_REPORT_TOOL,
   PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL,
-  MAIN_FLOW_TEXT,
-  SUBAGENT_FLOW_TEXT,
   GOAL_ACTIVE_STAGE,
   GOAL_ACTIVE_CONTEXT_TEXT,
   workingResumedContextText,
@@ -65,12 +63,6 @@ const store = createStageStore(STORE_FILE);
 
 check("插件默认导出存在", plugin !== null && typeof plugin === "object" && plugin.name === "ka-whale-workflow");
 check("whale_report 工具名", WHALE_REPORT_TOOL === "whale_report");
-check("主流程文案已导出且非空", typeof MAIN_FLOW_TEXT === "string" && MAIN_FLOW_TEXT.trim().length > 0);
-check("主流程文案含 v0.9 §9.1 Goal-active 语义", MAIN_FLOW_TEXT.includes("working (or goal-active)") && MAIN_FLOW_TEXT.includes("do not use create_goal directly") && MAIN_FLOW_TEXT.includes("After Goal ends, proceed as if working ended") && MAIN_FLOW_TEXT.includes("At decide-goal, choose normal when the task is completable in this workflow-run") && MAIN_FLOW_TEXT.includes("Choose goal when the objective is clear"));
-check("36.6 主 Persona 含事件驱动等待语义", MAIN_FLOW_TEXT.includes("must NOT use pwsh sleep") && MAIN_FLOW_TEXT.includes("poll list_agents") && MAIN_FLOW_TEXT.includes("end the current turn and wait for the subagent's report/finished message") && MAIN_FLOW_TEXT.includes("list_agents and send_message are not wait primitives"));
-check("36.7 主 Persona 含批评纪律", MAIN_FLOW_TEXT.includes("Critique first") && MAIN_FLOW_TEXT.includes("do not manufacture criticism") && MAIN_FLOW_TEXT.includes("Critically evaluate subagent reports and critiques instead of accepting them blindly"));
-check("36.7 worker 流程含批评纪律", SUBAGENT_FLOW_TEXT.includes("critique the delegation first") && SUBAGENT_FLOW_TEXT.includes("identify real weaknesses") && SUBAGENT_FLOW_TEXT.includes("do not blindly accept"));
-check("36.6 子代理流程文案已导出且非空", typeof SUBAGENT_FLOW_TEXT === "string" && SUBAGENT_FLOW_TEXT.includes("work_sub_whale_report") && SUBAGENT_FLOW_TEXT.includes("subagent flow"));
 check("goal-active 常量不在 MAIN_STAGE_IDS", GOAL_ACTIVE_STAGE === "goal-active" && !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE));
 check("goal-active/working-resumed 文本导出", GOAL_ACTIVE_CONTEXT_TEXT.includes("[ka-whale-workflow goal-active]") && workingResumedContextText("C:/plan.json").includes("taskPlanPath: C:/plan.json"));
 
@@ -183,36 +175,37 @@ check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.
   const mainChallenge = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
   const workerChallenge = stageDefinitionFor("worker", "challenge-plan");
   check(
-    "36.7 主 challenge-plan task 先批评/识别真弱点/不制造批评",
+    "主 challenge-plan task 先批评/识别真弱点/不制造批评",
     typeof mainChallenge?.task === "string" &&
-      mainChallenge.task.includes("Critique the user's approach first") &&
+      mainChallenge.task.includes("Critique the approach first") &&
       mainChallenge.task.includes("identify real weaknesses") &&
       mainChallenge.task.includes("do not manufacture criticism"),
   );
   check(
-    "36.7 worker challenge-plan task 先批评/识别真弱点/不制造批评",
+    "worker challenge-plan task 先批评/识别真弱点/不制造批评",
     typeof workerChallenge?.task === "string" &&
       workerChallenge.task.includes("Critique the delegation first") &&
       workerChallenge.task.includes("identify real weaknesses") &&
       workerChallenge.task.includes("do not manufacture criticism"),
   );
   check(
-    "36.8 worker challenge-plan 只可推进 check-tools",
+    "worker challenge-plan 只可推进 check-tools",
     JSON.stringify(workerChallenge?.canAdvance) === JSON.stringify(["check-tools"]),
   );
   check(
-    "36.8 worker challenge/check-tools 文本含文件工具只在 working 与不得提前报告",
+    "worker challenge task 含文件工具只在 working 授予；check-tools task 含不得提前报告/阻断判定",
     typeof workerChallenge?.task === "string" &&
-      workerChallenge.task.includes("full working file-tool set (edit, write, pwsh, read) is granted in the working stage") &&
-      workerChallenge.task.includes("Do not report tool insufficiency before reaching working") &&
+      workerChallenge.task.includes("full working file-tool set (edit, write, pwsh, read) is granted in working, not here") &&
       typeof stageDefinitionFor("worker", "check-tools")?.task === "string" &&
-      stageDefinitionFor("worker", "check-tools").task.includes("do not report tool insufficiency before reaching working"),
+      stageDefinitionFor("worker", "check-tools").task.includes("genuine blocker") &&
+      stageDefinitionFor("worker", "check-tools").task.includes("Do not report tool insufficiency before reaching working"),
   );
   check(
-    "36.7 主 working task 批判性评估子代理批评而非盲从",
+    "主 working task 含委派后等待子代理/复核报告/强制 memory gate 语义",
     typeof workingDef?.task === "string" &&
-      workingDef.task.includes("critically evaluates subagent reports and their critiques") &&
-      workingDef.task.includes("instead of accepting them blindly"),
+      workingDef.task.includes("After ka_sub_whale, end the turn and wait for the child report") &&
+      workingDef.task.includes("Monitor/verify reports") &&
+      workingDef.task.includes("advance to memory-maintenance before communication"),
   );
 }
 check("decide-goal 定义含 working 与 goal-active", canAdvance(MAIN_ROLE, "decide-goal", "working") === true && canAdvance(MAIN_ROLE, "decide-goal", GOAL_ACTIVE_STAGE) === true);
@@ -249,18 +242,27 @@ check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlan
       !noNoteText.includes("Context:"),
   );
 }
+check(
+  "Minimal 提示由 stageInjectionText 可选 minimalTools 参数承载：有值输出、缺省不输出",
+  stageInjectionText(MAIN_ROLE, "assess-complexity", { minimalTools: ["memory_search", "context_search"] }).includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.") &&
+    stageInjectionText(MAIN_ROLE, "assess-complexity", { minimalTools: ["memory_search", "context_search"] }).indexOf("Minimal (first round only):") > stageInjectionText(MAIN_ROLE, "assess-complexity", { minimalTools: ["memory_search", "context_search"] }).indexOf("Can advance to:") &&
+    !stageInjectionText(MAIN_ROLE, "assess-complexity").includes("Minimal (first round only):"),
+);
 {
   const waitStages = ["working", "memory-maintenance", "plugin-maintenance"];
   const waitOk = waitStages.every((stage) => {
     const text = stageInjectionText(MAIN_ROLE, stage);
+    if (stage === "working") {
+      return (
+        text.includes("After ka_sub_whale, end the turn and wait for the child report") &&
+        text.includes("each *_sub_whale_report pauses the child until you send_message")
+      );
+    }
     return (
-      text.includes("end the current turn and wait for the subagent's report/finished message") &&
-      text.includes("pwsh sleep") &&
-      text.includes("poll list_agents") &&
-      text.includes("not wait primitives")
+      text.includes("after each report, wait and reply with send_message to resume")
     );
   });
-  check("36.6 working/memory-maintenance/plugin-maintenance 阶段注入含事件驱动等待语义", waitOk);
+  check("working/memory-maintenance/plugin-maintenance 阶段注入含等待/回复恢复语义", waitOk);
 }
 
 {
