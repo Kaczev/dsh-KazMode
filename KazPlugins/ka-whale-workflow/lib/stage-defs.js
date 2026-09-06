@@ -114,7 +114,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["decide-tools-before-writing-plan"],
       task:
-        "Critique the approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.",
+        "Critique the approach first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose some concrete enhancements that would make the result more polished, practical, or delightful — without overcomplicating. Present these ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.",
     },
     "decide-tools-before-writing-plan": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
@@ -135,7 +135,7 @@ PlanItem rules:
 
 Delegation rules:
 - Delegate every worker planItem to a subagent via "ka-sub-whale". Do not execute planItems directly.
-- For each delegated task, include: objective, steps, expected output, and constraints.
+- For each delegated task, provide the fullest possible task description — include objective, detailed step-by-step actions, expected outputs, constraints, relevant context, assumptions, and potential pitfalls. When in doubt, include the information. Do not assume the subagent can infer what you mean; spell everything out.
 
 Amendment rules:
 - In amendment mode, read the current plan first, persist the revised plan, then advance.
