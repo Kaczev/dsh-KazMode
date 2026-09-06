@@ -112,7 +112,7 @@ const DEFINITIONS = {
         "web_search",
         "whale_report",
       ],
-      canAdvance: ["decide-tools", "communication"],
+      canAdvance: ["decide-tools"],
       task:
         "Critique the approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write task plans here and do not call ka_sub_whale.",
     },
@@ -207,7 +207,7 @@ const DEFINITIONS = {
         "web_search",
         "work_sub_whale_report",
       ],
-      canAdvance: ["check-tools", "communication", "compass_context"],
+      canAdvance: ["check-tools"],
       task:
         "Critique the delegation first; identify real weaknesses; do not manufacture criticism. Find the smallest workable approach. The full working file-tool set (edit, write, pwsh, read) is granted in working, not here. Then advance to check-tools. If we only need to report, advance to communication. If the context is long and we only need to report, advance to compass_context.",
     },
