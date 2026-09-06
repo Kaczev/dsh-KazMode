@@ -148,13 +148,13 @@ const h1 = makeBase({ includeSubagents: false, stageStoreFile: STORE_FILE, planF
     planItemId: "p-worker",
     persona: "worker",
     assignedTools: [],
-    finalTools: ["memory_search", "context_search", "work_sub_whale_report"],
+    finalTools: ["memory_search", "context_search"],
   });
   store.setSubagentRole("child-memory", {
     planItemId: "p-memory",
     persona: "memoryMaintainer",
     assignedTools: [],
-    finalTools: ["memory_search", "context_search", "memory_sub_whale_report"],
+    finalTools: ["memory_search", "context_search"],
   });
   store.setSubagentRole("child-plugin-maintainer-create", {
     planItemId: "p-pm-create",
@@ -166,7 +166,7 @@ const h1 = makeBase({ includeSubagents: false, stageStoreFile: STORE_FILE, planF
     planItemId: "p-pc",
     persona: "pluginCreator",
     assignedTools: [],
-    finalTools: ["memory_search", "context_search", "plugin_creator_sub_whale_report"],
+    finalTools: ["memory_search", "context_search"],
   });
   // Seed one controlled subagent already at a plugin lifecycle stage so the probe
   // can assert lifecyclePath is injected through the runtime pre-step path.

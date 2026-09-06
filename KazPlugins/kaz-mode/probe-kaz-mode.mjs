@@ -241,7 +241,7 @@ const sKazSubCtlMin = agentOf("s-kaz-sub-ctl-min");
   check("②.5 Kaz 恒开：记忆关旧状态不再影响固定主面（仍 22 含记忆读/context）", nomem !== null && nomem.size === 22 && nomem.has("memory_search") && nomem.has("memory_list") && nomem.has("memory_detail") && nomem.has("context_compress") && nomem.has("context_read") && nomem.has("context_search") && nomem.has("get_goal"));
   check("②.5 子代理稳定面 = 保守 Subagent Base 14", sub !== null && sub.size === 14 && sub.has("read") && sub.has("context_compress") && sub.has("context_read") && sub.has("context_search") && sub.has("web_search") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
   check("②.5 旧/未知子代理首轮回退 memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
-  check("②.5 受控 v0.9 子代理首轮 Minimal = memory_search+context_search+各自 report", subCtlMin !== null && subCtlMin.size === 3 && subCtlMin.has("memory_search") && subCtlMin.has("context_search") && subCtlMin.has("work_sub_whale_report"));
+  check("②.5 受控 v0.9 子代理首轮 Minimal 恰为 memory_search+context_search（不含 report/context_compress）", subCtlMin !== null && subCtlMin.size === 2 && subCtlMin.has("memory_search") && subCtlMin.has("context_search") && !subCtlMin.has("work_sub_whale_report") && !subCtlMin.has("context_compress"));
 }
 
 // ①.6 RPC：B4 只读面板 + 三类候选（固定主面下，候选只写候选层，不进主面）
