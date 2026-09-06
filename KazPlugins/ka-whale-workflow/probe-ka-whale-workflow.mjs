@@ -98,7 +98,7 @@ check("plugin/goal/tool 消息判定为假", isUserMessage({ content: [], source
 check("subagent report/settled 消息判定为假", isUserMessage({ content: [], source: { kind: "subagent-report", form: "relay" } }) === false && isUserMessage({ content: [], source: { kind: "subagent-settled", form: "notice" } }) === false);
 check("37.5 从 subagent-report/settled 提取 child session id", subagentReportChildSessionIdOf({ content: [], source: { kind: "subagent-report", senderSessionId: "child-1" } }) === "child-1" && subagentReportChildSessionIdOf({ content: [], source: { kind: "subagent-settled", senderSessionId: "child-2" } }) === "child-2" && subagentReportChildSessionIdOf({ content: [], source: { kind: "user" } }) === "");
 check("父主 send_message 判定：coordinator/relay 为真，其它 source 为假", isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "relay", senderSessionId: "parent" } }) === true && isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "other" } }) === false && isParentMainSendMessage({ content: [], source: { kind: "user" } }) === false && isParentMainSendMessage({ content: [] }) === false);
-check("报告硬等门常量导出", SUB_WHALE_REPORT_WAIT_NOTICE.includes("Report delivered. Now waiting for the parent main model's reply") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("end your turn and do not call further tools") && SUB_WHALE_REPORT_WAIT_DENY_CODE === "subagent-report-wait-deny");
+check("报告硬等门常量导出", SUB_WHALE_REPORT_WAIT_NOTICE.includes("Stage advanced; now output your full report as your final message") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("parent receives it as subagent-settled") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("do not call further tools") && SUB_WHALE_REPORT_WAIT_DENY_CODE === "subagent-report-wait-deny");
 
 {
   const cmdEvents = [
@@ -201,9 +201,10 @@ check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.
       stageDefinitionFor("worker", "check-tools").task.includes("Do not report tool insufficiency before reaching working"),
   );
   check(
-    "主 working task 含委派后等待子代理/复核报告/强制 memory gate 语义",
+    "主 working task 含委派后 single settled 到达/复核报告/强制 memory gate 语义",
     typeof workingDef?.task === "string" &&
-      workingDef.task.includes("After ka_sub_whale, end the turn and wait for the child report") &&
+      workingDef.task.includes("single subagent-settled message") &&
+      workingDef.task.includes("Reply once with send_message to resume it") &&
       workingDef.task.includes("Monitor/verify reports") &&
       workingDef.task.includes("advance to memory-maintenance before communication"),
   );
@@ -254,12 +255,13 @@ check(
     const text = stageInjectionText(MAIN_ROLE, stage);
     if (stage === "working") {
       return (
-        text.includes("After ka_sub_whale, end the turn and wait for the child report") &&
-        text.includes("each *_sub_whale_report pauses the child until you send_message")
+        text.includes("single subagent-settled message") &&
+        text.includes("Reply once with send_message to resume it")
       );
     }
     return (
-      text.includes("after each report, wait and reply with send_message to resume")
+      text.includes("each child's full report arrives as one subagent-settled message") &&
+      text.includes("reply once with send_message to resume")
     );
   });
   check("working/memory-maintenance/plugin-maintenance 阶段注入含等待/回复恢复语义", waitOk);

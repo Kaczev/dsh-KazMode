@@ -125,7 +125,6 @@ const base = {
           startedSubagentRequests.push(spec?.request ?? null);
           return { childId: spec.childId };
         },
-        reportFrom: async () => "report-v09-365",
       };
     }
     return undefined;
@@ -225,7 +224,7 @@ check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity"
   check("write-plan/working/memory/plugin 主阶段不再引用 pluginCreator/plugin-preflight", ["write-plan", "working", "memory-maintenance", "plugin-maintenance"].every((stage) => !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("pluginCreator") && !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("plugin-preflight")));
   check("memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-maintenance", "write-plan") === true);
   check("working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
-  check("working task 含子代理 report 暂停父模型需 send_message 恢复语义", typeof workingDef?.task === "string" && workingDef.task.includes("each *_sub_whale_report pauses the child until you send_message") && workingDef.task.includes("end the turn and wait for the child report"));
+  check("working task 含 single subagent-settled 到达且父回复一次 send_message 语义", typeof workingDef?.task === "string" && workingDef.task.includes("single subagent-settled message") && workingDef.task.includes("Reply once with send_message to resume it") && workingDef.task.includes("end the turn; the child's full report arrives"));
 }
 
 // Task plan draft/finalized 骨架（planStore 在 plugin.apply 前预写，plugin store 可见）
@@ -413,7 +412,7 @@ check("36.6 ka_sub_whale 成功输出含 notice", workerInWorking?.ok === true &
 
 // 子代理 report 硬等门纯常量/消息判定（完整行为覆盖在 probe-subagent-workflow.mjs）。
 {
-  check("report 硬等门常量/拒绝 code 导出", SUB_WHALE_REPORT_WAIT_NOTICE.includes("Report delivered. Now waiting for the parent main model's reply") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("end your turn and do not call further tools") && SUB_WHALE_REPORT_WAIT_DENY_CODE === "subagent-report-wait-deny");
+  check("report 硬等门常量/拒绝 code 导出", SUB_WHALE_REPORT_WAIT_NOTICE.includes("Stage advanced; now output your full report as your final message") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("parent receives it as subagent-settled") && SUB_WHALE_REPORT_WAIT_NOTICE.includes("do not call further tools") && SUB_WHALE_REPORT_WAIT_DENY_CODE === "subagent-report-wait-deny");
   check("父主 send_message（coordinator/relay）判定可用", isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "relay", senderSessionId: "parent" } }) === true && isParentMainSendMessage({ content: [], source: { kind: "coordinator", form: "notice" } }) === false);
 }
 

@@ -136,7 +136,7 @@ const DEFINITIONS = {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["write-plan", "memory-maintenance"],
       task:
-        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn and wait for the child report; each *_sub_whale_report pauses the child until you send_message. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication.",
+        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn; the child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. Reply once with send_message to resume it. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication.",
     },
     "memory-maintenance": {
       allowedTools: [
@@ -155,7 +155,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan"],
       task:
-        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; after each report, wait and reply with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance.",
+        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance.",
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -171,7 +171,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["write-plan", "communication"],
       task:
-        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; after each report, wait and reply with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first.",
+        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first.",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],
@@ -235,7 +235,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["communication"],
       task:
-        "Execute the delegated work. Do not write memories or plugins. When done, report with work_sub_whale_report, then stop and wait for the parent reply.",
+        "Execute the delegated work. Do not write memories or plugins. When done, call work_sub_whale_report({nextStage:'communication'}) to advance and set awaitingParent, then do not call more tools; write your full report as your final message, end the turn, and wait for the parent reply (received as subagent-settled).",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],

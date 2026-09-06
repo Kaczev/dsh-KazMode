@@ -120,9 +120,9 @@ export const WORK_SUB_WHALE_REPORT_TOOL = "work_sub_whale_report";
 export const MEMORY_SUB_WHALE_REPORT_TOOL = "memory_sub_whale_report";
 export const PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL = "plugin_maintainer_sub_whale_report";
 
-/** *_sub_whale_report 成功后的硬等门提示（工具结果文案追加；子代理应结束回合等待父主模型）。 */
+/** *_sub_whale_report 成功后的硬等门提示（工具结果文案追加；子代理应把完整报告作为最终消息结束回合，父主以 subagent-settled 收到）。 */
 export const SUB_WHALE_REPORT_WAIT_NOTICE =
-  "Report delivered. Now waiting for the parent main model's reply; end your turn and do not call further tools.";
+  "Stage advanced; now output your full report as your final message and end the turn; parent receives it as subagent-settled; do not call further tools.";
 
 /** tools/pre-execute 对 awaitingParent 受控子代理的结构化拒绝 code。 */
 export const SUB_WHALE_REPORT_WAIT_DENY_CODE = "subagent-report-wait-deny";
@@ -2095,10 +2095,12 @@ export default {
     });
 
     // -----------------------------------------------------------------------
-    // *_sub_whale_report：子代理作用域的 v0.9 report 包装。
-    // 它同时具备两个能力：
-    //   1) 与主模型 whale_report 相同的“推进本角色 workflow”能力（nextStage）；
-    //   2) 原生子代理 report：把输出汇报给主模型（output）。
+    // *_sub_whale_report：子代理作用域的 v0.9 单一 subagent-settled 通道。
+    // 它只负责：
+    //   1) 推进本角色 workflow（nextStage）；
+    //   2) 置 awaitingParent 硬等门。
+    // 完整报告由子代理在工具结果后以“最终消息”写出；父主模型经 DSH
+    // subagent-settled 单条收到。不再调用 reportFrom、不再 child-side 写摘要。
     // 每个受控角色只放行自己的 *_sub_whale_report，阶段机也按角色不同。
     // -----------------------------------------------------------------------
     const subWhaleReportDefs = [];
@@ -2117,21 +2119,17 @@ export default {
         description:
           `Advance/report through the v0.9 ${role} subagent workflow (${roleFlow}). ` +
           `This tool is available only inside the matching v0.9 subagent role. ` +
-          `Pass output for the native report to the parent main model, and nextStage to advance ` +
-          `this role's ka-whale-workflow stage before reporting (must be in the current stage's ` +
-          `Can advance to list). If nextStage is omitted, only the report is sent and the stage stays unchanged. ` +
-          `A successful report is a hard stop: the child sets awaitingParent and waits for the parent main model's ` +
+          `Pass nextStage to advance this role's ka-whale-workflow stage (must be in the current stage's ` +
+          `Can advance to list); if nextStage is omitted, only awaitingParent is set and the stage stays unchanged. ` +
+          `Stage advanced; now output your full report as your final message and end the turn; ` +
+          `parent receives it as subagent-settled. Do not call further tools. ` +
+          `A successful call is a hard stop: the child sets awaitingParent and waits for the parent main model's ` +
           `reply via send_message, which resumes it; if the child is at terminal communication, that parent reply ` +
           `starts a fresh delegation at ${roleFlow.split(" → ")[0]}.`,
         parameters: {
-          output: {
-            type: "string",
-            required: true,
-            description: "Report/result text sent to the parent main model through the native subagent report.",
-          },
           nextStage: {
             type: "string",
-            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before reporting.`,
+            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before the final report.`,
           },
         },
         output: {
@@ -2139,7 +2137,6 @@ export default {
             type: "object",
             additionalProperties: false,
             properties: {
-              messageId: { type: "string" },
               role: { type: "string" },
               stage: { type: "string" },
               advanced: { type: "boolean" },
@@ -2162,20 +2159,6 @@ export default {
             );
           }
           ensureControlledSubagentStarted(agent);
-          const subagents = ctx.get("subagents");
-          if (
-            subagents === undefined ||
-            subagents === null ||
-            typeof subagents.reportFrom !== "function"
-          ) {
-            return Promise.reject(
-              new Error(`${reportTool} is unavailable: DSH subagent report service is not present.`),
-            );
-          }
-          const output = typeof args?.output === "string" ? args.output : "";
-          if (output.trim().length === 0) {
-            return Promise.reject(new Error(`${reportTool} requires a non-empty output.`));
-          }
           const nextStage = typeof args?.nextStage === "string" ? args.nextStage.trim() : "";
           const current = stageOfAgent(agent);
           let advanced = false;
@@ -2195,29 +2178,15 @@ export default {
               reportRoundDisplay(agent, `${reportTool}: ${role} ${current} → ${nextStage}`, "阶段切换");
             }
           }
-          // 6.0.2 child-side write: the reporting subagent records its own
-          // output summary under its own round-display, so child pages reliably
-          // show report summaries under the child's own turn.
-          reportRoundDisplay(agent, oneLineSummary(output), "子代理汇报", "subagent-report");
-          const content = [{ type: "text", text: output }];
-          const messageId = await subagents.reportFrom(agent, content, {
-            delivery: "next-step",
-            signal: exec.signal,
-          });
-          // 6.0.2 keeps the existing parent-side capture: when the report message
-          // reaches the parent main line, agent/pre-step still records the summary
-          // under the main agent and attempts the child-session write too. Child-side
-          // writing above plus parent-side capture make the child page reliable
-          // even when the parent-side child resolution is delayed or unavailable.
-          // 硬等门：reportFrom 已成功送达后才置 awaitingParent=true（无论是否带
-          // nextStage）。同一轮若子代理再尝试任何工具（含再次 report），
-          // tools/pre-execute 会以 SUB_WHALE_REPORT_WAIT_DENY_CODE 拒绝。
+          // 单一 subagent-settled 通道：工具不发送报告正文；子代理随后把完整报告
+          // 作为最终消息写出，父主以 subagent-settled 收到。此处只置硬等门。
+          // 同一轮若子代理再尝试任何工具（含再次 report），tools/pre-execute
+          // 会以 SUB_WHALE_REPORT_WAIT_DENY_CODE 拒绝。
           const childId = sessionIdOf(agent);
           if (typeof childId === "string" && childId.length > 0) {
             stageStore.setSubagentRoleAwaitingParent(childId, true);
           }
           return {
-            messageId,
             role,
             stage: nextStage.length > 0 ? nextStage : current,
             advanced,
@@ -2307,8 +2276,9 @@ export default {
       if (controlledRole !== null) {
         const roleRecord = controlledSubagentRecordOfAgent(agent);
         const name = typeof exec?.name === "string" ? exec.name : "(unknown)";
-        // 硬等门：report 已送达后禁止继续调任何工具（含再次 report），直到父主
-        // 模型 send_message 到达清门。放在 stage Allowed 检查之前，保证没有旁路。
+        // 硬等门：最终报告将作为 subagent-settled 发出后，禁止继续调任何工具
+        // （含再次 report），直到父主模型 send_message 到达清门。放在 stage
+        // Allowed 检查之前，保证没有旁路。
         if (roleRecord !== null && roleRecord.awaitingParent === true) {
           ctx.logger.info(
             `[ka-whale-workflow] ${SUB_WHALE_REPORT_WAIT_DENY_CODE}: "${name}" blocked for ${controlledRole} subagent (awaitingParent=true)`,
@@ -2318,9 +2288,10 @@ export default {
             code: SUB_WHALE_REPORT_WAIT_DENY_CODE,
             reason:
               `${SUB_WHALE_REPORT_WAIT_DENY_CODE}: "${name}" is blocked because ${controlledRole} ` +
-              `subagent report 已送达，等待主代理回复（awaitingParent=true）。No further tool calls ` +
+              `subagent has set awaitingParent=true; its full final report will be received as subagent-settled. ` +
+              `No further tool calls ` +
               `(including ${V09_ROLE_REPORT_TOOLS[controlledRole] ?? "the role report tool"}) are allowed ` +
-              `until the parent main model replies via send_message. End your turn and do not call further tools.`,
+              `until the parent main model replies via send_message. Write your full report as your final message and end the turn.`,
           };
         }
         ensureControlledSubagentStarted(agent);
@@ -2670,12 +2641,12 @@ export default {
           clearAwaitingParentOnParentReply(agent, message);
         }
       }
-      // 6.0.2 subagent round-display: child-side *_sub_whale_report already writes
-      // a summary under the child; when the parent main agent additionally receives
-      // a DSH subagent-report/subagent-settled message, record the summary under
-      // BOTH the parent/main agent and the child subagent session (resolved from
-      // message.source.senderSessionId), keeping the main session summary while
-      // reinforcing the child-side write.
+      // Single subagent-settled channel: the child no longer writes a summary
+      // through *_sub_whale_report. When the parent main agent receives a DSH
+      // subagent-report/subagent-settled message, record the summary under BOTH
+      // the parent/main agent and the child subagent session (resolved from
+      // message.source.senderSessionId), keeping the main session summary and the
+      // child page summary intact from the single settled message.
       if (
         liveNow.enabled === true &&
         controlledRoleNow === null &&

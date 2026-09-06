@@ -53,13 +53,12 @@
   `KAZ_ROLE_PROMPTS.subagent.*`，`kaz-system-prompt` 会原样保留该角色 Persona。
   因此真实 system 里 main/role guidance 都只出现一次，也不再重复 DeepSeek
   base 的 Keep-gray 段落。
-- 子代理 report 的 round-display 摘要（37.5 → 6.0.2）：child-side
-  `*_sub_whale_report` 会先以 category=`subagent-report` 把 output 的单行摘要写到
-  child 自己的 round-display；父主线 `agent/pre-step` 收到 `subagent-report` /
-  `subagent-settled` 后仍保留 parent-side capture，以 category=`subagent-report`
-  同时记录到主 agent 与 child subagent session（child id 取自
-  `source.senderSessionId`）。因此主会话和 child 页面都能看到该次汇报；child agent
-  结束后 round-display 仍保留 child 记录。
+- 子代理 report 的 round-display 摘要（单一 subagent-settled 通道）：子代理不再由
+  `*_sub_whale_report` child-side 写摘要；完整报告由子代理作为最终消息写出并结束
+  回合，父主线 `agent/pre-step` 收到 `subagent-report` / `subagent-settled` 后以
+  category=`subagent-report` 同时记录到主 agent 与 child subagent session（child id
+  取自 `source.senderSessionId`）。因此主会话和 child 页面都能看到该次汇报；child
+  agent 结束后 round-display 仍保留 child 记录。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/working/memory-maintenance/
   plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
@@ -104,15 +103,17 @@
   `memoryMaintainer`/`pluginMaintainer` items，必须先走
   `memory-maintenance`/`plugin-maintenance` 再 communication。
 - 36.6 事件驱动等待：`ka_sub_whale` 创建 continuable child 后，主线不使用
-  `pwsh sleep` / 轮询 `list_agents` 等待；应结束当前回合，等子代理 report/finished
-  消息到达主会话再继续。`list_agents` / `send_message` 不是等待原语；主 Persona、
-  working/memory-maintenance/plugin-maintenance 注入与
+  `pwsh sleep` / 轮询 `list_agents` 等待；应结束当前回合，等子代理最终
+  subagent-settled 消息到达主会话再继续。`list_agents` / `send_message` 不是等待
+  原语；主 Persona、working/memory-maintenance/plugin-maintenance 注入与
   `ka_sub_whale` description/output 都明确该口径。
-- 主子代理相处模式：每个 `*_sub_whale_report` 都会**硬停**子代理并置
-  `awaitingParent`，直到父主模型回复；父主审查 report 后用 `send_message`
-  恢复子代理（子代理处于 terminal `communication` 时，该回复开启该角色新的一轮：
-  worker=assess-complexity、memoryMaintainer/pluginMaintainer=assess-delegation）。
-  父主不得假设子代理在 report 后仍继续运行。
+- 主子代理相处模式（单一 subagent-settled 通道）：`*_sub_whale_report` 是子代理
+  唯一的硬停/汇报闸门——调用它（可选 `nextStage` 推进）后置 `awaitingParent` 并
+  硬停；随后子代理把完整报告作为**最终消息**写出并结束回合，父主以单条
+  `subagent-settled` 收到。父主审查后用一次 `send_message` 恢复子代理（子代理处于
+  terminal `communication` 时，该回复开启该角色新的一轮：worker=assess-complexity、
+  memoryMaintainer/pluginMaintainer=assess-delegation）。父主不得假设子代理在
+  report 工具调用后仍继续运行。
 - 36.7 challenge-plan 批评纪律：主/worker 的 challenge-plan 阶段要求先批评、
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
   批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与
@@ -135,15 +136,17 @@
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 三个 `*_sub_whale_report`
-  （每个工具按角色不同流程推进 stage，并包装 DSH reportFrom 把 output 汇报给
-  父主模型；`nextStage` 用于推进，省略 `nextStage` 时只原生汇报）；
+  （单一 subagent-settled 通道：每个工具按角色不同流程推进 stage，可选 `nextStage`
+  用于推进，省略 `nextStage` 只置硬等门；工具不再接收 `output`、不调用 DSH
+  `reportFrom`，完整报告由子代理最终消息携带）；
   `list_agents / send_message / interrupt_agent` 由 DSH subagent-control 提供，
   ka-whale-workflow/kaz-shared 负责 Stable Main Surface 放行。
-- 子代理 report 硬等门：`*_sub_whale_report` 成功送达 reportFrom 后把
-  subagentRoles 记录的 `awaitingParent` 置 true（无论是否带 `nextStage`），工具
-  结果追加 `Report delivered. Now waiting...` 文案；受控子代理
-  `awaitingParent=true` 期间 tools/pre-execute 拒绝其继续调用任何工具（含再次
-  report），返回结构化 `subagent-report-wait-deny`；父主模型 `send_message`
+- 子代理 report 硬等门：`*_sub_whale_report` 无论是否带 `nextStage` 都把
+  subagentRoles 记录的 `awaitingParent` 置 true，工具结果追加
+  `Stage advanced; now output your full report as your final message and end the
+  turn; parent receives it as subagent-settled; do not call further tools.` 文案；
+  受控子代理 `awaitingParent=true` 期间 tools/pre-execute 拒绝其继续调用任何工具
+  （含再次 report），返回结构化 `subagent-report-wait-deny`；父主模型 `send_message`
   （DSH source `kind=coordinator`/`form=relay`）到达时清门——当前 stage 为
   `communication` 终态则重置为该角色初始阶段（worker=assess-complexity、
   memoryMaintainer/pluginMaintainer=assess-delegation）开始新的一轮，非终态仅清
