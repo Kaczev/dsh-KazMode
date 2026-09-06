@@ -2,6 +2,8 @@
 //   - includeSubagents=false 时受控 v0.9 子代理仍被治理（不跳过）；
 //   - idle 初始化 role 首阶段（worker=assess-complexity，其余=assess-delegation）；
 //   - role 专属 [ka-whale-workflow <stage>] 按 pending 注入一次；
+//   - report 后等待期（awaitingParent=true）pre-step 不注入/不清 pending，
+//     父主 send_message 清门后的下一 pre-step 才注入新 stage 文本；
 //   - plugin create/update/retire 注入携带 lifecyclePath；
 //   - 受控角色不注入旧通用 SUBAGENT_FLOW_TEXT；旧/未知子代理仅在 includeSubagents=true 时注入。
 //   - tools/pre-execute 按 role/stage Allowed tools 软闸门。
@@ -238,6 +240,19 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     "6.0.2 work_sub_whale_report child-side 写 child round-display 摘要",
     childRdReports.length >= 1 && childRdReports.some((payload) => payload?.content === "assessed: complex delegation"),
   );
+  // 延迟注入守卫：report+nextStage 已置 awaitingParent=true 且挂 pending
+  // challenge-plan；父主 send_message 清门前的 pre-step 不得注入或消费 pending。
+  const waitingStep = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
+  const waitingText = messageText(waitingStep?.messages ?? []);
+  check(
+    "report 后等待期 pre-step 不注入新 stage 文本（challenge-plan）",
+    !waitingText.includes("[ka-whale-workflow challenge-plan]") &&
+      roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true,
+  );
+  check(
+    "report 后等待期 pending 仍保留（未 clear）",
+    pendingFromFile(STORE_FILE, "child-worker") === "challenge-plan",
+  );
   // report 成功已置 awaitingParent=true；先由父主 send_message 清门，才能验证
   // challenge-plan 本身的 stage 软闸门（read 放行、write 拒绝）。
   await claimed({
@@ -249,6 +264,14 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     turn: 1,
   });
   check("父主 send_message 清门后 stage 保持 challenge-plan", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false);
+  const relayedStep = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
+  const relayedText = messageText(relayedStep?.messages ?? []);
+  check(
+    "父 relay 清门后的下一 pre-step 才注入 challenge-plan 文本并清 pending",
+    relayedText.includes("[ka-whale-workflow challenge-plan]") &&
+      relayedText.includes("work_sub_whale_report") &&
+      pendingFromFile(STORE_FILE, "child-worker") === null,
+  );
   const readAllow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const writeDeny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
   check("推进后 challenge-plan 软闸门：read 放行、write 拒绝", readAllow?.kind === "allow" && writeDeny?.kind === "deny");
@@ -285,11 +308,25 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   );
   check("report+nextStage 到 check-tools 后返回等待 notice", toCheckTools?.stage === "check-tools" && typeof toCheckTools?.notice === "string" && toCheckTools.notice.includes("Report delivered. Now waiting for the parent main model's reply") && toCheckTools.notice.includes("end your turn and do not call further tools"));
   check("report 成功后角色记录 awaitingParent=true", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true);
+  const checkToolsWaitingStep = await preStep({ agent, turn: 2, messages: [] }, nextEnter);
+  const checkToolsWaitingText = messageText(checkToolsWaitingStep?.messages ?? []);
+  check(
+    "report 后等待期 pre-step 不注入新 stage 文本（check-tools）",
+    !checkToolsWaitingText.includes("[ka-whale-workflow check-tools]") &&
+      pendingFromFile(STORE_FILE, "child-worker") === "check-tools",
+  );
   const waitDenyAgainReport = await preExecute({ name: "work_sub_whale_report", agent }, async () => ({ kind: "allow" }));
   const waitDenyAllowedTool = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
   check("awaitingParent 等待期任何工具（含再次 report）被结构化拒绝", waitDenyAgainReport?.kind === "deny" && waitDenyAgainReport?.code === "subagent-report-wait-deny" && String(waitDenyAgainReport.reason).includes("report 已送达，等待主代理回复") && waitDenyAllowedTool?.kind === "deny" && waitDenyAllowedTool?.code === "subagent-report-wait-deny");
   await claimed({ agent, message: parentRelay, turn: 2 });
   check("父主 send_message 到达非终态：仅清 awaitingParent、stage 保持不变", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && stageFromFile(STORE_FILE, "child-worker") === "check-tools");
+  const checkToolsRelayedStep = await preStep({ agent, turn: 2, messages: [] }, nextEnter);
+  const checkToolsRelayedText = messageText(checkToolsRelayedStep?.messages ?? []);
+  check(
+    "父 relay 清门后的下一 pre-step 才注入 check-tools 文本并清 pending",
+    checkToolsRelayedText.includes("[ka-whale-workflow check-tools]") &&
+      pendingFromFile(STORE_FILE, "child-worker") === null,
+  );
   const reportAllowedAfterClear = await preExecute({ name: "work_sub_whale_report", agent }, async () => ({ kind: "allow" }));
   check("清门后允许继续调用 report（继续当前轮）", reportAllowedAfterClear?.kind === "allow");
   const toWorking = await workReport.execute(

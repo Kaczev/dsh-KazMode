@@ -2671,6 +2671,8 @@ export default {
       //     进入某 stage 会再次 pending，因此会再次注入）。
       const liveNow = liveFor(agent);
       const controlledRoleNow = controlledSubagentRoleOfAgent(agent);
+      const controlledRoleRecordNow =
+        controlledRoleNow !== null ? controlledSubagentRecordOfAgent(agent) : null;
       const skipSubagentNow =
         controlledRoleNow === null && liveNow.includeSubagents !== true && isSubagent(agent);
       const subagentNow = isSubagent(agent);
@@ -2772,7 +2774,15 @@ export default {
                 `[ka-whale-workflow] 构造 ${pendingStage} 边界注入消息失败：${error instanceof Error ? error.message : String(error)}`,
               );
             }
-          } else if (pendingStage !== null && controlledRoleNow !== null) {
+          } else if (
+            pendingStage !== null &&
+            controlledRoleNow !== null &&
+            // 硬等门守卫：report 送达后、父主 send_message 清门前的等待期，不注入
+            // 下一 pending stage，也不 clear pending——保留给清门后的下一 pre-step。
+            // （goal/working-resumed specialText 与主模型注入分支不受此守卫影响。）
+            controlledRoleRecordNow !== null &&
+            controlledRoleRecordNow.awaitingParent !== true
+          ) {
             // 受控子代理：注入 role 专属 stage 文本；plugin 生命周期阶段附实际 lifecyclePath。
             const options = stageNeedsLifecyclePath(pendingStage)
               ? { lifecyclePath: lifecycleReferencePath }
