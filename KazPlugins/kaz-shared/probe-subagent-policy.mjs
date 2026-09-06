@@ -1,7 +1,7 @@
-// kaz-shared 探针：v0.9 B3 子代理四角色层。
+// kaz-shared 探针：v0.9 B3 子代理三角色层。
 // 运行：node KazPlugins/kaz-shared/probe-subagent-policy.mjs
 // 验证：
-//   - 角色常量只含 worker / memoryMaintainer / pluginMaintainer / pluginCreator；
+//   - 角色常量只含 worker / memoryMaintainer / pluginMaintainer；
 //   - 每个角色有 Minimal、Stable Base、personaRef、toolFilter；
 //   - 旧 toolCreator / retriever 不再被接受；
 //   - assignedTools 来源 = tool-jobs + 可用私有插件候选，>6 提醒、>8 拒绝；
@@ -30,10 +30,10 @@ function check(label, ok) {
   if (!ok) failures += 1;
 }
 
-const V09_ROLES = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+const V09_ROLES = ["worker", "memoryMaintainer", "pluginMaintainer"];
 
 // ---------- v0.9 角色常量 ----------
-check("角色常量只含 v0.9 四值且冻结", Array.isArray(V09_SUBAGENT_ROLE_IDS) && Object.isFrozen(V09_SUBAGENT_ROLE_IDS) && JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(V09_ROLES));
+check("角色常量只含 v0.9 三角色且冻结、无 pluginCreator/plugin_creator_sub_whale_report", Array.isArray(V09_SUBAGENT_ROLE_IDS) && Object.isFrozen(V09_SUBAGENT_ROLE_IDS) && JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(V09_ROLES) && !V09_SUBAGENT_ROLE_IDS.includes("pluginCreator") && !Object.values(V09_SUBAGENT_ROLE_STABLE_BASE).flat().includes("plugin_creator_sub_whale_report"));
 check("每个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_ROLES.every((role) => Array.isArray(V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role]) && Array.isArray(V09_SUBAGENT_ROLE_STABLE_BASE[role]) && typeof V09_SUBAGENT_ROLE_PERSONA_REFS[role] === "string" && Array.isArray(V09_SUBAGENT_ROLE_TOOL_FILTERS[role].allow)));
 check("首轮 role Minimal 恰为 memory_search + context_search（不含各自 report）", V09_ROLES.every((role) => {
   const list = V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role];

@@ -118,7 +118,7 @@ function subagentAgent(id) {
 }
 
 {
-  const roles = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  const roles = ["worker", "memoryMaintainer", "pluginMaintainer"];
   const contextTools = ["context_search", "context_read", "context_compress"];
   check(
     "M3.3 子代理 communication 均含 context_search/context_read/context_compress",
@@ -162,12 +162,6 @@ const h1 = makeBase({ includeSubagents: false, stageStoreFile: STORE_FILE, planF
     assignedTools: [],
     finalTools: ["read", "context_read", "context_search", "write", "plugin_maintainer_sub_whale_report"],
   });
-  store.setSubagentRole("child-plugin-creator", {
-    planItemId: "p-pc",
-    persona: "pluginCreator",
-    assignedTools: [],
-    finalTools: ["memory_search", "context_search"],
-  });
   // Seed one controlled subagent already at a plugin lifecycle stage so the probe
   // can assert lifecyclePath is injected through the runtime pre-step path.
   store.set("child-plugin-maintainer-create", "create-plugin");
@@ -186,7 +180,8 @@ const preStep = h1.listeners.get("agent/pre-step")?.[0];
 const userMessage = { content: [{ type: "text", text: "delegation" }], source: { kind: "user" } };
 const nextEnter = async () => ({ kind: "enter", messages: [] });
 
-check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL_STAGES.worker === "assess-complexity" && V09_SUBAGENT_ROLE_INITIAL_STAGES.memoryMaintainer === "assess-delegation" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginMaintainer === "assess-delegation" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginCreator === "assess-delegation");
+check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确且无 pluginCreator", V09_SUBAGENT_ROLE_INITIAL_STAGES.worker === "assess-complexity" && V09_SUBAGENT_ROLE_INITIAL_STAGES.memoryMaintainer === "assess-delegation" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginMaintainer === "assess-delegation" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginCreator === undefined);
+check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugin_creator_sub_whale_report") === false);
 
 // Worker: includeSubagents=false 下 inbox claim 不跳过，idle 进入 assess-complexity。
 {
@@ -264,21 +259,6 @@ check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL
   const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const allow = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
   check("memoryMaintainer assess-delegation 软闸门：read 拒绝、memory_search 放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow");
-}
-
-// pluginCreator: idle 进入 assess-delegation（不同于 worker 的 assess-complexity）。
-{
-  const agent = subagentAgent("child-plugin-creator");
-  await claimed({ agent, message: userMessage, turn: 1 });
-  check("includeSubagents=false：pluginCreator 受控子代理仍进入 assess-delegation", stageFromFile(STORE_FILE, "child-plugin-creator") === "assess-delegation");
-  const decision = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
-  const text = messageText(decision?.messages ?? []);
-  check("pluginCreator 注入 role stage 文本", text.includes("[ka-whale-workflow assess-delegation]") && text.includes("plugin_creator_sub_whale_report"));
-  const deny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
-  const denyRead = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
-  const allowMem = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
-  const allowCtx = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
-  check("pluginCreator assess-delegation 软闸门：write/read 拒绝、memory_search/context_search 放行", deny?.kind === "deny" && denyRead?.kind === "deny" && allowMem?.kind === "allow" && allowCtx?.kind === "allow");
 }
 
 // pluginMaintainer create-plugin: pre-step 注入 lifecyclePath。

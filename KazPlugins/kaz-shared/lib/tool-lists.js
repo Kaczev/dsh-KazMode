@@ -146,7 +146,7 @@ export const MEMORY_READ_TOOLS = Object.freeze([
 
 /** 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，这些工具不应出现在工具面。
  *  v0.8 Step B1/B2：create-plan/原生 Plan 已从 Kaz 移除并删除插件目录。
- *  v0.9：ka-whale-workflow 还携带 ka_sub_whale 与四个子代理 report 工具；
+ *  v0.9：ka-whale-workflow 还携带 ka_sub_whale 与三个子代理 report 工具；
  *  M3.3：kaz-context-policy 携带 context_compress / context_search / context_read。 */
 export const MANAGED_CARRIER_TOOLS = {
   "ka-whale-workflow": [
@@ -155,7 +155,6 @@ export const MANAGED_CARRIER_TOOLS = {
     "work_sub_whale_report",
     "memory_sub_whale_report",
     "plugin_maintainer_sub_whale_report",
-    "plugin_creator_sub_whale_report",
   ],
   "kaz-context-policy": ["context_search", "context_read", "context_compress"],
 };
@@ -216,7 +215,6 @@ export const KAZ_V09_SUB_WHALE_REPORT_TOOLS = Object.freeze([
   "work_sub_whale_report",
   "memory_sub_whale_report",
   "plugin_maintainer_sub_whale_report",
-  "plugin_creator_sub_whale_report",
 ]);
 
 /** v0.9 Stable Main Surface（§1.1，22 个；M3.3 含 context_compress/context_search/context_read；不含 create_goal/subagent）。 */
@@ -320,27 +318,11 @@ export const KAZ_V09_PLUGIN_MAINTAINER_TOOLS = Object.freeze([
   "plugin_maintainer_sub_whale_report",
 ]);
 
-/** v0.9 插件创建子代理（pluginCreator）Stable Surface（§1.5；M3.3 加 context 三工具）。 */
-export const KAZ_V09_PLUGIN_CREATOR_TOOLS = Object.freeze([
-  "read",
-  "context_read",
-  "context_search",
-  "context_compress",
-  "write",
-  "edit",
-  "glob",
-  "grep",
-  "pwsh",
-  "todo_write",
-  "plugin_creator_sub_whale_report",
-]);
-
 /** v0.9 角色 → 子代理 Stable Surface 映射。 */
 export const KAZ_V09_SUBAGENT_ROLE_TOOLS = Object.freeze({
   worker: KAZ_V09_WORKER_BASE_TOOLS,
   memoryMaintainer: KAZ_V09_MEMORY_MAINTAINER_TOOLS,
   pluginMaintainer: KAZ_V09_PLUGIN_MAINTAINER_TOOLS,
-  pluginCreator: KAZ_V09_PLUGIN_CREATOR_TOOLS,
 });
 
 /** 计算主模型 stable surface（Set）。固定集 = KAZ_V09_MAIN_TOOLS。 */
@@ -360,7 +342,7 @@ export function stableSubagentSurface({ baseTools = KAZ_SUBAGENT_BASE_TOOLS, ass
 
 /** v0.9 角色特化段终稿（§9.1–9.5）：完整 Persona 的唯一收口常量。
  *  与 `不入库文件/Kaz5.0与6.0更新规划/最终基准 描述 v0.9.md` §9 逐字一致。
- *  只按角色固定，禁止按任务实例动态生成；subagent 四条由
+ *  只按角色固定，禁止按任务实例动态生成；subagent 三条由
  *  ka-whale-workflow/stage-defs 派生 V09_ROLE_PERSONAS，供 ka_sub_whale 使用。 */
 export const KAZ_ROLE_PROMPTS = Object.freeze({
   main: Object.freeze(`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
@@ -398,15 +380,8 @@ Report changed files, probe results, and rollback paths.
 Manage context proactively: manual/model-initiated context_search/read/compress come first; auto compression is only a safety net. When earlier exact details, verbatim text, or content that may already be summarized are needed, actively use context_search then context_read before answering. When the session is very long, a heavy task needs closing room, or the user asks to free context, preview with context_compress suggest, then fold; do not interrupt frequently.
 
 The final white response should be crisp and to the point, and only appear after reasoning and working.`),
-    pluginCreator: Object.freeze(`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
 
-Follow the ka-whale-workflow in order: assess-delegation, plan-plugin, create-plugin, communication. Use plugin_creator_sub_whale_report to advance. Work as the private plugin creation subagent: assess the delegation, plan the new plugin under KazPrivatePlugins, implement CANDIDATE → package/lib/probe → registration → versioning, then report. Do not write memories. Before planning or executing plugin creation, read the private-plugin lifecycle reference; its path is provided in the current stage injection. Register the new tool candidate with an English description. Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the parent main agent and stop the work immediately.
 
-Report plugin path, probe results, and rollback path.
-
-Manage context proactively: manual/model-initiated context_search/read/compress come first; auto compression is only a safety net. When earlier exact details, verbatim text, or content that may already be summarized are needed, actively use context_search then context_read before answering. When the session is very long, a heavy task needs closing room, or the user asks to free context, preview with context_compress suggest, then fold; do not interrupt frequently.
-
-The final white response should be crisp and to the point, and only appear after reasoning and working.`),
   }),
 });
 
@@ -676,7 +651,7 @@ export {
   newDeletionAudit,
 } from "./maintenance-report.js";
 
-/** v0.9 B3 子代理四角色层（见 subagent-policy.js）。 */
+/** v0.9 B3 子代理三角色层（见 subagent-policy.js）。 */
 export {
   SUBAGENT_MAINTENANCE_MEMORY_WRITE_TOOLS,
   normalizeToolNameList,

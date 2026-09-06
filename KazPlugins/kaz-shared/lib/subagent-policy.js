@@ -1,9 +1,9 @@
-// kaz-shared —— v0.9 B3 子代理四角色层（Minimal / Stable Base / toolFilter / personaRef）
+// kaz-shared —— v0.9 B3 子代理三角色层（Minimal / Stable Base / toolFilter / personaRef）
 // ===========================================================================
 // 目标：
-//   1) 本模块只产出 v0.9 固定四角色（worker / memoryMaintainer /
-//      pluginMaintainer / pluginCreator）的 Minimal、Stable Base、toolFilter
-//      与 personaRef，供 ka-whale-workflow 受控委派层使用。
+//   1) 本模块只产出 v0.9 固定三角色（worker / memoryMaintainer /
+//      pluginMaintainer）的 Minimal、Stable Base、toolFilter 与 personaRef，
+//      供 ka-whale-workflow 受控委派层使用。
 //   2) assignedTools 来源校验只接受 tool-jobs + 可用私有插件候选，并遵守
 //      >6 提醒、>8 拒绝；最终面 = role Stable Base + assignedTools。
 //   3) B5 起旧 toolCreator / retriever 角色与旧 taskAllowedTools 投影层已退役。
@@ -50,7 +50,7 @@ export function normalizeToolNameList(value) {
 }
 
 // ---------------------------------------------------------------------------
-// v0.9 B3：四角色固定层（Minimal / Stable Base / toolFilter / personaRef）
+// v0.9 B3：三角色固定层（Minimal / Stable Base / toolFilter / personaRef）
 // ---------------------------------------------------------------------------
 
 /** v0.9 子代理角色固定集合（R-B3-2）。 */
@@ -58,7 +58,6 @@ export const V09_SUBAGENT_ROLE_IDS = Object.freeze([
   "worker",
   "memoryMaintainer",
   "pluginMaintainer",
-  "pluginCreator",
 ]);
 
 /** v0.9 子代理 Minimal 工具（§1.7；首次工具调用前可见）：子代理 Minimal 只两个工具（memory_search+context_search）；report 工具在首次工具调用后的 Stable Base 才可见。 */
@@ -66,7 +65,6 @@ export const V09_SUBAGENT_ROLE_MINIMAL_TOOLS = Object.freeze({
   worker: Object.freeze(["memory_search", "context_search"]),
   memoryMaintainer: Object.freeze(["memory_search", "context_search"]),
   pluginMaintainer: Object.freeze(["memory_search", "context_search"]),
-  pluginCreator: Object.freeze(["memory_search", "context_search"]),
 });
 
 /** v0.9 子代理 Stable Base（§1.2–1.5；含该角色的 report 工具；M3.3 加 context 三工具）。 */
@@ -116,19 +114,6 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "todo_write",
     "plugin_maintainer_sub_whale_report",
   ]),
-  pluginCreator: Object.freeze([
-    "read",
-    "context_read",
-    "context_search",
-    "context_compress",
-    "write",
-    "edit",
-    "glob",
-    "grep",
-    "pwsh",
-    "todo_write",
-    "plugin_creator_sub_whale_report",
-  ]),
 });
 
 /** v0.9 角色 → personaRef（R-B3-3）。 */
@@ -136,7 +121,6 @@ export const V09_SUBAGENT_ROLE_PERSONA_REFS = Object.freeze({
   worker: "v0.9:worker",
   memoryMaintainer: "v0.9:memoryMaintainer",
   pluginMaintainer: "v0.9:pluginMaintainer",
-  pluginCreator: "v0.9:pluginCreator",
 });
 
 /** v0.9 角色固定 toolFilter（Stable Base 即 allow；最终面由 Base + assignedTools 合成）。 */
@@ -147,9 +131,6 @@ export const V09_SUBAGENT_ROLE_TOOL_FILTERS = Object.freeze({
   }),
   pluginMaintainer: Object.freeze({
     allow: Object.freeze([...V09_SUBAGENT_ROLE_STABLE_BASE.pluginMaintainer]),
-  }),
-  pluginCreator: Object.freeze({
-    allow: Object.freeze([...V09_SUBAGENT_ROLE_STABLE_BASE.pluginCreator]),
   }),
 });
 

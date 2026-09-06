@@ -1790,9 +1790,9 @@ export default {
         }
 
         if (endpoint === "addPrivatePluginCandidate") {
-          // 6.0.3：私有插件候选不由用户在面板添加；写入只允许 pluginCreator /
-          // pluginMaintainer 生命周期内部完成。此端点保持存在但只读拒绝。
-          return rpcReadOnly("私有插件候选不可由用户在工具面板添加；请通过 pluginCreator/pluginMaintainer 生命周期管理。");
+          // 6.0.3：私有插件候选不由用户在面板添加；写入只允许 pluginMaintainer
+          // 生命周期内部完成。此端点保持存在但只读拒绝。
+          return rpcReadOnly("私有插件候选不可由用户在工具面板添加；请通过 pluginMaintainer 生命周期管理。");
         }
 
         if (endpoint === "resetExternalToolPlugins") {

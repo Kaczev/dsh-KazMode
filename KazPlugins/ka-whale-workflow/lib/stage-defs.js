@@ -1,6 +1,6 @@
 // ka-whale-workflow —— v0.9 阶段机常量与注入文本（纯 ESM）
 // ===========================================================================
-// v0.9 §3–§7 表格的单一事实源：主模型与四类子代理使用英文 stage id，
+// v0.9 §3–§6 表格的单一事实源：主模型与三类子代理使用英文 stage id，
 // Allowed tools / Can advance to / Task 全部由 v0.9 表格定义。
 // 本文件不依赖 cordis / dsh 服务，供 lib/index.js 与离线探针共用。
 // ===========================================================================
@@ -15,7 +15,6 @@ export const V09_SUBAGENT_ROLES = Object.freeze([
   "worker",
   "memoryMaintainer",
   "pluginMaintainer",
-  "pluginCreator",
 ]);
 
 /** 主模型主流程 stage id（§3 表格顺序；goal-active 是外部模式，不列入这里）。 */
@@ -65,14 +64,6 @@ export const PLUGIN_MAINTAINER_STAGE_IDS = Object.freeze([
   "communication",
 ]);
 
-/** pluginCreator 子代理 stage id（§7）。 */
-export const PLUGIN_CREATOR_STAGE_IDS = Object.freeze([
-  "assess-delegation",
-  "plan-plugin",
-  "create-plugin",
-  "communication",
-]);
-
 /** 所有 v0.9 stage id（不含 idle/done/end 等状态壳）。 */
 export const V09_STAGE_IDS = Object.freeze([
   ...new Set([
@@ -80,7 +71,6 @@ export const V09_STAGE_IDS = Object.freeze([
     ...WORKER_STAGE_IDS,
     ...MEMORY_MAINTAINER_STAGE_IDS,
     ...PLUGIN_MAINTAINER_STAGE_IDS,
-    ...PLUGIN_CREATOR_STAGE_IDS,
   ]),
 ]);
 
@@ -403,57 +393,6 @@ const DEFINITIONS = {
       task: "Report changed files, probe results, and rollback paths.",
     },
   },
-  pluginCreator: {
-    "assess-delegation": {
-      allowedTools: [
-        "memory_search",
-        "context_search",
-        "context_read",
-        "context_compress",
-        "plugin_creator_sub_whale_report",
-      ],
-      canAdvance: ["plan-plugin", "communication"],
-      task: "Judge whether the plugin creation delegation is clear.",
-    },
-    "plan-plugin": {
-      allowedTools: [
-        "read",
-        "context_search",
-        "context_read",
-        "context_compress",
-        "glob",
-        "grep",
-        "pwsh",
-        "todo_write",
-        "plugin_creator_sub_whale_report",
-      ],
-      canAdvance: ["create-plugin", "communication"],
-      task: "Plan the new private plugin under KazPrivatePlugins.",
-    },
-    "create-plugin": {
-      allowedTools: [
-        "write",
-        "edit",
-        "read",
-        "context_search",
-        "context_read",
-        "context_compress",
-        "glob",
-        "grep",
-        "pwsh",
-        "todo_write",
-        "plugin_creator_sub_whale_report",
-      ],
-      canAdvance: ["communication"],
-      task:
-        "Implement CANDIDATE → package/lib/probe → registration → versioning. Plugin lifecycle checklist: 1) CANDIDATE.md; 2) implement under KazPrivatePlugins/<plugin>/; 3) probes + node --check; 4) register/version; 5) sync candidate registry with English description; 6) hot reload only if probe passed, otherwise next task/restart. Read detailed rules from lifecyclePath: {KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH}.",
-    },
-    communication: {
-      allowedTools: ["context_search", "context_read", "context_compress"],
-      canAdvance: ["end"],
-      task: "Report plugin path, probes, and rollback path.",
-    },
-  },
 };
 
 /** 返回 role 的定义表；未知角色返回 null。 */
@@ -474,12 +413,10 @@ export function stageIdsForRole(role) {
   if (role === "worker") return [...WORKER_STAGE_IDS];
   if (role === "memoryMaintainer") return [...MEMORY_MAINTAINER_STAGE_IDS];
   if (role === "pluginMaintainer") return [...PLUGIN_MAINTAINER_STAGE_IDS];
-  if (role === "pluginCreator") return [...PLUGIN_CREATOR_STAGE_IDS];
   return [];
 }
 
-/** v0.9 主阶段 → ka_sub_whale 唯一可委派的 persona（36.8 + 37.5 stage-persona mapping）。
- *  pluginCreator is store-only/unused: no main stage maps to it. */
+/** v0.9 主阶段 → ka_sub_whale 唯一可委派的 persona（36.8 + 37.5 stage-persona mapping）。 */
 export const V09_KA_SUB_WHALE_STAGE_PERSONAS = Object.freeze({
   working: "worker",
   "memory-maintenance": "memoryMaintainer",
@@ -529,7 +466,6 @@ export const V09_ROLE_PERSONAS = Object.freeze({
   worker: KAZ_ROLE_PROMPTS.subagent.worker,
   memoryMaintainer: KAZ_ROLE_PROMPTS.subagent.memoryMaintainer,
   pluginMaintainer: KAZ_ROLE_PROMPTS.subagent.pluginMaintainer,
-  pluginCreator: KAZ_ROLE_PROMPTS.subagent.pluginCreator,
 });
 
 /** v0.9 角色 → report 工具名。 */
@@ -537,7 +473,6 @@ export const V09_ROLE_REPORT_TOOLS = Object.freeze({
   worker: "work_sub_whale_report",
   memoryMaintainer: "memory_sub_whale_report",
   pluginMaintainer: "plugin_maintainer_sub_whale_report",
-  pluginCreator: "plugin_creator_sub_whale_report",
 });
 
 /**

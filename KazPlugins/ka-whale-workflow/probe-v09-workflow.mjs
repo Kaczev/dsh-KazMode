@@ -14,7 +14,6 @@ import {
   WORKER_STAGE_IDS,
   MEMORY_MAINTAINER_STAGE_IDS,
   PLUGIN_MAINTAINER_STAGE_IDS,
-  PLUGIN_CREATOR_STAGE_IDS,
   stageInjectionText,
   stageDefinitionFor,
   canAdvance,
@@ -40,7 +39,6 @@ const planStore = createTaskPlanStore(PLAN_FILE);
 planStore.persistDraftItems([
   { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
   { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
-  { planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] },
   { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
   { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
   { planItemId: "p-draft", persona: "worker", task: "Draft only", assignedTools: [] },
@@ -50,7 +48,6 @@ planStore.persistFinalPayload({
   items: [
     { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
     { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
-    { planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] },
     { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
     { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
   ],
@@ -166,17 +163,16 @@ const kaSubWhale = registeredTools.get(KA_SUB_WHALE_TOOL);
 
 // 纯函数层
 check("主 stage ids 与 v0.9 37.5 一致", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools","write-plan","decide-goal","working","memory-maintenance","plugin-maintenance","communication"]));
-check("worker/memory/plugin stage ids 齐全", WORKER_STAGE_IDS.includes("check-tools") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_CREATOR_STAGE_IDS.includes("create-plugin"));
+check("worker/memory/plugin stage ids 齐全", WORKER_STAGE_IDS.includes("check-tools") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_MAINTAINER_STAGE_IDS.includes("create-plugin"));
 check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE) && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight"));
 {
   const contextTools = ["context_search", "context_read", "context_compress"];
-  const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer"];
   const initialStages = {
     main: "assess-complexity",
     worker: "assess-complexity",
     memoryMaintainer: "assess-delegation",
     pluginMaintainer: "assess-delegation",
-    pluginCreator: "assess-delegation",
   };
   check(
     "M3.3 communication allowedTools = context_search+context_read+context_compress",
@@ -291,7 +287,6 @@ await whaleReport.execute(
       items: [
         { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
         { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
-        { planItemId: "p-creator", persona: "pluginCreator", task: "Create private plugin", assignedTools: [] },
         { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
         { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
       ],
@@ -306,8 +301,8 @@ await whaleReport.execute({ nextStage: "working" }, { agent });
 // each stage only delegates its mapped persona.
 const memoryInWorking = await kaSubWhale.execute({ planItemId: "p-memory" }, { agent });
 check("working 拒绝 memoryMaintainer 委派（stage-persona-mismatch）", memoryInWorking.ok === false && memoryInWorking.code === "stage-persona-mismatch");
-const creatorInWorking = await kaSubWhale.execute({ planItemId: "p-creator" }, { agent });
-check("working 拒绝 pluginCreator 委派（stage-persona-mismatch）", creatorInWorking.ok === false && creatorInWorking.code === "stage-persona-mismatch");
+const creatorMissing = await kaSubWhale.execute({ planItemId: "p-creator" }, { agent });
+check("working 无 pluginCreator plan item 可委派（plan-item-not-found）", creatorMissing.ok === false && creatorMissing.code === "plan-item-not-found");
 const workerInWorking = await kaSubWhale.execute({ planItemId: "p1" }, { agent });
 check("working 允许 worker 委派", workerInWorking.ok === true && workerInWorking.code === "subagent-created");
 const workingDefault = await whaleReport.execute({}, { agent });

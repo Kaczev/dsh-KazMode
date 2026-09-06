@@ -57,8 +57,8 @@ const REGISTRY = {
 writeFileSync(REG_FILE, JSON.stringify(REGISTRY, null, 2), "utf8");
 
 // ---------- pure layer: roles ----------
-check("v0.9 角色固定集合只含四值", JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"]));
-check("四个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_SUBAGENT_ROLE_IDS.every((role) =>
+check("v0.9 角色固定集合只含三角色且无 pluginCreator/plugin_creator_sub_whale_report", JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(["worker", "memoryMaintainer", "pluginMaintainer"]) && !V09_SUBAGENT_ROLE_IDS.includes("pluginCreator") && !Object.keys(V09_SUBAGENT_ROLE_STABLE_BASE).includes("pluginCreator") && !Object.values(V09_SUBAGENT_ROLE_STABLE_BASE).flat().includes("plugin_creator_sub_whale_report"));
+check("三个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_SUBAGENT_ROLE_IDS.every((role) =>
   Array.isArray(V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role]) &&
   Array.isArray(V09_SUBAGENT_ROLE_STABLE_BASE[role]) &&
   typeof V09_SUBAGENT_ROLE_PERSONA_REFS[role] === "string" &&
@@ -67,16 +67,14 @@ check("四个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_
 check("首轮 role Minimal：worker = memory_search + context_search（不含 report/context_compress）", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker) === JSON.stringify(["memory_search", "context_search"]) && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker.includes("work_sub_whale_report") && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker.includes("context_compress"));
 check("首轮 role Minimal：memoryMaintainer = memory_search + context_search（不含 report/context_compress）", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.memoryMaintainer) === JSON.stringify(["memory_search", "context_search"]) && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.memoryMaintainer.includes("memory_sub_whale_report") && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.memoryMaintainer.includes("context_compress"));
 check("首轮 role Minimal：pluginMaintainer = memory_search + context_search（不含 report/context_compress）", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer) === JSON.stringify(["memory_search", "context_search"]) && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer.includes("plugin_maintainer_sub_whale_report") && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer.includes("context_compress"));
-check("首轮 role Minimal：pluginCreator = memory_search + context_search（不含 report/context_compress）", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator) === JSON.stringify(["memory_search", "context_search"]) && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator.includes("plugin_creator_sub_whale_report") && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator.includes("context_compress"));
-check("各角色 Stable Base 含 context_compress/context_read/context_search", ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"].every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_compress") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
+check("各角色 Stable Base 含 context_compress/context_read/context_search", ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_compress") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
 {
   const initialStages = {
     worker: "assess-complexity",
     memoryMaintainer: "assess-delegation",
     pluginMaintainer: "assess-delegation",
-    pluginCreator: "assess-delegation",
   };
-  const roles = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  const roles = ["worker", "memoryMaintainer", "pluginMaintainer"];
   const contextTools = ["context_search", "context_read", "context_compress"];
   check(
     "M3.3 stage-defs 子代理 communication 均含三 context 工具",
@@ -131,7 +129,6 @@ check("tool-jobs 固定集合", JSON.stringify(V09_TOOL_JOBS) === JSON.stringify
         "work_sub_whale_report",
         "memory_sub_whale_report",
         "plugin_maintainer_sub_whale_report",
-        "plugin_creator_sub_whale_report",
         ...V09_TOOL_JOBS,
         ...CANDIDATE_NAMES,
       ].includes(tool),

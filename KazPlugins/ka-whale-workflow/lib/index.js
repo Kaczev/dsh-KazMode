@@ -119,7 +119,6 @@ export const KA_SUB_WHALE_TOOL = "ka_sub_whale";
 export const WORK_SUB_WHALE_REPORT_TOOL = "work_sub_whale_report";
 export const MEMORY_SUB_WHALE_REPORT_TOOL = "memory_sub_whale_report";
 export const PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL = "plugin_maintainer_sub_whale_report";
-export const PLUGIN_CREATOR_SUB_WHALE_REPORT_TOOL = "plugin_creator_sub_whale_report";
 
 /** v0.9 stage 常量（再导出，便于探针/下游引用）。 */
 export { MAIN_ROLE, MAIN_STAGE_IDS, V09_SUBAGENT_ROLES, V09_STAGE_IDS };
@@ -157,7 +156,6 @@ export const V09_SUBAGENT_ROLE_INITIAL_STAGES = Object.freeze({
   worker: "assess-complexity",
   memoryMaintainer: "assess-delegation",
   pluginMaintainer: "assess-delegation",
-  pluginCreator: "assess-delegation",
 });
 
 /** 设置 schema（同时驱动设置页 UI）。 */
@@ -1196,7 +1194,7 @@ export default {
     }
 
     /** 受控 v0.9 子代理 idle 时初始化其 role 专属首阶段：
-     *  worker=assess-complexity；memoryMaintainer/pluginMaintainer/pluginCreator=assess-delegation。 */
+     *  worker=assess-complexity；memoryMaintainer/pluginMaintainer=assess-delegation。 */
     function ensureControlledSubagentStarted(agent) {
       const role = controlledSubagentRoleOfAgent(agent);
       if (role === null) return null;
@@ -1896,15 +1894,14 @@ export default {
         }
         // 36.8 + 37.5 stage-persona mapping enforcement:
         //   working → worker; memory-maintenance → memoryMaintainer;
-        //   plugin-maintenance → pluginMaintainer. pluginCreator is store-only/unused
-        //   and is not exposed through any main stage.
+        //   plugin-maintenance → pluginMaintainer (only delegable plugin role).
         const currentStage = stageOfAgent(agent);
         const expectedPersona = V09_KA_SUB_WHALE_STAGE_PERSONAS[currentStage];
         if (expectedPersona !== undefined && role !== expectedPersona) {
           return Promise.resolve({
             ok: false,
             code: "stage-persona-mismatch",
-            reason: `ka_sub_whale rejected plan item "${item.planItemId}" in ${currentStage}: persona "${role}" does not match the only delegable persona "${expectedPersona}" for this stage. Working delegates only worker; memory-maintenance only memoryMaintainer; plugin-maintenance only pluginMaintainer; pluginCreator is store-only/unused and has no delegating main stage.`,
+            reason: `ka_sub_whale rejected plan item "${item.planItemId}" in ${currentStage}: persona "${role}" does not match the only delegable persona "${expectedPersona}" for this stage. Working delegates only worker; memory-maintenance only memoryMaintainer; plugin-maintenance only pluginMaintainer.`,
           });
         }
 
@@ -1948,7 +1945,7 @@ export default {
 
         const personaText = V09_ROLE_PERSONAS[role] ?? role;
         const lifecycleNote =
-          role === "pluginMaintainer" || role === "pluginCreator"
+          role === "pluginMaintainer"
             ? `\n\nlifecyclePath: ${lifecycleReferencePath}`
             : "";
         const promptText = `${item.task}${lifecycleNote}`;

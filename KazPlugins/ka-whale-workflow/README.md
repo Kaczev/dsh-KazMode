@@ -8,7 +8,7 @@
   表格一致；`decide-goal` 可推进 `working` 或外部模式 `goal-active`；
   37.5 移除 `plugin-preflight`：主流程为
   `decide-tools → write-plan → decide-goal → working → memory-maintenance → plugin-maintenance/communication`；
-  `pluginCreator` 角色定义保留，但没有主阶段可委派它（store-only/unused）。
+  受控子代理只含 worker / memoryMaintainer / pluginMaintainer 三角色。
 - Goal-active 外部模式：`whale_report({mode:'goal', objective, max_goal_rounds?})`
   从 decide-goal 或非主 stage（idle/done/end）进入 `goal-active`；该值写入 stage
   state，但不加入 `MAIN_STAGE_IDS`；goal-active 期间普通 `whale_report` 推进返回
@@ -31,7 +31,7 @@
   `memory_search` + `context_search` + 各自 report。各角色 `communication`
   阶段允许工具为 `context_search` + `context_read` + `context_compress`。
 - 受控 v0.9 子代理：`ka_sub_whale` 创建的
-  `worker`/`memoryMaintainer`/`pluginMaintainer`/`pluginCreator` 不受
+  `worker`/`memoryMaintainer`/`pluginMaintainer` 不受
   `includeSubagents=false` 跳过。idle 时自动进入 role 首阶段
   （`worker=assess-complexity`，其余 `=assess-delegation`），按 pending stage
   注入 role 专属 `[ka-whale-workflow <role-stage>]` 文本，并由 `tools/pre-execute`
@@ -77,8 +77,8 @@
   `write-plan` 通过 `whale_report(finalPlanPayload)` 创建/定稿（finalized）；
   memory-maintenance/plugin-maintenance 不能创建 task plan，只能经 write-plan
   读取/改约；
-  plan item `persona` 允许 `main` + 四子代理角色；`ka_sub_whale` 只接受
-  finalized planItemId 且 persona 必须是四子代理角色之一，`persona=main` 返回
+  plan item `persona` 允许 `main` + 三子代理角色；`ka_sub_whale` 只接受
+  finalized planItemId 且 persona 必须是三子代理角色之一，`persona=main` 返回
   结构化 `main-persona-delegation-denied`。
 - B3 受控委派：`ka_sub_whale` 按 finalized `planItemId` 读取
   persona/task/assignedTools，校验 assignedTools 来源
@@ -112,14 +112,13 @@
   再按 plugin work 进入 plugin-maintenance 或 communication。
 - 36.8/37.5 stage-persona mapping：`ka_sub_whale` 的委派阶段与 persona 固定映射
   （working→worker、memory-maintenance→memoryMaintainer、
-  plugin-maintenance→pluginMaintainer）；`pluginCreator` 保留角色定义但无主阶段
-  可委派（store-only/unused）；不匹配返回结构化 `stage-persona-mismatch`。
+  plugin-maintenance→pluginMaintainer）；不匹配返回结构化 `stage-persona-mismatch`。
 - 36.8 task splitting：write-plan 必须为每个 coherent task 建独立 planItem；
   working 逐个委派 worker planItems；memory/plugin planItems 留给对应维护阶段；
-  37.5 起 no pluginCreator plan item is delegated from any main stage。
+  受控委派只覆盖 worker / memoryMaintainer / pluginMaintainer 三角色。
 - B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
   结束不再注入两类标题。
-- 新工具注册：`ka_sub_whale` 实际受控委派层 + 四个 `*_sub_whale_report`
+- 新工具注册：`ka_sub_whale` 实际受控委派层 + 三个 `*_sub_whale_report`
   （每个工具按角色不同流程推进 stage，并包装 DSH reportFrom 把 output 汇报给
   父主模型；`nextStage` 用于推进，省略 `nextStage` 时只原生汇报）；
   `list_agents / send_message / interrupt_agent` 由 DSH subagent-control 提供，

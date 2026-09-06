@@ -57,7 +57,7 @@ Kaz 工具面由代码级固定面（`KAZ_STABLE_MAIN_TOOLS` / workflow 面）�
   以及当前四文件模型生效状态；
 - **用户可操作范围**：
   1. 私有插件候选：**只读查看**（`kaz-agent-managed-tools.json` 的 `candidates`
-     schema v2；用户不可添加，写入只由 pluginCreator / pluginMaintainer 生命周期完成）；
+     schema v2；用户不可添加，写入只由 pluginMaintainer 生命周期完成）；
   2. `tool-jobs`：只读查看官方固定集合 `job_list / job_output / job_kill`；
   3. 外置插件候选：查看 / 添加（沿用用户 `other-*` 四文件作为候选层；
      不直接进主面）。
@@ -118,7 +118,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 - 旧 four-file JSON（`tool-plugin*.json` / `other-tool-plugin*.json`）继续兼容读取，
   只作为面板只读状态来源；
 - 面板可操作范围仅剩：
-  - 私有插件候选（**只读查看**；用户不可添加，写入只由 pluginCreator/pluginMaintainer 生命周期完成）；
+  - 私有插件候选（**只读查看**；用户不可添加，写入只由 pluginMaintainer 生命周期完成）；
   - `tool-jobs` 固定集合查看；
   - 外置插件候选（查看/添加，仍写用户 `other-*` 候选层）；
 - 添加候选**不会直接进入 Stable Main/Sub Surface**，后续经受控委派/任务计划选择；

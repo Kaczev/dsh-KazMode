@@ -5,7 +5,7 @@
 //   write-plan  whale_report(finalPlanPayload) → 完整计划创建/定稿 finalized；
 //   decide-tools 不得写入 draft；memory/plugin-maintenance 只读/经 write-plan 改约。
 //   persona=main 表示主线执行；ka_sub_whale 只接受 finalized planItemId 且只放行
-//   四个 v0.9 子代理角色，persona=main 由主线执行并拒绝委派。
+//   三个 v0.9 子代理角色，persona=main 由主线执行并拒绝委派。
 // ===========================================================================
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,15 +17,12 @@ export const TASK_PLAN_STORE_VERSION = 1;
 /** 允许的 plan item 状态。 */
 export const PLAN_ITEM_STATUSES = Object.freeze(["draft", "finalized"]);
 
-/** 允许的 plan item persona：main（主线执行） + v0.9 四个子代理角色。
- *  pluginCreator is store-only/unused: the role definition remains, but no main
- *  stage delegates it. */
+/** 允许的 plan item persona：main（主线执行） + v0.9 三个子代理角色。 */
 export const PLAN_PERSONAS = Object.freeze([
   "main",
   "worker",
   "memoryMaintainer",
   "pluginMaintainer",
-  "pluginCreator",
 ]);
 
 /** 归一化工具名列表：去空、去重、保留顺序。 */

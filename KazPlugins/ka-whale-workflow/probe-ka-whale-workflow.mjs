@@ -11,7 +11,6 @@ import plugin, {
   WORK_SUB_WHALE_REPORT_TOOL,
   MEMORY_SUB_WHALE_REPORT_TOOL,
   PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL,
-  PLUGIN_CREATOR_SUB_WHALE_REPORT_TOOL,
   MAIN_FLOW_TEXT,
   SUBAGENT_FLOW_TEXT,
   GOAL_ACTIVE_STAGE,
@@ -115,8 +114,8 @@ check("37.5 从 subagent-report/settled 提取 child session id", subagentReport
   check("manualCommandIdOf 不再识别旧 /plan", manualCommandIdOf({ id: "s-old-plan", session: { id: "s-old-plan", events: oldPlanEvents } }) === null);
 }
 
-check("v0.9 工具名", KA_SUB_WHALE_TOOL === "ka_sub_whale" && WORK_SUB_WHALE_REPORT_TOOL === "work_sub_whale_report" && MEMORY_SUB_WHALE_REPORT_TOOL === "memory_sub_whale_report" && PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL === "plugin_maintainer_sub_whale_report" && PLUGIN_CREATOR_SUB_WHALE_REPORT_TOOL === "plugin_creator_sub_whale_report");
-check("v0.9 stage 常量导出（37.5 无 plugin-preflight）", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight") && V09_SUBAGENT_ROLES.length === 4 && V09_SUBAGENT_ROLES.includes("pluginCreator") && V09_STAGE_IDS.length > 0);
+check("v0.9 工具名（三角色、无 pluginCreator/plugin_creator_sub_whale_report）", KA_SUB_WHALE_TOOL === "ka_sub_whale" && WORK_SUB_WHALE_REPORT_TOOL === "work_sub_whale_report" && MEMORY_SUB_WHALE_REPORT_TOOL === "memory_sub_whale_report" && PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL === "plugin_maintainer_sub_whale_report" && !V09_SUBAGENT_ROLES.includes("pluginCreator"));
+check("v0.9 stage 常量导出（37.5 无 plugin-preflight；三角色）", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight") && V09_SUBAGENT_ROLES.length === 3 && !V09_SUBAGENT_ROLES.includes("pluginCreator") && V09_STAGE_IDS.length > 0);
 
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
@@ -134,7 +133,6 @@ check("双层语义：主 assess allowedTools = memory_search+context_search+con
     worker: "assess-complexity",
     memoryMaintainer: "assess-delegation",
     pluginMaintainer: "assess-delegation",
-    pluginCreator: "assess-delegation",
   };
   check(
     "双层语义：受控子代理初始 stage allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
@@ -149,7 +147,6 @@ check("双层语义：主 assess allowedTools = memory_search+context_search+con
     worker: ["challenge-plan", "check-tools", "working"],
     memoryMaintainer: ["plan-memory", "save-update", "delete-memory"],
     pluginMaintainer: ["plan-plugin", "create-plugin", "update-plugin", "retire-plugin"],
-    pluginCreator: ["plan-plugin", "create-plugin"],
   };
   check(
     "M3.3 子代理非 Minimal 执行阶段均含 context_search/context_read/context_compress",
@@ -157,7 +154,7 @@ check("双层语义：主 assess allowedTools = memory_search+context_search+con
   );
 }
 {
-  const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer"];
   check(
     "M3.3 各角色 communication 阶段含三个 context 工具",
     roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(CONTEXT_TOOLS)),
@@ -205,7 +202,7 @@ check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.
   );
 }
 check("decide-goal 定义含 working 与 goal-active", canAdvance(MAIN_ROLE, "decide-goal", "working") === true && canAdvance(MAIN_ROLE, "decide-goal", GOAL_ACTIVE_STAGE) === true);
-check("子代理 role stage 定义齐全", ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"].every((role) => stageIdsForRole(role).length >= 4));
+check("子代理 role stage 定义齐全", ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => stageIdsForRole(role).length >= 4));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });
 check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlanText.includes("taskPlanPath: C:/tmp/task-plan.json"));
 {
