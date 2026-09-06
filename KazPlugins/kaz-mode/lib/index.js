@@ -1072,13 +1072,28 @@ export default {
     /** 该代理此刻是否处于首阶段极简（36.9：round-minimal 已删除，纯核心判定）：
      *  Kaz 模式主模型与子代理在第一次 tool/call 前都保持极简，
      *  保证首次工具调用前工具面 ≤2（硬边界 2；v0.8 Step A 子代理同样适用）。
-     *  受控子代理一旦持久化 minimalDone=true（首次 tool/call 已发生），即使
-     *  resume/restore 后会话 tool/call 事件不可见，也不再回 Minimal。
+     *  受控子代理一旦持久化 minimalDone=true，或角色记录已进入非 idle role stage
+     *  （如 plan-memory），即使 resume/restore 后会话 tool/call 事件不可见，也
+     *  不再回 Minimal。
      *  注意：kazSurfaceFor 只用于 Kaz 会话，因此这里不会误伤非 Kaz 模式。 */
     function isMinimalAgent(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
       const roleRecord = controlledSubagentRoleOf(agent);
-      if (roleRecord !== null && roleRecord.minimalDone === true) return false;
+      if (roleRecord !== null) {
+        if (roleRecord.minimalDone === true) return false;
+        const stage = roleRecord.stage;
+        if (
+          typeof stage === "string" &&
+          stage.length > 0 &&
+          stage !== "idle" &&
+          stage !== "done" &&
+          stage !== "end" &&
+          stage !== "goal-active" &&
+          stage !== "working-resumed"
+        ) {
+          return false;
+        }
+      }
       return !hasToolCallEvent(agent);
     }
 

@@ -53,6 +53,8 @@ const SESSIONS = {
   "s-kaz-sub-ctl-min": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true, subagentRole: "worker" },
   // 受控 v0.9 worker 子代理已 minimalDone=true（无 tool/call 事件也能全量解锁）。
   "s-kaz-sub-ctl-unlocked": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true, subagentRole: "worker", subagentUnlocked: true },
+  // 受控 v0.9 memoryMaintainer 已到 plan-memory 但 minimalDone 未置位（stage-only 兜底）。
+  "s-kaz-sub-ctl-stage": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true, subagentRole: "memoryMaintainer", subagentStage: "plan-memory" },
   // 专门验证首轮极简（无任何 tool/call）的 Kaz 会话。
   "s-kaz-min": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-min-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
@@ -63,7 +65,7 @@ const SESSIONS = {
 const eventsOf = (id) => {
   const isSub = SESSIONS[id]?.subagent === true;
   const descriptor = isSub ? [{ type: "subagent/descriptor", seq: 0, time: Date.now(), data: {} }] : [];
-  if (id === "s-kaz-min" || id === "s-kaz-min-nomem" || id === "s-kaz-sub-min" || id === "s-kaz-sub-ctl-min" || id === "s-kaz-sub-ctl-unlocked") return descriptor;
+  if (id === "s-kaz-min" || id === "s-kaz-min-nomem" || id === "s-kaz-sub-min" || id === "s-kaz-sub-ctl-min" || id === "s-kaz-sub-ctl-unlocked" || id === "s-kaz-sub-ctl-stage") return descriptor;
   const base = [...descriptor, { type: "tool/call", seq: descriptor.length, time: Date.now(), data: { name: "pwsh" } }];
   if (id === "s-kaz-plan") return [...base, { type: "plan/mode", seq: base.length, time: Date.now(), data: { active: true } }];
   return base;
@@ -189,16 +191,28 @@ const ctx = {
         const info = SESSIONS[agent?.id];
         const role = info?.subagentRole;
         if (typeof role !== "string") return null;
-        return info?.subagentUnlocked === true ? { persona: role, minimalDone: true } : { persona: role };
+        return {
+          persona: role,
+          ...(info?.subagentUnlocked === true ? { minimalDone: true } : {}),
+          ...(typeof info?.subagentStage === "string" ? { stage: info.subagentStage } : {}),
+        };
       },
       subagentSurfaceOf: (agent) => {
         const info = SESSIONS[agent?.id];
-        if (info?.subagentUnlocked !== true) return null;
-        return [
-          "edit", "glob", "grep", "memory_detail", "memory_list", "memory_search",
-          "pwsh", "read", "context_read", "context_search", "context_compress",
-          "todo_write", "web_search", "write", "work_sub_whale_report",
-        ];
+        const unlocked = info?.subagentUnlocked === true || typeof info?.subagentStage === "string";
+        if (unlocked !== true) return null;
+        return info?.subagentRole === "memoryMaintainer"
+          ? [
+              "memory_detail", "memory_search", "memory_list", "memory_save",
+              "memory_update", "memory_forget", "read", "context_read",
+              "context_search", "context_compress", "glob", "grep",
+              "memory_sub_whale_report",
+            ]
+          : [
+              "edit", "glob", "grep", "memory_detail", "memory_list", "memory_search",
+              "pwsh", "read", "context_read", "context_search", "context_compress",
+              "todo_write", "web_search", "write", "work_sub_whale_report",
+            ];
       },
     };
     if (name === "connection") return mockConnection;
@@ -230,6 +244,7 @@ const sKazSub = agentOf("s-kaz-sub");
 const sKazSubMin = agentOf("s-kaz-sub-min");
 const sKazSubCtlMin = agentOf("s-kaz-sub-ctl-min");
 const sKazSubCtlUnlocked = agentOf("s-kaz-sub-ctl-unlocked");
+const sKazSubCtlStage = agentOf("s-kaz-sub-ctl-stage");
 
 // ② 硬边界 2：首次工具调用前工具面 ≤2（kaz-memory/ka-whale-memory 开与关两种状态）。
 {
@@ -258,6 +273,8 @@ const sKazSubCtlUnlocked = agentOf("s-kaz-sub-ctl-unlocked");
   check("②.5 受控 v0.9 子代理首轮 Minimal 恰为 memory_search+context_search（不含 report/context_compress）", subCtlMin !== null && subCtlMin.size === 2 && subCtlMin.has("memory_search") && subCtlMin.has("context_search") && !subCtlMin.has("work_sub_whale_report") && !subCtlMin.has("context_compress"));
   const subCtlUnlocked = kazMode.surfaceOf(sKazSubCtlUnlocked);
   check("②.5 受控 v0.9 子代理 minimalDone=true 时无 tool/call 事件也全量解锁（含 report）", subCtlUnlocked !== null && subCtlUnlocked.size > 2 && subCtlUnlocked.has("work_sub_whale_report") && subCtlUnlocked.has("memory_search") && subCtlUnlocked.has("context_compress"));
+  const subCtlStage = kazMode.surfaceOf(sKazSubCtlStage);
+  check("②.5 受控 v0.9 子代理 role stage=plan-memory 且 minimalDone=false 也无 tool/call 事件时全量解锁（含 report/memory_save）", subCtlStage !== null && subCtlStage.size > 2 && subCtlStage.has("memory_sub_whale_report") && subCtlStage.has("memory_save") && subCtlStage.has("memory_search"));
 }
 
 // ①.6 RPC：B4 只读面板 + 三类候选（固定主面下，候选只写候选层，不进主面）

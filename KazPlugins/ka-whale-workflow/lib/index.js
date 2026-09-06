@@ -1285,13 +1285,25 @@ export default {
     }
 
     /** 是否处于首阶段极简（36.9：round-minimal 服务已删除，直接按本插件核心
-     *  hasToolCall + 受控子代理持久化 minimalDone 判定；调用处已排除
+     *  hasToolCall + 受控子代理持久化 minimalDone/role-stage 判定；调用处已排除
      *  includeSubagents=false 的旧子代理）。minimalDone=true 表示该受控子代理
-     *  已完成首次工具调用；即使 resume 后会话 tool/call 事件不可见也不回 Minimal。 */
+     *  已完成首次工具调用；角色记录已进入非 idle role stage（如 plan-memory）
+     *  也视为已解锁——即使 resume 后会话 tool/call 事件不可见也不回 Minimal。 */
     function isMinimal(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
       const roleRecord = controlledSubagentRecordOfAgent(agent);
-      if (roleRecord !== null && roleRecord.minimalDone === true) return false;
+      if (roleRecord !== null) {
+        if (roleRecord.minimalDone === true) return false;
+        const roleStage = roleRecord.stage;
+        if (
+          typeof roleStage === "string" &&
+          roleStage.length > 0 &&
+          roleStage !== "idle" &&
+          V09_STAGE_IDS.includes(roleStage)
+        ) {
+          return false;
+        }
+      }
       return !hasToolCall(agent);
     }
 
@@ -2500,6 +2512,9 @@ Before we answer, call memory_search or context_search exactly once. After that 
               new Error(`${reportTool} can only be called by a controlled v0.9 "${role}" subagent`),
             );
           }
+          // report 本身是一次真实工具调用：即使 session/event 未置 minimalDone，
+          // 这里也确保角色记录已解锁（后续 resume 不再回 Minimal）。
+          markSubagentMinimalDone(agent);
           ensureControlledSubagentStarted(agent);
           const nextStage = typeof args?.nextStage === "string" ? args.nextStage.trim() : "";
           const current = stageOfAgent(agent);
@@ -2639,6 +2654,17 @@ Before we answer, call memory_search or context_search exactly once. After that 
         ensureControlledSubagentStarted(agent);
         const current = stageOfAgent(agent);
         const def = stageDefinitionFor(controlledRole, current);
+        const roleMinimalTools = V09_SUBAGENT_ROLE_MINIMAL_TOOLS[controlledRole] ?? [];
+        // 任何真实放行的受控子代理工具调用都视为 Minimal 解锁（不只依赖 session/event）：
+        // 首次工具调用前 def===null（stage=idle），最小面工具调用即置 minimalDone。
+        if (
+          typeof exec?.name === "string" &&
+          ((def !== null && def.allowedTools.includes(exec.name)) ||
+            (def === null && roleMinimalTools.includes(exec.name)))
+        ) {
+          markSubagentMinimalDone(agent);
+          return next();
+        }
         if (def === null) return next();
         if (typeof exec?.name !== "string" || def.allowedTools.includes(exec.name)) return next();
         ctx.logger.info(
