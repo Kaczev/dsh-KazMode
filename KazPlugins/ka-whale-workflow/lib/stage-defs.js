@@ -96,7 +96,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
       task:
-        "Judge whether the request is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If the context is long and we only need to report, advance to compass_context_before_communication.",
+        "Judge whether the request is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "challenge-plan": {
       allowedTools: [
@@ -126,7 +126,7 @@ const DEFINITIONS = {
       allowedTools: ["whale_report", "read", "context_search", "context_read"],
       canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
       task:
-        "Create and finalize the complete task plan via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan first, persist the revised plan, then advance.",
+        "Create and finalize the complete task plan via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan first, persist the revised plan, then advance. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "decide-goal": {
       allowedTools: ["whale_report"],
@@ -136,7 +136,7 @@ const DEFINITIONS = {
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
-      canAdvance: ["decide-tools-before-writing-plan", "write-plan", "memory-maintenance", "compass_context_before_communication"],
+      canAdvance: ["decide-tools-before-writing-plan", "write-plan", "memory-maintenance"],
       task:
         "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn; the child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. Reply once with send_message to resume it cause it must have a response in order to proceed. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.",
     },
@@ -155,7 +155,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan", "compass_context_before_communication"],
       task:
-        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'assess-delegation' process, with the context from the previous round still present but the current round being an independent delegation.",
+        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'assess-delegation' process, with the context from the previous round still present but the current round being an independent delegation. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -169,7 +169,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["write-plan", "communication", "compass_context_before_communication"],
       task:
-        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.",
+        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "whale_report"],
@@ -192,7 +192,7 @@ const DEFINITIONS = {
         "work_sub_whale_report",
       ],
       canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
-      task: "Judge whether the delegation is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If the context is long and we only need to report, advance to compass_context_before_communication.",
+      task: "Judge whether the delegation is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "challenge-plan": {
       allowedTools: [
@@ -215,7 +215,7 @@ const DEFINITIONS = {
       allowedTools: ["context_search", "context_read", "work_sub_whale_report"],
       canAdvance: ["working", "communication", "compass_context_before_communication"],
       task:
-        "Verify whether assigned tools are enough. Advance to working, or to communication only for a genuine blocker. Do not report tool insufficiency before reaching working. If the context is long and we only need to report, advance to compass_context_before_communication.",
+        "Verify whether assigned tools are enough. Advance to working, or to communication only for a genuine blocker. Do not report tool insufficiency before reaching working. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     working: {
       allowedTools: [
@@ -236,7 +236,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["communication", "compass_context_before_communication"],
       task:
-        "Execute the delegated work. Do not write memories or plugins. When done, call work_sub_whale_report({nextStage:'compass_context_before_communication'}) to tidy context, or ({nextStage:'communication'}) to finish; then do not call more tools; write your full report as your final message, end the turn, and wait for the parent reply (received as subagent-settled).",
+        "Execute the delegated work. Do not write memories or plugins. When done, call work_sub_whale_report({nextStage:'compass_context_before_communication'}) to tidy context, or ({nextStage:'communication'}) to finish; then do not call more tools; write your full report as your final message, end the turn, and wait for the parent reply (received as subagent-settled). If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "work_sub_whale_report"],
@@ -260,7 +260,7 @@ const DEFINITIONS = {
         "memory_sub_whale_report",
       ],
       canAdvance: ["plan-memory", "communication", "compass_context_before_communication"],
-      task: "Judge whether the memory delegation is clear. If it's not clear, request more information. If the context is long and we only need to report, advance to compass_context_before_communication.",
+      task: "Judge whether the memory delegation is clear. If it's not clear, request more information. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "plan-memory": {
       allowedTools: [
@@ -289,7 +289,7 @@ const DEFINITIONS = {
         "memory_sub_whale_report",
       ],
       canAdvance: ["communication", "compass_context_before_communication"],
-      task: "Save/update memories with evidence. Keep new entries as CANDIDATE.",
+      task: "Save/update memories with evidence. Keep new entries as CANDIDATE. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "delete-memory": {
       allowedTools: [
@@ -303,7 +303,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["communication", "compass_context_before_communication"],
       task:
-        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record.",
+        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "memory_sub_whale_report"],
@@ -326,7 +326,7 @@ const DEFINITIONS = {
         "plugin_maintainer_sub_whale_report",
       ],
       canAdvance: ["plan-plugin", "communication", "compass_context_before_communication"],
-      task: "Judge whether the plugin maintenance delegation is clear. If it's not clear, request more information. If the context is long and we only need to report, advance to compass_context_before_communication.",
+      task: "Judge whether the plugin maintenance delegation is clear. If it's not clear, request more information. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "plan-plugin": {
       allowedTools: [
@@ -361,7 +361,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["update-plugin", "retire-plugin", "communication", "compass_context_before_communication"],
       task:
-        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry.",
+        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "update-plugin": {
       allowedTools: [
@@ -381,7 +381,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["create-plugin", "retire-plugin", "communication", "compass_context_before_communication"],
       task:
-        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed.",
+        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "retire-plugin": {
       allowedTools: [
@@ -398,7 +398,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["create-plugin", "update-plugin", "communication", "compass_context_before_communication"],
       task:
-        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions.",
+        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "plugin_maintainer_sub_whale_report"],
