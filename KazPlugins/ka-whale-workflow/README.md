@@ -60,6 +60,13 @@
   Allowed / Can advance / Task，并在 write-plan/working/memory-maintenance/
   plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
   `lifecyclePath`，在 decide-tools 阶段携带当前私有插件候选目录。
+- 阶段级 Context 注记：`STAGE_CONTEXT_NOTES`（lib/stage-defs.js）为部分 stage
+  定义 Context 提醒；`stageInjectionText` 在有注记的 stage 的 `Task:` 行后输出
+  `Context: <text>`，无注记不输出。覆盖 main/worker 的 assess-complexity、
+  challenge-plan、communication 与 memoryMaintainer/pluginMaintainer 的
+  communication：涉及早前会话内容时先 `context_search` 再 `context_read`
+  掌握/复现背景；main.communication 另在会话冗长收尾前先
+  `context_compress suggest` 预览（manual 优先、auto 兜底）。
 - B2.5 重启语义：Minimal 只在整段 session 第一次 tool/call 前发生；后续
   workflow-run 重新进入 `assess-complexity` 但不重复 Minimal；Goal 存在时不重复
   assess；`assess-complexity -> communication (no-tool-call)` 是合法路径。

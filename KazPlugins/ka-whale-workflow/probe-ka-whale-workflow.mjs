@@ -32,6 +32,7 @@ import plugin, {
 import {
   stageDefinitionFor,
   stageInjectionText,
+  STAGE_CONTEXT_NOTES,
   canAdvance,
   stageIdsForRole,
 } from "./lib/stage-defs.js";
@@ -205,6 +206,36 @@ check("decide-goal 定义含 working 与 goal-active", canAdvance(MAIN_ROLE, "de
 check("子代理 role stage 定义齐全", ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => stageIdsForRole(role).length >= 4));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });
 check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlanText.includes("taskPlanPath: C:/tmp/task-plan.json"));
+{
+  const staged = [
+    ["main", "assess-complexity"],
+    ["main", "challenge-plan"],
+    ["main", "communication"],
+    ["worker", "assess-complexity"],
+    ["worker", "challenge-plan"],
+    ["worker", "communication"],
+    ["memoryMaintainer", "communication"],
+    ["pluginMaintainer", "communication"],
+  ];
+  check(
+    "Context 注记：STAGE_CONTEXT_NOTES 覆盖目标角色/stage",
+    staged.every(
+      ([role, stage]) =>
+        typeof STAGE_CONTEXT_NOTES?.[role]?.[stage] === "string" &&
+        STAGE_CONTEXT_NOTES[role][stage].length > 0,
+    ),
+  );
+  const assessText = stageInjectionText(MAIN_ROLE, "assess-complexity");
+  const commText = stageInjectionText(MAIN_ROLE, "communication");
+  const noNoteText = stageInjectionText(MAIN_ROLE, "working", { taskPlanPath: "C:/p.json" });
+  check(
+    "Context 注记：有注记 stage 在 Task 行后输出 Context，无注记 stage 不输出",
+    assessText.includes("\nContext: ") &&
+      commText.includes("\nContext: ") &&
+      assessText.indexOf("Task:") < assessText.indexOf("Context:") &&
+      !noNoteText.includes("Context:"),
+  );
+}
 {
   const waitStages = ["working", "memory-maintenance", "plugin-maintenance"];
   const waitOk = waitStages.every((stage) => {

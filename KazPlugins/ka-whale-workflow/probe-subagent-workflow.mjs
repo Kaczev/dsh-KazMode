@@ -11,7 +11,7 @@ import plugin, {
   SUBAGENT_FLOW_TEXT,
   V09_SUBAGENT_ROLE_INITIAL_STAGES,
 } from "./lib/index.js";
-import { stageDefinitionFor } from "./lib/stage-defs.js";
+import { stageDefinitionFor, stageInjectionText, STAGE_CONTEXT_NOTES } from "./lib/stage-defs.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -193,6 +193,17 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   check("worker 注入 role stage 文本", text.includes("[ka-whale-workflow assess-complexity]") && text.includes("work_sub_whale_report"));
   check("worker 不注入旧通用 SUBAGENT_FLOW_TEXT", !text.includes("[ka-whale-workflow subagent flow]"));
   check("worker 注入后 pending 已清除", pendingFromFile(STORE_FILE, "child-worker") === null);
+  check(
+    "Context 注记：worker/maintenance 目标 stage 注入注记，无注记 stage 不输出",
+    STAGE_CONTEXT_NOTES?.worker?.["assess-complexity"] !== undefined &&
+      stageInjectionText("worker", "assess-complexity").includes("Context: ") &&
+      stageInjectionText("worker", "challenge-plan").includes("Context: ") &&
+      stageInjectionText("worker", "communication").includes("Context: ") &&
+      stageInjectionText("memoryMaintainer", "communication").includes("Context: ") &&
+      stageInjectionText("pluginMaintainer", "communication").includes("Context: ") &&
+      !stageInjectionText("memoryMaintainer", "assess-delegation").includes("Context:") &&
+      !stageInjectionText("pluginMaintainer", "create-plugin").includes("Context:"),
+  );
   const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const allow = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
   const allowCtxRead = await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" }));

@@ -476,6 +476,38 @@ export const V09_ROLE_REPORT_TOOLS = Object.freeze({
 });
 
 /**
+ * v0.9 阶段级 Context 注记：进入对应 stage 时，stageInjectionText 在
+ * `Task:` 行之后输出一行 `Context: <text>`；没有注记的 stage 不输出。
+ * 文案与 kaz-shared KAZ_ROLE_PROMPTS 的 context 自管理纪律保持一致。
+ */
+export const STAGE_CONTEXT_NOTES = Object.freeze({
+  [MAIN_ROLE]: Object.freeze({
+    "assess-complexity":
+      "Before judging, if the request involves earlier session content, first use context_search then context_read to grasp the background.",
+    "challenge-plan":
+      "Before critiquing, if the critique involves earlier session content, first use context_search then context_read to grasp the background.",
+    communication:
+      "Before the final reply, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read. If the session is very long and about to close, first preview with context_compress suggest; manual compression comes first, auto compression is only a safety net.",
+  }),
+  worker: Object.freeze({
+    "assess-complexity":
+      "Before judging, if the delegation involves earlier session content, first use context_search then context_read to grasp the background.",
+    "challenge-plan":
+      "Before critiquing, if the delegation involves earlier session content, first use context_search then context_read to grasp the background.",
+    communication:
+      "Before reporting, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read.",
+  }),
+  memoryMaintainer: Object.freeze({
+    communication:
+      "Before reporting, review old context first when the report depends on earlier session content: use context_search then context_read.",
+  }),
+  pluginMaintainer: Object.freeze({
+    communication:
+      "Before reporting, review old context first when the report depends on earlier session content: use context_search then context_read.",
+  }),
+});
+
+/**
  * 构造 v0.9 阶段入口注入文本。
  * @param {string} role
  * @param {string} stage
@@ -500,6 +532,10 @@ export function stageInjectionText(role, stage, options = {}) {
     task = task.replace("<candidate tools: name: description>", options.candidateToolDirectory);
   }
   lines.push(`Task: ${task}`);
+  const contextNote = STAGE_CONTEXT_NOTES?.[role]?.[stage];
+  if (typeof contextNote === "string" && contextNote.length > 0) {
+    lines.push(`Context: ${contextNote}`);
+  }
   if (options && typeof options.taskPlanPath === "string" && options.taskPlanPath.length > 0 && stageNeedsTaskPlanPath(stage)) {
     lines.push(`taskPlanPath: ${options.taskPlanPath}`);
   }
