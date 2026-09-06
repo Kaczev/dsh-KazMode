@@ -78,7 +78,7 @@ function contextSearchDef() {
   return defineTool({
     name: "context_search",
     description:
-      "Search the current session's append-only original event log (user/assistant/tool surface messages only; replacement checkpoints and compaction logs are excluded). Returns page items with seq/kind/time/snippet sorted by seq descending, plus total/hasMore/nextCursor for cursor pagination. Read-only.",
+      "Search the current session's append-only original event log (user/assistant/tool surface messages only; replacement checkpoints and compaction logs are excluded). Use proactively when you need earlier session details, to look back after compression/summarization, or to find exact original events before answering; follow with context_read for verbatim text. Returns page items with seq/kind/time/snippet sorted by seq descending, plus total/hasMore/nextCursor for cursor pagination. Manual/model-initiated search is primary; automatic compaction is only a fallback. Read-only.",
     parameters: {
       query: {
         type: "string",
@@ -128,7 +128,7 @@ function contextReadDef() {
   return defineTool({
     name: "context_read",
     description:
-      "Read full original text for one or more session event seqs (from context_search results). Accepts a single seq number or an array of seq numbers; each returned item is verbatim and never truncated. Applies a total-character budget; items that do not fit are reported as omitted. Read-only.",
+      "Read full original text for one or more session event seqs (from context_search results). Use proactively after context_search when you need precise verbatim text or suspect earlier content may already be summarized away. Accepts a single seq number or an array of seq numbers; each returned item is verbatim and never truncated. Applies a total-character budget; items that do not fit are reported as omitted. Read-only.",
     parameters: {
       seqs: {
         oneOf: [
@@ -189,12 +189,12 @@ function contextCompressDef(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns a compact candidate summary (start/end, shadowedTokens, cachePreservedTokens, tailPreservedTokens, unitCount and suggestedUnitLayer) without changing anything; no full units array is returned unless opts.includeUnits=true (debug). strategy='fold' commits a compaction through the Kaz m33b compaction provider. Manual suggest/fold fills once from the right of the compressible area, using about 50% of the currently measured context (foldTargetRatio default 0.5) as the budget; it stays under that budget while crossing layers/runs but never folds prefix/tail/protected units. Automatic compactIfNeeded keeps the official 0.8 context-window threshold and does not apply foldTargetRatio. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
+      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. Use it when the session is very long, a heavy task needs closing room, or the user asks to free context; always preview with strategy='suggest' before strategy='fold'. Manual/model-initiated compression is primary; automatic compaction is only a fallback. strategy='suggest' (default) returns a compact candidate summary (start/end, shadowedTokens, cachePreservedTokens, tailPreservedTokens, unitCount and suggestedUnitLayer) without changing anything; no full units array is returned unless opts.includeUnits=true (debug). strategy='fold' commits a compaction through the Kaz m33b compaction provider. Manual suggest/fold fills once from the right of the compressible area, using about 50% of the currently measured context (foldTargetRatio default 0.5) as the budget; it stays under that budget while crossing layers/runs but never folds prefix/tail/protected units. Automatic compactIfNeeded keeps the official 0.8 context-window threshold and does not apply foldTargetRatio. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
     parameters: {
       strategy: {
         type: "string",
         enum: ["suggest", "fold"],
-        description: "suggest = show compact candidate range only (default, no mutation; set opts.includeUnits=true to also include the full units array for debug); fold = select then commit through the Kaz provider. Manual suggest/fold fills the compressible area once up to about 50% of the measured-context budget (foldTargetRatio default 0.5), crossing layers/runs but never prefix/tail/protected units; auto compaction keeps the official 0.8 threshold.",
+        description: "suggest = show compact candidate range only (default, no mutation; set opts.includeUnits=true to also include the full units array for debug); fold = select then commit through the Kaz provider. Use suggest first to preview, then fold when the session is long or the user asks to free context; manual/model-initiated use is primary and auto compaction is only fallback. Manual suggest/fold fills the compressible area once up to about 50% of the measured-context budget (foldTargetRatio default 0.5), crossing layers/runs but never prefix/tail/protected units; auto compaction keeps the official 0.8 threshold.",
       },
       limit: {
         type: "integer",
