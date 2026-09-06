@@ -121,7 +121,7 @@ check("v0.9 stage 常量导出（37.5 无 plugin-preflight）", MAIN_ROLE === "m
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && workingDef?.canAdvance.includes("write-plan"));
-check("M3.3 主 assess-complexity Minimal 保持 memory_search+context_search+whale_report，不加 read/compress", JSON.stringify(assessDef?.allowedTools) === JSON.stringify(["memory_search", "context_search", "whale_report"]) && !assessDef?.allowedTools.includes("read") && !assessDef?.allowedTools.includes("context_read") && !assessDef?.allowedTools.includes("context_compress"));
+check("双层语义：主 assess allowedTools = memory_search+context_search+context_read+context_compress+whale_report（Minimal 不再由 stage 收口；ask_user_question 留 challenge-plan）", JSON.stringify(assessDef?.allowedTools) === JSON.stringify(["memory_search", "context_search", "context_read", "context_compress", "whale_report"]) && !assessDef?.allowedTools.includes("read") && !assessDef?.allowedTools.includes("ask_user_question"));
 {
   const mainNonMinimal = ["challenge-plan", "decide-tools", "write-plan", "decide-goal", "working", "memory-maintenance", "plugin-maintenance"];
   check(
@@ -137,10 +137,10 @@ check("M3.3 主 assess-complexity Minimal 保持 memory_search+context_search+wh
     pluginCreator: "assess-delegation",
   };
   check(
-    "M3.3 子代理 Minimal/初始阶段均含 context_search 且不含 read/context_read/context_compress",
+    "双层语义：受控子代理初始 stage allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
     Object.entries(subagentInitialStages).every(([role, stage]) => {
       const tools = stageDefinitionFor(role, stage)?.allowedTools ?? [];
-      return tools.includes("context_search") && !tools.includes("read") && !tools.includes("context_read") && !tools.includes("context_compress");
+      return CONTEXT_TOOLS.every((tool) => tools.includes(tool)) && !tools.includes("read");
     }),
   );
 }

@@ -171,16 +171,28 @@ check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_
 {
   const contextTools = ["context_search", "context_read", "context_compress"];
   const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  const initialStages = {
+    main: "assess-complexity",
+    worker: "assess-complexity",
+    memoryMaintainer: "assess-delegation",
+    pluginMaintainer: "assess-delegation",
+    pluginCreator: "assess-delegation",
+  };
   check(
     "M3.3 communication allowedTools = context_search+context_read+context_compress",
     roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
   );
   check(
-    "M3.3 主/worker Minimal/初始阶段不含 read/context_read/context_compress",
-    !stageDefinitionFor(MAIN_ROLE, "assess-complexity")?.allowedTools.includes("read") &&
-      !stageDefinitionFor("worker", "assess-complexity")?.allowedTools.includes("read") &&
-      !stageDefinitionFor(MAIN_ROLE, "assess-complexity")?.allowedTools.includes("context_compress") &&
-      !stageDefinitionFor("worker", "assess-complexity")?.allowedTools.includes("context_compress"),
+    "双层语义：stage 初始 allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
+    roles.every((role) =>
+      contextTools.every((tool) =>
+        stageDefinitionFor(role, initialStages[role])?.allowedTools.includes(tool),
+      ),
+    ),
+  );
+  check(
+    "stage 初始 allowedTools 仍不含 read（文件执行工具不属于初始阶段软闸门）",
+    roles.every((role) => !stageDefinitionFor(role, initialStages[role])?.allowedTools.includes("read")),
   );
 }
 check("37.5 新图：decide-tools 只到 write-plan，write-plan 可到 decide-goal/working/maintenance/communication", JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools")?.canAdvance) === JSON.stringify(["write-plan"]) && ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
@@ -232,6 +244,8 @@ const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "all
 check("assess 中调用 read 返回 workflow-stage-deny", deny.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:"));
 const allowMem = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
 check("assess 中调用 memory_search 放行", allowMem.kind === "allow");
+const allowCtxAssess = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
+check("assess 软闸门放行 context_search/context_read/context_compress（阶段面已与 Minimal 分离）", allowCtxAssess?.kind === "allow" && (await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" })))?.kind === "allow" && (await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" })))?.kind === "allow");
 
 // whale_report 推进到 communication 后再闸门
 const result = await whaleReport.execute({ nextStage: "communication" }, { agent });

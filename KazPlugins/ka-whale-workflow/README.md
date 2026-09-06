@@ -19,12 +19,17 @@
   按边界各一次。
 - `tools/pre-execute` 软闸门：主模型与受控 v0.9 子代理在当前 stage 调用非
   Allowed tools 返回 `workflow-stage-deny`，不视为模型失败惩罚。
-- M3.3 context 工具面：主模型与受控子代理的所有非 Minimal 阶段在
-  `allowedTools` 中均含 `context_search` / `context_read` / `context_compress`
-  （主 `working` 经 `KAZ_V09_MAIN_TOOLS` 已含，故不重复列出）；Minimal/初始
-  阶段保持只含 `context_search`，不加 `read` / `context_read` /
-  `context_compress`；各角色 `communication` 阶段允许工具为
-  `context_search` + `context_read` + `context_compress`。
+- 双层语义（M3.3 + Minimal 收口）：stage `allowedTools` 是当前阶段的软闸门，
+  不是首轮 Minimal 列表。主 `assess-complexity` 与受控子代理初始 stage
+  （`assess-complexity` / `assess-delegation`）的 `allowedTools` 均含
+  `memory_search` / `context_search` / `context_read` / `context_compress`
+  （主另含 `whale_report`，子代理含各自报告工具），且不含 `read`；主
+  `assess-complexity` 不放 `ask_user_question`（澄清需求先推进
+  `challenge-plan`）。真正的首轮 Minimal 由 kaz-mode `firstRoundTools` /
+  `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 在“首次工具调用前”独立收口：
+  主 = `memory_search` + `context_search`；受控子代理 =
+  `memory_search` + `context_search` + 各自 report。各角色 `communication`
+  阶段允许工具为 `context_search` + `context_read` + `context_compress`。
 - 受控 v0.9 子代理：`ka_sub_whale` 创建的
   `worker`/`memoryMaintainer`/`pluginMaintainer`/`pluginCreator` 不受
   `includeSubagents=false` 跳过。idle 时自动进入 role 首阶段

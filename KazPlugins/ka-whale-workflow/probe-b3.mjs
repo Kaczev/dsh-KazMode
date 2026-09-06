@@ -64,10 +64,10 @@ check("四个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_
   typeof V09_SUBAGENT_ROLE_PERSONA_REFS[role] === "string" &&
   V09_SUBAGENT_ROLE_TOOL_FILTERS[role]?.allow !== undefined,
 ));
-check("worker Minimal = memory_search + context_search + report（M3.3 不加 context_compress）", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker) === JSON.stringify(["memory_search", "context_search", "work_sub_whale_report"]) && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker.includes("context_compress"));
-check("memoryMaintainer Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.memoryMaintainer) === JSON.stringify(["memory_search", "context_search", "memory_sub_whale_report"]));
-check("pluginMaintainer Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer) === JSON.stringify(["memory_search", "context_search", "plugin_maintainer_sub_whale_report"]));
-check("pluginCreator Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator) === JSON.stringify(["memory_search", "context_search", "plugin_creator_sub_whale_report"]));
+check("首轮 role Minimal：worker = memory_search + context_search + report（不加 context_compress）", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker) === JSON.stringify(["memory_search", "context_search", "work_sub_whale_report"]) && !V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker.includes("context_compress"));
+check("首轮 role Minimal：memoryMaintainer = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.memoryMaintainer) === JSON.stringify(["memory_search", "context_search", "memory_sub_whale_report"]));
+check("首轮 role Minimal：pluginMaintainer = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer) === JSON.stringify(["memory_search", "context_search", "plugin_maintainer_sub_whale_report"]));
+check("首轮 role Minimal：pluginCreator = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator) === JSON.stringify(["memory_search", "context_search", "plugin_creator_sub_whale_report"]));
 check("各角色 Stable Base 含 context_compress/context_read/context_search", ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"].every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_compress") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
 {
   const initialStages = {
@@ -83,10 +83,10 @@ check("各角色 Stable Base 含 context_compress/context_read/context_search", 
     roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
   );
   check(
-    "M3.3 stage-defs 子代理 Minimal/初始阶段含 context_search 且不含 read/compress",
+    "双层语义：stage-defs 子代理初始 allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
     roles.every((role) => {
       const tools = stageDefinitionFor(role, initialStages[role])?.allowedTools ?? [];
-      return tools.includes("context_search") && !tools.includes("read") && !tools.includes("context_read") && !tools.includes("context_compress");
+      return contextTools.every((tool) => tools.includes(tool)) && !tools.includes("read");
     }),
   );
 }

@@ -87,11 +87,21 @@ export const V09_STAGE_IDS = Object.freeze([
 /** 阶段定义（Task 文本来自 v0.9 表格；{KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH} 占位由注入层替换）。 */
 const DEFINITIONS = {
   [MAIN_ROLE]: {
+    // assess-complexity 的 allowedTools 是“该阶段软闸门”，不是首轮 Minimal 列表。
+    // Minimal 由 kaz-mode firstRoundTools（主）/ V09_SUBAGENT_ROLE_MINIMAL_TOOLS
+    // （受控子代理）在“首次工具调用前”独立收口；这里不再承担 Minimal 语义。
+    // 不加 ask_user_question：需要澄清的任务推进 challenge-plan（其持有该工具）。
     "assess-complexity": {
-      allowedTools: ["memory_search", "context_search", "whale_report"],
+      allowedTools: [
+        "memory_search",
+        "context_search",
+        "context_read",
+        "context_compress",
+        "whale_report",
+      ],
       canAdvance: ["challenge-plan", "communication"],
       task:
-        "Judge whether the request is simple or complex. Minimal applies only before the first tool call of the first round: only memory_search and context_search are visible. After the first tool call, schema expands to Stable Main Surface, but the stage soft gate still only allows memory_search, context_search, and whale_report; other calls return workflow-stage-deny. If simple, advance to communication (no-tool-call is a legal exception). If complex, advance to challenge-plan.",
+        "Judge whether the request is simple or complex. Minimal is a separate first-round behavior (before this workflow-run's first tool/call) enforced by kaz-mode firstRoundTools / role Minimal, not by this stage's allowedTools; while Minimal is active, the visible schema is only memory_search + context_search for main. This stage's allowedTools are the workflow soft gate used once Minimal is lifted: memory_search/context_search/context_read/context_compress/whale_report; other calls return workflow-stage-deny. ask_user_question is intentionally not added here: ambiguous tasks advance to challenge-plan, which owns ask_user_question. If simple, advance to communication (no-tool-call is a legal exception). If complex, advance to challenge-plan.",
     },
     "challenge-plan": {
       allowedTools: [
@@ -179,7 +189,13 @@ const DEFINITIONS = {
   },
   worker: {
     "assess-complexity": {
-      allowedTools: ["memory_search", "context_search", "work_sub_whale_report"],
+      allowedTools: [
+        "memory_search",
+        "context_search",
+        "context_read",
+        "context_compress",
+        "work_sub_whale_report",
+      ],
       canAdvance: ["challenge-plan", "communication"],
       task: "Judge whether the delegation is simple or complex.",
     },
@@ -236,7 +252,13 @@ const DEFINITIONS = {
   },
   memoryMaintainer: {
     "assess-delegation": {
-      allowedTools: ["memory_search", "context_search", "memory_sub_whale_report"],
+      allowedTools: [
+        "memory_search",
+        "context_search",
+        "context_read",
+        "context_compress",
+        "memory_sub_whale_report",
+      ],
       canAdvance: ["plan-memory", "communication"],
       task: "Judge whether the memory delegation is clear.",
     },
@@ -299,7 +321,13 @@ const DEFINITIONS = {
   },
   pluginMaintainer: {
     "assess-delegation": {
-      allowedTools: ["memory_search", "context_search", "plugin_maintainer_sub_whale_report"],
+      allowedTools: [
+        "memory_search",
+        "context_search",
+        "context_read",
+        "context_compress",
+        "plugin_maintainer_sub_whale_report",
+      ],
       canAdvance: ["plan-plugin", "communication"],
       task: "Judge whether the plugin maintenance delegation is clear.",
     },
@@ -377,7 +405,13 @@ const DEFINITIONS = {
   },
   pluginCreator: {
     "assess-delegation": {
-      allowedTools: ["memory_search", "context_search", "plugin_creator_sub_whale_report"],
+      allowedTools: [
+        "memory_search",
+        "context_search",
+        "context_read",
+        "context_compress",
+        "plugin_creator_sub_whale_report",
+      ],
       canAdvance: ["plan-plugin", "communication"],
       task: "Judge whether the plugin creation delegation is clear.",
     },

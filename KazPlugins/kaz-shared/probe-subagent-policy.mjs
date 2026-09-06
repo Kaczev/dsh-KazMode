@@ -35,12 +35,12 @@ const V09_ROLES = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCrea
 // ---------- v0.9 角色常量 ----------
 check("角色常量只含 v0.9 四值且冻结", Array.isArray(V09_SUBAGENT_ROLE_IDS) && Object.isFrozen(V09_SUBAGENT_ROLE_IDS) && JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(V09_ROLES));
 check("每个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_ROLES.every((role) => Array.isArray(V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role]) && Array.isArray(V09_SUBAGENT_ROLE_STABLE_BASE[role]) && typeof V09_SUBAGENT_ROLE_PERSONA_REFS[role] === "string" && Array.isArray(V09_SUBAGENT_ROLE_TOOL_FILTERS[role].allow)));
-check("M3.2 每个角色 Minimal = memory_search + context_search + 各自 report", V09_ROLES.every((role) => {
+check("首轮 role Minimal = memory_search + context_search + 各自 report（独立于 stage allowedTools）", V09_ROLES.every((role) => {
   const list = V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role];
   const report = { worker: "work_sub_whale_report", memoryMaintainer: "memory_sub_whale_report", pluginMaintainer: "plugin_maintainer_sub_whale_report", pluginCreator: "plugin_creator_sub_whale_report" }[role];
   return JSON.stringify(list) === JSON.stringify(["memory_search", "context_search", report]);
 }));
-check("M3.3 Minimal 不加入 context_compress", V09_ROLES.every((role) => !V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role].includes("context_compress")));
+check("首轮 role Minimal 不加入 context_compress（context 三工具只进 stage allowedTools / Stable Base）", V09_ROLES.every((role) => !V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role].includes("context_compress")));
 check("M3.3 每个角色 Stable Base 含 context_compress/context_read/context_search", V09_ROLES.every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_compress") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
 check("旧 toolCreator/retriever 被拒绝", normalizeV09Role("toolCreator") === null && normalizeV09Role("retriever") === null);
 check("未知角色被拒绝", normalizeV09Role("attackerRole") === null);

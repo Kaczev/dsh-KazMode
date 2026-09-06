@@ -57,7 +57,10 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
     `KAZ_V09_SUBAGENT_ROLE_TOOLS` 表达，供 ka_sub_whale 使用）；
   - 首阶段（kaz-mode 核心 `minimalPhase=true`）只保留 `firstRoundTools`；
     为空时按 `resolveFirstRoundTools({ kazMemoryEnabled })` 自动解析——Kaz 下
-    ka-whale-memory 恒开 → `memory_search` + `context_search`；
+    ka-whale-memory 恒开 → `memory_search` + `context_search`；受控 v0.9 子代理
+    首轮另由 `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 收口 =
+    `memory_search` + `context_search` + 各自 report。该 Minimal 是“首次工具调用前”
+    的特殊行为，独立于 ka-whale-workflow/stage-defs 的 stage `allowedTools`；
   - 原生 Plan 已移除，`stableMainSurface()` 不接受 Plan 自动放行参数。
 - **记忆工具**：Kaz 下 ka-whale-memory 恒开，旧项目关闭状态不再从 Kaz 固定面剔除；
   非 Kaz 模式仍由 kaz-mode 按 agent 会话开关从工具面剔除。

@@ -5,8 +5,10 @@
 //   - units 由 session-context-adapter.buildCompressUnits 按当前 surface 生成；
 //   - 可选（默认开）用 ctx.tokenMeter.measure(session).nodes 把每个 unit 的
 //     tokens 换成真实 meter 价格，再交给 M1 预算；
-//   - compactIfNeeded 保留官方 threshold / toolResultPruner / retry /
-//     context-overflow 语义，但自动选区改为 Kaz 分层预算；
+//   - compactIfNeeded 保留官方 threshold（默认 0.8）/ toolResultPruner / retry /
+//     context-overflow 语义，自动选区仍用固定 maxFoldTokens；
+//   - context_compress 手动 suggest/fold 选区改用 foldTargetRatio（默认 0.5）
+//     对当前 totalTokens 的动态预算，不触碰 auto 路径；
 //   - compactRegion 沿用父类（BasicCompactionEngine）的持久事务与摘要缝。
 //
 // 本文件 import DSH 包；运行/加载时必须在能解析 @deepseek-ai/* 的环境
@@ -41,6 +43,7 @@ export const KAZ_CONFIG_KEYS = Object.freeze([
   "preservePrefixTokens",
   "preserveTailTokens",
   "maxFoldTokens",
+  "foldTargetRatio",
   "layerPriority",
   "protectedUnitIds",
   "useMeterTokens",
@@ -56,6 +59,7 @@ export const KAZ_CONFIG_DEFAULTS = Object.freeze({
   preservePrefixTokens: DEFAULT_PRESERVE_PREFIX_TOKENS,
   preserveTailTokens: DEFAULT_PRESERVE_TAIL_TOKENS,
   maxFoldTokens: DEFAULT_MAX_FOLD_TOKENS,
+  foldTargetRatio: 0.5,
   layerPriority: LAYER_PRIORITY_DEFAULT,
   protectedUnitIds: [],
   useMeterTokens: true,
@@ -120,6 +124,19 @@ function readLayerPriority(value) {
   return value.slice();
 }
 
+function readFoldTargetRatio(value) {
+  if (value === undefined) return KAZ_CONFIG_DEFAULTS.foldTargetRatio;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    value > 1
+  ) {
+    throw kazError("foldTargetRatio must be a number in (0, 1]");
+  }
+  return value;
+}
+
 function readProtectedUnitIds(value) {
   if (value === undefined) return [];
   if (!Array.isArray(value)) throw kazError("protectedUnitIds must be an array");
@@ -161,6 +178,7 @@ export function normalizeKazConfig(config) {
     }
     maxFoldTokens = source.maxFoldTokens;
   }
+  const foldTargetRatio = readFoldTargetRatio(source.foldTargetRatio);
   const layerPriority = readLayerPriority(source.layerPriority);
   const protectedUnitIds = readProtectedUnitIds(source.protectedUnitIds);
   let useMeterTokens = KAZ_CONFIG_DEFAULTS.useMeterTokens;
@@ -181,6 +199,7 @@ export function normalizeKazConfig(config) {
     preservePrefixTokens,
     preserveTailTokens,
     maxFoldTokens,
+    foldTargetRatio,
     layerPriority,
     protectedUnitIds,
     useMeterTokens,
@@ -279,6 +298,24 @@ function selectionOptionsFrom(rawOptions) {
       options.useMeterTokens === undefined ? true : options.useMeterTokens,
     adapterOptions: options.adapterOptions,
   };
+}
+
+/**
+ * 手动 context_compress 的动态 fold 预算：
+ *   dynamicMaxFoldTokens = Math.max(1, Math.floor(totalTokens * foldTargetRatio))
+ * 只有拿到 tokenMeter 的 totalTokens 时才可计算；离线/无测量时回退固定
+ * maxFoldTokens，保持旧行为（live DSH 总有 tokenMeter）。
+ */
+function resolveManualFoldMax(measurement, foldTargetRatio, fallbackMaxFoldTokens) {
+  const totalTokens =
+    measurement &&
+    typeof measurement.totalTokens === "number" &&
+    Number.isFinite(measurement.totalTokens) &&
+    measurement.totalTokens >= 0
+      ? measurement.totalTokens
+      : null;
+  if (totalTokens === null) return fallbackMaxFoldTokens;
+  return Math.max(1, Math.floor(totalTokens * foldTargetRatio));
 }
 
 /**
@@ -420,8 +457,10 @@ function errWithCode(message, code) {
  * KazCompactionEngine：ctx.compaction provider。
  *
  * 配置可同时包含 BasicCompactionEngine 字段与 Kaz 扩展字段：
- *   thresholdRatio/retainRatio/retainTokens/modelPolicies/... （父类）
- *   preservePrefixTokens/preserveTailTokens/maxFoldTokens/layerPriority （M1）
+ *   thresholdRatio/retainRatio/retainTokens/modelPolicies/... （父类，官方默认
+ *   thresholdRatio=0.8 / retainRatio=0.16，auto 路径不改动）
+ *   preservePrefixTokens/preserveTailTokens/maxFoldTokens/foldTargetRatio/
+ *   layerPriority （Kaz 选区；foldTargetRatio 只用于手动 context_compress）
  */
 export class KazCompactionEngine extends BasicCompactionEngine {
   /** Kaz 扩展配置（冻结）。 */
@@ -434,8 +473,19 @@ export class KazCompactionEngine extends BasicCompactionEngine {
     this.kazConfig = normalized;
   }
 
-  /** 返回本次应交给 compactRegion 的 range（surface seq 闭区间），无候选时 null。 */
-  selectRange(session, measurement, { overflow = false, force = false } = {}) {
+  /**
+   * 返回本次应交给 compactRegion 的 range（surface seq 闭区间），无候选时 null。
+   *
+   * manual=true 是 context_compress 的手动 suggest/fold 路径：按当前测量的
+   * totalTokens 计算 dynamicMaxFoldTokens = max(1, floor(totalTokens * foldTargetRatio))
+   * 并替换固定 maxFoldTokens。auto compactIfNeeded / context-overflow 仍用固定
+   * maxFoldTokens（force 时 MAX_SAFE_INTEGER），不套 foldTargetRatio。
+   */
+  selectRange(
+    session,
+    measurement,
+    { overflow = false, force = false, manual = false } = {},
+  ) {
     const base = this.kazConfig;
     const primaryOptions = {
       preservePrefixTokens: base.preservePrefixTokens,
@@ -449,6 +499,12 @@ export class KazCompactionEngine extends BasicCompactionEngine {
       primaryOptions.preservePrefixTokens = 0;
       primaryOptions.preserveTailTokens = 0;
       primaryOptions.maxFoldTokens = Number.MAX_SAFE_INTEGER;
+    } else if (manual) {
+      primaryOptions.maxFoldTokens = resolveManualFoldMax(
+        measurement,
+        base.foldTargetRatio,
+        base.maxFoldTokens,
+      );
     }
     let result = selectKazRange(session, measurement, primaryOptions);
     if (result.ok) {

@@ -177,6 +177,38 @@ const compressSession = {
 };
 const compressExec = execFor({ session: compressSession });
 
+// ---------- fake tokenMeter：任何 surface 每个 node 按 100 token 计价 ----------
+const tokenMeter = {
+  measure(session) {
+    const nodes =
+      session && session.surface && Array.isArray(session.surface.nodes)
+        ? session.surface.nodes
+        : [];
+    return {
+      totalTokens: nodes.length * 100,
+      nodes: nodes.map((seq) => ({ seq, tokens: 100 })),
+    };
+  },
+};
+provided.tokenMeter = tokenMeter;
+
+// ---------- 手动 dynamic-fold 判别会话：6 个相邻 detail unit，固定 100000
+// vs 50%×600=300 会产生不同范围 ----------
+const manualCompressEvents = Array.from({ length: 6 }, (_, index) => {
+  const seq = index + 1;
+  return ev(
+    seq,
+    "assistant/message",
+    { message: assistantMessage(`Manual fold assistant detail ${seq}`) },
+    "append",
+  );
+});
+const manualCompressSession = {
+  events: manualCompressEvents.slice(),
+  surface: { nodes: [1, 2, 3, 4, 5, 6], replaceGeneration: 0 },
+};
+const manualCompressExec = execFor({ session: manualCompressSession });
+
 // ---------- 插件注册（default class：provider + tools 同一实例） ----------
 const pluginInstance = new plugin(ctx, {
   auto: false,
@@ -368,6 +400,46 @@ check(
     count: compressSuggestDetailed.units?.length,
     sample: compressSuggestDetailed.units?.[0],
   }),
+);
+// 手动 suggest/fold：totalTokens=600 → 50% 动态预算 300；6 个相邻 detail unit
+// 每个 100 token → 应折叠最右 3 个（seq 4..6），而不是固定 maxFoldTokens=100000。
+const manualSuggest = await compressDef.execute(
+  { strategy: "suggest" },
+  manualCompressExec,
+);
+check(
+  "context_compress manual suggest 用 50% 动态预算（seq 4..6 = 300 tokens）",
+  manualSuggest.ok === true &&
+    manualSuggest.action === "suggest" &&
+    manualSuggest.start === 4 &&
+    manualSuggest.end === 6 &&
+    manualSuggest.shadowedTokens === 300 &&
+    manualSuggest.unitCount === 3,
+  JSON.stringify(manualSuggest),
+);
+const foldCalls = [];
+const originalCompactRegion = pluginInstance.compactRegion;
+pluginInstance.compactRegion = async (start, end, agent, signal) => {
+  foldCalls.push({ start, end, agent, signal });
+  return {
+    ok: true,
+    compactionId: `manual-${start}-${end}`,
+    shadowedRange: { start, end },
+    shadowedSeqs: [start, end],
+  };
+};
+const manualFold = await compressDef.execute({ strategy: "fold" }, manualCompressExec);
+pluginInstance.compactRegion = originalCompactRegion;
+check(
+  "context_compress manual fold 用 50% 动态预算提交 compactRegion(4,6)",
+  manualFold.ok === true &&
+    manualFold.action === "fold" &&
+    foldCalls.length === 1 &&
+    foldCalls[0].start === 4 &&
+    foldCalls[0].end === 6 &&
+    foldCalls[0].agent === manualCompressExec.agent &&
+    foldCalls[0].signal === manualCompressExec.signal,
+  JSON.stringify({ foldCalls, manualFold }),
 );
 const compressNoSession = await compressDef.execute({ strategy: "suggest" }, execFor(undefined));
 check(

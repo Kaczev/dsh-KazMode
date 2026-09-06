@@ -49,6 +49,8 @@ const SESSIONS = {
   // v0.8 Step A：子代理 stable/minimal 会话（带 subagent/descriptor）。
   "s-kaz-sub": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true },
   "s-kaz-sub-min": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true },
+  // 受控 v0.9 worker 子代理首轮（kaz-mode 按 kaWhaleWorkflow.subagentRoleOf 收敛为 role Minimal）。
+  "s-kaz-sub-ctl-min": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true, subagentRole: "worker" },
   // 专门验证首轮极简（无任何 tool/call）的 Kaz 会话。
   "s-kaz-min": { cwd: PROJECT_A, agentPreset: "kaz" },
   "s-kaz-min-nomem": { cwd: PROJECT_B, agentPreset: "kaz" },
@@ -59,7 +61,7 @@ const SESSIONS = {
 const eventsOf = (id) => {
   const isSub = SESSIONS[id]?.subagent === true;
   const descriptor = isSub ? [{ type: "subagent/descriptor", seq: 0, time: Date.now(), data: {} }] : [];
-  if (id === "s-kaz-min" || id === "s-kaz-min-nomem" || id === "s-kaz-sub-min") return descriptor;
+  if (id === "s-kaz-min" || id === "s-kaz-min-nomem" || id === "s-kaz-sub-min" || id === "s-kaz-sub-ctl-min") return descriptor;
   const base = [...descriptor, { type: "tool/call", seq: descriptor.length, time: Date.now(), data: { name: "pwsh" } }];
   if (id === "s-kaz-plan") return [...base, { type: "plan/mode", seq: base.length, time: Date.now(), data: { active: true } }];
   return base;
@@ -179,7 +181,13 @@ const ctx = {
     if (name === "settings") return settings;
     if (name === "agents") return { get: (sid) => agentsBySession.get(sid) ?? undefined };
     if (name === "goals") return { get: (agent) => goalsByAgent.get(agent?.id) ?? undefined };
-    if (name === "kaWhaleWorkflow") return { stageOf: (agent) => whaleStages[agent?.id] ?? null };
+    if (name === "kaWhaleWorkflow") return {
+      stageOf: (agent) => whaleStages[agent?.id] ?? null,
+      subagentRoleOf: (agent) => {
+        const role = SESSIONS[agent?.id]?.subagentRole;
+        return typeof role === "string" ? { persona: role } : null;
+      },
+    };
     if (name === "connection") return mockConnection;
     return undefined;
   },
@@ -207,6 +215,7 @@ const sKazMin = agentOf("s-kaz-min");
 const sKazMinNomem = agentOf("s-kaz-min-nomem");
 const sKazSub = agentOf("s-kaz-sub");
 const sKazSubMin = agentOf("s-kaz-sub-min");
+const sKazSubCtlMin = agentOf("s-kaz-sub-ctl-min");
 
 // ② 硬边界 2：首次工具调用前工具面 ≤2（kaz-memory/ka-whale-memory 开与关两种状态）。
 {
@@ -223,6 +232,7 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   const nomem = kazMode.surfaceOf(sKazNomem);
   const sub = kazMode.surfaceOf(sKazSub);
   const subMin = kazMode.surfaceOf(sKazSubMin);
+  const subCtlMin = kazMode.surfaceOf(sKazSubCtlMin);
   check("②.5 Stable Main Surface = 22（v0.9 §1.1；M3.3 含 context 三工具）", stable !== null && stable.size === 22 && stable.has("context_compress") && stable.has("context_read") && stable.has("context_search"));
   check("②.5 主面含 get_goal/update_goal，不含 create_goal", kazMode.toolVisible(sKaz, "create_goal") === false && kazMode.toolVisible(sKaz, "get_goal") === true && kazMode.toolVisible(sKaz, "update_goal") === true);
   check("②.5 主面含 whale_report/ka_sub_whale/controls，不含旧 subagent", kazMode.toolVisible(sKaz, "whale_report") === true && kazMode.toolVisible(sKaz, "ka_sub_whale") === true && kazMode.toolVisible(sKaz, "list_agents") === true && kazMode.toolVisible(sKaz, "send_message") === true && kazMode.toolVisible(sKaz, "interrupt_agent") === true && kazMode.toolVisible(sKaz, "subagent") === false);
@@ -230,7 +240,8 @@ const sKazSubMin = agentOf("s-kaz-sub-min");
   check("②.5 主面不含 exit_plan_mode（v0.8 Step B1：原生 Plan 已移除）", kazMode.toolVisible(sKaz, "exit_plan_mode") === false);
   check("②.5 Kaz 恒开：记忆关旧状态不再影响固定主面（仍 22 含记忆读/context）", nomem !== null && nomem.size === 22 && nomem.has("memory_search") && nomem.has("memory_list") && nomem.has("memory_detail") && nomem.has("context_compress") && nomem.has("context_read") && nomem.has("context_search") && nomem.has("get_goal"));
   check("②.5 子代理稳定面 = 保守 Subagent Base 14", sub !== null && sub.size === 14 && sub.has("read") && sub.has("context_compress") && sub.has("context_read") && sub.has("context_search") && sub.has("web_search") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
-  check("②.5 子代理 minimal = memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
+  check("②.5 旧/未知子代理首轮回退 memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
+  check("②.5 受控 v0.9 子代理首轮 Minimal = memory_search+context_search+各自 report", subCtlMin !== null && subCtlMin.size === 3 && subCtlMin.has("memory_search") && subCtlMin.has("context_search") && subCtlMin.has("work_sub_whale_report"));
 }
 
 // ①.6 RPC：B4 只读面板 + 三类候选（固定主面下，候选只写候选层，不进主面）

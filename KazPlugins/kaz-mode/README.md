@@ -131,7 +131,10 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 
 kaz-mode 在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集：Kaz 下
 `ka-whale-memory` 恒开 → `memory_search` + `context_search`（M3.2）；受控子代理按 v0.9 role Minimal
-（`memory_search` + `context_search` + 各自 report）；
+（`memory_search` + `context_search` + 各自 report）。
+**Minimal 不是 assess/初始 stage 本身**：stage `allowedTools` 由
+ka-whale-workflow/stage-defs 作为阶段软闸门（初始阶段已含三 context 工具与报告工具），
+首轮可见 schema 则由本插件 firstRoundTools / `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 独立收口。
 首次工具调用后恢复 Stable Main Surface（v0.8 Step A 固定集，不由工具控制面板 JSON 决定）。
 每次 assemble 后的真实工具面增删由本插件以 `category=tool-surface` 上报 round-display。
 
@@ -189,6 +192,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    含 `context_compress/context_read/context_search`，不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +
    assignedTools 显示，旧/未知子代理回落到保守 Base；
+   该 Minimal 是首轮特殊行为：ka-whale-workflow 初始 stage 的 `allowedTools`
+   （含三 context 工具与报告工具）是阶段软闸门，不是 Minimal 列表；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
 5. Kaz 面板「工具控制面板」只读展示 Stable Main/workflow 面；私有插件候选只读、

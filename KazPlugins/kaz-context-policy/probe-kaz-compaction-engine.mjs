@@ -183,11 +183,18 @@ function throws(label, fn, messagePart) {
     norm.preservePrefixTokens === 4096 &&
       norm.preserveTailTokens === 8192 &&
       norm.maxFoldTokens === 8192 &&
+      norm.foldTargetRatio === 0.5 &&
       norm.useMeterTokens === true &&
       norm.overflowFallback === true &&
       Array.isArray(norm.layerPriority) &&
       norm.layerPriority.length === 4,
     JSON.stringify(KAZ_CONFIG_DEFAULTS),
+  );
+  const customRatio = normalizeKazConfig({ foldTargetRatio: 0.25 });
+  check(
+    "① foldTargetRatio 可配置（0.25）",
+    customRatio.foldTargetRatio === 0.25,
+    String(customRatio.foldTargetRatio),
   );
 }
 
@@ -506,6 +513,15 @@ function throws(label, fn, messagePart) {
   throws("⑦ maxFoldTokens 0 抛错", () => {
     new KazCompactionEngine(ctx, { auto: false, maxFoldTokens: 0 });
   }, "maxFoldTokens");
+  throws("⑦ foldTargetRatio 0 抛错", () => {
+    new KazCompactionEngine(ctx, { auto: false, foldTargetRatio: 0 });
+  }, "foldTargetRatio");
+  throws("⑦ foldTargetRatio 1.01 抛错", () => {
+    new KazCompactionEngine(ctx, { auto: false, foldTargetRatio: 1.01 });
+  }, "foldTargetRatio");
+  throws("⑦ foldTargetRatio 非数字抛错", () => {
+    new KazCompactionEngine(ctx, { auto: false, foldTargetRatio: "half" });
+  }, "foldTargetRatio");
   throws("⑦ layerPriority 非法层抛错", () => {
     new KazCompactionEngine(ctx, { auto: false, layerPriority: ["bogus"] });
   }, "layerPriority");
@@ -518,6 +534,81 @@ function throws(label, fn, messagePart) {
   throws("⑦ protectedUnitIds 非数组抛错", () => {
     new KazCompactionEngine(ctx, { auto: false, protectedUnitIds: "keep" });
   }, "protectedUnitIds");
+}
+
+// ---------- ⑧ foldTargetRatio：manual dynamic 50% vs auto 固定预算 ----------
+{
+  const events = [];
+  for (let i = 0; i < 6; i += 1) {
+    events.push(assistantEvent(10 + i * 10, `assistant detail ${i}`));
+  }
+  const nodes = events.map((e) => e.seq);
+  const session = makeSession(events, nodes);
+  const tokenMap = Object.fromEntries(nodes.map((seq) => [seq, 100]));
+  const meter = makeMeter(tokenMap);
+  const measurement = meter.measure(session); // totalTokens = 600
+  const ctx = makeCtx(meter, undefined);
+  const engine = new KazCompactionEngine(ctx, {
+    auto: false,
+    preservePrefixTokens: 0,
+    preserveTailTokens: 0,
+    maxFoldTokens: 100,
+  });
+  const manualRange = engine.selectRange(session, measurement, { manual: true });
+  const autoRange = engine.selectRange(session, measurement, {});
+  check(
+    "⑧ manual selectRange 用 totalTokens×0.5=300 预算（折叠右端 3 units）",
+    manualRange !== null &&
+      manualRange.result.shadowedTokens === 300 &&
+      manualRange.result.unitStart === 3 &&
+      manualRange.result.unitEnd === 5 &&
+      manualRange.start === 40 &&
+      manualRange.end === 60,
+    JSON.stringify(manualRange && manualRange.result),
+  );
+  check(
+    "⑧ 非 manual selectRange 仍用固定 maxFoldTokens=100（只折叠 1 unit）",
+    autoRange !== null &&
+      autoRange.result.shadowedTokens === 100 &&
+      autoRange.result.unitStart === 5 &&
+      autoRange.result.unitEnd === 5 &&
+      autoRange.start === 60 &&
+      autoRange.end === 60,
+    JSON.stringify(autoRange && autoRange.result),
+  );
+
+  const pressureMeter = makeMeter(tokenMap);
+  const pressureCtx = makeCtx(pressureMeter, {
+    async resolveModelInfo() {
+      return { context: { contextWindow: 700 } };
+    },
+  });
+  const pressureEngine = new KazCompactionEngine(pressureCtx, {
+    auto: false,
+    // 不传 thresholdRatio：验证继承官方默认 0.8（0.8×700=560 ≤ total 600）
+    preservePrefixTokens: 0,
+    preserveTailTokens: 0,
+    maxFoldTokens: 100,
+  });
+  const calls = [];
+  pressureEngine.compactRegion = async (start, end, agent, signal) => {
+    calls.push({ start, end });
+    pressureMeter.setLow(true);
+    return stubCompactionResult(start, end);
+  };
+  const pressureResult = await pressureEngine.compactIfNeeded(
+    agentFor(session),
+    "pressure",
+    new AbortController().signal,
+  );
+  check(
+    "⑧ auto compactIfNeeded 不套 50%：固定 100 预算只压最后 1 unit（seq 60）",
+    pressureResult !== null &&
+      calls.length === 1 &&
+      calls[0].start === 60 &&
+      calls[0].end === 60,
+    JSON.stringify(calls),
+  );
 }
 
 console.log("");

@@ -12,6 +12,9 @@
 // context_compress：schema 支持 strategy=suggest|fold、limit 与 opts；执行时
 // 读取本插件提供的 ctx.compaction（selectRange + compactRegion）。无 provider
 // 时返回结构化 no-provider（仅离线/降级路径）。
+// suggest/fold 是模型/手动路径：默认按当前 tokenMeter totalTokens 的 50%
+// （foldTargetRatio=0.5）作单次 fold 预算；自动 compactIfNeeded 仍保持官方
+// thresholdRatio 0.8 的上下文窗口压力阈值，不套 foldTargetRatio。
 // suggest 默认返回紧凑摘要（无全量 units）；opts.includeUnits=true 时附加
 // 全量 units 数组供调试，schema 与 tool description 同步暴露 includeUnits。
 // 结果以 JSON 文本渲染；错误也走结构化 { ok:false, code, reason }。
@@ -185,12 +188,12 @@ function contextCompressDef(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns a compact candidate summary (start/end, shadowedTokens, cachePreservedTokens, tailPreservedTokens, unitCount and suggestedUnitLayer) without changing anything; no full units array is returned unless opts.includeUnits=true (debug). strategy='fold' commits a compaction through the Kaz m33b compaction provider. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
+      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns a compact candidate summary (start/end, shadowedTokens, cachePreservedTokens, tailPreservedTokens, unitCount and suggestedUnitLayer) without changing anything; no full units array is returned unless opts.includeUnits=true (debug). strategy='fold' commits a compaction through the Kaz m33b compaction provider. Manual suggest/fold targets about 50% of the currently measured context (foldTargetRatio default 0.5) as the single-fold budget; automatic compactIfNeeded keeps the official 0.8 context-window threshold and does not apply foldTargetRatio. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
     parameters: {
       strategy: {
         type: "string",
         enum: ["suggest", "fold"],
-        description: "suggest = show compact candidate range only (default, no mutation; set opts.includeUnits=true to also include the full units array for debug); fold = select then commit through the Kaz provider.",
+        description: "suggest = show compact candidate range only (default, no mutation; set opts.includeUnits=true to also include the full units array for debug); fold = select then commit through the Kaz provider. Manual suggest/fold uses about 50% of current measured context as the fold budget; auto compaction keeps the official 0.8 threshold.",
       },
       limit: {
         type: "integer",
@@ -239,9 +242,12 @@ function contextCompressDef(ctx) {
         } catch {
           measurement = undefined;
         }
+        // 手动 suggest/fold 路径：manual=true 触发 dynamicMaxFoldTokens
+        // （当前 totalTokens * foldTargetRatio，默认 50%），auto 不走此分支。
         const range = provider.selectRange(session, measurement, {
           overflow: false,
           force: false,
+          manual: true,
         });
         if (range === null || range === undefined) {
           return structuredError(

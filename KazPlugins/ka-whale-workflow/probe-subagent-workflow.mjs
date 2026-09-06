@@ -125,11 +125,16 @@ function subagentAgent(id) {
     roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
   );
   check(
-    "M3.3 子代理 Minimal/初始阶段不含 read/context_read/context_compress",
-    roles.every((role) => {
-      const tools = stageDefinitionFor(role, V09_SUBAGENT_ROLE_INITIAL_STAGES[role])?.allowedTools ?? [];
-      return tools.includes("context_search") && !tools.includes("read") && !tools.includes("context_read") && !tools.includes("context_compress");
-    }),
+    "双层语义：受控子代理初始 stage allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
+    roles.every((role) =>
+      contextTools.every((tool) =>
+        stageDefinitionFor(role, V09_SUBAGENT_ROLE_INITIAL_STAGES[role])?.allowedTools.includes(tool),
+      ),
+    ),
+  );
+  check(
+    "受控子代理初始 stage allowedTools 仍不含 read",
+    roles.every((role) => !stageDefinitionFor(role, V09_SUBAGENT_ROLE_INITIAL_STAGES[role])?.allowedTools.includes("read")),
   );
 }
 
@@ -195,7 +200,9 @@ check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL
   check("worker 注入后 pending 已清除", pendingFromFile(STORE_FILE, "child-worker") === null);
   const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const allow = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
-  check("worker assess-complexity 软闸门：read 拒绝、memory_search 放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow");
+  const allowCtxRead = await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" }));
+  const allowCtxCompress = await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" }));
+  check("worker assess-complexity 软闸门：read 拒绝、memory_search/context_read/context_compress 放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow" && allowCtxRead?.kind === "allow" && allowCtxCompress?.kind === "allow");
 }
 
 // *_sub_whale_report：output + nextStage 应同时推进角色 workflow 并原生汇报给主模型。
