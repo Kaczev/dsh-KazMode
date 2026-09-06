@@ -1,11 +1,15 @@
-// kaz-context-policy M3.2b 探针：插件工具 context_search / context_read
+// kaz-context-policy M3.3 探针：插件 provider + 工具 context_search / context_read / context_compress
 // ===========================================================================
-// 离线验证：stub ctx.tools.register + fake exec.agent.session.events
+// 离线验证：stub ctx.tools.register / ctx.reflect.provide / fake exec.agent.session.events
 // （events 含 append 原文、replacement checkpoint、compaction 日志）。
-// 运行：node KazPlugins/kaz-context-policy/probe-context-tools.mjs
+// 插件默认导出是 KazContextPolicy（class extends KazCompactionEngine）：实例化后
+// 应同时注册 ctx.compaction 与三个 context 工具；context_compress 在有 provider
+// 的会话上应走 Kaz selectRange，而不是 no-provider。
+// 运行：node KazPlugins/kaz-context-policy/probe-context-tools.mjs（profile 树内）
 // ===========================================================================
 
 import plugin from "./lib/index.js";
+import { KazCompactionEngine } from "./lib/kaz-compaction-engine.js";
 
 let passed = 0;
 let failures = 0;
@@ -23,15 +27,33 @@ const failWith = (result, code) =>
   result.code === code &&
   typeof result.reason === "string";
 
-// ---------- fake 注册面 ----------
+// ---------- fake 注册面（含 Service/reflect 接线） ----------
 const registered = [];
+const provided = Object.create(null);
 let disposedCount = 0;
 let cleanup = null;
+const disposers = [];
 const ctx = {
   logger: {
     warn() {},
     info() {},
     debug() {},
+  },
+  reflect: {
+    provide(name, instance) {
+      provided[name] = instance;
+      let called = false;
+      const dispose = () => {
+        if (called) return;
+        called = true;
+        delete provided[name];
+      };
+      disposers.push(dispose);
+      return dispose;
+    },
+  },
+  get(name) {
+    return provided[name];
   },
   tools: {
     register(def) {
@@ -46,6 +68,9 @@ const ctx = {
   },
   effect(registerCleanup) {
     cleanup = registerCleanup();
+  },
+  on() {
+    return () => {};
   },
 };
 
@@ -123,25 +148,76 @@ const exec = execFor({ session });
 const eventsSnapshot = JSON.stringify(events);
 const sessionSnapshot = JSON.stringify(session);
 
-// ---------- 插件注册 ----------
-plugin.apply(ctx);
+// ---------- 可压缩会话：provider mounted 后 context_compress 走 Kaz selectRange ----------
+const compressSession = {
+  events: [
+    { seq: 1, type: "user/message", data: "First core task to keep", surfaceOp: "append", time: "c-1" },
+    {
+      seq: 2,
+      type: "assistant/message",
+      data: { message: assistantMessage("Assistant prefix plan") },
+      surfaceOp: "append",
+    },
+    { seq: 3, type: "user/message", data: "Old middle detail to fold", surfaceOp: "append" },
+    {
+      seq: 4,
+      type: "assistant/message",
+      data: { message: assistantMessage("Verbose middle assistant detail that should be folded away") },
+      surfaceOp: "append",
+    },
+    { seq: 5, type: "user/message", data: "Tail recent question", surfaceOp: "append" },
+    {
+      seq: 6,
+      type: "assistant/message",
+      data: { message: assistantMessage("Tail assistant answer") },
+      surfaceOp: "append",
+    },
+  ],
+  surface: { nodes: [1, 2, 3, 4, 5, 6], replaceGeneration: 0 },
+};
+const compressExec = execFor({ session: compressSession });
+
+// ---------- 插件注册（default class：provider + tools 同一实例） ----------
+const pluginInstance = new plugin(ctx, {
+  auto: false,
+  preservePrefixTokens: 0,
+  preserveTailTokens: 0,
+  maxFoldTokens: 100000,
+});
 
 const byName = Object.fromEntries(registered.map((def) => [def.name, def]));
 check(
-  "注册 context_search/context_read 两个工具",
-  registered.length === 2 &&
+  "注册 context_search/context_read/context_compress 三个工具",
+  registered.length === 3 &&
     Object.prototype.hasOwnProperty.call(byName, "context_search") &&
-    Object.prototype.hasOwnProperty.call(byName, "context_read"),
+    Object.prototype.hasOwnProperty.call(byName, "context_read") &&
+    Object.prototype.hasOwnProperty.call(byName, "context_compress"),
   registered.map((d) => d.name).join(","),
 );
 check(
-  "两个工具都带 JSON 文本 output.render",
+  "三个工具都带 JSON 文本 output.render",
   typeof byName.context_search.output.render === "function" &&
-    typeof byName.context_read.output.render === "function",
+    typeof byName.context_read.output.render === "function" &&
+    typeof byName.context_compress.output.render === "function",
+);
+check(
+  "默认导出是 KazCompactionEngine 子类实例（provider+tools 同一插件）",
+  pluginInstance instanceof KazCompactionEngine &&
+    typeof pluginInstance.selectRange === "function" &&
+    typeof pluginInstance.compactRegion === "function",
+  typeof plugin,
+);
+check(
+  "ctx.compaction 已通过 Service/reflect 注册为同一实例",
+  ctx.get("compaction") === pluginInstance &&
+    typeof ctx.get("compaction").selectRange === "function" &&
+    typeof ctx.get("compaction").compactRegion === "function",
+  typeof ctx.get("compaction"),
 );
 
 const searchDef = byName.context_search;
 const readDef = byName.context_read;
+const compressDef = byName.context_compress;
 check(
   "context_search schema：query required，limit/cursor optional",
   searchDef.parameters.type === "object" &&
@@ -158,6 +234,25 @@ check(
     JSON.stringify(readDef.parameters.required) === JSON.stringify(["seqs"]) &&
     readDef.parameters.properties.seqs?.oneOf !== undefined,
   JSON.stringify(readDef.parameters.properties.seqs),
+);
+check(
+  "context_compress schema：strategy optional suggest|fold，limit/opts optional",
+  compressDef.parameters.type === "object" &&
+    compressDef.parameters.properties.strategy?.type === "string" &&
+    JSON.stringify(compressDef.parameters.properties.strategy.enum) === JSON.stringify(["suggest", "fold"]) &&
+    compressDef.parameters.properties.limit?.type === "integer" &&
+    compressDef.parameters.properties.opts?.type === "object" &&
+    (compressDef.parameters.required ?? []).every(
+      (name) => !["strategy", "limit", "opts"].includes(name),
+    ),
+  JSON.stringify(compressDef.parameters),
+);
+check(
+  "context_compress schema：strategy/limit/opts 全部可选",
+  !JSON.stringify(compressDef.parameters.required ?? []).includes("strategy") &&
+    !JSON.stringify(compressDef.parameters.required ?? []).includes("limit") &&
+    !JSON.stringify(compressDef.parameters.required ?? []).includes("opts"),
+  JSON.stringify(compressDef.parameters.required),
 );
 
 // ---------- context_search 命中 ----------
@@ -228,6 +323,24 @@ check(
   JSON.stringify(emptyQuery),
 );
 
+// ---------- context_compress：provider 已由同一插件挂载 ----------
+const compressSuggest = await compressDef.execute({ strategy: "suggest" }, compressExec);
+check(
+  "context_compress provider mounted → suggest 返回 Kaz 选区（非 no-provider）",
+  compressSuggest.ok === true &&
+    compressSuggest.action === "suggest" &&
+    typeof compressSuggest.start === "number" &&
+    typeof compressSuggest.end === "number" &&
+    compressSuggest.end >= compressSuggest.start,
+  JSON.stringify(compressSuggest),
+);
+const compressNoSession = await compressDef.execute({ strategy: "suggest" }, execFor(undefined));
+check(
+  "context_compress provider mounted + 无 session → 结构化 no-agent-session",
+  failWith(compressNoSession, "no-agent-session"),
+  JSON.stringify(compressNoSession),
+);
+
 // ---------- context_read 读取 / 错误 ----------
 const readTwo = await readDef.execute({ seqs: [10, 40] }, exec);
 check(
@@ -296,7 +409,7 @@ check(
 if (typeof cleanup === "function") {
   cleanup();
 }
-check("ctx.effect cleanup 注销两个工具", disposedCount === 2, String(disposedCount));
+check("ctx.effect cleanup 注销三个工具", disposedCount === 3, String(disposedCount));
 
 console.log(
   `\nprobe-context-tools: ${passed}/${passed + failures} PASS${failures ? `, ${failures} FAIL` : ""}`,

@@ -1,12 +1,24 @@
-// kaz-context-policy M3.2b —— Cordis 插件：context_search / context_read
+// kaz-context-policy M3.3 —— Cordis 插件：Kaz compaction provider + context 工具
 // ===========================================================================
-// 纯只读回溯工具：从当前 agent session 的 append-only 原始事件日志建 M2
-// records（replacement checkpoint / compaction 日志不进 records），再调用 M2
-// 纯核心 searchContext / readContext。结果以 JSON 文本渲染；错误也走结构化
-// { ok:false, code, reason }。不 append、不改写 session、不写任何存储。
+// 同一插件实例承担两个角色：
+//   1. ctx.compaction provider（KazCompactionEngine，M1/M3 自定义选区 + 官方
+//      compaction 事务），可直接替换 preset compaction group 里的
+//      @deepseek-ai/dsh-compaction-basic 行；
+//   2. 工具：context_search / context_read（M2 只读回溯）与 context_compress
+//      （模型主动压缩入口，strategy=suggest|fold）。
+// context_search / context_read：纯只读回溯工具，从当前 agent session 的
+// append-only 原始事件日志建 M2 records（replacement checkpoint / compaction
+// 日志不进 records），再调用 M2 纯核心 searchContext / readContext。
+// context_compress：schema 支持 strategy=suggest|fold、limit 与 opts；执行时
+// 读取本插件提供的 ctx.compaction（selectRange + compactRegion）。无 provider
+// 时返回结构化 no-provider（仅离线/降级路径）。
+// 结果以 JSON 文本渲染；错误也走结构化 { ok:false, code, reason }。
+// 不 append、不改写 session、不写任何存储（fold 时改写 surface 由 provider
+// 的官方 compactRegion 事务负责）。
 // ===========================================================================
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { KazCompactionEngine } from "./kaz-compaction-engine.js";
 import { searchContext, readContext } from "./context-search-read.js";
 import { buildSearchRecords } from "./session-context-adapter.js";
 
@@ -151,30 +163,161 @@ function contextReadDef() {
   });
 }
 
-export default {
-  name: "kaz-context-policy",
-  inject: ["tools"],
-  apply(ctx, _config = {}) {
-    const disposers = [];
-    for (const def of [contextSearchDef(), contextReadDef()]) {
+function compressionProviderOf(ctx) {
+  try {
+    const provider = ctx && typeof ctx.get === "function" ? ctx.get("compaction") : null;
+    if (
+      provider &&
+      typeof provider.selectRange === "function" &&
+      typeof provider.compactRegion === "function"
+    ) {
+      return provider;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function contextCompressDef(ctx) {
+  return defineTool({
+    name: "context_compress",
+    description:
+      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns the candidate range without changing anything; strategy='fold' commits a compaction through the Kaz m33b compaction provider. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
+    parameters: {
+      strategy: {
+        type: "string",
+        enum: ["suggest", "fold"],
+        description: "suggest = show candidate range only (default, no mutation); fold = select then commit through the Kaz provider.",
+      },
+      limit: {
+        type: "integer",
+        description: "Optional fold-size/candidate limit forwarded to the m33b provider when supported.",
+      },
+      opts: {
+        type: "object",
+        additionalProperties: true,
+        description: "Optional provider options reserved for the m33b provider (e.g. preserve budgets / protected unit ids).",
+      },
+    },
+    output: {
+      schema: { type: "object", additionalProperties: true },
+      render: renderJsonText,
+    },
+    async execute(args, exec) {
+      const provider = compressionProviderOf(ctx);
+      if (provider === null) {
+        return structuredError(
+          "no-provider",
+          "context_compress requires the Kaz m33b compaction provider (ctx.compaction with selectRange/compactRegion); the provider is not mounted or is not complete.",
+        );
+      }
+      const agent = exec?.agent;
+      const session = agent?.session;
+      if (session === null || session === undefined) {
+        return structuredError(
+          "no-agent-session",
+          "context_compress requires exec.agent.session",
+        );
+      }
+      const strategy = args?.strategy === "fold" ? "fold" : "suggest";
       try {
-        disposers.push(ctx.tools.register(def));
+        let measurement;
+        try {
+          const meter = ctx?.get?.("tokenMeter");
+          if (meter && typeof meter.measure === "function") {
+            measurement = meter.measure(session);
+          }
+        } catch {
+          measurement = undefined;
+        }
+        const range = provider.selectRange(session, measurement, {
+          overflow: false,
+          force: false,
+        });
+        if (range === null || range === undefined) {
+          return structuredError(
+            "no-compressible-range",
+            "context_compress found no candidate range after prefix/tail protection.",
+          );
+        }
+        if (strategy === "suggest") {
+          return {
+            ok: true,
+            strategy,
+            action: "suggest",
+            start: range.start,
+            end: range.end,
+            result: range.result ?? range,
+          };
+        }
+        const result = await provider.compactRegion(
+          range.start,
+          range.end,
+          agent,
+          exec.signal,
+        );
+        return { ok: true, strategy, action: "fold", result };
+      } catch (error) {
+        return structuredError(
+          "internal-error",
+          `context_compress failed: ${safeReason(error)}`,
+        );
+      }
+    },
+    presentCall: (args) => ({
+      card: "generic",
+      title: "压缩会话上下文",
+      kind: args?.strategy === "fold" ? "write" : "read",
+      rawInput: JSON.stringify(args ?? {}),
+    }),
+  });
+}
+
+/** 在同一个插件 fiber/entry context 上注册三个 context 工具并绑定注销。 */
+function registerTools(ctx) {
+  const disposers = [];
+  for (const def of [
+    contextSearchDef(),
+    contextReadDef(),
+    contextCompressDef(ctx),
+  ]) {
+    try {
+      disposers.push(ctx.tools.register(def));
+    } catch (error) {
+      ctx.logger?.warn?.(
+        `[kaz-context-policy] 注册工具 ${def.name} 失败：${safeReason(error)}`,
+      );
+    }
+  }
+  ctx.effect(() => () => {
+    for (const dispose of disposers.splice(0)) {
+      try {
+        dispose();
       } catch (error) {
         ctx.logger?.warn?.(
-          `[kaz-context-policy] 注册工具 ${def.name} 失败：${safeReason(error)}`,
+          `[kaz-context-policy] 注销工具失败：${safeReason(error)}`,
         );
       }
     }
-    ctx.effect(() => () => {
-      for (const dispose of disposers.splice(0)) {
-        try {
-          dispose();
-        } catch (error) {
-          ctx.logger?.warn?.(
-            `[kaz-context-policy] 注销工具失败：${safeReason(error)}`,
-          );
-        }
-      }
-    });
-  },
-};
+  });
+}
+
+/**
+ * KazContextPolicy —— provider + tool 同一插件的 Cordis 默认导出。
+ *
+ * 与 @deepseek-ai/dsh-compaction-basic 的加载形式一致（default class plugin）：
+ * Cordis 在拥有 llm/tokenMeter/sessions/tools 的 entry context 构造本类；
+ * KazCompactionEngine 的 Service 构造器把实例注册为 ctx.compaction，之后
+ * registerTools() 把 context_search/read/compress 挂进同一 ctx。
+ */
+export class KazContextPolicy extends KazCompactionEngine {
+  static inject = ["tools", "llm", "tokenMeter", "sessions"];
+
+  constructor(ctx, config = {}) {
+    super(ctx, config);
+    registerTools(ctx);
+  }
+}
+
+export default KazContextPolicy;

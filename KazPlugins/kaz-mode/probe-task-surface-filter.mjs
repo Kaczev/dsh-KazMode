@@ -1,5 +1,5 @@
-// kaz-mode 探针（v0.9 B5/M3.2 口径）：
-//   - Kaz Stable Main Surface 固定 21 项，含 context_read/context_search，无 enable_tool / old subagent / create_goal；
+// kaz-mode 探针（v0.9 B5/M3.3 口径）：
+//   - Kaz Stable Main Surface 固定 22 项，含 context_compress/context_read/context_search，无 enable_tool / old subagent / create_goal；
 //   - ka-whale-memory/workflow 在 Kaz 恒开：旧“记忆关”项目状态不再从固定面剔除记忆读；
 //   - 非 Kaz 模式仍按项目状态移除记忆工具；
 //   - 受控 v0.9 worker 子代理面 = role Stable Base + assignedTools；
@@ -55,7 +55,7 @@ const agentOfSubagent = (id) => ({
 });
 const CONTROLLED_WORKER_SURFACE = [
   "edit", "glob", "grep", "memory_detail", "memory_list", "memory_search",
-  "pwsh", "read", "context_read", "context_search", "todo_write", "web_search", "write", "work_sub_whale_report", "job_list",
+  "pwsh", "read", "context_read", "context_search", "context_compress", "todo_write", "web_search", "write", "work_sub_whale_report", "job_list",
 ];
 const kaWhaleMock = {
   stageOf: () => "working",
@@ -129,7 +129,7 @@ const sPlainNomem = agentOf("s-plain-nomem");
 // ① Kaz fixed surface: no optional/task-tool machinery.
 {
   const surface = kazMode.surfaceOf(sKaz);
-  check("Kaz surface = 21 fixed tools", surface !== null && surface.size === 21 && surface.has("context_read") && surface.has("context_search"));
+  check("Kaz surface = 22 fixed tools", surface !== null && surface.size === 22 && surface.has("context_compress") && surface.has("context_read") && surface.has("context_search"));
   check("Kaz surface contains v0.9 controls and Goal reads", surface.has("read") && surface.has("ka_sub_whale") && surface.has("list_agents") && surface.has("send_message") && surface.has("interrupt_agent") && surface.has("whale_report") && surface.has("get_goal") && surface.has("update_goal"));
   check("Kaz surface has no enable_tool / old subagent / create_goal / external optional", !surface.has("enable_tool") && !surface.has("subagent") && !surface.has("create_goal") && !surface.has("read_image") && !surface.has("job_list"));
   check("Kaz surface contains memory reads but not writes", surface.has("memory_search") && surface.has("memory_list") && surface.has("memory_detail") && !surface.has("memory_save") && !surface.has("memory_forget"));
@@ -138,7 +138,7 @@ const sPlainNomem = agentOf("s-plain-nomem");
 // ② Kaz 恒开：old memory-off state ignored.
 {
   const nomemSurface = kazMode.surfaceOf(sKazNomem);
-  check("Kaz memory-off legacy state still yields memory/context reads (B5/M3.2 fixed)", nomemSurface !== null && nomemSurface.has("memory_search") && nomemSurface.has("memory_list") && nomemSurface.has("memory_detail") && nomemSurface.has("context_read") && nomemSurface.has("context_search") && nomemSurface.size === 21);
+  check("Kaz memory-off legacy state still yields memory/context reads (B5/M3.3 fixed)", nomemSurface !== null && nomemSurface.has("memory_search") && nomemSurface.has("memory_list") && nomemSurface.has("memory_detail") && nomemSurface.has("context_compress") && nomemSurface.has("context_read") && nomemSurface.has("context_search") && nomemSurface.size === 22);
 }
 
 // ③ Non-Kaz still honors plugin state.
@@ -154,7 +154,7 @@ const sPlainNomem = agentOf("s-plain-nomem");
 }
 
 // ⑤ assemble/pre-execute use same stable surface.
-const ALL_TOOLS = ["read", "pwsh", "web_search", "read_image", "job_list", "subagent", "enable_tool", "exit_plan_mode", "create_goal", "get_goal", "update_goal", "whale_report", "ka_sub_whale", "list_agents", "send_message", "interrupt_agent", "memory_search", "memory_save", "context_read", "context_search"];
+const ALL_TOOLS = ["read", "pwsh", "web_search", "read_image", "job_list", "subagent", "enable_tool", "exit_plan_mode", "create_goal", "get_goal", "update_goal", "whale_report", "ka_sub_whale", "list_agents", "send_message", "interrupt_agent", "memory_search", "memory_save", "context_read", "context_search", "context_compress"];
 const runAssemble = async (agent) => {
   const listener = listeners.get("system-prompt/assemble")[0];
   const assembly = { tools: ALL_TOOLS.map((name) => ({ name })), sections: [], contexts: [], variables: {} };
@@ -164,7 +164,7 @@ const runAssemble = async (agent) => {
 const gate = listeners.get("tools/pre-execute")[0];
 const runGate = async (agent, name) => gate({ name, agent }, async () => ({ kind: "allow" }));
 const assembled = await runAssemble(sKaz);
-check("assemble keeps v0.9 fixed surface only", assembled.has("ka_sub_whale") && assembled.has("whale_report") && assembled.has("context_read") && assembled.has("context_search") && !assembled.has("enable_tool") && !assembled.has("subagent") && !assembled.has("create_goal") && !assembled.has("read_image") && !assembled.has("job_list"));
+check("assemble keeps v0.9 fixed surface only", assembled.has("ka_sub_whale") && assembled.has("whale_report") && assembled.has("context_compress") && assembled.has("context_read") && assembled.has("context_search") && !assembled.has("enable_tool") && !assembled.has("subagent") && !assembled.has("create_goal") && !assembled.has("read_image") && !assembled.has("job_list"));
 check("pre-execute allows fixed tools and denies enable_tool/old subagent/writes", (await runGate(sKaz, "whale_report")).kind === "allow" && (await runGate(sKaz, "enable_tool")).kind === "deny" && (await runGate(sKaz, "subagent")).kind === "deny" && (await runGate(sKaz, "memory_save")).kind === "deny");
 
 rmSync(TMP, { recursive: true, force: true });

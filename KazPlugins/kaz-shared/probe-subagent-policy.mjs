@@ -40,7 +40,8 @@ check("M3.2 每个角色 Minimal = memory_search + context_search + 各自 repor
   const report = { worker: "work_sub_whale_report", memoryMaintainer: "memory_sub_whale_report", pluginMaintainer: "plugin_maintainer_sub_whale_report", pluginCreator: "plugin_creator_sub_whale_report" }[role];
   return JSON.stringify(list) === JSON.stringify(["memory_search", "context_search", report]);
 }));
-check("M3.2 每个角色 Stable Base 含 context_read/context_search", V09_ROLES.every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
+check("M3.3 Minimal 不加入 context_compress", V09_ROLES.every((role) => !V09_SUBAGENT_ROLE_MINIMAL_TOOLS[role].includes("context_compress")));
+check("M3.3 每个角色 Stable Base 含 context_compress/context_read/context_search", V09_ROLES.every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_compress") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
 check("旧 toolCreator/retriever 被拒绝", normalizeV09Role("toolCreator") === null && normalizeV09Role("retriever") === null);
 check("未知角色被拒绝", normalizeV09Role("attackerRole") === null);
 

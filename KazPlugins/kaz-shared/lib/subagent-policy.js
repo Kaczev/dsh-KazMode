@@ -69,7 +69,7 @@ export const V09_SUBAGENT_ROLE_MINIMAL_TOOLS = Object.freeze({
   pluginCreator: Object.freeze(["memory_search", "context_search", "plugin_creator_sub_whale_report"]),
 });
 
-/** v0.9 子代理 Stable Base（§1.2–1.5；含该角色的 report 工具；M3.2 加 context 两工具）。 */
+/** v0.9 子代理 Stable Base（§1.2–1.5；含该角色的 report 工具；M3.3 加 context 三工具）。 */
 export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
   worker: Object.freeze([
     "edit",
@@ -82,6 +82,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "read",
     "context_read",
     "context_search",
+    "context_compress",
     "todo_write",
     "web_search",
     "write",
@@ -97,6 +98,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "read",
     "context_read",
     "context_search",
+    "context_compress",
     "glob",
     "grep",
     "memory_sub_whale_report",
@@ -105,6 +107,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "read",
     "context_read",
     "context_search",
+    "context_compress",
     "write",
     "edit",
     "glob",
@@ -117,6 +120,7 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "read",
     "context_read",
     "context_search",
+    "context_compress",
     "write",
     "edit",
     "glob",
