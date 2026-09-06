@@ -209,7 +209,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["check-tools"],
       task:
-        "Critique the delegation first; identify real weaknesses; do not manufacture criticism. Find the smallest workable approach. The full working file-tool set (edit, write, pwsh, read) is granted in working, not here. Then advance to check-tools. If we only need to report, advance to communication. If the context is long and we only need to report, advance to compass_context_before_communication.",
+        "Critique the delegation first; identify real weaknesses; do not manufacture criticism. Find the smallest workable approach. The full working file-tool set (edit, write, pwsh, read) is granted in working, not here. Then advance to check-tools.",
     },
     "check-tools": {
       allowedTools: ["context_search", "context_read", "work_sub_whale_report"],
@@ -582,7 +582,7 @@ export const GOAL_ACTIVE_CONTEXT_TEXT = `[ka-whale-workflow goal-active]
 Mode: Goal is active; ka-whale-workflow ordinary stage progression is suspended.
 Allowed tools: [main stable surface minus whale_report progression usage]
 Use get_goal/update_goal per official Goal rules. Goal context and rounds are driven by the official Goal driver. Persona is unchanged.
-Context: Before continuing, if earlier exact goal/session content may have been summarized, use context_search then context_read; if the Goal session is very long, preview with context_compress suggest before folding.
+Context: Before continuing, if earlier exact goal/session content may have been summarized, use context_search then context_read.
 <`;
 
 /**
