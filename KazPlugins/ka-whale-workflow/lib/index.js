@@ -2782,23 +2782,14 @@ Before we answer, call memory_search or context_search exactly once. After that 
       return found;
     }
 
-    // 子代理 dispose/异常时清理角色注册与复用父索引，避免脏复用候选。
-    ctx.on("agent/disposed", ({ agent }) => {
-      if (agent === null || agent === undefined || typeof agent !== "object") return;
-      try {
-        const disposedId = sessionIdOf(agent);
-        if (typeof disposedId === "string" && disposedId.length > 0) {
-          if (stageStore.removeSubagentRole(disposedId)) {
-            ctx.logger?.info?.(
-              `[ka-whale-workflow] removed disposed controlled subagent role record for ${disposedId}`,
-            );
-          }
-        }
-      } catch (error) {
-        ctx.logger?.warn?.(
-          `[ka-whale-workflow] agent/disposed role cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+    // 子代理 dispose 时**不**删除角色注册：DSH continuable 子代理在每轮结束/被
+    // interrupt 后可能 unload 成 ready（agent/disposed 会触发）；此时若删除
+    // subagentRoles，父主 send_message 恢复时 controlled role 判定丢失，pending
+    // 阶段注入不再发生，kaz-mode 也会把它当普通子代理退回 memory_search。
+    // 真正已移除子代理的脏记录由 tryReuseMemoryMaintainer 经 subagents.listChildren
+    // 对账清理（不在 children 列表即 removeSubagentRole），因此这里必须保留记录。
+    ctx.on("agent/disposed", () => {
+      // intentionally no-op: preserve continuable child role records across ready/unload.
     });
 
     ctx.on("agent/inbox/claimed", ({ agent, message, turn }) => {

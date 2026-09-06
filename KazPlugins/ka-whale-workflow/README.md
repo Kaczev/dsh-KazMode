@@ -48,7 +48,10 @@
   （role Persona 已由 ka_sub_whale 的 `request.persona` 提供，并被
   kaz-system-prompt 原样保留）；旧/未知子代理在
   `includeSubagents=true` 时只进入 workflow stage 外壳，不再注入旧通用
-  subagent-flow。
+  subagent-flow。受控子代理的 `subagentRoles` 记录在 unload/ready/agent/disposed
+  期间**保留不删**（DSH continuable 子代理每轮结束可能触发 dispose/unload，删除
+  会让父主 send_message 恢复时丢失受控角色与 pending 注入）；真正已移除子代理的
+  脏记录由 memoryMaintainer 复用对账经 `listChildren` 清理。
 - 各角色 `communication` 阶段只允许各自的 report 工具（`whale_report` /
   `work_sub_whale_report` / `memory_sub_whale_report` /
   `plugin_maintainer_sub_whale_report`）。

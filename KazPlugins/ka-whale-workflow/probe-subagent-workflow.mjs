@@ -475,7 +475,9 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   check("pluginMaintainer create-plugin 软闸门：write/memory_search 放行、memory_save 拒绝", allowWrite?.kind === "allow" && allowMemSearch?.kind === "allow" && denyMemSave?.kind === "deny" && String(denyMemSave.reason).startsWith("workflow-stage-deny:"));
 }
 
-// agent/disposed：子代理 dispose 时清理角色记录与 parent→role→child 复用索引。
+// agent/disposed：continuable 子代理 unload/ready 时不得清角色记录——否则
+// 父主 send_message 恢复时 controlled role/pending 注入丢失。真正已移除子代理的
+// 脏记录由 tryReuseMemoryMaintainer 经 listChildren 对账清理。
 {
   const beforeRaw = readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, "");
   const before = JSON.parse(beforeRaw);
@@ -490,9 +492,9 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   }
   const after = JSON.parse(readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, ""));
   check(
-    "agent/disposed 后：角色记录与 parent 复用索引均已清理",
-    after.subagentRoles?.["child-dispose-reuse"] === undefined &&
-      (after.subagentRoleParents?.["parent-main"]?.["memoryMaintainer"] ?? []).includes("child-dispose-reuse") === false,
+    "agent/disposed（unload/ready）后：角色记录与 parent 复用索引保留，resume 仍可识别受控角色",
+    after.subagentRoles?.["child-dispose-reuse"]?.parentId === "parent-main" &&
+      after.subagentRoleParents?.["parent-main"]?.["memoryMaintainer"]?.includes("child-dispose-reuse") === true,
   );
 }
 
