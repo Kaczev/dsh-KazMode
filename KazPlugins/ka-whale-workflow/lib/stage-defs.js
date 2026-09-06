@@ -119,8 +119,11 @@ const DEFINITIONS = {
     "decide-tools-before-writing-plan": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
       canAdvance: ["write-plan"],
-      task:
-        "Decide required tools for the work. Do not write task plans here (write-plan owns persistence). Advance to write-plan. Candidate assignedTools list (system-injected): <candidate tools: name: description>.",
+      task:`Decide which tools from the candidate private plugins list are required for this work. Do not write task plans here — persistence is handled by the write-plan stage. Advance to write-plan when ready.
+
+The candidate tools (private plugins) are: <candidate tools: name: description>.
+
+Only these private plugins and tool_jobs(job_list, job_output, job_kill) may be included in assignedTools. Regular file tools and memory tools are part of the base role surface and must not be listed.`,
     },
     "write-plan": {
       allowedTools: ["whale_report", "read", "context_search", "context_read"],
@@ -136,6 +139,7 @@ PlanItem rules:
 Delegation rules:
 - Delegate every worker planItem to a subagent via "ka-sub-whale". Do not execute planItems directly.
 - For each delegated task, provide the fullest possible task description — include objective, detailed step-by-step actions, expected outputs, constraints, relevant context, assumptions, and potential pitfalls. When in doubt, include the information. Do not assume the subagent can infer what you mean; spell everything out.
+- Assigned tools cannot exceed 8 tools per planItem.
 
 Amendment rules:
 - In amendment mode, read the current plan first, persist the revised plan, then advance.
