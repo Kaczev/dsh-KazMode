@@ -13,7 +13,8 @@
 // 读取本插件提供的 ctx.compaction（selectRange + compactRegion）。无 provider
 // 时返回结构化 no-provider（仅离线/降级路径）。
 // suggest/fold 是模型/手动路径：默认按当前 tokenMeter totalTokens 的 50%
-// （foldTargetRatio=0.5）作单次 fold 预算；自动 compactIfNeeded 仍保持官方
+// （foldTargetRatio=0.5）作一次连续填充预算，从可压区右侧尽量压满预算、
+// 跨 layer/run 但仍不碰前缀/尾/强保单位；自动 compactIfNeeded 仍保持官方
 // thresholdRatio 0.8 的上下文窗口压力阈值，不套 foldTargetRatio。
 // suggest 默认返回紧凑摘要（无全量 units）；opts.includeUnits=true 时附加
 // 全量 units 数组供调试，schema 与 tool description 同步暴露 includeUnits。
@@ -188,12 +189,12 @@ function contextCompressDef(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns a compact candidate summary (start/end, shadowedTokens, cachePreservedTokens, tailPreservedTokens, unitCount and suggestedUnitLayer) without changing anything; no full units array is returned unless opts.includeUnits=true (debug). strategy='fold' commits a compaction through the Kaz m33b compaction provider. Manual suggest/fold targets about 50% of the currently measured context (foldTargetRatio default 0.5) as the single-fold budget; automatic compactIfNeeded keeps the official 0.8 context-window threshold and does not apply foldTargetRatio. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
+      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns a compact candidate summary (start/end, shadowedTokens, cachePreservedTokens, tailPreservedTokens, unitCount and suggestedUnitLayer) without changing anything; no full units array is returned unless opts.includeUnits=true (debug). strategy='fold' commits a compaction through the Kaz m33b compaction provider. Manual suggest/fold fills once from the right of the compressible area, using about 50% of the currently measured context (foldTargetRatio default 0.5) as the budget; it stays under that budget while crossing layers/runs but never folds prefix/tail/protected units. Automatic compactIfNeeded keeps the official 0.8 context-window threshold and does not apply foldTargetRatio. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
     parameters: {
       strategy: {
         type: "string",
         enum: ["suggest", "fold"],
-        description: "suggest = show compact candidate range only (default, no mutation; set opts.includeUnits=true to also include the full units array for debug); fold = select then commit through the Kaz provider. Manual suggest/fold uses about 50% of current measured context as the fold budget; auto compaction keeps the official 0.8 threshold.",
+        description: "suggest = show compact candidate range only (default, no mutation; set opts.includeUnits=true to also include the full units array for debug); fold = select then commit through the Kaz provider. Manual suggest/fold fills the compressible area once up to about 50% of the measured-context budget (foldTargetRatio default 0.5), crossing layers/runs but never prefix/tail/protected units; auto compaction keeps the official 0.8 threshold.",
       },
       limit: {
         type: "integer",
@@ -243,7 +244,8 @@ function contextCompressDef(ctx) {
           measurement = undefined;
         }
         // 手动 suggest/fold 路径：manual=true 触发 dynamicMaxFoldTokens
-        // （当前 totalTokens * foldTargetRatio，默认 50%），auto 不走此分支。
+        // （当前 totalTokens * foldTargetRatio，默认 50%）并启用 fillToBudget
+        // 连续填充；auto 不走此分支。
         const range = provider.selectRange(session, measurement, {
           overflow: false,
           force: false,

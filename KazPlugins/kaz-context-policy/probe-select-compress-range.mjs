@@ -309,6 +309,145 @@ const u = (seqStart, seqEnd, tokens, layer, id, position) => ({
   );
 }
 
+// ---------- ⑤d fillToBudget：跨 layer/run 右侧连续填充至预算 ----------
+{
+  const units = [
+    u(0, 100, 100, "core-task"),
+    u(100, 200, 100, "detail"),
+    u(200, 300, 100, "noise"),
+    u(300, 400, 100, "detail"),
+    u(400, 500, 100, "active-detail"),
+    u(500, 600, 100, "noise"),
+    u(600, 700, 100, "core-task"),
+  ];
+  const opts = {
+    preservePrefixTokens: 150,
+    preserveTailTokens: 150,
+    maxFoldTokens: 300,
+  };
+  const fill = selectCompressRange(units, { ...opts, fillToBudget: true });
+  check(
+    "⑤d fillToBudget=true 跨 layer/run 连续填充（unitStart=3..5, 300 tokens）",
+    fill.ok === true &&
+      fill.unitStart === 3 &&
+      fill.unitEnd === 5 &&
+      fill.startSeq === 300 &&
+      fill.endSeq === 600 &&
+      fill.shadowedTokens === 300,
+    JSON.stringify(fill),
+  );
+  check(
+    "⑤d fillToBudget=true 估算 cache/tail 不吞保护前缀/尾",
+    fill.ok === true &&
+      fill.cachePreservedTokens === 300 &&
+      fill.tailPreservedTokens === 100,
+    JSON.stringify({
+      cachePreservedTokens: fill.cachePreservedTokens,
+      tailPreservedTokens: fill.tailPreservedTokens,
+    }),
+  );
+  const nonFill = selectCompressRange(units, opts);
+  check(
+    "⑤d fillToBudget=false（默认）仍旧 staged 只压最右 noise run 单 unit",
+    nonFill.ok === true &&
+      nonFill.unitStart === 5 &&
+      nonFill.unitEnd === 5 &&
+      nonFill.shadowedTokens === 100,
+    JSON.stringify(nonFill),
+  );
+}
+
+// ---------- ⑤e fillToBudget：预算不可超（组内），单 unit 超预算整条压 ----------
+{
+  const units = [
+    u(0, 100, 90, "core-task"),
+    u(100, 200, 90, "noise"),
+    u(200, 300, 90, "detail"),
+    u(300, 400, 90, "active-detail"),
+    u(400, 500, 90, "detail"),
+    u(500, 600, 90, "core-task"),
+  ];
+  const r = selectCompressRange(units, {
+    preservePrefixTokens: 100,
+    preserveTailTokens: 100,
+    maxFoldTokens: 250,
+    fillToBudget: true,
+  });
+  check(
+    "⑤e 组内累计 180 ≤ 250，不因再加 90=270 超预算",
+    r.ok === true &&
+      r.shadowedTokens === 180 &&
+      r.unitEnd - r.unitStart + 1 === 2 &&
+      r.unitStart === 3 &&
+      r.unitEnd === 4,
+    JSON.stringify(r),
+  );
+
+  const oversize = selectCompressRange(
+    [
+      u(0, 100, 100, "core-task"),
+      u(100, 200, 500, "noise"),
+      u(200, 300, 100, "core-task"),
+    ],
+    {
+      preservePrefixTokens: 150,
+      preserveTailTokens: 150,
+      maxFoldTokens: 100,
+      fillToBudget: true,
+    },
+  );
+  check(
+    "⑤e 最右单 unit 超预算仍整条压（singleOversized=500）",
+    oversize.ok === true &&
+      oversize.unitStart === 1 &&
+      oversize.unitEnd === 1 &&
+      oversize.shadowedTokens === 500,
+    JSON.stringify(oversize),
+  );
+}
+
+// ---------- ⑤f fillToBudget：强制保护不包含，连续区间停在其右边界 ----------
+{
+  const units = [
+    u(0, 100, 100, "core-task", "core-prefix"),
+    u(100, 200, 100, "detail", "detail-left"),
+    u(200, 300, 100, "noise", "noise-left"),
+    u(300, 400, 100, "detail", "keep-mid"),
+    u(400, 500, 100, "noise", "noise-right"),
+    u(500, 600, 100, "active-detail", "active-right"),
+    u(600, 700, 100, "core-task", "core-tail"),
+  ];
+  const r = selectCompressRange(units, {
+    preservePrefixTokens: 150,
+    preserveTailTokens: 150,
+    maxFoldTokens: 500,
+    fillToBudget: true,
+    protectedUnitIds: ["keep-mid"],
+  });
+  check(
+    "⑤f 遇到强制保护 keep-mid 停在其右边界，不吞左右断开的 unit",
+    r.ok === true &&
+      r.unitStart === 4 &&
+      r.unitEnd === 5 &&
+      r.shadowedTokens === 200 &&
+      r.startSeq === 400 &&
+      r.endSeq === 600,
+    JSON.stringify(r),
+  );
+
+  const invalid = selectCompressRange(
+    [u(0, 100, 10, "noise")],
+    { fillToBudget: "yes" },
+  );
+  check(
+    "⑤f fillToBudget 非 boolean → ok:false invalid-fill-to-budget",
+    invalid.ok === false &&
+      invalid.code === "invalid-fill-to-budget" &&
+      typeof invalid.reason === "string",
+    JSON.stringify(invalid),
+  );
+}
+
 // ---------- ⑥ helper 估算正确 ----------
 {
   const units = [

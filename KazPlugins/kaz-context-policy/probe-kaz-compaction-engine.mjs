@@ -611,6 +611,77 @@ function throws(label, fn, messagePart) {
   );
 }
 
+// ---------- ⑨ fillToBudget：manual 跨 layer/run 填充 vs auto 仍单 run ----------
+{
+  // 混合 layer：user=core/active-detail、assistant=detail；6×100=600 tokens。
+  const events = [
+    userEvent(10, "u1-core"),
+    assistantEvent(20, "a1-detail"),
+    userEvent(30, "u2-active"),
+    assistantEvent(40, "a2-detail"),
+    userEvent(50, "u3-active"),
+    assistantEvent(60, "a3-detail"),
+  ];
+  const nodes = events.map((e) => e.seq);
+  const session = makeSession(events, nodes);
+  const tokenMap = Object.fromEntries(nodes.map((seq) => [seq, 100]));
+  const meter = makeMeter(tokenMap);
+  const measurement = meter.measure(session);
+  const ctx = makeCtx(meter, undefined);
+  const engine = new KazCompactionEngine(ctx, {
+    auto: false,
+    preservePrefixTokens: 0,
+    preserveTailTokens: 0,
+    maxFoldTokens: 100,
+  });
+  const manualRange = engine.selectRange(session, measurement, { manual: true });
+  const autoRange = engine.selectRange(session, measurement, {});
+  check(
+    "⑨ manual fillToBudget 跨 detail/active-detail runs：右端连续 3 units=300（seq 40..60）",
+    manualRange !== null &&
+      manualRange.result.unitStart === 3 &&
+      manualRange.result.unitEnd === 5 &&
+      manualRange.result.shadowedTokens === 300 &&
+      manualRange.start === 40 &&
+      manualRange.end === 60,
+    JSON.stringify(manualRange && manualRange.result),
+  );
+  check(
+    "⑨ manual 结果明显大于 auto 单 run（300 vs 100）",
+    manualRange !== null &&
+      autoRange !== null &&
+      manualRange.result.shadowedTokens === 300 &&
+      autoRange.result.shadowedTokens === 100 &&
+      autoRange.result.unitStart === 5 &&
+      autoRange.result.unitEnd === 5,
+    JSON.stringify({ manual: manualRange && manualRange.result, auto: autoRange && autoRange.result }),
+  );
+  check(
+    "⑨ auto selectRange 不套 fillToBudget：只压最右 detail 单 run（seq 60）",
+    autoRange !== null &&
+      autoRange.result.shadowedTokens === 100 &&
+      autoRange.result.unitStart === 5 &&
+      autoRange.result.unitEnd === 5 &&
+      autoRange.start === 60 &&
+      autoRange.end === 60,
+    JSON.stringify(autoRange && autoRange.result),
+  );
+  const directFill = selectKazRange(session, measurement, {
+    preservePrefixTokens: 0,
+    preserveTailTokens: 0,
+    maxFoldTokens: 300,
+    fillToBudget: true,
+  });
+  check(
+    "⑨ selectKazRange 支持 fillToBudget=true 直接入口（unitStart=3..5）",
+    directFill.ok === true &&
+      directFill.unitStart === 3 &&
+      directFill.unitEnd === 5 &&
+      directFill.shadowedTokens === 300,
+    JSON.stringify(directFill),
+  );
+}
+
 console.log("");
 console.log(`probe-kaz-compaction-engine: ${passed} PASS, ${failures} FAIL`);
 if (failures > 0) process.exitCode = 1;

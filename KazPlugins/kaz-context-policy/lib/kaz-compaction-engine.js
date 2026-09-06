@@ -272,6 +272,13 @@ export function applyMeterTokens(units, session, measurement) {
 
 function selectionOptionsFrom(rawOptions) {
   const options = rawOptions === undefined ? {} : rawOptions;
+  let fillToBudget = false;
+  if (options.fillToBudget !== undefined) {
+    if (typeof options.fillToBudget !== "boolean") {
+      throw kazError("fillToBudget must be a boolean");
+    }
+    fillToBudget = options.fillToBudget;
+  }
   return {
     preservePrefixTokens: readBudget(
       options.preservePrefixTokens,
@@ -294,6 +301,7 @@ function selectionOptionsFrom(rawOptions) {
           })(),
     layerPriority: readLayerPriority(options.layerPriority),
     protectedUnitIds: readProtectedUnitIds(options.protectedUnitIds),
+    fillToBudget,
     useMeterTokens:
       options.useMeterTokens === undefined ? true : options.useMeterTokens,
     adapterOptions: options.adapterOptions,
@@ -323,7 +331,7 @@ function resolveManualFoldMax(measurement, foldTargetRatio, fallbackMaxFoldToken
  *
  * @param session DshLike session（events/surface）
  * @param measurement tokenMeter.measure(session) 的结果；缺省时保留 adapter 的粗估 tokens
- * @param rawOptions 支持 M1 四个配置 + protectedUnitIds/useMeterTokens/adapterOptions
+ * @param rawOptions 支持 M1 四个配置 + protectedUnitIds/fillToBudget/useMeterTokens/adapterOptions
  * @returns selectCompressRange 的结果，失败也原样返回 { ok:false, code, reason }
  */
 export function selectKazRange(session, measurement, rawOptions) {
@@ -339,6 +347,7 @@ export function selectKazRange(session, measurement, rawOptions) {
     maxFoldTokens: opts.maxFoldTokens,
     layerPriority: opts.layerPriority,
     ...(opts.protectedUnitIds.length > 0 ? { protectedUnitIds: opts.protectedUnitIds } : {}),
+    fillToBudget: opts.fillToBudget,
   });
   if (!result.ok) return result;
   return {
@@ -478,8 +487,9 @@ export class KazCompactionEngine extends BasicCompactionEngine {
    *
    * manual=true 是 context_compress 的手动 suggest/fold 路径：按当前测量的
    * totalTokens 计算 dynamicMaxFoldTokens = max(1, floor(totalTokens * foldTargetRatio))
-   * 并替换固定 maxFoldTokens。auto compactIfNeeded / context-overflow 仍用固定
-   * maxFoldTokens（force 时 MAX_SAFE_INTEGER），不套 foldTargetRatio。
+   * 并替换固定 maxFoldTokens，同时启用 fillToBudget（从可压区右侧一次连续填充
+   * 至该预算）。auto compactIfNeeded / context-overflow 仍用固定 maxFoldTokens
+   * （force 时 MAX_SAFE_INTEGER）且 fillToBudget=false，不套 foldTargetRatio。
    */
   selectRange(
     session,
@@ -493,6 +503,7 @@ export class KazCompactionEngine extends BasicCompactionEngine {
       maxFoldTokens: base.maxFoldTokens,
       layerPriority: base.layerPriority,
       protectedUnitIds: base.protectedUnitIds,
+      fillToBudget: false,
       useMeterTokens: base.useMeterTokens,
     };
     if (force) {
@@ -505,6 +516,7 @@ export class KazCompactionEngine extends BasicCompactionEngine {
         base.foldTargetRatio,
         base.maxFoldTokens,
       );
+      primaryOptions.fillToBudget = true;
     }
     let result = selectKazRange(session, measurement, primaryOptions);
     if (result.ok) {

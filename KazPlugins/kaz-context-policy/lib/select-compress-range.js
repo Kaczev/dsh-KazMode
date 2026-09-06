@@ -13,7 +13,7 @@
 //
 // opts（缺省见 DEFAULT_*）：
 //   { preservePrefixTokens, preserveTailTokens, maxFoldTokens,
-//     layerPriority, protectedUnitIds }
+//     layerPriority, protectedUnitIds, fillToBudget }
 //
 // protectedUnitIds 的匹配规则：
 //   1) unit 提供 id 时，只按 String(unit.id) 匹配；
@@ -30,6 +30,10 @@
 //   - 层优先级：layerPriority 靠前 = 越优先压缩；默认 noise 先于 detail。
 //   - 同一层内：选最靠右的连续 run；若 run 超过 maxFoldTokens，则一次只压该 run
 //     最右侧且累计不超过预算的后缀（staged fold，先小压，后续再压更左部分）。
+//   - fillToBudget=true：改走连续预算填充。忽略 layerPriority 的 run 切片，从
+//     可压区最右侧 unit 开始向左累计；允许跨 layer/跨 run，连续闭区间不包含
+//     强制保护单位（遇到 protected 停在其右边界）。累计不超过 maxFoldTokens；
+//     若首个（最右）单 unit 已超预算，仍整条压（singleOversized 语义）。
 // ===========================================================================
 
 export const LAYERS = Object.freeze([
@@ -272,6 +276,17 @@ function normalizeOpts(rawOpts) {
   const protectedResult = validateProtectedUnitIds(rawOpts.protectedUnitIds);
   if (!protectedResult.ok) return protectedResult;
 
+  let fillToBudget = false;
+  if (rawOpts.fillToBudget !== undefined) {
+    if (typeof rawOpts.fillToBudget !== "boolean") {
+      return failure(
+        "invalid-fill-to-budget",
+        "fillToBudget must be a boolean when provided",
+      );
+    }
+    fillToBudget = rawOpts.fillToBudget;
+  }
+
   return {
     ok: true,
     opts: {
@@ -280,6 +295,7 @@ function normalizeOpts(rawOpts) {
       maxFoldTokens: maxFold,
       layerPriority,
       protectedIds: new Set(protectedResult.ids),
+      fillToBudget,
     },
   };
 }
@@ -392,9 +408,49 @@ function rightmostFeasibleSliceInRun(units, run, maxFoldTokens) {
 }
 
 /**
+ * 连续预算填充（fillToBudget=true）。
+ * 从可压区最右侧未强保 unit 开始向左累计：允许跨 layer/跨 run，但只返回
+ * 排序索引上的连续闭区间，因此遇到 protected/前缀边界就停止；累计不超过
+ * maxFoldTokens。若最右侧首个单 unit 本身已超预算，仍整条压（singleOversized）。
+ */
+function pickFillRange(units, opts) {
+  const prefixEnd = prefixProtectedEnd(units, opts.preservePrefixTokens);
+  const tailStart = tailProtectedStart(units, opts.preserveTailTokens);
+
+  if (prefixEnd >= tailStart) return null;
+
+  let end = tailStart - 1;
+  while (end >= prefixEnd && isProtected(units[end], end, opts.protectedIds)) {
+    end -= 1;
+  }
+  if (end < prefixEnd) return null;
+
+  let used = 0;
+  let start = end + 1;
+  for (let i = end; i >= prefixEnd; i -= 1) {
+    if (isProtected(units[i], i, opts.protectedIds)) break;
+    const nextTotal = used + units[i].tokens;
+    if (nextTotal <= opts.maxFoldTokens) {
+      used += units[i].tokens;
+      start = i;
+      continue;
+    }
+    // 预算已满：不再向左取（闭区间保持连续）。
+    // 若这是最右首个 unit，说明单 unit 超预算 → 仍整条压。
+    if (start === end + 1) return { start: i, end: i };
+    break;
+  }
+
+  if (start <= end) return { start, end };
+  return null;
+}
+
+/**
  * 核心决策：返回 { start, end }（排序后索引，闭区间），或 null。
  */
 function pickRange(units, opts) {
+  if (opts.fillToBudget) return pickFillRange(units, opts);
+
   const prefixEnd = prefixProtectedEnd(units, opts.preservePrefixTokens);
   const tailStart = tailProtectedStart(units, opts.preserveTailTokens);
 

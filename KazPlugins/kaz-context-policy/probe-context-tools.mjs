@@ -441,6 +441,52 @@ check(
     foldCalls[0].signal === manualCompressExec.signal,
   JSON.stringify({ foldCalls, manualFold }),
 );
+
+// ---------- manual fillToBudget 跨 layer/run（context_compress 层） ----------
+const manualCrossEvents = [
+  ev(1, "user/message", "Manual cross core", "append"),
+  ev(2, "assistant/message", { message: assistantMessage("Manual cross assistant a1") }, "append"),
+  ev(3, "user/message", "Manual cross active u2", "append"),
+  ev(4, "assistant/message", { message: assistantMessage("Manual cross assistant a2") }, "append"),
+  ev(5, "user/message", "Manual cross active u3", "append"),
+  ev(6, "assistant/message", { message: assistantMessage("Manual cross assistant a3") }, "append"),
+];
+const manualCrossSession = {
+  events: manualCrossEvents.slice(),
+  surface: { nodes: [1, 2, 3, 4, 5, 6], replaceGeneration: 0 },
+};
+const manualCrossExec = execFor({ session: manualCrossSession });
+const manualCrossMeasurement = tokenMeter.measure(manualCrossSession);
+const autoCrossRange = pluginInstance.selectRange(manualCrossSession, manualCrossMeasurement, {});
+const manualCrossSuggest = await compressDef.execute({ strategy: "suggest" }, manualCrossExec);
+const manualCrossDetailed = await compressDef.execute(
+  { strategy: "suggest", opts: { includeUnits: true } },
+  manualCrossExec,
+);
+check(
+  "manual suggest 跨 detail/active-detail runs：seq 4..6 = 300 tokens（明显大于 auto 单 run）",
+  manualCrossSuggest.ok === true &&
+    manualCrossSuggest.start === 4 &&
+    manualCrossSuggest.end === 6 &&
+    manualCrossSuggest.shadowedTokens === 300 &&
+    manualCrossSuggest.unitCount === 3 &&
+    autoCrossRange !== null &&
+    autoCrossRange.result.shadowedTokens === 100 &&
+    autoCrossRange.start === 6 &&
+    autoCrossRange.end === 6,
+  JSON.stringify({ manualCrossSuggest, autoCrossRange: autoCrossRange && autoCrossRange.result }),
+);
+check(
+  "manual fill 选区确实跨 layer：positions 3..5 = detail/active-detail/detail",
+  manualCrossDetailed.ok === true &&
+    Array.isArray(manualCrossDetailed.units) &&
+    manualCrossDetailed.units.length === 6 &&
+    manualCrossDetailed.units[3]?.layer === "detail" &&
+    manualCrossDetailed.units[4]?.layer === "active-detail" &&
+    manualCrossDetailed.units[5]?.layer === "detail",
+  JSON.stringify(manualCrossDetailed.units?.slice(3, 6)),
+);
+
 const compressNoSession = await compressDef.execute({ strategy: "suggest" }, execFor(undefined));
 check(
   "context_compress provider mounted + 无 session → 结构化 no-agent-session",
