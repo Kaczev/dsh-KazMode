@@ -225,6 +225,7 @@ check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity"
   check("37.5 memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-maintenance", "write-plan") === true);
   check("36.7 主 working task 批判性评估子代理批评", typeof workingDef?.task === "string" && workingDef.task.includes("critically evaluates subagent reports and their critiques") && workingDef.task.includes("instead of accepting them blindly"));
   check("36.5 working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
+  check("working task 含父主侧 report 硬停等/回复恢复/terminal 新轮语义", typeof workingDef?.task === "string" && workingDef.task.includes("Each *_sub_whale_report pauses the child until you reply") && workingDef.task.includes("send_message to resume it") && workingDef.task.includes("Do not assume the child keeps running after a report."));
 }
 
 // Task plan draft/finalized 骨架（planStore 在 plugin.apply 前预写，plugin store 可见）

@@ -104,6 +104,11 @@
   消息到达主会话再继续。`list_agents` / `send_message` 不是等待原语；主 Persona、
   working/memory-maintenance/plugin-maintenance 注入与
   `ka_sub_whale` description/output 都明确该口径。
+- 主子代理相处模式：每个 `*_sub_whale_report` 都会**硬停**子代理并置
+  `awaitingParent`，直到父主模型回复；父主审查 report 后用 `send_message`
+  恢复子代理（子代理处于 terminal `communication` 时，该回复开启该角色新的一轮：
+  worker=assess-complexity、memoryMaintainer/pluginMaintainer=assess-delegation）。
+  父主不得假设子代理在 report 后仍继续运行。
 - 36.7 challenge-plan 批评纪律：主/worker 的 challenge-plan 阶段要求先批评、
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
   批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与

@@ -2133,7 +2133,10 @@ export default {
           `This tool is available only inside the matching v0.9 subagent role. ` +
           `Pass output for the native report to the parent main model, and nextStage to advance ` +
           `this role's ka-whale-workflow stage before reporting (must be in the current stage's ` +
-          `Can advance to list). If nextStage is omitted, only the report is sent and the stage stays unchanged.`,
+          `Can advance to list). If nextStage is omitted, only the report is sent and the stage stays unchanged. ` +
+          `A successful report is a hard stop: the child sets awaitingParent and waits for the parent main model's ` +
+          `reply via send_message, which resumes it; if the child is at terminal communication, that parent reply ` +
+          `starts a fresh delegation at ${roleFlow.split(" → ")[0]}.`,
         parameters: {
           output: {
             type: "string",

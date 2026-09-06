@@ -221,6 +221,7 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   // child-worker 已在上一段进入 assess-complexity；这里验证推进能力。
   check("前置：child-worker 处于 assess-complexity", stageFromFile(STORE_FILE, "child-worker") === "assess-complexity");
   const workReport = h1.registeredTools.get("work_sub_whale_report");
+  check("work_sub_whale_report description 含硬停等/父回复恢复/terminal 新轮", typeof workReport?.description === "string" && workReport.description.includes("hard stop") && workReport.description.includes("awaitingParent") && workReport.description.includes("send_message, which resumes it") && workReport.description.includes("fresh delegation at assess-complexity"));
   const beforeReports = h1.capturedReports.length;
   const beforeRoundReports = h1.roundReports.length;
   const result = await workReport.execute(
