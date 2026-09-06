@@ -1,6 +1,6 @@
 // ka-whale-workflow v0.9 B3 探针：受控委派投影 + 候选注册表 + role surface。
 // 运行：node KazPlugins/ka-whale-workflow/probe-b3.mjs
-import plugin from "./lib/index.js";
+import plugin, { createStageStore } from "./lib/index.js";
 import { stageDefinitionFor } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
 import {
@@ -55,6 +55,12 @@ const REGISTRY = {
   })),
 };
 writeFileSync(REG_FILE, JSON.stringify(REGISTRY, null, 2), "utf8");
+
+const MEM_BASE_SURFACE = computeV09FinalSurface({ role: "memoryMaintainer", assignedTools: [] });
+const MEM_DIFF_SURFACE = computeV09FinalSurface({
+  role: "memoryMaintainer",
+  assignedTools: ["safe_json_write"],
+});
 
 // ---------- pure layer: roles ----------
 check("v0.9 角色固定集合只含三角色且无 pluginCreator/plugin_creator_sub_whale_report", JSON.stringify(V09_SUBAGENT_ROLE_IDS) === JSON.stringify(["worker", "memoryMaintainer", "pluginMaintainer"]) && !V09_SUBAGENT_ROLE_IDS.includes("pluginCreator") && !Object.keys(V09_SUBAGENT_ROLE_STABLE_BASE).includes("pluginCreator") && !Object.values(V09_SUBAGENT_ROLE_STABLE_BASE).flat().includes("plugin_creator_sub_whale_report"));
@@ -141,6 +147,8 @@ const listeners = new Map();
 const registeredTools = new Map();
 const capturedStarts = [];
 const capturedReports = [];
+const capturedFollowups = [];
+const childCatalog = new Map();
 const settings = {
   register(ns, _schema, opts = {}) {
     let current = { ...(opts.base ?? {}) };
@@ -194,6 +202,12 @@ const base = {
     if (name === "roundDisplay") return { report: () => {} };
     if (name === "subagents") {
       return {
+        listChildren: async (parentId) =>
+          [...childCatalog.values()].filter((entry) => entry.parentId === parentId),
+        followup: async (parent, childId, content, options) => {
+          capturedFollowups.push({ parent, childId, content, options });
+          return `msg-${capturedFollowups.length}`;
+        },
         startContinuable: async (spec) => {
           let roleAtStart = null;
           try {
@@ -203,6 +217,15 @@ const base = {
             roleAtStart = null;
           }
           capturedStarts.push({ spec, roleAtStart });
+          const parentId = spec?.request?.parent?.id ?? spec?.request?.parent ?? "s-b3-main";
+          childCatalog.set(spec?.childId, {
+            id: spec?.childId,
+            kind: "child",
+            mode: "continuable",
+            label: spec?.label ?? "",
+            activity: "running",
+            parentId,
+          });
           // The real continuable-subagent service honors the caller-reserved id;
           // the mock echoes it so the probe mirrors the production contract.
           return { childId: spec.childId };
@@ -226,6 +249,10 @@ planStore.persistDraftItems([
   { planItemId: "p2", persona: "worker", task: "Invalid assigned source", assignedTools: ["not_allowed"] },
   { planItemId: "p3", persona: "worker", task: "Over limit", assignedTools: [...CANDIDATE_NAMES, "job_list"] },
   { planItemId: "p4", persona: "worker", task: "Warn count", assignedTools: CANDIDATE_NAMES.slice(0, 7) },
+  { planItemId: "m-a1", persona: "memoryMaintainer", task: "Memory same-surface one", assignedTools: [] },
+  { planItemId: "m-a2", persona: "memoryMaintainer", task: "Memory same-surface two", assignedTools: [] },
+  { planItemId: "m-a3", persona: "memoryMaintainer", task: "Memory same-surface three", assignedTools: [] },
+  { planItemId: "m-b", persona: "memoryMaintainer", task: "Memory different surface", assignedTools: ["safe_json_write"] },
 ]);
 planStore.persistFinalPayload({
   status: "finalized",
@@ -234,8 +261,39 @@ planStore.persistFinalPayload({
     { planItemId: "p2", persona: "worker", task: "Invalid assigned source", assignedTools: ["not_allowed"] },
     { planItemId: "p3", persona: "worker", task: "Over limit", assignedTools: [...CANDIDATE_NAMES, "job_list"] },
     { planItemId: "p4", persona: "worker", task: "Warn count", assignedTools: CANDIDATE_NAMES.slice(0, 7) },
+    { planItemId: "m-a1", persona: "memoryMaintainer", task: "Memory same-surface one", assignedTools: [] },
+    { planItemId: "m-a2", persona: "memoryMaintainer", task: "Memory same-surface two", assignedTools: [] },
+    { planItemId: "m-a3", persona: "memoryMaintainer", task: "Memory same-surface three", assignedTools: [] },
+    { planItemId: "m-b", persona: "memoryMaintainer", task: "Memory different surface", assignedTools: ["safe_json_write"] },
   ],
 });
+
+// Pre-seed memoryMaintainer reuse candidates so plugin.apply's in-memory stage
+// store already owns them (probe cannot reach the plugin's private store later).
+{
+  const preStore = createStageStore(STORE_FILE);
+  preStore.set("s-b3-main", "idle");
+  preStore.setSubagentRole("mem-child-a", {
+    planItemId: "m-a1",
+    persona: "memoryMaintainer",
+    parentId: "s-b3-main",
+    stage: "communication",
+    assignedTools: [],
+    finalTools: MEM_BASE_SURFACE,
+    awaitingParent: true,
+  });
+  preStore.set("mem-child-a", "communication");
+  preStore.setSubagentRole("mem-child-busy", {
+    planItemId: "m-a1",
+    persona: "memoryMaintainer",
+    parentId: "s-b3-main",
+    stage: "plan-memory",
+    assignedTools: [],
+    finalTools: MEM_BASE_SURFACE,
+    awaitingParent: true,
+  });
+  preStore.set("mem-child-busy", "plan-memory");
+}
 
 await plugin.apply(base, {
   stageStore: STORE_FILE,
@@ -248,6 +306,22 @@ await new Promise((resolve) => setTimeout(resolve, 20));
 const agent = { id: "s-b3-main", session: { id: "s-b3-main", events: [] } };
 const signal = new AbortController().signal;
 const kaSubWhale = registeredTools.get("ka_sub_whale");
+childCatalog.set("mem-child-a", {
+  id: "mem-child-a",
+  kind: "child",
+  mode: "continuable",
+  label: "kaz:memoryMaintainer:m-a1",
+  activity: "running",
+  parentId: "s-b3-main",
+});
+childCatalog.set("mem-child-busy", {
+  id: "mem-child-busy",
+  kind: "child",
+  mode: "continuable",
+  label: "kaz:memoryMaintainer:m-a1",
+  activity: "running",
+  parentId: "s-b3-main",
+});
 
 {
   const result = await kaSubWhale.execute({ planItemId: "p1" }, { agent, signal });
@@ -287,6 +361,77 @@ const kaSubWhale = registeredTools.get("ka_sub_whale");
   const storedAfterReport = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.[childId];
   check("report 成功后角色记录 awaitingParent=true", storedAfterReport?.awaitingParent === true);
   check("ka_sub_whale 新建角色记录缺省 awaitingParent=false（schema 兼容）", capturedStarts[0]?.roleAtStart?.awaitingParent === false);
+}
+
+// memoryMaintainer 强制复用 runtime（worker/pluginMaintainer 不做强制复用）。
+{
+  const workerStartsBefore = capturedStarts.length;
+  const workerFollowsBefore = capturedFollowups.length;
+  const workerNoReuse = await kaSubWhale.execute({ planItemId: "p1" }, { agent, signal });
+  check(
+    "worker 不复用：存在终态同 surface worker child 仍新 spawn、不 followup",
+    workerNoReuse.ok === true &&
+      workerNoReuse.code === "subagent-created" &&
+      workerNoReuse.reused !== true &&
+      capturedStarts.length === workerStartsBefore + 1 &&
+      capturedFollowups.length === workerFollowsBefore,
+  );
+}
+{
+  const diffStartsBefore = capturedStarts.length;
+  const diffFollowsBefore = capturedFollowups.length;
+  const diffSurface = await kaSubWhale.execute({ planItemId: "m-b" }, { agent, signal });
+  check(
+    "memoryMaintainer 不同 surface 不复用：新开 child 而非误用同 parent 的 base-surface child",
+    diffSurface.ok === true &&
+      diffSurface.code === "subagent-created" &&
+      diffSurface.reused !== true &&
+      capturedStarts.length === diffStartsBefore + 1 &&
+      capturedFollowups.length === diffFollowsBefore,
+  );
+}
+{
+  const sameStartsBefore = capturedStarts.length;
+  const sameFollowsBefore = capturedFollowups.length;
+  const sameSurface = await kaSubWhale.execute({ planItemId: "m-a2" }, { agent, signal });
+  const afterReuse = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.["mem-child-a"];
+  check(
+    "memoryMaintainer 同 surface 第二项复用同一 terminal communication child",
+    sameSurface.ok === true &&
+      sameSurface.code === "subagent-reused" &&
+      sameSurface.reused === true &&
+      sameSurface.childId === "mem-child-a" &&
+      sameSurface.subagentId === "mem-child-a" &&
+      capturedStarts.length === sameStartsBefore &&
+      capturedFollowups.length === sameFollowsBefore + 1 &&
+      String(sameSurface.messageId).startsWith("msg-"),
+  );
+  check(
+    "复用命中不清除角色记录且 planItemId 更新到当前项",
+    afterReuse?.persona === "memoryMaintainer" &&
+      afterReuse?.parentId === "s-b3-main" &&
+      afterReuse?.planItemId === "m-a2",
+  );
+}
+{
+  // 让 free 的 mem-child-a 从 DSH child 列表消失：代码应先清理该 stale 记录；
+  // 剩余兼容 child（mem-child-busy）处于非终态 awaitingParent=true → busy。
+  childCatalog.delete("mem-child-a");
+  const busyStartsBefore = capturedStarts.length;
+  const busyFollowsBefore = capturedFollowups.length;
+  const busy = await kaSubWhale.execute({ planItemId: "m-a3" }, { agent, signal });
+  const cleanedFree = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.["mem-child-a"];
+  check(
+    "memoryMaintainer busy 拒绝：非终态 awaitingParent=true 返回 busy、不 followup 不 spawn",
+    busy.ok === false &&
+      busy.code === "subagent-busy" &&
+      busy.status === "busy" &&
+      busy.childId === "mem-child-busy" &&
+      busy.subagentId === "mem-child-busy" &&
+      capturedStarts.length === busyStartsBefore &&
+      capturedFollowups.length === busyFollowsBefore &&
+      cleanedFree === undefined,
+  );
 }
 
 rmSync(TMP, { recursive: true, force: true });

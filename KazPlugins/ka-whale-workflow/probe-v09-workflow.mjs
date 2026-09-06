@@ -4,6 +4,7 @@ import plugin, {
   createStageStore,
   KA_SUB_WHALE_TOOL,
   WORK_SUB_WHALE_REPORT_TOOL,
+  MEMORY_SUB_WHALE_REPORT_TOOL,
   SUB_WHALE_REPORT_WAIT_NOTICE,
   SUB_WHALE_REPORT_WAIT_DENY_CODE,
   isParentMainSendMessage,
@@ -24,6 +25,7 @@ import {
 } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
 import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
+import { computeV09FinalSurface } from "../kaz-shared/lib/subagent-policy.js";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,11 +41,28 @@ const STORE_FILE = join(TMP, "ka-whale-workflow-stage.json");
 const PLAN_FILE = join(TMP, "ka-whale-workflow-task-plan.json");
 const store = createStageStore(STORE_FILE);
 store.set("s-v09", "done");
+const MEM_BASE_SURFACE = computeV09FinalSurface({
+  role: "memoryMaintainer",
+  assignedTools: [],
+});
+// memoryMaintainer 强制复用：先放一个“不同 surface”终态 child（避免第一次 p-memory
+// 被复用），真正可复用 child 由 runtime 第一次 spawn 后推进到 communication 再验证。
+store.setSubagentRole("child-memory-other-surface", {
+  planItemId: "p-memory",
+  persona: "memoryMaintainer",
+  parentId: "s-v09",
+  stage: "communication",
+  assignedTools: [],
+  finalTools: ["memory_search", "not_current_surface"],
+  awaitingParent: true,
+});
+store.set("child-memory-other-surface", "communication");
 const planStore = createTaskPlanStore(PLAN_FILE);
 planStore.persistDraftItems([
   { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
   { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
   { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
+  { planItemId: "p-memory-2", persona: "memoryMaintainer", task: "Write memory two", assignedTools: [] },
   { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
   { planItemId: "p-draft", persona: "worker", task: "Draft only", assignedTools: [] },
 ]);
@@ -53,6 +72,7 @@ planStore.persistFinalPayload({
     { planItemId: "p1", persona: "worker", task: "Do task", assignedTools: [] },
     { planItemId: "p-main", persona: "main", task: "Main line task", assignedTools: [] },
     { planItemId: "p-memory", persona: "memoryMaintainer", task: "Write memory", assignedTools: [] },
+    { planItemId: "p-memory-2", persona: "memoryMaintainer", task: "Write memory two", assignedTools: [] },
     { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
   ],
 });
@@ -60,6 +80,8 @@ planStore.persistFinalPayload({
 const rdReports = [];
 const promptSections = [];
 const startedSubagentRequests = [];
+const capturedFollowups = [];
+const childCatalog = new Map();
 const agentRegistry = new Map();
 const sessionsRegistry = new Map();
 // --- minimal plugin mock ---
@@ -121,8 +143,23 @@ const base = {
     if (name === "sessions") return { get: (id) => sessionsRegistry.get(id) };
     if (name === "subagents") {
       return {
+        listChildren: async (parentId) =>
+          [...childCatalog.values()].filter((entry) => entry.parentId === parentId),
+        followup: async (parent, childId, content, options) => {
+          capturedFollowups.push({ parent, childId, content, options });
+          return `msg-v09-${capturedFollowups.length}`;
+        },
         startContinuable: async (spec) => {
           startedSubagentRequests.push(spec?.request ?? null);
+          const parentId = spec?.request?.parent?.id ?? spec?.request?.parent ?? "s-v09";
+          childCatalog.set(spec?.childId, {
+            id: spec?.childId,
+            kind: "child",
+            mode: "continuable",
+            label: spec?.label ?? "",
+            activity: "running",
+            parentId,
+          });
           return { childId: spec.childId };
         },
       };
@@ -151,6 +188,14 @@ const claimed = listeners.get("agent/inbox/claimed")?.[0];
 const preExecute = listeners.get("tools/pre-execute")?.[0];
 const whaleReport = registeredTools.get("whale_report");
 const kaSubWhale = registeredTools.get(KA_SUB_WHALE_TOOL);
+childCatalog.set("child-memory-other-surface", {
+  id: "child-memory-other-surface",
+  kind: "child",
+  mode: "continuable",
+  label: "kaz:memoryMaintainer:p-memory",
+  activity: "running",
+  parentId: "s-v09",
+});
 
 // persona application: ka-whale-workflow no longer registers ka-whale-workflow:main
 // (or any system section); kaz-system-prompt sets deployment:persona to
@@ -225,6 +270,7 @@ check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity"
   check("memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-maintenance", "write-plan") === true);
   check("working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
   check("working task 含 single subagent-settled 到达且父回复一次 send_message 语义", typeof workingDef?.task === "string" && workingDef.task.includes("single subagent-settled message") && workingDef.task.includes("Reply once with send_message to resume it") && workingDef.task.includes("end the turn; the child's full report arrives"));
+  check("主 working/memory-maintenance/plugin-maintenance 任务含复用口径", stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes("同一 memoryMaintainer 子代理可被多轮复用；每轮从 assess-delegation 开始，前一轮上下文仍在但本轮为独立委派。") && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。"));
 }
 
 // Task plan draft/finalized 骨架（planStore 在 plugin.apply 前预写，plugin store 可见）
@@ -332,7 +378,42 @@ check("whale_report 从 working 默认推进到 memory-maintenance", workingDefa
 const workerInMemory = await kaSubWhale.execute({ planItemId: "p1" }, { agent });
 check("memory-maintenance 拒绝 worker 委派（stage-persona-mismatch）", workerInMemory.ok === false && workerInMemory.code === "stage-persona-mismatch");
 const memoryInMemory = await kaSubWhale.execute({ planItemId: "p-memory" }, { agent });
-check("memory-maintenance 允许 memoryMaintainer 委派", memoryInMemory.ok === true && memoryInMemory.code === "subagent-created");
+check(
+  "memory-maintenance 允许 memoryMaintainer 委派（无同 surface 候选时先 spawn）",
+  memoryInMemory.ok === true && memoryInMemory.code === "subagent-created",
+);
+{
+  // 让刚 spawn 的 child 真正到达 communication 终态（等同该子代理已完成第一轮并报告）。
+  const firstMemoryChildId = memoryInMemory.subagentId;
+  const childAgent = {
+    id: firstMemoryChildId,
+    session: { id: firstMemoryChildId, events: [] },
+    options: { subagentDepth: 1 },
+  };
+  const memoryReport = registeredTools.get(MEMORY_SUB_WHALE_REPORT_TOOL);
+  const reportResult = await memoryReport.execute(
+    { nextStage: "communication" },
+    { agent: childAgent, signal: new AbortController().signal },
+  );
+  check("新 spawn memoryMaintainer child 报告到 communication 终态", reportResult?.stage === "communication" && reportResult?.advanced === true);
+  const startsBeforeReuse = startedSubagentRequests.length;
+  const followsBeforeReuse = capturedFollowups.length;
+  const secondMemory = await kaSubWhale.execute({ planItemId: "p-memory-2" }, { agent });
+  const secondContentText = (capturedFollowups.at(-1)?.content ?? [])
+    .map((part) => part?.text ?? "")
+    .join("\n");
+  check(
+    "memoryMaintainer 同 surface 第二项复用同一 terminal communication child（followup 投递 planItemId+task）",
+    secondMemory.ok === true &&
+      secondMemory.code === "subagent-reused" &&
+      secondMemory.reused === true &&
+      secondMemory.childId === firstMemoryChildId &&
+      startedSubagentRequests.length === startsBeforeReuse &&
+      capturedFollowups.length === followsBeforeReuse + 1 &&
+      secondContentText.includes("planItemId: p-memory-2") &&
+      secondContentText.includes("Write memory two"),
+  );
+}
 await whaleReport.execute({ nextStage: "plugin-maintenance" }, { agent });
 const memoryInPlugin = await kaSubWhale.execute({ planItemId: "p-memory" }, { agent });
 check("plugin-maintenance 拒绝 memoryMaintainer 委派（stage-persona-mismatch）", memoryInPlugin.ok === false && memoryInPlugin.code === "stage-persona-mismatch");

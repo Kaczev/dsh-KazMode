@@ -187,6 +187,17 @@ const h1 = makeBase({ includeSubagents: false, stageStoreFile: STORE_FILE, planF
   // can assert lifecyclePath is injected through the runtime pre-step path.
   store.set("child-plugin-maintainer-create", "create-plugin");
   store.setPendingStageInjection("child-plugin-maintainer-create", "create-plugin");
+  // memoryMaintainer 强制复用：parent→role→child 注册的终态 child（随后验证 dispose 清理）。
+  store.setSubagentRole("child-dispose-reuse", {
+    planItemId: "p-mem-reuse",
+    persona: "memoryMaintainer",
+    parentId: "parent-main",
+    stage: "communication",
+    assignedTools: [],
+    finalTools: ["memory_search", "context_search"],
+    awaitingParent: true,
+  });
+  store.set("child-dispose-reuse", "communication");
 }
 await plugin.apply(h1.base, {
   stageStore: STORE_FILE,
@@ -395,6 +406,27 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   const allow = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
   const deny = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
   check("pluginMaintainer create-plugin 软闸门：write 放行、memory_search 拒绝", allow?.kind === "allow" && deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:"));
+}
+
+// agent/disposed：子代理 dispose 时清理角色记录与 parent→role→child 复用索引。
+{
+  const beforeRaw = readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, "");
+  const before = JSON.parse(beforeRaw);
+  check(
+    "dispose 前：child-dispose-reuse 已在 subagentRoles + subagentRoleParents 注册",
+    before.subagentRoles?.["child-dispose-reuse"]?.parentId === "parent-main" &&
+      before.subagentRoleParents?.["parent-main"]?.["memoryMaintainer"]?.includes("child-dispose-reuse") === true,
+  );
+  const disposed = h1.listeners.get("agent/disposed")?.[0];
+  if (typeof disposed === "function") {
+    await disposed({ agent: subagentAgent("child-dispose-reuse") });
+  }
+  const after = JSON.parse(readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, ""));
+  check(
+    "agent/disposed 后：角色记录与 parent 复用索引均已清理",
+    after.subagentRoles?.["child-dispose-reuse"] === undefined &&
+      (after.subagentRoleParents?.["parent-main"]?.["memoryMaintainer"] ?? []).includes("child-dispose-reuse") === false,
+  );
 }
 
 // ---------------------------------------------------------------------------

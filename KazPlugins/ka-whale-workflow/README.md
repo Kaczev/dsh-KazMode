@@ -114,6 +114,11 @@
   terminal `communication` 时，该回复开启该角色新的一轮：worker=assess-complexity、
   memoryMaintainer/pluginMaintainer=assess-delegation）。父主不得假设子代理在
   report 工具调用后仍继续运行。
+- 子代理多轮复用：同一 memoryMaintainer 子代理可被多轮复用（`ka_sub_whale` 对同
+  parent + 同 role + finalSurface 一致且终态空闲的 child 自动 followup 下一轮；每轮从
+  assess-delegation 开始，前一轮上下文仍在但本轮为独立委派）。worker/pluginMaintainer
+  是否复用由主代理决定：可对同 surface+空闲 child 直接 `send_message`，否则
+  `ka_sub_whale` 新开。
 - 36.7 challenge-plan 批评纪律：主/worker 的 challenge-plan 阶段要求先批评、
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
   批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与

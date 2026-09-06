@@ -551,7 +551,8 @@ export function normalizeContractStateValue(raw) {
   };
 }
 
-/** 归一化一条受控子代理角色记录（v0.9 B3）。 */
+/** 归一化一条受控子代理角色记录（v0.9 B3 + memoryMaintainer 强制复用）。
+ *  旧记录缺少 parentId/stage 时兼容读取（缺省空串）；awaitingParent 缺省 false。 */
 export function normalizeSubagentRoleRecord(raw) {
   if (raw === null || raw === undefined || typeof raw !== "object") return null;
   const planItemId = typeof raw.planItemId === "string" ? raw.planItemId.trim() : "";
@@ -560,6 +561,8 @@ export function normalizeSubagentRoleRecord(raw) {
   return {
     planItemId,
     persona,
+    parentId: typeof raw.parentId === "string" ? raw.parentId.trim() : "",
+    stage: typeof raw.stage === "string" ? raw.stage.trim() : "",
     assignedTools: normalizeToolList(raw.assignedTools),
     finalTools: normalizeToolList(raw.finalTools),
     // schema-compatible：旧记录没有该字段时按 false 读取；写入时总是归一化为布尔。
@@ -587,10 +590,11 @@ const KNOWN_SESSION_STAGES = new Set([
  *        contractState: { "<sessionId>": {...} },
  *        workflowRuns: { "<sessionId>": { runId, enteredStages } },
  *        pendingStageInjection: { "<sessionId>": "<stage>" },
- *        subagentRoles: { "<childSessionId>": { planItemId, persona,
- *          assignedTools, finalTools, awaitingParent, createdAt, updatedAt } } }
- * 旧文件缺少 contractState / workflowRuns 时仍按旧版读取；subagentRoles 记录缺
- *  awaitingParent 时按 false 兼容（version 保持 6）。
+ *        subagentRoles: { "<childSessionId>": { planItemId, persona, parentId,
+ *          stage, assignedTools, finalTools, awaitingParent, createdAt, updatedAt } },
+ *        subagentRoleParents: { "<parentId>": { "<role>": ["<childSessionId>", ...] } } }
+ * 旧文件缺少 contractState / workflowRuns / subagentRoleParents 时仍按旧版读取；
+ * subagentRoles 记录缺 parentId/stage/awaitingParent 时按兼容缺省读取（version 保持 6）。
  */
 export function createStageStore(file) {
   const sessions = {};
@@ -598,6 +602,7 @@ export function createStageStore(file) {
   const workflowRuns = {};
   const pendingStageInjection = {};
   const subagentRoles = {};
+  const subagentRoleParents = {};
   try {
     if (file !== undefined && file !== null && existsSync(file)) {
       let raw = readFileSync(file, "utf8");
@@ -646,10 +651,64 @@ export function createStageStore(file) {
           if (normalized !== null) subagentRoles[id] = normalized;
         }
       }
+      // 旧文件兼容/自愈：stage 从 sessions 回填；subagentRoleParents 每次从
+      // subagentRoles 重建（不信任旧索引，避免 dispose 后的脏 childId 残留）。
+      for (const [id, record] of Object.entries(subagentRoles)) {
+        if (typeof record.stage !== "string" || record.stage.length === 0) {
+          const sessionStage = sessions[id];
+          if (typeof sessionStage === "string" && sessionStage.length > 0) record.stage = sessionStage;
+        }
+        if (typeof record.parentId === "string" && record.parentId.length > 0) {
+          addRoleParentIndex(id, record);
+        }
+      }
     }
   } catch {
     // 存储损坏时从空状态开始，不影响主流程
   }
+  /** 父索引：parentId → role → [childSessionId] 增删。 */
+  function addRoleParentIndex(childId, record) {
+    const parentId = record?.parentId ?? "";
+    const persona = record?.persona ?? "";
+    if (
+      typeof childId !== "string" ||
+      childId.length === 0 ||
+      typeof parentId !== "string" ||
+      parentId.length === 0 ||
+      typeof persona !== "string" ||
+      persona.length === 0
+    ) {
+      return;
+    }
+    let roleMap = subagentRoleParents[parentId];
+    if (roleMap === undefined) {
+      roleMap = {};
+      subagentRoleParents[parentId] = roleMap;
+    }
+    let list = roleMap[persona];
+    if (!Array.isArray(list)) {
+      list = [];
+      roleMap[persona] = list;
+    }
+    if (!list.includes(childId)) list.push(childId);
+  }
+
+  function removeRoleParentIndex(childId, record) {
+    const parentId = record?.parentId ?? "";
+    const persona = record?.persona ?? "";
+    if (typeof parentId !== "string" || parentId.length === 0) return;
+    if (typeof persona !== "string" || persona.length === 0) return;
+    const roleMap = subagentRoleParents[parentId];
+    if (roleMap === undefined) return;
+    const list = Array.isArray(roleMap[persona]) ? roleMap[persona] : null;
+    if (list !== null) {
+      const index = list.indexOf(childId);
+      if (index >= 0) list.splice(index, 1);
+      if (list.length === 0) delete roleMap[persona];
+    }
+    if (Object.keys(roleMap).length === 0) delete subagentRoleParents[parentId];
+  }
+
   function persist() {
     if (typeof file !== "string" || file.length === 0) return true;
     try {
@@ -664,6 +723,7 @@ export function createStageStore(file) {
             workflowRuns,
             pendingStageInjection,
             subagentRoles,
+            subagentRoleParents,
           },
           null,
           2,
@@ -692,6 +752,14 @@ export function createStageStore(file) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       if (typeof stage !== "string" || !KNOWN_SESSION_STAGES.has(stage)) return false;
       sessions[sessionId] = stage;
+      const roleRecord = subagentRoles[sessionId];
+      if (roleRecord !== undefined && roleRecord !== null) {
+        subagentRoles[sessionId] = {
+          ...roleRecord,
+          stage,
+          updatedAt: new Date().toISOString(),
+        };
+      }
       return persist();
     },
     remove(sessionId) {
@@ -766,12 +834,18 @@ export function createStageStore(file) {
       const normalized = normalizeSubagentRoleRecord(value);
       if (normalized === null) return false;
       const previous = subagentRoles[sessionId];
+      if (previous !== undefined && previous !== null) removeRoleParentIndex(sessionId, previous);
       const timestamp = new Date().toISOString();
-      subagentRoles[sessionId] = {
+      const nextRecord = {
         ...normalized,
         createdAt: previous?.createdAt || timestamp,
         updatedAt: timestamp,
       };
+      if ((typeof nextRecord.stage !== "string" || nextRecord.stage.length === 0) && sessions[sessionId]) {
+        nextRecord.stage = sessions[sessionId];
+      }
+      subagentRoles[sessionId] = nextRecord;
+      addRoleParentIndex(sessionId, nextRecord);
       return persist();
     },
     /** 硬等门：设置/清除受控子代理角色记录的 awaitingParent 标志。 */
@@ -788,9 +862,30 @@ export function createStageStore(file) {
       };
       return persist();
     },
+    /** memoryMaintainer 强制复用：取同 parent + role 的可复用子代理候选取证记录。 */
+    getReusableSubagentChildren(parentId, role) {
+      if (typeof parentId !== "string" || parentId.length === 0) return [];
+      if (typeof role !== "string" || role.length === 0 || !V09_SUBAGENT_ROLES.includes(role)) return [];
+      const roleMap = subagentRoleParents[parentId];
+      const childIds = Array.isArray(roleMap?.[role]) ? [...roleMap[role]] : [];
+      const out = [];
+      for (const childId of childIds) {
+        const record = subagentRoles[childId];
+        if (record === undefined || record === null) continue;
+        if (record.persona !== role || record.parentId !== parentId) continue;
+        out.push({
+          childSessionId: childId,
+          ...JSON.parse(JSON.stringify(record)),
+        });
+      }
+      out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+      return out;
+    },
     removeSubagentRole(sessionId) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       if (!Object.prototype.hasOwnProperty.call(subagentRoles, sessionId)) return false;
+      const current = subagentRoles[sessionId];
+      removeRoleParentIndex(sessionId, current);
       delete subagentRoles[sessionId];
       persist();
       return true;
@@ -1878,6 +1973,182 @@ export default {
     // 已 finalized task plan + role Stable Surface 计算，再经
     // ctx.subagents.startContinuable 创建 continuable child。
     // -----------------------------------------------------------------------
+
+    /** 工具面集合相等（忽略顺序/重复；空数组相等）。 */
+    function sameToolSet(left, right) {
+      const norm = (value) => {
+        const out = [];
+        const seen = new Set();
+        for (const tool of Array.isArray(value) ? value : []) {
+          if (typeof tool !== "string") continue;
+          const name = tool.trim();
+          if (name.length === 0 || seen.has(name)) continue;
+          seen.add(name);
+          out.push(name);
+        }
+        return out.sort();
+      };
+      const a = norm(left);
+      const b = norm(right);
+      return a.length === b.length && a.every((tool, index) => tool === b[index]);
+    }
+
+    /** memoryMaintainer 强制复用：同 parent + 同 role、finalSurface 集合一致、且
+     *  终态 communication / ready 非忙碌的 child 才通过 followup 投递下一轮。
+     *  返回 null 表示没有可复用/复用服务不可用，调用方继续正常 spawn。 */
+    async function tryReuseMemoryMaintainer({ parentId, agent, item, assignedTools, finalSurface, subagents, exec }) {
+      if (
+        typeof subagents?.listChildren !== "function" ||
+        typeof subagents?.followup !== "function"
+      ) {
+        return null;
+      }
+      let children = [];
+      try {
+        const listed = await subagents.listChildren(parentId, exec.signal);
+        children = Array.isArray(listed) ? listed : [];
+      } catch (error) {
+        ctx.logger?.warn?.(
+          `[ka-whale-workflow] memoryMaintainer reuse cannot list children; falling back to spawn: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      }
+      const childrenById = new Map();
+      for (const entry of children) {
+        if (
+          entry !== null &&
+          typeof entry === "object" &&
+          entry.kind === "child" &&
+          entry.mode === "continuable" &&
+          typeof entry.id === "string" &&
+          entry.id.length > 0
+        ) {
+          childrenById.set(entry.id, entry);
+        }
+      }
+      const candidates = stageStore.getReusableSubagentChildren(parentId, "memoryMaintainer");
+      const agents = ctx.get("agents");
+      let busyChildId = null;
+      let busyStage = null;
+      for (const candidate of candidates) {
+        const childId = candidate.childSessionId;
+        if (!childrenById.has(childId)) {
+          // child 已释放/异常：从注册表清理，不作为可复用候选。
+          stageStore.removeSubagentRole(childId);
+          continue;
+        }
+        if (!sameToolSet(candidate.finalTools, finalSurface)) continue;
+        const entry = childrenById.get(childId);
+        const record = stageStore.getSubagentRole(childId) ?? candidate;
+        const stageNow = stageStore.get(childId) || record.stage || "";
+        const liveAgent =
+          agents !== undefined && agents !== null && typeof agents.get === "function"
+            ? agents.get(childId)
+            : undefined;
+        const isBusy =
+          stageNow !== "communication" &&
+          (record.awaitingParent === true || liveAgent !== undefined || entry.activity === "running");
+        if (stageNow !== "communication" && isBusy) {
+          if (busyChildId === null) {
+            busyChildId = childId;
+            busyStage = stageNow;
+          }
+          continue;
+        }
+        // 可复用：先更新角色记录为新 planItem（不清除），再投递下一轮；
+        // child 收到 coordinator/relay 后按终态重置规则进入 assess-delegation。
+        const currentRecord = stageStore.getSubagentRole(childId);
+        if (currentRecord !== null) {
+          stageStore.setSubagentRole(childId, {
+            ...currentRecord,
+            planItemId: item.planItemId,
+            assignedTools,
+            finalTools: finalSurface,
+            stage: stageNow || currentRecord.stage || "",
+          });
+        }
+        let messageId = "";
+        try {
+          const followupResult = await subagents.followup(
+            agent,
+            childId,
+            [
+              {
+                type: "text",
+                text: `planItemId: ${item.planItemId}\n\n${item.task}`,
+              },
+            ],
+            {
+              source: {
+                kind: "coordinator",
+                form: "relay",
+                senderSessionId: parentId,
+              },
+              signal: exec.signal,
+            },
+          );
+          messageId =
+            typeof followupResult === "string"
+              ? followupResult
+              : typeof followupResult?.messageId === "string"
+                ? followupResult.messageId
+                : "";
+        } catch (error) {
+          stageStore.removeSubagentRole(childId);
+          ctx.logger?.warn?.(
+            `[ka-whale-workflow] memoryMaintainer reuse followup failed for ${childId}; removed reusable record: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return {
+            ok: false,
+            code: "subagent-reuse-failed",
+            status: "reuse-failed",
+            planItemId: item.planItemId,
+            persona: "memoryMaintainer",
+            childId,
+            subagentId: childId,
+            reason: `ka_sub_whale could not reuse memoryMaintainer subagent ${childId}: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+        reportRoundDisplay(
+          agent,
+          `ka_sub_whale reused memoryMaintainer subagent ${childId} for plan item ${item.planItemId}.`,
+          "受控委派复用",
+        );
+        return {
+          ok: true,
+          code: "subagent-reused",
+          status: "reused",
+          reused: true,
+          planItemId: item.planItemId,
+          persona: "memoryMaintainer",
+          task: item.task,
+          assignedTools,
+          finalSurface,
+          childId,
+          subagentId: childId,
+          messageId,
+          notice:
+            "MemoryMaintainer subagent reused for a new plan item. End the current turn and await its report/finished message; do not use pwsh sleep or poll list_agents.",
+        };
+      }
+      if (busyChildId !== null) {
+        return {
+          ok: false,
+          code: "subagent-busy",
+          status: "busy",
+          planItemId: item.planItemId,
+          persona: "memoryMaintainer",
+          childId: busyChildId,
+          subagentId: busyChildId,
+          reason:
+            `ka_sub_whale cannot reuse memoryMaintainer subagent ${busyChildId}: ` +
+            `compatible child is busy (stage="${busyStage}", awaitingParent or active). ` +
+            "End the current turn and await its report before delegating the next memory-maintenance plan item.",
+        };
+      }
+      return null;
+    }
+
     const kaSubWhaleDef = defineTool({
       name: KA_SUB_WHALE_TOOL,
       description:
@@ -1904,6 +2175,9 @@ export default {
             assignedTools: { type: "array", items: { type: "string" } },
             finalSurface: { type: "array", items: { type: "string" } },
             subagentId: { type: "string" },
+            childId: { type: "string" },
+            reused: { type: "boolean" },
+            messageId: { type: "string" },
             notice: { type: "string" },
             warning: { type: "string" },
           },
@@ -1990,6 +2264,25 @@ export default {
         });
 
         const subagents = ctx.get("subagents");
+        // memoryMaintainer 强制复用：同 parent+role、finalSurface 一致且空闲才
+        // 复用同一 child；忙碌返回 busy；无/不兼容/服务不可用才继续 spawn。
+        const parentId = sessionIdOf(agent);
+        if (
+          role === "memoryMaintainer" &&
+          typeof parentId === "string" &&
+          parentId.length > 0
+        ) {
+          const reuseResult = await tryReuseMemoryMaintainer({
+            parentId,
+            agent,
+            item,
+            assignedTools: assignedValidation.tools,
+            finalSurface,
+            subagents,
+            exec,
+          });
+          if (reuseResult !== null) return Promise.resolve(reuseResult);
+        }
         if (
           subagents === undefined ||
           subagents === null ||
@@ -2017,6 +2310,8 @@ export default {
         const roleRecord = {
           planItemId: item.planItemId,
           persona: role,
+          parentId: typeof parentId === "string" ? parentId : "",
+          stage: "idle",
           assignedTools: assignedValidation.tools,
           finalTools: finalSurface,
           createdAt: now,
@@ -2413,6 +2708,25 @@ export default {
       consumedManualCommands.add(found.commandId);
       return found;
     }
+
+    // 子代理 dispose/异常时清理角色注册与复用父索引，避免脏复用候选。
+    ctx.on("agent/disposed", ({ agent }) => {
+      if (agent === null || agent === undefined || typeof agent !== "object") return;
+      try {
+        const disposedId = sessionIdOf(agent);
+        if (typeof disposedId === "string" && disposedId.length > 0) {
+          if (stageStore.removeSubagentRole(disposedId)) {
+            ctx.logger?.info?.(
+              `[ka-whale-workflow] removed disposed controlled subagent role record for ${disposedId}`,
+            );
+          }
+        }
+      } catch (error) {
+        ctx.logger?.warn?.(
+          `[ka-whale-workflow] agent/disposed role cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    });
 
     ctx.on("agent/inbox/claimed", ({ agent, message, turn }) => {
       if (agent === null || agent === undefined || typeof agent !== "object") return;

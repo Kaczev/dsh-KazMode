@@ -136,7 +136,7 @@ const DEFINITIONS = {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["write-plan", "memory-maintenance"],
       task:
-        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn; the child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. Reply once with send_message to resume it. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication.",
+        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn; the child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. Reply once with send_message to resume it. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication. 是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。",
     },
     "memory-maintenance": {
       allowedTools: [
@@ -155,7 +155,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan"],
       task:
-        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance.",
+        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance. 同一 memoryMaintainer 子代理可被多轮复用；每轮从 assess-delegation 开始，前一轮上下文仍在但本轮为独立委派。",
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -171,7 +171,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["write-plan", "communication"],
       task:
-        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first.",
+        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first. 是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],

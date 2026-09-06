@@ -85,6 +85,52 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
   check("subagentRoles 新记录缺省 awaitingParent=false（schema 兼容）", store.getSubagentRole("child-wait-gate")?.awaitingParent === false && store.getSubagentRole("child-wait-gate")?.persona === "worker");
   check("setSubagentRoleAwaitingParent true/false 持久化", store.setSubagentRoleAwaitingParent("child-wait-gate", true) === true && store.getSubagentRole("child-wait-gate")?.awaitingParent === true && store.setSubagentRoleAwaitingParent("child-wait-gate", false) === true && store.getSubagentRole("child-wait-gate")?.awaitingParent === false);
 }
+{
+  // memoryMaintainer 强制复用：stage store parent→role→child 注册/查询/清理。
+  store.setSubagentRole("mem-child-reuse", {
+    planItemId: "p-mem",
+    persona: "memoryMaintainer",
+    parentId: "s-whale",
+    stage: "communication",
+    assignedTools: [],
+    finalTools: ["memory_search", "memory_sub_whale_report"],
+    awaitingParent: true,
+  });
+  store.set("mem-child-reuse", "communication");
+  let parsed = JSON.parse(readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, ""));
+  check(
+    "subagentRoleParents 持久化 parent→role→child 且角色记录含 parentId/stage",
+    parsed.subagentRoleParents?.["s-whale"]?.["memoryMaintainer"]?.includes("mem-child-reuse") === true &&
+      parsed.subagentRoles?.["mem-child-reuse"]?.parentId === "s-whale" &&
+      parsed.subagentRoles?.["mem-child-reuse"]?.stage === "communication",
+  );
+  const reusable = store.getReusableSubagentChildren("s-whale", "memoryMaintainer");
+  check(
+    "getReusableSubagentChildren 返回同 parent+role 候选取证（childSessionId）",
+    reusable.length === 1 &&
+      reusable[0].childSessionId === "mem-child-reuse" &&
+      reusable[0].persona === "memoryMaintainer" &&
+      reusable[0].awaitingParent === true,
+  );
+  store.setSubagentRole("old-mem-no-parent", {
+    planItemId: "p-old",
+    persona: "memoryMaintainer",
+    assignedTools: [],
+    finalTools: ["memory_search"],
+  });
+  check(
+    "旧记录无 parentId/stage 兼容读取（缺省空串）",
+    store.getSubagentRole("old-mem-no-parent")?.parentId === "" &&
+      store.getSubagentRole("old-mem-no-parent")?.stage === "" &&
+      store.getReusableSubagentChildren("s-whale", "memoryMaintainer").length === 1,
+  );
+  check("removeSubagentRole 同步清理 parent 索引", store.removeSubagentRole("mem-child-reuse") === true && store.getReusableSubagentChildren("s-whale", "memoryMaintainer").length === 0);
+  parsed = JSON.parse(readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, ""));
+  check(
+    "parent 索引清理已落盘（不再指向已删 child）",
+    (parsed.subagentRoleParents?.["s-whale"]?.["memoryMaintainer"] ?? []).includes("mem-child-reuse") === false,
+  );
+}
 
 check("36.5 终态新消息进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity" && nextStageOnUserMessage("end", 3) === "assess-complexity" && nextStageOnUserMessage("idle", 1) === "assess-complexity");
 check("36.5/37.5 活动阶段新消息保留当前阶段", nextStageOnUserMessage("working", 2) === "working" && nextStageOnUserMessage("challenge-plan", 3) === "challenge-plan" && nextStageOnUserMessage("decide-tools", 2) === "decide-tools" && nextStageOnUserMessage("write-plan", 2) === "write-plan" && nextStageOnUserMessage("memory-maintenance", 2) === "memory-maintenance");
@@ -265,6 +311,7 @@ check(
     );
   });
   check("working/memory-maintenance/plugin-maintenance 阶段注入含等待/回复恢复语义", waitOk);
+  check("working/memory-maintenance/plugin-maintenance 阶段注入含多轮复用口径", stageInjectionText(MAIN_ROLE, "working").includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。") && stageInjectionText(MAIN_ROLE, "memory-maintenance").includes("同一 memoryMaintainer 子代理可被多轮复用；每轮从 assess-delegation 开始，前一轮上下文仍在但本轮为独立委派。") && stageInjectionText(MAIN_ROLE, "plugin-maintenance").includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。"));
 }
 
 {
