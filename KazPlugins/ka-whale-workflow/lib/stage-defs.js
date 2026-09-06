@@ -125,8 +125,23 @@ const DEFINITIONS = {
     "write-plan": {
       allowedTools: ["whale_report", "read", "context_search", "context_read"],
       canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
-      task:
-        "Create and finalize the complete task plan via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan first, persist the revised plan, then advance. Try to delegate your tasks to workers in order to achieve better results. Arrange for a long-term memoryMaintainer to keep the memories. Consider whether it is necessary to assign pluginMaintainer to create a new private plugin. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+      task:`Create and finalize the complete task plan via "whale_report(finalPlanPayload)".
+
+PlanItem rules:
+- Use separate planItems per coherent task. Do not pack all work into one planItem.
+- "worker" planItems: delegated individually during the Working stage.
+- "memoryMaintainer" planItems: reserved for long-term memory maintenance.
+- "pluginMaintainer" planItems: create a new private plugin only when existing plugins cannot meet the task requirements.
+
+Delegation rules:
+- Delegate every worker planItem to a subagent via "ka-sub-whale". Do not execute planItems directly.
+- For each delegated task, include: objective, steps, expected output, and constraints.
+
+Amendment rules:
+- In amendment mode, read the current plan first, persist the revised plan, then advance.
+
+Communication rules:
+- Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,
     },
     "decide-goal": {
       allowedTools: ["whale_report"],
