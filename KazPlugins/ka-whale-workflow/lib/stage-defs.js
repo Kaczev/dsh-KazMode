@@ -27,6 +27,7 @@ export const MAIN_STAGE_IDS = Object.freeze([
   "working",
   "memory-maintenance",
   "plugin-maintenance",
+  "compass_context",
   "communication",
 ]);
 
@@ -42,6 +43,7 @@ export const WORKER_STAGE_IDS = Object.freeze([
   "challenge-plan",
   "check-tools",
   "working",
+  "compass_context",
   "communication",
 ]);
 
@@ -51,6 +53,7 @@ export const MEMORY_MAINTAINER_STAGE_IDS = Object.freeze([
   "plan-memory",
   "save-update",
   "delete-memory",
+  "compass_context",
   "communication",
 ]);
 
@@ -61,6 +64,7 @@ export const PLUGIN_MAINTAINER_STAGE_IDS = Object.freeze([
   "create-plugin",
   "update-plugin",
   "retire-plugin",
+  "compass_context",
   "communication",
 ]);
 
@@ -122,7 +126,7 @@ const DEFINITIONS = {
     },
     "write-plan": {
       allowedTools: ["whale_report", "read", "context_search", "context_read", "context_compress"],
-      canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"],
+      canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "compass_context", "communication"],
       task:
         "Create and finalize the complete task plan via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan first, persist the revised plan, then advance.",
     },
@@ -134,9 +138,9 @@ const DEFINITIONS = {
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
-      canAdvance: ["write-plan", "memory-maintenance"],
+      canAdvance: ["write-plan", "memory-maintenance", "compass_context"],
       task:
-        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn; the child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. Reply once with send_message to resume it cause it must have a response in order to proceed. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.",
+        "Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance. After ka_sub_whale, end the turn; the child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. Reply once with send_message to resume it cause it must have a response in order to proceed. Monitor/verify reports; amend plans only through write-plan. When complete, advance to memory-maintenance before communication. 是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。",
     },
     "memory-maintenance": {
       allowedTools: [
@@ -153,9 +157,9 @@ const DEFINITIONS = {
         "memory_detail",
         "memory_list",
       ],
-      canAdvance: ["plugin-maintenance", "communication", "write-plan"],
+      canAdvance: ["plugin-maintenance", "communication", "write-plan", "compass_context"],
       task:
-        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'assess-delegation' process, with the context from the previous round still present but the current round being an independent delegation.",
+        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance. 同一 memoryMaintainer 子代理可被多轮复用；每轮从 assess-delegation 开始，前一轮上下文仍在但本轮为独立委派。",
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -171,7 +175,13 @@ const DEFINITIONS = {
       ],
       canAdvance: ["write-plan", "communication"],
       task:
-        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.",
+        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first. 是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。",
+    },
+    "compass_context": {
+      allowedTools: ["context_compress", "whale_report"],
+      canAdvance: ["communication"],
+      task:
+        "Tidy the context: if the session is long, preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback. After tidying, advance to communication.",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],
@@ -233,9 +243,15 @@ const DEFINITIONS = {
         "write",
         "work_sub_whale_report",
       ],
+      canAdvance: ["communication", "compass_context"],
+      task:
+        "Execute the delegated work. Do not write memories or plugins. When done, call work_sub_whale_report({nextStage:'compass_context'}) to tidy context, or ({nextStage:'communication'}) to finish; then do not call more tools; write your full report as your final message, end the turn, and wait for the parent reply (received as subagent-settled).",
+    },
+    "compass_context": {
+      allowedTools: ["context_compress", "work_sub_whale_report"],
       canAdvance: ["communication"],
       task:
-        "Execute the delegated work. Do not write memories or plugins. When done, call work_sub_whale_report({nextStage:'communication'}) to advance and set awaitingParent, then do not call more tools; write your full report as your final message, end the turn, and wait for the parent reply (received as subagent-settled).",
+        "Tidy the context: if the session is long, preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback. Then advance to communication with work_sub_whale_report({nextStage:'communication'}).",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],
@@ -286,7 +302,7 @@ const DEFINITIONS = {
         "grep",
         "memory_sub_whale_report",
       ],
-      canAdvance: ["communication"],
+      canAdvance: ["communication", "compass_context"],
       task: "Save/update memories with evidence. Keep new entries as CANDIDATE.",
     },
     "delete-memory": {
@@ -302,9 +318,15 @@ const DEFINITIONS = {
         "grep",
         "memory_sub_whale_report",
       ],
-      canAdvance: ["communication"],
+      canAdvance: ["communication", "compass_context"],
       task:
         "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record.",
+    },
+    "compass_context": {
+      allowedTools: ["context_compress", "memory_sub_whale_report"],
+      canAdvance: ["communication"],
+      task:
+        "Tidy the context: if the session is long, preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback. Then advance to communication with memory_sub_whale_report({nextStage:'communication'}).",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],
@@ -353,7 +375,7 @@ const DEFINITIONS = {
         "todo_write",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: ["communication"],
+      canAdvance: ["communication", "compass_context"],
       task:
         "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry.",
     },
@@ -371,7 +393,7 @@ const DEFINITIONS = {
         "todo_write",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: ["communication"],
+      canAdvance: ["communication", "compass_context"],
       task:
         "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed.",
     },
@@ -386,9 +408,15 @@ const DEFINITIONS = {
         "pwsh",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: ["communication"],
+      canAdvance: ["communication", "compass_context"],
       task:
         "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions.",
+    },
+    "compass_context": {
+      allowedTools: ["context_compress", "plugin_maintainer_sub_whale_report"],
+      canAdvance: ["communication"],
+      task:
+        "Tidy the context: if the session is long, preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback. Then advance to communication with plugin_maintainer_sub_whale_report({nextStage:'communication'}).",
     },
     communication: {
       allowedTools: ["context_search", "context_read", "context_compress"],

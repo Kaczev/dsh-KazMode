@@ -64,6 +64,7 @@
   plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
   `lifecyclePath`，在 decide-tools 阶段携带当前私有插件候选目录。
 - 阶段级 Context 注记：`STAGE_CONTEXT_NOTES`（lib/stage-defs.js）为部分 stage
+- compass_context：主/子代理压缩整理阶段；仅 context_compress + 各自 report/whale_report，只能去 communication（可从 main write-plan/working/memory-maintenance、worker working、memory save-update/delete、plugin create/update/retire 进入）。
   定义 Context 提醒；`stageInjectionText` 在有注记的 stage 的 `Task:` 行后输出
   `Context: <text>`，无注记不输出。覆盖 main/worker 的 assess-complexity、
   challenge-plan、communication 与 memoryMaintainer/pluginMaintainer 的

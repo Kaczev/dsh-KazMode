@@ -167,7 +167,7 @@ check("报告硬等门常量导出", SUB_WHALE_REPORT_WAIT_NOTICE.includes("Stag
 }
 
 check("v0.9 工具名（三角色、无 pluginCreator/plugin_creator_sub_whale_report）", KA_SUB_WHALE_TOOL === "ka_sub_whale" && WORK_SUB_WHALE_REPORT_TOOL === "work_sub_whale_report" && MEMORY_SUB_WHALE_REPORT_TOOL === "memory_sub_whale_report" && PLUGIN_MAINTAINER_SUB_WHALE_REPORT_TOOL === "plugin_maintainer_sub_whale_report" && !V09_SUBAGENT_ROLES.includes("pluginCreator"));
-check("v0.9 stage 常量导出（37.5 无 plugin-preflight；三角色）", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight") && V09_SUBAGENT_ROLES.length === 3 && !V09_SUBAGENT_ROLES.includes("pluginCreator") && V09_STAGE_IDS.length > 0);
+check("v0.9 stage 常量导出（compass_context 已加入；三角色）", MAIN_ROLE === "main" && MAIN_STAGE_IDS.length === 10 && MAIN_STAGE_IDS.includes("compass_context") && !MAIN_STAGE_IDS.includes("plugin-preflight") && V09_SUBAGENT_ROLES.length === 3 && !V09_SUBAGENT_ROLES.includes("pluginCreator") && V09_STAGE_IDS.length > 0);
 
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
@@ -213,7 +213,7 @@ check("双层语义：主 assess allowedTools = memory_search+context_search+con
   );
 }
 check("37.5 新图：write-plan 可到 decide-goal/working/maintenance/communication", ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
-check("37.5 新图：working 只到 write-plan/memory-maintenance", JSON.stringify(workingDef?.canAdvance) === JSON.stringify(["write-plan", "memory-maintenance"]));
+check("compass_context 图：working 可到 write-plan/memory-maintenance/compass_context", workingDef?.canAdvance.includes("write-plan") === true && workingDef?.canAdvance.includes("memory-maintenance") === true && workingDef?.canAdvance.includes("compass_context") === true);
 check("37.5 新图：memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "memory-maintenance", "plugin-maintenance") === true && canAdvance(MAIN_ROLE, "memory-maintenance", "communication") === true);
 check("37.5 plugin-preflight 不再是主阶段且 decide-tools 只到 write-plan", stageDefinitionFor(MAIN_ROLE, "plugin-preflight") === null && JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools")?.canAdvance) === JSON.stringify(["write-plan"]));
 check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.canAdvance.includes("communication") === false && workingDef?.canAdvance.includes("plugin-maintenance") === false && workingDef?.canAdvance.includes("memory-maintenance") === true);
