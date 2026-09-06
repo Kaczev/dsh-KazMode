@@ -88,10 +88,10 @@ export const V09_STAGE_IDS = Object.freeze([
 const DEFINITIONS = {
   [MAIN_ROLE]: {
     "assess-complexity": {
-      allowedTools: ["memory_search", "ask_user_question", "whale_report"],
+      allowedTools: ["memory_search", "context_search", "whale_report"],
       canAdvance: ["challenge-plan", "communication"],
       task:
-        "Judge whether the request is simple or complex. Minimal applies only before the first tool call of the first round: only memory_search and ask_user_question are visible. After the first tool call, schema expands to Stable Main Surface, but the stage soft gate still only allows memory_search, ask_user_question, and whale_report; other calls return workflow-stage-deny. If simple, advance to communication (no-tool-call is a legal exception). If complex, advance to challenge-plan.",
+        "Judge whether the request is simple or complex. Minimal applies only before the first tool call of the first round: only memory_search and context_search are visible. After the first tool call, schema expands to Stable Main Surface, but the stage soft gate still only allows memory_search, context_search, and whale_report; other calls return workflow-stage-deny. If simple, advance to communication (no-tool-call is a legal exception). If complex, advance to challenge-plan.",
     },
     "challenge-plan": {
       allowedTools: [
@@ -170,7 +170,7 @@ const DEFINITIONS = {
   },
   worker: {
     "assess-complexity": {
-      allowedTools: ["memory_search", "work_sub_whale_report"],
+      allowedTools: ["memory_search", "context_search", "work_sub_whale_report"],
       canAdvance: ["challenge-plan", "communication"],
       task: "Judge whether the delegation is simple or complex.",
     },
@@ -221,7 +221,7 @@ const DEFINITIONS = {
   },
   memoryMaintainer: {
     "assess-delegation": {
-      allowedTools: ["memory_search", "memory_sub_whale_report"],
+      allowedTools: ["memory_search", "context_search", "memory_sub_whale_report"],
       canAdvance: ["plan-memory", "communication"],
       task: "Judge whether the memory delegation is clear.",
     },
@@ -275,7 +275,7 @@ const DEFINITIONS = {
   },
   pluginMaintainer: {
     "assess-delegation": {
-      allowedTools: ["read", "plugin_maintainer_sub_whale_report"],
+      allowedTools: ["memory_search", "context_search", "plugin_maintainer_sub_whale_report"],
       canAdvance: ["plan-plugin", "communication"],
       task: "Judge whether the plugin maintenance delegation is clear.",
     },
@@ -341,7 +341,7 @@ const DEFINITIONS = {
   },
   pluginCreator: {
     "assess-delegation": {
-      allowedTools: ["read", "plugin_creator_sub_whale_report"],
+      allowedTools: ["memory_search", "context_search", "plugin_creator_sub_whale_report"],
       canAdvance: ["plan-plugin", "communication"],
       task: "Judge whether the plugin creation delegation is clear.",
     },

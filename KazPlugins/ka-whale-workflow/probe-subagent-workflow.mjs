@@ -126,25 +126,25 @@ const h1 = makeBase({ includeSubagents: false, stageStoreFile: STORE_FILE, planF
     planItemId: "p-worker",
     persona: "worker",
     assignedTools: [],
-    finalTools: ["memory_search", "work_sub_whale_report"],
+    finalTools: ["memory_search", "context_search", "work_sub_whale_report"],
   });
   store.setSubagentRole("child-memory", {
     planItemId: "p-memory",
     persona: "memoryMaintainer",
     assignedTools: [],
-    finalTools: ["memory_search", "memory_sub_whale_report"],
+    finalTools: ["memory_search", "context_search", "memory_sub_whale_report"],
   });
   store.setSubagentRole("child-plugin-maintainer-create", {
     planItemId: "p-pm-create",
     persona: "pluginMaintainer",
     assignedTools: [],
-    finalTools: ["read", "write", "plugin_maintainer_sub_whale_report"],
+    finalTools: ["read", "context_read", "context_search", "write", "plugin_maintainer_sub_whale_report"],
   });
   store.setSubagentRole("child-plugin-creator", {
     planItemId: "p-pc",
     persona: "pluginCreator",
     assignedTools: [],
-    finalTools: ["read", "plugin_creator_sub_whale_report"],
+    finalTools: ["memory_search", "context_search", "plugin_creator_sub_whale_report"],
   });
   // Seed one controlled subagent already at a plugin lifecycle stage so the probe
   // can assert lifecyclePath is injected through the runtime pre-step path.
@@ -251,8 +251,10 @@ check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确", V09_SUBAGENT_ROLE_INITIAL
   const text = messageText(decision?.messages ?? []);
   check("pluginCreator 注入 role stage 文本", text.includes("[ka-whale-workflow assess-delegation]") && text.includes("plugin_creator_sub_whale_report"));
   const deny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
-  const allow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
-  check("pluginCreator assess-delegation 软闸门：write 拒绝、read 放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow");
+  const denyRead = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
+  const allowMem = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
+  const allowCtx = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
+  check("pluginCreator assess-delegation 软闸门：write/read 拒绝、memory_search/context_search 放行", deny?.kind === "deny" && denyRead?.kind === "deny" && allowMem?.kind === "allow" && allowCtx?.kind === "allow");
 }
 
 // pluginMaintainer create-plugin: pre-step 注入 lifecyclePath。

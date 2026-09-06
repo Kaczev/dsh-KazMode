@@ -61,15 +61,15 @@ export const V09_SUBAGENT_ROLE_IDS = Object.freeze([
   "pluginCreator",
 ]);
 
-/** v0.9 子代理 Minimal 工具（§1.7；首次工具调用前可见）。 */
+/** v0.9 子代理 Minimal 工具（§1.7；首次工具调用前可见；M3.2 均为 memory_search+context_search+各自 report）。 */
 export const V09_SUBAGENT_ROLE_MINIMAL_TOOLS = Object.freeze({
-  worker: Object.freeze(["memory_search", "work_sub_whale_report"]),
-  memoryMaintainer: Object.freeze(["memory_search", "memory_sub_whale_report"]),
-  pluginMaintainer: Object.freeze(["read", "plugin_maintainer_sub_whale_report"]),
-  pluginCreator: Object.freeze(["read", "plugin_creator_sub_whale_report"]),
+  worker: Object.freeze(["memory_search", "context_search", "work_sub_whale_report"]),
+  memoryMaintainer: Object.freeze(["memory_search", "context_search", "memory_sub_whale_report"]),
+  pluginMaintainer: Object.freeze(["memory_search", "context_search", "plugin_maintainer_sub_whale_report"]),
+  pluginCreator: Object.freeze(["memory_search", "context_search", "plugin_creator_sub_whale_report"]),
 });
 
-/** v0.9 子代理 Stable Base（§1.2–1.5；含该角色的 report 工具）。 */
+/** v0.9 子代理 Stable Base（§1.2–1.5；含该角色的 report 工具；M3.2 加 context 两工具）。 */
 export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
   worker: Object.freeze([
     "edit",
@@ -80,6 +80,8 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "memory_search",
     "pwsh",
     "read",
+    "context_read",
+    "context_search",
     "todo_write",
     "web_search",
     "write",
@@ -93,12 +95,16 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
     "memory_update",
     "memory_forget",
     "read",
+    "context_read",
+    "context_search",
     "glob",
     "grep",
     "memory_sub_whale_report",
   ]),
   pluginMaintainer: Object.freeze([
     "read",
+    "context_read",
+    "context_search",
     "write",
     "edit",
     "glob",
@@ -109,6 +115,8 @@ export const V09_SUBAGENT_ROLE_STABLE_BASE = Object.freeze({
   ]),
   pluginCreator: Object.freeze([
     "read",
+    "context_read",
+    "context_search",
     "write",
     "edit",
     "glob",

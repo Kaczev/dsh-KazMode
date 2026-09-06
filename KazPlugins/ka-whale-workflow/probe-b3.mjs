@@ -63,10 +63,11 @@ check("四个角色均有 Minimal / Stable Base / personaRef / toolFilter", V09_
   typeof V09_SUBAGENT_ROLE_PERSONA_REFS[role] === "string" &&
   V09_SUBAGENT_ROLE_TOOL_FILTERS[role]?.allow !== undefined,
 ));
-check("worker Minimal 含 report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker) === JSON.stringify(["memory_search", "work_sub_whale_report"]));
-check("memoryMaintainer Minimal 含 memory_sub_whale_report", V09_SUBAGENT_ROLE_MINIMAL_TOOLS.memoryMaintainer.includes("memory_sub_whale_report"));
-check("pluginMaintainer Minimal 从 read + report 开始", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer) === JSON.stringify(["read", "plugin_maintainer_sub_whale_report"]));
-check("pluginCreator Minimal 从 read + report 开始", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator) === JSON.stringify(["read", "plugin_creator_sub_whale_report"]));
+check("worker Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.worker) === JSON.stringify(["memory_search", "context_search", "work_sub_whale_report"]));
+check("memoryMaintainer Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.memoryMaintainer) === JSON.stringify(["memory_search", "context_search", "memory_sub_whale_report"]));
+check("pluginMaintainer Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer) === JSON.stringify(["memory_search", "context_search", "plugin_maintainer_sub_whale_report"]));
+check("pluginCreator Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator) === JSON.stringify(["memory_search", "context_search", "plugin_creator_sub_whale_report"]));
+check("各角色 Stable Base 含 context_read/context_search", ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"].every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
 check("worker Stable Base 不含 memory_save/update/forget", ["memory_save", "memory_update", "memory_forget"].every((tool) => !V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes(tool)));
 check("worker Stable Base 含 work_sub_whale_report", V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes("work_sub_whale_report"));
 check("memoryMaintainer Stable Base 含全部记忆写工具", ["memory_save", "memory_update", "memory_forget"].every((tool) => V09_SUBAGENT_ROLE_STABLE_BASE.memoryMaintainer.includes(tool)));

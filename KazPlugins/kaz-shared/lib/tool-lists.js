@@ -74,18 +74,18 @@ export const KAZ_V09_TOOL_JOBS = Object.freeze([
 export const V09_ASSIGNED_TOOLS_WARN_THRESHOLD = 6;
 export const V09_ASSIGNED_TOOLS_MAX = 8;
 
-/** 首轮工具面常量（Kaz 5.0 设计）：所有插件状态下 ≤2。
- *  - "ka-whale-memory" / legacy "kaz-memory" 开 → memory_search（1 个）；
+/** 首轮工具面常量（Kaz 5.0 设计；M3.2 加 context_search）：所有插件状态下 ≤2。
+ *  - "ka-whale-memory" / legacy "kaz-memory" 开 → memory_search + context_search（2 个）；
  *  - 其余（记忆关 / 未知）→ read + pwsh（2 个）。
  */
 export const KAZ_FIRST_ROUND_TOOLS = Object.freeze({
-  "ka-whale-memory": Object.freeze(["memory_search"]),
-  "kaz-memory": Object.freeze(["memory_search"]),
+  "ka-whale-memory": Object.freeze(["memory_search", "context_search"]),
+  "kaz-memory": Object.freeze(["memory_search", "context_search"]),
   default: Object.freeze(["read", "pwsh"]),
 });
 
-/** kaz-memory/ka-whale-memory 开启时的首轮工具白名单：第一轮先查记忆，触发首次工具调用后再恢复。 */
-export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = ["memory_search"];
+/** kaz-memory/ka-whale-memory 开启时的首轮工具白名单：第一轮先查记忆与上下文，触发首次工具调用后再恢复。 */
+export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_ON = ["memory_search", "context_search"];
 
 /** kaz-memory/ka-whale-memory 关闭时的首轮工具白名单：read + pwsh（≤2，2026-09 起由 kaz-mode 核心直接拥有）。 */
 export const DEFAULT_FIRST_ROUND_TOOLS_MEMORY_OFF = ["read", "pwsh"];
@@ -146,7 +146,8 @@ export const MEMORY_READ_TOOLS = Object.freeze([
 
 /** 携带工具的 Kaz 被管理组件：组件在 Kaz 面板关闭时，这些工具不应出现在工具面。
  *  v0.8 Step B1/B2：create-plan/原生 Plan 已从 Kaz 移除并删除插件目录。
- *  v0.9：ka-whale-workflow 还携带 ka_sub_whale 与四个子代理 report 工具。 */
+ *  v0.9：ka-whale-workflow 还携带 ka_sub_whale 与四个子代理 report 工具；
+ *  M3.2：kaz-context-policy 携带 context_search / context_read。 */
 export const MANAGED_CARRIER_TOOLS = {
   "ka-whale-workflow": [
     "whale_report",
@@ -156,6 +157,7 @@ export const MANAGED_CARRIER_TOOLS = {
     "plugin_maintainer_sub_whale_report",
     "plugin_creator_sub_whale_report",
   ],
+  "kaz-context-policy": ["context_search", "context_read"],
 };
 
 /** Kaz 5.0 组件命名：ka-whale-memory 为新 id；kaz-memory 仅作旧键兼容读。 */
@@ -217,7 +219,7 @@ export const KAZ_V09_SUB_WHALE_REPORT_TOOLS = Object.freeze([
   "plugin_creator_sub_whale_report",
 ]);
 
-/** v0.9 Stable Main Surface（§1.1，19 个；不含 create_goal/subagent）。 */
+/** v0.9 Stable Main Surface（§1.1，21 个；M3.2 含 context_search/context_read；不含 create_goal/subagent）。 */
 export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "ask_user_question",
   "edit",
@@ -229,6 +231,8 @@ export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "memory_search",
   "pwsh",
   "read",
+  "context_read",
+  "context_search",
   "ka_sub_whale",
   "list_agents",
   "send_message",
@@ -241,14 +245,16 @@ export const KAZ_V09_MAIN_TOOLS = Object.freeze([
 ]);
 
 /**
- * Stable Main Surface = v0.9 固定 19 项。
+ * Stable Main Surface = v0.9 固定 21 项（M3.2 加入 context_search/context_read）。
  * B5 后不再保留旧 subagent / create_goal 常量。
  */
 export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([...KAZ_V09_MAIN_TOOLS]);
 
-/** v0.8 保守子代理 Stable Base（旧兼容常量；B5 前不删除）。 */
+/** v0.8 保守子代理 Stable Base（旧兼容常量；B5 前不删除；M3.2 加 context 两工具）。 */
 export const KAZ_SUBAGENT_BASE_TOOLS = Object.freeze([
   "read",
+  "context_read",
+  "context_search",
   "write",
   "edit",
   "glob",
@@ -261,7 +267,7 @@ export const KAZ_SUBAGENT_BASE_TOOLS = Object.freeze([
   "web_search",
 ]);
 
-/** v0.9 普通子代理（worker）Stable Surface 基础（§1.2）。 */
+/** v0.9 普通子代理（worker）Stable Surface 基础（§1.2；M3.2 加 context 两工具）。 */
 export const KAZ_V09_WORKER_BASE_TOOLS = Object.freeze([
   "edit",
   "glob",
@@ -271,13 +277,15 @@ export const KAZ_V09_WORKER_BASE_TOOLS = Object.freeze([
   "memory_search",
   "pwsh",
   "read",
+  "context_read",
+  "context_search",
   "todo_write",
   "web_search",
   "write",
   "work_sub_whale_report",
 ]);
 
-/** v0.9 记忆管理子代理（memoryMaintainer）Stable Surface（§1.3）。 */
+/** v0.9 记忆管理子代理（memoryMaintainer）Stable Surface（§1.3；M3.2 加 context 两工具）。 */
 export const KAZ_V09_MEMORY_MAINTAINER_TOOLS = Object.freeze([
   "memory_detail",
   "memory_search",
@@ -286,14 +294,18 @@ export const KAZ_V09_MEMORY_MAINTAINER_TOOLS = Object.freeze([
   "memory_update",
   "memory_forget",
   "read",
+  "context_read",
+  "context_search",
   "glob",
   "grep",
   "memory_sub_whale_report",
 ]);
 
-/** v0.9 插件维护子代理（pluginMaintainer）Stable Surface（§1.4）。 */
+/** v0.9 插件维护子代理（pluginMaintainer）Stable Surface（§1.4；M3.2 加 context 两工具）。 */
 export const KAZ_V09_PLUGIN_MAINTAINER_TOOLS = Object.freeze([
   "read",
+  "context_read",
+  "context_search",
   "write",
   "edit",
   "glob",
@@ -303,9 +315,11 @@ export const KAZ_V09_PLUGIN_MAINTAINER_TOOLS = Object.freeze([
   "plugin_maintainer_sub_whale_report",
 ]);
 
-/** v0.9 插件创建子代理（pluginCreator）Stable Surface（§1.5）。 */
+/** v0.9 插件创建子代理（pluginCreator）Stable Surface（§1.5；M3.2 加 context 两工具）。 */
 export const KAZ_V09_PLUGIN_CREATOR_TOOLS = Object.freeze([
   "read",
+  "context_read",
+  "context_search",
   "write",
   "edit",
   "glob",

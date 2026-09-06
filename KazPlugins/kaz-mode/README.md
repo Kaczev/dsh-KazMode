@@ -10,7 +10,7 @@ Kaz 模式同时具备两个入口，双向同步：
 | 插件 | 角色 |
 | --- | --- |
 | `thinking-anchor` | 思考锚点（**消息注入**）：新对话开始时把完整思考协议作为一条合成用户消息注入，此后每轮开头注入短提醒；不触碰系统提示词 |
-| 首阶段极简（核心能力，36.9 起无独立插件） | **首次工具调用前**由 kaz-mode 直接暴露 `memory_search`（Kaz 恒开 ka-whale-memory），首次工具调用后恢复 Stable Main Surface（固定集） |
+| 首阶段极简（核心能力，36.9 起无独立插件） | **首次工具调用前**由 kaz-mode 直接暴露 `memory_search` + `context_search`（Kaz 恒开 ka-whale-memory；M3.2），首次工具调用后恢复 Stable Main Surface（固定集） |
 | `plugin-filter`（原 tool-filter） | 工具过滤：按名单移除 / 禁用指定工具 |
 | `output-beep` | 用户介入 / Kaz 收尾提示音：主模型 `communication`/`done` 收尾完成、`ask_user_question`、`exit_plan_mode` 时响；无 idleBeep |
 | `round-display` | 每轮注入显示：记录每轮 Kaz 联动/附属插件给模型发送的信息，「本轮注入」按钮+面板 |
@@ -29,10 +29,10 @@ Kaz 模式同时具备两个入口，双向同步：
    tool:* 指导段 / 运行时上下文…）一律过滤。**kaz-mode 插件不再控制系统提示词。**
 2. **工具面两阶段（v0.8 Step A/B1 固定集；36.9 起无 round-minimal 插件）**：
    - 首次工具调用前：kaz-mode 核心 Minimal 直接保留首轮工具集
-     （Kaz 下 `ka-whale-memory` 恒开 → `memory_search`；≤2）；
-   - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 19 项，含
-     `get_goal/update_goal/whale_report/ka_sub_whale/list_agents/send_message/
-     interrupt_agent`，不含旧 `create_goal/subagent`）。
+     （Kaz 下 `ka-whale-memory` 恒开 → `memory_search` + `context_search`；≤2）；
+   - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 21 项，含
+     `context_read/context_search/get_goal/update_goal/whale_report/ka_sub_whale/
+     list_agents/send_message/interrupt_agent`，不含旧 `create_goal/subagent`）。
      代码级固定集不受旧 tool-plugin JSON 的 false 开关影响；外部/自创建工具不进主面。
    - 纯 `minimal → Stable Main` 一次变化；原生 Plan 已实际移除，不再有 Plan 例外。
 3. **记忆工具按项目生效（仅非 Kaz）**：v0.9 B5 起 `ka-whale-memory` 在 Kaz 恒开，
@@ -130,7 +130,8 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 ### 5. 首阶段 Minimal（36.9 起由 kaz-mode 核心直接拥有）
 
 kaz-mode 在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集：Kaz 下
-`ka-whale-memory` 恒开 → `memory_search`；受控子代理按 v0.9 role Minimal；
+`ka-whale-memory` 恒开 → `memory_search` + `context_search`（M3.2）；受控子代理按 v0.9 role Minimal
+（`memory_search` + `context_search` + 各自 report）；
 首次工具调用后恢复 Stable Main Surface（v0.8 Step A 固定集，不由工具控制面板 JSON 决定）。
 每次 assemble 后的真实工具面增删由本插件以 `category=tool-surface` 上报 round-display。
 
@@ -182,9 +183,10 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    真实 system = `deployment:persona` 单段，主会话逐字 `KAZ_ROLE_PROMPTS.main`，
    受控子代理逐字 `KAZ_ROLE_PROMPTS.subagent.<role>`（v0.8 Step B1 后不再含
    plan:policy / tool:goal）；
-2. 首次工具调用前工具面：Kaz = `memory_search`（ka-whale-memory 恒开）；
-   第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 19 项，
-   不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
+2. 首次工具调用前工具面：Kaz = `memory_search` + `context_search`（ka-whale-memory 恒开；
+   M3.2）；
+   第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 21 项，
+   含 `context_read/context_search`，不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +
    assignedTools 显示，旧/未知子代理回落到保守 Base；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
