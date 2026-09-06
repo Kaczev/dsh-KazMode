@@ -126,7 +126,7 @@ The candidate tools (private plugins) are: <candidate tools: name: description>.
 Only these private plugins and tool_jobs(job_list, job_output, job_kill) may be included in assignedTools. Regular file tools and memory tools are part of the base role surface and must not be listed.`,
     },
     "write-plan": {
-      allowedTools: ["whale_report", "read", "context_search", "context_read"],
+      allowedTools: ["whale_report", "read", "grep", "glob", "web_search", "memory_detail", "memory_search", "memory_list",  "context_search", "context_read"],
       canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
       task:`Create and finalize the complete task plan via "whale_report(finalPlanPayload)".
 
@@ -363,6 +363,7 @@ Amend plans only through write-plan. When complete, advance to memory-maintenanc
         "memory_list",
         "glob",
         "grep",
+        "web_search",
         "plugin_maintainer_sub_whale_report",
       ],
       canAdvance: ["create-plugin", "update-plugin", "retire-plugin"],
@@ -380,6 +381,7 @@ Amend plans only through write-plan. When complete, advance to memory-maintenanc
         "memory_list",
         "glob",
         "grep",
+        "web_search",
         "pwsh",
         "todo_write",
         "plugin_maintainer_sub_whale_report",
@@ -400,6 +402,7 @@ Amend plans only through write-plan. When complete, advance to memory-maintenanc
         "memory_list",
         "glob",
         "grep",
+        "web_search",
         "pwsh",
         "todo_write",
         "plugin_maintainer_sub_whale_report",
