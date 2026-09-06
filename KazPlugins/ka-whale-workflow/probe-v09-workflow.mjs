@@ -14,6 +14,8 @@ import {
   MAIN_STAGE_IDS,
   GOAL_ACTIVE_STAGE,
   GOAL_ACTIVE_CONTEXT_TEXT,
+  FIRST_ROUND_STARTUP_FORM,
+  FIRST_ROUND_STARTUP_TEXT,
   workingResumedContextText,
   WORKER_STAGE_IDS,
   MEMORY_MAINTAINER_STAGE_IDS,
@@ -196,6 +198,82 @@ childCatalog.set("child-memory-other-surface", {
   activity: "running",
   parentId: "s-v09",
 });
+
+// 首轮 startup hint：新会话 turn 1、stage=idle、尚无 tool/call 时，pre-step
+// 注入一次 [ka-whale-workflow first-round]，随后同一会话不重复注入。
+{
+  const preStep = listeners.get("agent/pre-step")?.[0];
+  const startupTextsOf = (decision) =>
+    (decision?.messages ?? [])
+      .map((message) => (message?.content ?? []).map((part) => part?.text ?? "").join("\n"))
+      .join("\n");
+  const startupMessagesOf = (decision) =>
+    (decision?.messages ?? []).filter(
+      (message) =>
+        message?.source?.kind === "plugin" &&
+        message?.source?.plugin === "ka-whale-workflow" &&
+        message?.source?.form === FIRST_ROUND_STARTUP_FORM,
+    );
+
+  const startupAgent = {
+    id: "s-startup-hint",
+    session: { id: "s-startup-hint", events: [] },
+    steer() {},
+  };
+  const firstDecision = await preStep(
+    { agent: startupAgent, turn: 1, messages: [userMessage] },
+    async () => ({ kind: "enter", messages: [userMessage] }),
+  );
+  const firstText = startupTextsOf(firstDecision);
+  const firstStartupMessages = startupMessagesOf(firstDecision);
+  check(
+    "首轮 idle+Minimal pre-step 注入 [ka-whale-workflow first-round] startup hint",
+    firstText.includes("[ka-whale-workflow first-round]") &&
+      firstText.includes("memory_search or context_search") &&
+      firstStartupMessages.length === 1,
+  );
+
+  // 模拟真实会话事件已写入（插件 user message source.form=startup-tool-hint）。
+  startupAgent.session.events.push({
+    type: "user/message",
+    data: {
+      source: { kind: "plugin", plugin: "ka-whale-workflow", form: FIRST_ROUND_STARTUP_FORM },
+    },
+  });
+  const secondDecision = await preStep(
+    { agent: startupAgent, turn: 1, messages: [userMessage] },
+    async () => ({ kind: "enter", messages: [userMessage] }),
+  );
+  check(
+    "startup hint 每会话只注入一次（已注入事件后不再追加）",
+    startupMessagesOf(secondDecision).length === 0,
+  );
+
+  // 已有 tool/call：不再属于首轮 Minimal，不注入 startup hint（可能注入 assess stage）。
+  const toolAgent = {
+    id: "s-startup-tool",
+    session: { id: "s-startup-tool", events: [{ type: "tool/call" }] },
+    steer() {},
+  };
+  const toolDecision = await preStep(
+    { agent: toolAgent, turn: 1, messages: [userMessage] },
+    async () => ({ kind: "enter", messages: [userMessage] }),
+  );
+  check("已有 tool/call 不注入 startup hint", startupMessagesOf(toolDecision).length === 0);
+
+  // turn 2 起走正常 assess 路由，不注入 startup hint。
+  const secondTurnAgent = {
+    id: "s-startup-turn2",
+    session: { id: "s-startup-turn2", events: [] },
+    steer() {},
+  };
+  const secondTurnDecision = await preStep(
+    { agent: secondTurnAgent, turn: 2, messages: [userMessage] },
+    async () => ({ kind: "enter", messages: [userMessage] }),
+  );
+  check("非首轮（turn 2）不注入 startup hint", startupMessagesOf(secondTurnDecision).length === 0);
+  check("FIRST_ROUND_STARTUP_TEXT 导出且标题正确", FIRST_ROUND_STARTUP_TEXT.startsWith("[ka-whale-workflow first-round]"));
+}
 
 // persona application: ka-whale-workflow no longer registers ka-whale-workflow:main
 // (or any system section); kaz-system-prompt sets deployment:persona to

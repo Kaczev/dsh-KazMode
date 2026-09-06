@@ -70,6 +70,8 @@ import {
   GOAL_ACTIVE_STAGE,
   WORKING_RESUMED_STAGE,
   GOAL_ACTIVE_CONTEXT_TEXT,
+  FIRST_ROUND_STARTUP_FORM,
+  FIRST_ROUND_STARTUP_TEXT,
   workingResumedContextText,
   V09_SUBAGENT_ROLES,
   V09_STAGE_IDS,
@@ -2987,6 +2989,44 @@ export default {
         //   - main persona 由 kaz-system-prompt 每 step 以 deployment:persona 组装；
         //   - controlled v0.9 subagents 经 request.persona 携带 KAZ_ROLE_PROMPTS.subagent.*；
         //   - 旧 unknown-subagent 通用 SUBAGENT_FLOW_TEXT 注入路径已删除。
+
+        // 首轮 startup hint：主模型在 turn 1 idle + Minimal（首次工具调用前）看不到
+        // 任何 stage 正文（assess-complexity 要等首次 tool/call 后才 pending），因此
+        // 在这里注入一次性提示，告诉它先调用 memory_search / context_search 解锁工作流。
+        // 受控子代理不需要：它们首轮已有 role stage 注入（可带 Minimal 行）。
+        const shouldInjectStartupHint =
+          controlledRoleNow === null &&
+          !skipSubagentNow &&
+          !subagentNow &&
+          typeof sessionIdNow === "string" &&
+          sessionIdNow.length > 0 &&
+          turn < 2 &&
+          [
+            ...(Array.isArray(payload?.messages) ? payload.messages : []),
+            ...messages,
+          ].some((message) => isUserMessage(message)) &&
+          stageOfAgent(agent) === "idle" &&
+          isMinimal(agent) &&
+          !hasInjectedBefore(agent, FIRST_ROUND_STARTUP_FORM);
+        if (shouldInjectStartupHint) {
+          try {
+            const message = createUserMessage({
+              content: [{ type: "text", text: FIRST_ROUND_STARTUP_TEXT }],
+              source: {
+                kind: "plugin",
+                plugin: "ka-whale-workflow",
+                form: FIRST_ROUND_STARTUP_FORM,
+              },
+            });
+            messages.push(message);
+            appended = true;
+            reportRoundDisplay(agent, FIRST_ROUND_STARTUP_TEXT, "首轮 startup hint");
+          } catch (error) {
+            ctx.logger.warn(
+              `[ka-whale-workflow] 构造首轮 startup hint 注入消息失败：${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
 
         // v0.9 阶段入口注入 + goal-active/working-resumed 边界注入：
         // 每次进入 v0.9 stage 或跨越 Goal 边界时 pending 一次，注入后即清除。

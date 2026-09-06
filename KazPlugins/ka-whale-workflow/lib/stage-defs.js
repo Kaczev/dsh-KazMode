@@ -586,6 +586,21 @@ Context: Before continuing, if earlier exact goal/session content may have been 
 <`;
 
 /**
+ * v0.9 首轮 startup hint：会话处于 idle + Minimal（尚无首次工具调用）时，
+ * 主模型在 turn 1 的真实用户消息里只会看到 memory_search + context_search。
+ * 这个一次性提示让模型知道必须先做一次工具调用，工作流才进入 assess-complexity。
+ * 它不是 stage（无 Allowed tools / Can advance to / Task），也不使用已退役的
+ * round-minimal 命名；source.form = FIRST_ROUND_STARTUP_FORM。
+ */
+export const FIRST_ROUND_STARTUP_FORM = "startup-tool-hint";
+
+export const FIRST_ROUND_STARTUP_TEXT = `[ka-whale-workflow first-round]
+>
+Mode: Minimal startup (first round, before the first tool call).
+Before we answer, call memory_search or context_search exactly once. After that first tool call, ka-whale-workflow enters assess-complexity and the stable tool surface unlocks. Do not end the turn before making the call.
+<`;
+
+/**
  * v0.9 §3.1 working-resumed 上下文注入。
  * @param {string} [taskPlanPath] 实际 task plan 路径；缺省时保留基准占位。
  * @returns {string}

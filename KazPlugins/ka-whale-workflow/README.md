@@ -31,7 +31,13 @@
   `memory_search` + `context_search`。live pre-step 在尚未发生首次工具调用时，
   会在主/受控子代理的 stage 正文里额外输出
   `Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.`；
-  首次工具调用后不再传入 `minimalTools`，该行不再出现。各角色 `communication`
+  首次工具调用后不再传入 `minimalTools`，该行不再出现。真正的新会话 turn 1
+  （stage=idle、尚无首次工具调用）还没有任何 stage 正文可挂这行 Minimal 提示，
+  因此 ka-whale-workflow 额外注入一次 `[ka-whale-workflow first-round]` startup
+  hint（source.form=`startup-tool-hint`）：明确要求先调用
+  `memory_search` / `context_search` 一次，随后才进入 assess-complexity 并解锁
+  稳定工具面。该提示不是 stage，不携带 Allowed tools / Can advance to / Task，
+  且只在主模型新会话首次真实用户消息时注入一次。各角色 `communication`
   阶段允许工具为 `context_search` + `context_read` + `context_compress`。
 - 受控 v0.9 子代理：`ka_sub_whale` 创建的
   `worker`/`memoryMaintainer`/`pluginMaintainer` 不受
