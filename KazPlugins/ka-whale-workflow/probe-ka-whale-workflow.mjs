@@ -172,12 +172,15 @@ check("v0.9 stage 常量导出（compass_context 已加入；三角色）", MAIN
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && workingDef?.canAdvance.includes("write-plan"));
-check("双层语义：主 assess allowedTools = memory_search+context_search+context_read+context_compress+whale_report（Minimal 不再由 stage 收口；ask_user_question 留 challenge-plan）", JSON.stringify(assessDef?.allowedTools) === JSON.stringify(["memory_search", "context_search", "context_read", "context_compress", "whale_report"]) && !assessDef?.allowedTools.includes("read") && !assessDef?.allowedTools.includes("ask_user_question"));
+check("双层语义：主 assess allowedTools = memory_search+context_search+context_read+whale_report（Minimal 不再由 stage 收口；ask_user_question 留 challenge-plan；不放 context_compress/read）", JSON.stringify(assessDef?.allowedTools) === JSON.stringify(["memory_search", "context_search", "context_read", "whale_report"]) && !assessDef?.allowedTools.includes("read") && !assessDef?.allowedTools.includes("ask_user_question") && !assessDef?.allowedTools.includes("context_compress"));
 {
-  const mainNonMinimal = ["challenge-plan", "decide-tools", "write-plan", "decide-goal", "working", "memory-maintenance", "plugin-maintenance"];
+  const mainNonMinimal = ["challenge-plan", "decide-tools", "write-plan", "working", "memory-maintenance", "plugin-maintenance"];
   check(
-    "M3.3 主模型非 Minimal 阶段均含 context_search/context_read/context_compress",
-    mainNonMinimal.every((stage) => hasContextTools(stageDefinitionFor(MAIN_ROLE, stage))),
+    "主模型非终态需回溯阶段均含 context_search+context_read",
+    mainNonMinimal.every((stage) => {
+      const tools = stageDefinitionFor(MAIN_ROLE, stage)?.allowedTools ?? [];
+      return tools.includes("context_search") && tools.includes("context_read");
+    }),
   );
 }
 {
@@ -186,11 +189,16 @@ check("双层语义：主 assess allowedTools = memory_search+context_search+con
     memoryMaintainer: "assess-delegation",
     pluginMaintainer: "assess-delegation",
   };
+  const subagentReportTools = {
+    worker: "work_sub_whale_report",
+    memoryMaintainer: "memory_sub_whale_report",
+    pluginMaintainer: "plugin_maintainer_sub_whale_report",
+  };
   check(
-    "双层语义：受控子代理初始 stage allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
+    "双层语义：受控子代理初始 stage allowedTools 含 memory/context/report，不含 read/context_compress",
     Object.entries(subagentInitialStages).every(([role, stage]) => {
       const tools = stageDefinitionFor(role, stage)?.allowedTools ?? [];
-      return CONTEXT_TOOLS.every((tool) => tools.includes(tool)) && !tools.includes("read");
+      return tools.includes("memory_search") && tools.includes("context_search") && tools.includes("context_read") && tools.includes(subagentReportTools[role]) && !tools.includes("read") && !tools.includes("context_compress");
     }),
   );
 }
@@ -201,15 +209,24 @@ check("双层语义：主 assess allowedTools = memory_search+context_search+con
     pluginMaintainer: ["plan-plugin", "create-plugin", "update-plugin", "retire-plugin"],
   };
   check(
-    "M3.3 子代理非 Minimal 执行阶段均含 context_search/context_read/context_compress",
-    Object.entries(subagentNonMinimal).every(([role, stages]) => stages.every((stage) => hasContextTools(stageDefinitionFor(role, stage)))),
+    "受控子代理执行阶段均含 context_search+context_read（回溯纪律）",
+    Object.entries(subagentNonMinimal).every(([role, stages]) => stages.every((stage) => {
+      const tools = stageDefinitionFor(role, stage)?.allowedTools ?? [];
+      return tools.includes("context_search") && tools.includes("context_read");
+    })),
   );
 }
 {
   const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer"];
+  const reportTools = {
+    main: "whale_report",
+    worker: "work_sub_whale_report",
+    memoryMaintainer: "memory_sub_whale_report",
+    pluginMaintainer: "plugin_maintainer_sub_whale_report",
+  };
   check(
-    "M3.3 各角色 communication 阶段含三个 context 工具",
-    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(CONTEXT_TOOLS)),
+    "各角色 communication 阶段只含各自 report 工具",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify([reportTools[role]])),
   );
 }
 check("37.5 新图：write-plan 可到 decide-goal/working/maintenance/communication", ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
@@ -311,7 +328,7 @@ check(
     );
   });
   check("working/memory-maintenance/plugin-maintenance 阶段注入含等待/回复恢复语义", waitOk);
-  check("working/memory-maintenance/plugin-maintenance 阶段注入含多轮复用口径", stageInjectionText(MAIN_ROLE, "working").includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。") && stageInjectionText(MAIN_ROLE, "memory-maintenance").includes("同一 memoryMaintainer 子代理可被多轮复用；每轮从 assess-delegation 开始，前一轮上下文仍在但本轮为独立委派。") && stageInjectionText(MAIN_ROLE, "plugin-maintenance").includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。"));
+  check("working/memory-maintenance/plugin-maintenance 阶段注入含多轮复用口径", stageInjectionText(MAIN_ROLE, "working").includes("Whether to reuse is determined by the main agent") && stageInjectionText(MAIN_ROLE, "memory-maintenance").includes("memoryMaintainer sub-agent can be reused multiple times") && stageInjectionText(MAIN_ROLE, "plugin-maintenance").includes("Whether to reuse is determined by the main agent"));
 }
 
 {

@@ -292,7 +292,12 @@ check("主 stage ids 与 v0.9/compass_context 一致", JSON.stringify(MAIN_STAGE
 check("worker/memory/plugin stage ids 齐全且含 compass_context", WORKER_STAGE_IDS.includes("check-tools") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_MAINTAINER_STAGE_IDS.includes("create-plugin") && WORKER_STAGE_IDS.includes("compass_context") && MEMORY_MAINTAINER_STAGE_IDS.includes("compass_context") && PLUGIN_MAINTAINER_STAGE_IDS.includes("compass_context"));
 check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE) && MAIN_STAGE_IDS.length === 10 && !MAIN_STAGE_IDS.includes("plugin-preflight"));
 {
-  const contextTools = ["context_search", "context_read", "context_compress"];
+  const roleReportTools = {
+    main: "whale_report",
+    worker: "work_sub_whale_report",
+    memoryMaintainer: "memory_sub_whale_report",
+    pluginMaintainer: "plugin_maintainer_sub_whale_report",
+  };
   const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer"];
   const initialStages = {
     main: "assess-complexity",
@@ -301,16 +306,21 @@ check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_
     pluginMaintainer: "assess-delegation",
   };
   check(
-    "M3.3 communication allowedTools = context_search+context_read+context_compress",
-    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
+    "communication allowedTools 只含各自 report 工具（37.5/当前语义）",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify([roleReportTools[role]])),
   );
   check(
-    "双层语义：stage 初始 allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
-    roles.every((role) =>
-      contextTools.every((tool) =>
-        stageDefinitionFor(role, initialStages[role])?.allowedTools.includes(tool),
-      ),
-    ),
+    "双层语义：stage 初始 allowedTools 含 memory/context/report，不含 context_compress（Minimal 不再由 stage 收口）",
+    roles.every((role) => {
+      const allowed = stageDefinitionFor(role, initialStages[role])?.allowedTools ?? [];
+      return (
+        allowed.includes("memory_search") &&
+        allowed.includes("context_search") &&
+        allowed.includes("context_read") &&
+        allowed.includes(roleReportTools[role]) &&
+        !allowed.includes("context_compress")
+      );
+    }),
   );
   check(
     "stage 初始 allowedTools 仍不含 read（文件执行工具不属于初始阶段软闸门）",
@@ -348,7 +358,7 @@ check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity"
   check("memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-maintenance", "write-plan") === true);
   check("working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
   check("working task 含 single subagent-settled 到达且父回复一次 send_message 语义", typeof workingDef?.task === "string" && workingDef.task.includes("single subagent-settled message") && workingDef.task.includes("Reply once with send_message to resume it") && workingDef.task.includes("end the turn; the child's full report arrives"));
-  check("主 working/memory-maintenance/plugin-maintenance 任务含复用口径", stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes("同一 memoryMaintainer 子代理可被多轮复用；每轮从 assess-delegation 开始，前一轮上下文仍在但本轮为独立委派。") && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes("是否复用由主代理决定：可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开。"));
+  check("主 working/memory-maintenance/plugin-maintenance 任务含复用口径", stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("Whether to reuse is determined by the main agent") && stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes("memoryMaintainer sub-agent can be reused multiple times") && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes("Whether to reuse is determined by the main agent"));
 }
 
 // Task plan draft/finalized 骨架（planStore 在 plugin.apply 前预写，plugin store 可见）
@@ -387,7 +397,7 @@ check("assess 中调用 read 返回 workflow-stage-deny", deny.kind === "deny" &
 const allowMem = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
 check("assess 中调用 memory_search 放行", allowMem.kind === "allow");
 const allowCtxAssess = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
-check("assess 软闸门放行 context_search/context_read/context_compress（阶段面已与 Minimal 分离）", allowCtxAssess?.kind === "allow" && (await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" })))?.kind === "allow" && (await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" })))?.kind === "allow");
+check("assess 软闸门放行 context_search/context_read，拒绝 context_compress（当前 assess 不放 compress）", allowCtxAssess?.kind === "allow" && (await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" })))?.kind === "allow" && (await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" })))?.kind === "deny");
 
 // whale_report 推进到 communication 后再闸门
 const result = await whaleReport.execute({ nextStage: "communication" }, { agent });
@@ -395,7 +405,7 @@ check("whale_report assess→communication", result.ok === true && result.stage 
 const denyComm = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
 check("communication 中调用 read 返回 workflow-stage-deny", denyComm.kind === "deny" && String(denyComm.reason).startsWith("workflow-stage-deny:"));
 const allowCtxComm = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
-check("communication 软闸门放行 context_search/context_read/context_compress", allowCtxComm?.kind === "allow" && (await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" })))?.kind === "allow" && (await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" })))?.kind === "allow");
+check("communication 软闸门拒绝 context_search/context_read/context_compress（communication 只放 report 工具）", allowCtxComm?.kind === "deny" && (await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" })))?.kind === "deny" && (await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" })))?.kind === "deny");
 
 // 36.5 用户插话/新轮路由：终态 communication 重置；活动阶段保留。
 await claimed({ agent, message: userMessage, turn: 2 });
@@ -468,6 +478,13 @@ check(
     session: { id: firstMemoryChildId, events: [] },
     options: { subagentDepth: 1 },
   };
+  // 新受控子代理先完成首次工具调用（真实路径：session/event 置 minimalDone 并进入 assess-delegation）。
+  childAgent.session.events.push({ type: "tool/call", data: { name: "memory_search" } });
+  agentRegistry.set(firstMemoryChildId, childAgent);
+  const sessionEventV09 = listeners.get("session/event")?.[0];
+  if (typeof sessionEventV09 === "function") {
+    await sessionEventV09({ id: firstMemoryChildId }, { type: "tool/call", data: { name: "memory_search" } });
+  }
   const memoryReport = registeredTools.get(MEMORY_SUB_WHALE_REPORT_TOOL);
   const reportResult = await memoryReport.execute(
     { nextStage: "communication" },

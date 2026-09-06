@@ -569,6 +569,9 @@ export function normalizeSubagentRoleRecord(raw) {
     finalTools: normalizeToolList(raw.finalTools),
     // schema-compatible：旧记录没有该字段时按 false 读取；写入时总是归一化为布尔。
     awaitingParent: raw.awaitingParent === true,
+    // 7.0/2026-09：受控子代理首次 tool/call 后置 true 并持久化，避免 resume 后
+    // kaz-mode 只依赖会话 tool/call 事件而把已解锁子代理重新判成 Minimal。
+    minimalDone: raw.minimalDone === true,
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
   };
@@ -1282,9 +1285,13 @@ export default {
     }
 
     /** 是否处于首阶段极简（36.9：round-minimal 服务已删除，直接按本插件核心
-     *  hasToolCall 判定；调用处已排除 includeSubagents=false 的子代理与受控角色）。 */
+     *  hasToolCall + 受控子代理持久化 minimalDone 判定；调用处已排除
+     *  includeSubagents=false 的旧子代理）。minimalDone=true 表示该受控子代理
+     *  已完成首次工具调用；即使 resume 后会话 tool/call 事件不可见也不回 Minimal。 */
     function isMinimal(agent) {
       if (agent === null || agent === undefined || typeof agent !== "object") return false;
+      const roleRecord = controlledSubagentRecordOfAgent(agent);
+      if (roleRecord !== null && roleRecord.minimalDone === true) return false;
       return !hasToolCall(agent);
     }
 
@@ -1316,6 +1323,33 @@ export default {
       return record !== null && V09_SUBAGENT_ROLES.includes(record.persona)
         ? record.persona
         : null;
+    }
+
+    /** 受控子代理完成首次 tool/call 后，把 minimalDone 持久化到角色记录。
+     *  返回是否已置为 true（已 true 也返回 true）。 */
+    function markSubagentMinimalDone(agent) {
+      if (agent === null || agent === undefined || typeof agent !== "object") return false;
+      const record = controlledSubagentRecordOfAgent(agent);
+      const sessionId = sessionIdOf(agent);
+      if (record === null || typeof sessionId !== "string" || sessionId.length === 0) return false;
+      if (record.minimalDone === true) return true;
+      const updated = stageStore.setSubagentRole(sessionId, {
+        ...record,
+        minimalDone: true,
+      });
+      return updated === true;
+    }
+
+    /** 受控子代理首轮 Minimal startup hint（与主模型 [ka-whale-workflow first-round]
+     *  对齐：首次工具调用前不注入完整 role stage 正文，只提示先做一次工具调用）。 */
+    function controlledStartupHintText(role) {
+      const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role] ?? "";
+      const report = V09_ROLE_REPORT_TOOLS[role] ?? "";
+      return `[ka-whale-workflow first-round]
+>
+Mode: Minimal startup (${role} subagent, before the first tool call).
+Before we answer, call memory_search or context_search exactly once. After that first tool call, ka-whale-workflow starts ${initial} and the full ${role} tool surface unlocks (including ${report}). Do not end the turn before making the call.
+<`;
     }
 
     /** 父主模型 send_message（coordinator/relay）到达受控子代理时清门：
@@ -1351,14 +1385,24 @@ export default {
     }
 
     /** 受控 v0.9 子代理 idle 时初始化其 role 专属首阶段：
-     *  worker=assess-complexity；memoryMaintainer/pluginMaintainer=assess-delegation。 */
-    function ensureControlledSubagentStarted(agent) {
+     *  worker=assess-complexity；memoryMaintainer/pluginMaintainer=assess-delegation。
+     *  v0.9/主模型对齐：新受控子代理在首次 tool/call 前保持 stage=idle（只暴露
+     *  Minimal 工具面 + startup hint），不提前注入完整 role stage；只有
+     *  options.afterFirstTool=true（session/event 首次 tool/call）或会话已非
+     *  Minimal（minimalDone / 已有 tool/call）时才真正进入 role 首阶段。 */
+    function ensureControlledSubagentStarted(agent, options = {}) {
       const role = controlledSubagentRoleOfAgent(agent);
       if (role === null) return null;
       if (liveFor(agent).enabled !== true) return role;
       const current = stageOfAgent(agent);
+      const afterFirstTool = options?.afterFirstTool === true;
       const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role] ?? null;
       if (initial === null) return role;
+      if (current === "idle" && !afterFirstTool && isMinimal(agent)) {
+        // 尚未首次工具调用：与主模型一致，暂不进入 stage，等待 session/event
+        // 首次 tool/call 后由 ensure(…, { afterFirstTool: true }) 进入。
+        return role;
+      }
       const alreadyInRoleFlow =
         current !== "idle" &&
         current !== "done" &&
@@ -2316,6 +2360,7 @@ export default {
           stage: "idle",
           assignedTools: assignedValidation.tools,
           finalTools: finalSurface,
+          minimalDone: false,
           createdAt: now,
           updatedAt: now,
         };
@@ -2838,17 +2883,28 @@ export default {
       const sessionId = session !== null && typeof session === "object" && typeof session.id === "string"
         ? session.id
         : session?.sessionId;
-      if (typeof sessionId !== "string" || sessionId.length === 0 || !pendingStart.has(sessionId)) return;
-      pendingStart.delete(sessionId);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return;
       const agent = sessionAgentOf(session);
       if (agent === null || agent === undefined || typeof agent !== "object") return;
       if (liveFor(agent).enabled !== true) return;
-      // 受控 v0.9 子代理同样在首阶段 Minimal 解除后进入 role 专属首阶段。
+      // 受控 v0.9 子代理：首次 tool/call 持久化 minimalDone（resume/存储后仍视为
+      // 已解锁），随后才进入 role 专属首阶段——与主模型“首次工具调用后才进
+      // assess-complexity”的语义对齐。
       const controlledRole = controlledSubagentRoleOfAgent(agent);
       if (controlledRole !== null) {
-        ensureControlledSubagentStarted(agent);
+        const marked = markSubagentMinimalDone(agent);
+        if (marked) {
+          reportRoundDisplay(
+            agent,
+            `受控 ${controlledRole} 子代理首次工具调用：minimalDone=true，工具面解锁。`,
+            "工具面解锁",
+          );
+        }
+        ensureControlledSubagentStarted(agent, { afterFirstTool: true });
         return;
       }
+      if (!pendingStart.has(sessionId)) return;
+      pendingStart.delete(sessionId);
       if (liveFor(agent).includeSubagents !== true && isSubagentSession(session)) return;
       const current = stageOfAgent(agent);
       if (current !== "idle") return;
@@ -2990,14 +3046,15 @@ export default {
         //   - controlled v0.9 subagents 经 request.persona 携带 KAZ_ROLE_PROMPTS.subagent.*；
         //   - 旧 unknown-subagent 通用 SUBAGENT_FLOW_TEXT 注入路径已删除。
 
-        // 首轮 startup hint：主模型在 turn 1 idle + Minimal（首次工具调用前）看不到
-        // 任何 stage 正文（assess-complexity 要等首次 tool/call 后才 pending），因此
-        // 在这里注入一次性提示，告诉它先调用 memory_search / context_search 解锁工作流。
-        // 受控子代理不需要：它们首轮已有 role stage 注入（可带 Minimal 行）。
+        // 首轮 startup hint：主模型与受控子代理在 idle + Minimal（首次工具调用前）
+        // 都不注入完整 stage 正文；这里一次性提示先调用 memory_search / context_search
+        // 解锁工作流。主模型首次 tool/call 后进入 assess-complexity；受控子代理首次
+        // tool/call 后进入其 role 首阶段（assess-complexity / assess-delegation）。
+        const isMainStartupCandidate = controlledRoleNow === null && !subagentNow;
+        const isControlledStartupCandidate = controlledRoleNow !== null;
         const shouldInjectStartupHint =
-          controlledRoleNow === null &&
           !skipSubagentNow &&
-          !subagentNow &&
+          (isMainStartupCandidate || isControlledStartupCandidate) &&
           typeof sessionIdNow === "string" &&
           sessionIdNow.length > 0 &&
           turn < 2 &&
@@ -3009,9 +3066,13 @@ export default {
           isMinimal(agent) &&
           !hasInjectedBefore(agent, FIRST_ROUND_STARTUP_FORM);
         if (shouldInjectStartupHint) {
+          const startupHintText =
+            controlledRoleNow !== null
+              ? controlledStartupHintText(controlledRoleNow)
+              : FIRST_ROUND_STARTUP_TEXT;
           try {
             const message = createUserMessage({
-              content: [{ type: "text", text: FIRST_ROUND_STARTUP_TEXT }],
+              content: [{ type: "text", text: startupHintText }],
               source: {
                 kind: "plugin",
                 plugin: "ka-whale-workflow",
@@ -3020,7 +3081,7 @@ export default {
             });
             messages.push(message);
             appended = true;
-            reportRoundDisplay(agent, FIRST_ROUND_STARTUP_TEXT, "首轮 startup hint");
+            reportRoundDisplay(agent, startupHintText, "首轮 startup hint");
           } catch (error) {
             ctx.logger.warn(
               `[ka-whale-workflow] 构造首轮 startup hint 注入消息失败：${error instanceof Error ? error.message : String(error)}`,

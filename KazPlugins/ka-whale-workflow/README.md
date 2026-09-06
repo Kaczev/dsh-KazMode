@@ -20,28 +20,27 @@
 - `tools/pre-execute` 软闸门：主模型与受控 v0.9 子代理在当前 stage 调用非
   Allowed tools 返回 `workflow-stage-deny`，不视为模型失败惩罚。
 - 双层语义（M3.3 + Minimal 收口）：stage `allowedTools` 是当前阶段的软闸门，
-  不是首轮 Minimal 列表。主 `assess-complexity` 与受控子代理初始 stage
-  （`assess-complexity` / `assess-delegation`）的 `allowedTools` 均含
-  `memory_search` / `context_search` / `context_read` / `context_compress`
-  （主另含 `whale_report`，子代理含各自报告工具），且不含 `read`；主
-  `assess-complexity` 不放 `ask_user_question`（澄清需求先推进
-  `challenge-plan`）。真正的首轮 Minimal 由 kaz-mode `firstRoundTools` /
+  不是首轮 Minimal 列表。主 `assess-complexity` 的 `allowedTools` 为
+  `memory_search` / `context_search` / `context_read` / `whale_report`；受控子代理
+  初始 stage（`assess-complexity` / `assess-delegation`）为
+  `memory_search` / `context_search` / `context_read` + 各自报告工具；这些初始
+  stage 均不含 `read`，也不放 `context_compress`（compress 属于 compass_context /
+  Stable 面）。主 `assess-complexity` 不放 `ask_user_question`（澄清需求先推进
+  `challenge-plan`）。
+- 首轮 Minimal 与主/子代理对齐：真正的首轮 Minimal 由 kaz-mode `firstRoundTools` /
   `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 在“首次工具调用前”独立收口：
-  主 = `memory_search` + `context_search`；受控子代理 =
-  `memory_search` + `context_search`。live pre-step 在尚未发生首次工具调用时，
-  会在主/受控子代理的 stage 正文里额外输出
-  `Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.`；
-  首次工具调用后不再传入 `minimalTools`，该行不再出现。真正的新会话 turn 1
-  （stage=idle、尚无首次工具调用）还没有任何 stage 正文可挂这行 Minimal 提示，
-  因此 ka-whale-workflow 额外注入一次 `[ka-whale-workflow first-round]` startup
-  hint（source.form=`startup-tool-hint`）：明确要求先调用
-  `memory_search` / `context_search` 一次，随后才进入 assess-complexity 并解锁
-  稳定工具面。该提示不是 stage，不携带 Allowed tools / Can advance to / Task，
-  且只在主模型新会话首次真实用户消息时注入一次。各角色 `communication`
-  阶段允许工具为 `context_search` + `context_read` + `context_compress`。
+  主与受控子代理都是 `memory_search` + `context_search`。主模型和受控子代理在
+  stage=idle、尚无首次 tool/call 时都**不注入完整 stage 正文**；pre-step 只注入一次
+  `[ka-whale-workflow first-round]` startup hint（source.form=`startup-tool-hint`），
+  明确要求先调用 `memory_search` / `context_search` 一次。首次 tool/call 后：
+  主模型进入 `assess-complexity`；受控子代理由 `session/event` 把角色记录
+  `minimalDone` 置 true 并进入 role 首阶段，随后 pre-step 才注入该 stage 正文
+  （不再含 Minimal 行）。`minimalDone` 持久化在 stage store，因此子代理经父主
+  `send_message` resume 后即使会话 tool/call 事件不可见，也不会重新回到 Minimal。
 - 受控 v0.9 子代理：`ka_sub_whale` 创建的
   `worker`/`memoryMaintainer`/`pluginMaintainer` 不受
-  `includeSubagents=false` 跳过。idle 时自动进入 role 首阶段
+  `includeSubagents=false` 跳过。新受控子代理在首次 tool/call 前保持 stage=idle +
+  Minimal；首次 tool/call 后才自动进入 role 首阶段
   （`worker=assess-complexity`，其余 `=assess-delegation`），按 pending stage
   注入 role 专属 `[ka-whale-workflow <role-stage>]` 文本，并由 `tools/pre-execute`
   按该 role/stage 的 Allowed tools 软闸门约束；plugin 的 create/update/retire
@@ -50,6 +49,9 @@
   kaz-system-prompt 原样保留）；旧/未知子代理在
   `includeSubagents=true` 时只进入 workflow stage 外壳，不再注入旧通用
   subagent-flow。
+- 各角色 `communication` 阶段只允许各自的 report 工具（`whale_report` /
+  `work_sub_whale_report` / `memory_sub_whale_report` /
+  `plugin_maintainer_sub_whale_report`）。
 - B6 收口：`KAZ_ROLE_PROMPTS`（v0.9 §9.1–9.5）作为全量 Persona 唯一源存放在
   `kaz-shared`，本组件 `V09_ROLE_PERSONAS` 由它派生；旧的一次性
   `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 导出已删除。当前主 Persona 应用：`kaz-system-prompt` 每个

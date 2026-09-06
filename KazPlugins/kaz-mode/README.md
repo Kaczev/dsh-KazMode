@@ -130,11 +130,17 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 ### 5. 首阶段 Minimal（36.9 起由 kaz-mode 核心直接拥有）
 
 kaz-mode 在**首阶段（首次工具调用前）**把工具面收敛为首轮工具集：Kaz 下
-`ka-whale-memory` 恒开 → `memory_search` + `context_search`（M3.2）；受控子代理按 v0.9 role Minimal
-（`memory_search` + `context_search` + 各自 report）。
+`ka-whale-memory` 恒开 → `memory_search` + `context_search`（M3.2）；受控子代理同样按
+v0.9 role Minimal = `memory_search` + `context_search`（report 工具在首次工具调用后
+的 Stable Base 才可见）。
 **Minimal 不是 assess/初始 stage 本身**：stage `allowedTools` 由
-ka-whale-workflow/stage-defs 作为阶段软闸门（初始阶段已含三 context 工具与报告工具），
-首轮可见 schema 则由本插件 firstRoundTools / `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 独立收口。
+ka-whale-workflow/stage-defs 作为阶段软闸门（初始阶段含 memory/context 读与报告工具，
+不含 `context_compress`/read），首轮可见 schema 则由本插件 firstRoundTools /
+`V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 独立收口。
+受控子代理完成首次 tool/call 后，ka-whale-workflow 会把角色记录的 `minimalDone`
+置 true 并持久化；kaz-mode 判定该子代理 Minimal 时同时参考
+`roleRecord.minimalDone`，因此子代理被父主 `send_message` resume/restore 后即使
+会话 `tool/call` 事件不可见，也不会重新回 Minimal，仍使用全量 role Stable Base。
 首次工具调用后恢复 Stable Main Surface（v0.8 Step A 固定集，不由工具控制面板 JSON 决定）。
 每次 assemble 后的真实工具面增删由本插件以 `category=tool-surface` 上报 round-display。
 
@@ -193,7 +199,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +
    assignedTools 显示，旧/未知子代理回落到保守 Base；
    该 Minimal 是首轮特殊行为：ka-whale-workflow 初始 stage 的 `allowedTools`
-   （含三 context 工具与报告工具）是阶段软闸门，不是 Minimal 列表；
+   （含 memory/context 读工具与报告工具，不含 `context_compress`/read）是阶段软闸门，
+   不是 Minimal 列表；受控子代理 `minimalDone=true` 持久化后 resume 不再回 Minimal；
 3. 对话里不出现 skill 工具、技能目录与 skill-catalog 合成消息；
 4. `thinking-anchor` 的思考协议以一条合成用户消息出现在对话开头（而非系统提示词）；
 5. Kaz 面板「工具控制面板」只读展示 Stable Main/workflow 面；私有插件候选只读、
