@@ -47,6 +47,12 @@ function check(label, ok) {
   if (!ok) failures += 1;
 }
 
+const CONTEXT_TOOLS = ["context_search", "context_read", "context_compress"];
+const hasContextTools = (def) =>
+  def !== null &&
+  Array.isArray(def.allowedTools) &&
+  CONTEXT_TOOLS.every((tool) => def.allowedTools.includes(tool));
+
 const TMP = mkdtempSync(join(tmpdir(), "whale-probe-"));
 const STORE_FILE = join(TMP, "ka-whale-workflow-stage.json");
 const events = [];
@@ -115,6 +121,48 @@ check("v0.9 stage 常量导出（37.5 无 plugin-preflight）", MAIN_ROLE === "m
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && workingDef?.canAdvance.includes("write-plan"));
+check("M3.3 主 assess-complexity Minimal 保持 memory_search+context_search+whale_report，不加 read/compress", JSON.stringify(assessDef?.allowedTools) === JSON.stringify(["memory_search", "context_search", "whale_report"]) && !assessDef?.allowedTools.includes("read") && !assessDef?.allowedTools.includes("context_read") && !assessDef?.allowedTools.includes("context_compress"));
+{
+  const mainNonMinimal = ["challenge-plan", "decide-tools", "write-plan", "decide-goal", "working", "memory-maintenance", "plugin-maintenance"];
+  check(
+    "M3.3 主模型非 Minimal 阶段均含 context_search/context_read/context_compress",
+    mainNonMinimal.every((stage) => hasContextTools(stageDefinitionFor(MAIN_ROLE, stage))),
+  );
+}
+{
+  const subagentInitialStages = {
+    worker: "assess-complexity",
+    memoryMaintainer: "assess-delegation",
+    pluginMaintainer: "assess-delegation",
+    pluginCreator: "assess-delegation",
+  };
+  check(
+    "M3.3 子代理 Minimal/初始阶段均含 context_search 且不含 read/context_read/context_compress",
+    Object.entries(subagentInitialStages).every(([role, stage]) => {
+      const tools = stageDefinitionFor(role, stage)?.allowedTools ?? [];
+      return tools.includes("context_search") && !tools.includes("read") && !tools.includes("context_read") && !tools.includes("context_compress");
+    }),
+  );
+}
+{
+  const subagentNonMinimal = {
+    worker: ["challenge-plan", "check-tools", "working"],
+    memoryMaintainer: ["plan-memory", "save-update", "delete-memory"],
+    pluginMaintainer: ["plan-plugin", "create-plugin", "update-plugin", "retire-plugin"],
+    pluginCreator: ["plan-plugin", "create-plugin"],
+  };
+  check(
+    "M3.3 子代理非 Minimal 执行阶段均含 context_search/context_read/context_compress",
+    Object.entries(subagentNonMinimal).every(([role, stages]) => stages.every((stage) => hasContextTools(stageDefinitionFor(role, stage)))),
+  );
+}
+{
+  const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  check(
+    "M3.3 各角色 communication 阶段含三个 context 工具",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(CONTEXT_TOOLS)),
+  );
+}
 check("37.5 新图：write-plan 可到 decide-goal/working/maintenance/communication", ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
 check("37.5 新图：working 只到 write-plan/memory-maintenance", JSON.stringify(workingDef?.canAdvance) === JSON.stringify(["write-plan", "memory-maintenance"]));
 check("37.5 新图：memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "memory-maintenance", "plugin-maintenance") === true && canAdvance(MAIN_ROLE, "memory-maintenance", "communication") === true);

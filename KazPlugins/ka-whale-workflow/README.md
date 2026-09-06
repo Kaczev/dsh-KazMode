@@ -19,6 +19,12 @@
   按边界各一次。
 - `tools/pre-execute` 软闸门：主模型与受控 v0.9 子代理在当前 stage 调用非
   Allowed tools 返回 `workflow-stage-deny`，不视为模型失败惩罚。
+- M3.3 context 工具面：主模型与受控子代理的所有非 Minimal 阶段在
+  `allowedTools` 中均含 `context_search` / `context_read` / `context_compress`
+  （主 `working` 经 `KAZ_V09_MAIN_TOOLS` 已含，故不重复列出）；Minimal/初始
+  阶段保持只含 `context_search`，不加 `read` / `context_read` /
+  `context_compress`；各角色 `communication` 阶段允许工具为
+  `context_search` + `context_read` + `context_compress`。
 - 受控 v0.9 子代理：`ka_sub_whale` 创建的
   `worker`/`memoryMaintainer`/`pluginMaintainer`/`pluginCreator` 不受
   `includeSubagents=false` 跳过。idle 时自动进入 role 首阶段

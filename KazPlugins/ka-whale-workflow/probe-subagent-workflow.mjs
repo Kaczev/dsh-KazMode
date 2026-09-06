@@ -11,6 +11,7 @@ import plugin, {
   SUBAGENT_FLOW_TEXT,
   V09_SUBAGENT_ROLE_INITIAL_STAGES,
 } from "./lib/index.js";
+import { stageDefinitionFor } from "./lib/stage-defs.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,6 +115,22 @@ function messageText(messages) {
 }
 function subagentAgent(id) {
   return { id, session: { id, events: [] }, options: { subagentDepth: 1 } };
+}
+
+{
+  const roles = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  const contextTools = ["context_search", "context_read", "context_compress"];
+  check(
+    "M3.3 子代理 communication 均含 context_search/context_read/context_compress",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
+  );
+  check(
+    "M3.3 子代理 Minimal/初始阶段不含 read/context_read/context_compress",
+    roles.every((role) => {
+      const tools = stageDefinitionFor(role, V09_SUBAGENT_ROLE_INITIAL_STAGES[role])?.allowedTools ?? [];
+      return tools.includes("context_search") && !tools.includes("read") && !tools.includes("context_read") && !tools.includes("context_compress");
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------

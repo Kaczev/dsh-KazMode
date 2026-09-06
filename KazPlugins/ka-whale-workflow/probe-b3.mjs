@@ -1,6 +1,7 @@
 // ka-whale-workflow v0.9 B3 探针：受控委派投影 + 候选注册表 + role surface。
 // 运行：node KazPlugins/ka-whale-workflow/probe-b3.mjs
 import plugin from "./lib/index.js";
+import { stageDefinitionFor } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
 import {
   V09_SUBAGENT_ROLE_IDS,
@@ -68,6 +69,27 @@ check("memoryMaintainer Minimal = memory_search + context_search + report", JSON
 check("pluginMaintainer Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginMaintainer) === JSON.stringify(["memory_search", "context_search", "plugin_maintainer_sub_whale_report"]));
 check("pluginCreator Minimal = memory_search + context_search + report", JSON.stringify(V09_SUBAGENT_ROLE_MINIMAL_TOOLS.pluginCreator) === JSON.stringify(["memory_search", "context_search", "plugin_creator_sub_whale_report"]));
 check("各角色 Stable Base 含 context_compress/context_read/context_search", ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"].every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_compress") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
+{
+  const initialStages = {
+    worker: "assess-complexity",
+    memoryMaintainer: "assess-delegation",
+    pluginMaintainer: "assess-delegation",
+    pluginCreator: "assess-delegation",
+  };
+  const roles = ["worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  const contextTools = ["context_search", "context_read", "context_compress"];
+  check(
+    "M3.3 stage-defs 子代理 communication 均含三 context 工具",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
+  );
+  check(
+    "M3.3 stage-defs 子代理 Minimal/初始阶段含 context_search 且不含 read/compress",
+    roles.every((role) => {
+      const tools = stageDefinitionFor(role, initialStages[role])?.allowedTools ?? [];
+      return tools.includes("context_search") && !tools.includes("read") && !tools.includes("context_read") && !tools.includes("context_compress");
+    }),
+  );
+}
 check("worker Stable Base 不含 memory_save/update/forget", ["memory_save", "memory_update", "memory_forget"].every((tool) => !V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes(tool)));
 check("worker Stable Base 含 work_sub_whale_report", V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes("work_sub_whale_report"));
 check("memoryMaintainer Stable Base 含全部记忆写工具", ["memory_save", "memory_update", "memory_forget"].every((tool) => V09_SUBAGENT_ROLE_STABLE_BASE.memoryMaintainer.includes(tool)));

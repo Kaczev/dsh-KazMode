@@ -254,6 +254,12 @@ check(
     !JSON.stringify(compressDef.parameters.required ?? []).includes("opts"),
   JSON.stringify(compressDef.parameters.required),
 );
+check(
+  "context_compress schema：opts.includeUnits 为可选 boolean（默认 false）",
+  compressDef.parameters.properties.opts?.properties?.includeUnits?.type === "boolean" &&
+    !JSON.stringify(compressDef.parameters.required ?? []).includes("opts"),
+  JSON.stringify(compressDef.parameters.properties.opts?.properties?.includeUnits),
+);
 
 // ---------- context_search 命中 ----------
 const searchNeedle = await searchDef.execute({ query: "needle" }, exec);
@@ -333,6 +339,35 @@ check(
     typeof compressSuggest.end === "number" &&
     compressSuggest.end >= compressSuggest.start,
   JSON.stringify(compressSuggest),
+);
+const compressSuggestDetailed = await compressDef.execute(
+  { strategy: "suggest", opts: { includeUnits: true } },
+  compressExec,
+);
+check(
+  "suggest 默认紧凑：不含 units/result，返回 token/unit 摘要",
+  compressSuggest.units === undefined &&
+    compressSuggest.result === undefined &&
+    typeof compressSuggest.shadowedTokens === "number" &&
+    typeof compressSuggest.cachePreservedTokens === "number" &&
+    typeof compressSuggest.tailPreservedTokens === "number" &&
+    Number.isInteger(compressSuggest.unitCount) &&
+    compressSuggest.unitCount >= 1 &&
+    (compressSuggest.suggestedUnitLayer === undefined ||
+      typeof compressSuggest.suggestedUnitLayer === "string"),
+  JSON.stringify(compressSuggest),
+);
+check(
+  "opts.includeUnits=true 时 suggest 返回全量 units",
+  compressSuggestDetailed.ok === true &&
+    compressSuggestDetailed.action === "suggest" &&
+    Array.isArray(compressSuggestDetailed.units) &&
+    compressSuggestDetailed.units.length > 0 &&
+    compressSuggestDetailed.units[0]?.position === 0,
+  JSON.stringify({
+    count: compressSuggestDetailed.units?.length,
+    sample: compressSuggestDetailed.units?.[0],
+  }),
 );
 const compressNoSession = await compressDef.execute({ strategy: "suggest" }, execFor(undefined));
 check(

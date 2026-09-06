@@ -12,6 +12,8 @@
 // context_compress：schema 支持 strategy=suggest|fold、limit 与 opts；执行时
 // 读取本插件提供的 ctx.compaction（selectRange + compactRegion）。无 provider
 // 时返回结构化 no-provider（仅离线/降级路径）。
+// suggest 默认返回紧凑摘要（无全量 units）；opts.includeUnits=true 时附加
+// 全量 units 数组供调试，schema 与 tool description 同步暴露 includeUnits。
 // 结果以 JSON 文本渲染；错误也走结构化 { ok:false, code, reason }。
 // 不 append、不改写 session、不写任何存储（fold 时改写 surface 由 provider
 // 的官方 compactRegion 事务负责）。
@@ -183,12 +185,12 @@ function contextCompressDef(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns the candidate range without changing anything; strategy='fold' commits a compaction through the Kaz m33b compaction provider. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
+      "Proactively compress old middle content in the current session while preserving the stable prefix/tail. strategy='suggest' (default) returns a compact candidate summary (start/end, shadowedTokens, cachePreservedTokens, tailPreservedTokens, unitCount and suggestedUnitLayer) without changing anything; no full units array is returned unless opts.includeUnits=true (debug). strategy='fold' commits a compaction through the Kaz m33b compaction provider. limit/opts are optional forward-looking knobs for the provider. If the Kaz provider is not mounted/complete, returns structured no-provider instead of touching the official basic compaction path.",
     parameters: {
       strategy: {
         type: "string",
         enum: ["suggest", "fold"],
-        description: "suggest = show candidate range only (default, no mutation); fold = select then commit through the Kaz provider.",
+        description: "suggest = show compact candidate range only (default, no mutation; set opts.includeUnits=true to also include the full units array for debug); fold = select then commit through the Kaz provider.",
       },
       limit: {
         type: "integer",
@@ -197,7 +199,13 @@ function contextCompressDef(ctx) {
       opts: {
         type: "object",
         additionalProperties: true,
-        description: "Optional provider options reserved for the m33b provider (e.g. preserve budgets / protected unit ids).",
+        properties: {
+          includeUnits: {
+            type: "boolean",
+            description: "When true, suggest output also includes the full units array for debugging. Default false: suggest returns a compact summary only.",
+          },
+        },
+        description: "Optional provider options reserved for the m33b provider (e.g. preserve budgets / protected unit ids). Also accepts opts.includeUnits to control debug detail in suggest output.",
       },
     },
     output: {
@@ -242,14 +250,39 @@ function contextCompressDef(ctx) {
           );
         }
         if (strategy === "suggest") {
-          return {
+          // 默认紧凑输出：unitCount = 本次建议压缩覆盖的 unit 数；
+          // suggestedUnitLayer = 该连续候选区的 layer（可省）。
+          // 全量 units 仅当 opts.includeUnits=true（调试）时附加。
+          const detail = range.result ?? range;
+          const includeUnits = args?.opts?.includeUnits === true;
+          const unitStart = detail.unitStart;
+          const unitEnd = detail.unitEnd;
+          const unitCount =
+            Number.isInteger(unitStart) && Number.isInteger(unitEnd)
+              ? unitEnd - unitStart + 1
+              : 0;
+          const suggestedUnit =
+            Array.isArray(detail.units) && Number.isInteger(unitStart)
+              ? detail.units[unitStart]
+              : undefined;
+          const suggested = {
             ok: true,
             strategy,
             action: "suggest",
             start: range.start,
             end: range.end,
-            result: range.result ?? range,
+            shadowedTokens: detail.shadowedTokens,
+            cachePreservedTokens: detail.cachePreservedTokens,
+            tailPreservedTokens: detail.tailPreservedTokens,
+            unitCount,
           };
+          if (suggestedUnit && typeof suggestedUnit.layer === "string") {
+            suggested.suggestedUnitLayer = suggestedUnit.layer;
+          }
+          if (includeUnits) {
+            suggested.units = Array.isArray(detail.units) ? detail.units : [];
+          }
+          return suggested;
         }
         const result = await provider.compactRegion(
           range.start,

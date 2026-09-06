@@ -168,6 +168,21 @@ const kaSubWhale = registeredTools.get(KA_SUB_WHALE_TOOL);
 check("主 stage ids 与 v0.9 37.5 一致", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools","write-plan","decide-goal","working","memory-maintenance","plugin-maintenance","communication"]));
 check("worker/memory/plugin stage ids 齐全", WORKER_STAGE_IDS.includes("check-tools") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_CREATOR_STAGE_IDS.includes("create-plugin"));
 check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE) && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight"));
+{
+  const contextTools = ["context_search", "context_read", "context_compress"];
+  const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer", "pluginCreator"];
+  check(
+    "M3.3 communication allowedTools = context_search+context_read+context_compress",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
+  );
+  check(
+    "M3.3 主/worker Minimal/初始阶段不含 read/context_read/context_compress",
+    !stageDefinitionFor(MAIN_ROLE, "assess-complexity")?.allowedTools.includes("read") &&
+      !stageDefinitionFor("worker", "assess-complexity")?.allowedTools.includes("read") &&
+      !stageDefinitionFor(MAIN_ROLE, "assess-complexity")?.allowedTools.includes("context_compress") &&
+      !stageDefinitionFor("worker", "assess-complexity")?.allowedTools.includes("context_compress"),
+  );
+}
 check("37.5 新图：decide-tools 只到 write-plan，write-plan 可到 decide-goal/working/maintenance/communication", JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools")?.canAdvance) === JSON.stringify(["write-plan"]) && ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
 check("37.5 plugin-preflight 无主 stage 定义/无 taskPlanPath 注入", stageDefinitionFor(MAIN_ROLE, "plugin-preflight") === null && !stageInjectionText(MAIN_ROLE, "write-plan").includes("plugin-preflight"));
 check("decide-goal 可推进 working 与 goal-active", canAdvance(MAIN_ROLE, "decide-goal", "working") === true && canAdvance(MAIN_ROLE, "decide-goal", GOAL_ACTIVE_STAGE) === true);
@@ -223,6 +238,8 @@ const result = await whaleReport.execute({ nextStage: "communication" }, { agent
 check("whale_report assess→communication", result.ok === true && result.stage === "communication");
 const denyComm = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
 check("communication 中调用 read 返回 workflow-stage-deny", denyComm.kind === "deny" && String(denyComm.reason).startsWith("workflow-stage-deny:"));
+const allowCtxComm = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
+check("communication 软闸门放行 context_search/context_read/context_compress", allowCtxComm?.kind === "allow" && (await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" })))?.kind === "allow" && (await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" })))?.kind === "allow");
 
 // 36.5 用户插话/新轮路由：终态 communication 重置；活动阶段保留。
 await claimed({ agent, message: userMessage, turn: 2 });
