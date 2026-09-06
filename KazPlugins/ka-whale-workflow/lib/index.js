@@ -1852,7 +1852,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         nextStage: {
           type: "string",
           description:
-            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools, write-plan, decide-goal, working, goal-active, memory-maintenance, plugin-maintenance. In decide-tools/write-plan it may be omitted when the payload implies the only/default transition.",
+            "Legal main-model next stage id from the current stage's Can advance to list, e.g. challenge-plan, communication, decide-tools-before-writing-plan, write-plan, decide-goal, working, goal-active, memory-maintenance, plugin-maintenance. In decide-tools-before-writing-plan/write-plan it may be omitted when the payload implies the only/default transition.",
         },
         objective: {
           type: "string",
@@ -1970,8 +1970,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
           current === "assess-complexity" || current === "communication"
             ? null
             : current === "challenge-plan"
-              ? "decide-tools"
-              : current === "decide-tools"
+              ? "decide-tools-before-writing-plan"
+              : current === "decide-tools-before-writing-plan"
                 ? "write-plan"
                 : current === "write-plan"
                   ? "decide-goal"
@@ -3197,7 +3197,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
               ...(stageNeedsLifecyclePath(pendingStage)
                 ? { lifecyclePath: lifecycleReferencePath }
                 : {}),
-              ...(pendingStage === "decide-tools"
+              ...(pendingStage === "decide-tools-before-writing-plan"
                 ? {
                     candidateToolDirectory: (() => {
                       const fileResult = readJsonFileSafe(agentManagedRegistryFile);
