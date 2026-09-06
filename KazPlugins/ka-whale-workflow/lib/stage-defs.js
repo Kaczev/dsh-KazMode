@@ -126,7 +126,7 @@ const DEFINITIONS = {
       allowedTools: ["whale_report", "read", "context_search", "context_read"],
       canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
       task:
-        "Create and finalize the complete task plan via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan first, persist the revised plan, then advance. Try to delegate your tasks to workers in order to achieve better results. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        "Create and finalize the complete task plan via whale_report(finalPlanPayload). Use separate planItems per coherent task; do not pack all work into one planItem. worker planItems are delegated individually in working; memoryMaintainer/pluginMaintainer planItems are reserved for memory-maintenance/plugin-maintenance. In amendment mode, read the current plan first, persist the revised plan, then advance. Try to delegate your tasks to workers in order to achieve better results. Arrange for a long-term memoryMaintainer to keep the memories. Consider whether it is necessary to assign pluginMaintainer to create a new private plugin. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "decide-goal": {
       allowedTools: ["whale_report"],
