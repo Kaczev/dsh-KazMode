@@ -133,8 +133,8 @@ Only these private plugins and tool_jobs(job_list, job_output, job_kill) may be 
 PlanItem rules:
 - Use separate planItems per coherent task. Do not pack all work into one planItem.
 - "worker" planItems: delegated individually during the Working stage.
-- "memoryMaintainer" planItems: reserved for long-term memory maintenance.
-- "pluginMaintainer" planItems: create a new private plugin only when existing plugins cannot meet the task requirements.
+- "memoryMaintainer" planItems: reserved for long-term memory maintenance. Create at least one memoryMaintainer planItem if the work produces new insights, lessons learned, or reusable patterns — even if you are not certain they need to be saved.
+- "pluginMaintainer" planItems: create a new private plugin only when existing plugins cannot meet the task requirements. Consider this when you notice repetitive work that could be automated.
 
 Delegation rules:
 - Delegate every worker planItem to a subagent via "ka-sub-whale". Do not execute planItems directly.
@@ -180,7 +180,15 @@ Amend plans only through write-plan. When complete, advance to memory-maintenanc
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan", "compass_context_before_communication"],
       task:
-        "Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'assess-delegation' process, with the context from the previous round still present but the current round being an independent delegation. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items.
+
+If no memoryMaintainer planItem exists, check whether the completed work has produced any insights, lessons learned, or reusable patterns worth saving. If so, advance to write-plan to add a memoryMaintainer planItem, then return to this stage.
+
+If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'assess-delegation' process, with the context from the previous round still present but the current round being an independent delegation.
+
+**Before advancing to communication or calling compress_context_before_communication, we must first evaluate whether a private plugin would improve future efficiency. Consider: are there repetitive patterns, manual steps, or recurring operations in this work that could be automated? If yes, advance to write-plan to add a pluginMaintainer planItem, then proceed to plugin-maintenance. If no, we may proceed to communication.**
+
+Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -194,7 +202,13 @@ Amend plans only through write-plan. When complete, advance to memory-maintenanc
       ],
       canAdvance: ["write-plan", "communication", "compass_context_before_communication"],
       task:
-        "Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items. If a new plan item is needed, advance to write-plan first. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time; each child's full report arrives as one subagent-settled message, then reply once with send_message to resume. Read taskPlanPath to review remaining items.
+
+If no pluginMaintainer planItem exists, check whether the completed work reveals repetitive patterns or manual steps that could be automated with a private plugin. If so, advance to write-plan to add a pluginMaintainer planItem, then return to this stage.
+
+If a new plan item is needed, advance to write-plan first. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.
+
+After pluginMaintainer tasks are complete, advance to communication. Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "whale_report"],
