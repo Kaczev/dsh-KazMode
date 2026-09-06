@@ -114,7 +114,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["decide-tools"],
       task:
-        "Critique the approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write task plans here and do not call ka_sub_whale.",
+        "Critique the approach first; identify real weaknesses; do not manufacture criticism. Find the smallest workable solution. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.",
     },
     "decide-tools": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
