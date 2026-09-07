@@ -132,9 +132,9 @@ export { KAZ_TASK_PLAN_STORE_PATH, KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH };
 
 /** v0.9 受控子代理 role → 首个 workflow stage（§4 worker；§5–§7 其它 role）。 */
 export const V09_SUBAGENT_ROLE_INITIAL_STAGES = Object.freeze({
-  worker: "assess-complexity",
-  memoryMaintainer: "assess-delegation",
-  pluginMaintainer: "assess-delegation",
+  worker: "challenge-plan",
+  memoryMaintainer: "plan-memory",
+  pluginMaintainer: "plan-plugin",
 });
 
 /** 设置 schema（同时驱动设置页 UI）。 */
@@ -1255,7 +1255,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     }
 
     /** 受控 v0.9 子代理 idle 时初始化其 role 专属首阶段：
-     *  worker=assess-complexity；memoryMaintainer/pluginMaintainer=assess-delegation。
+     *  worker=challenge-plan；memoryMaintainer/pluginMaintainer=plan-memory/plan-plugin。
      *  v0.9/主模型对齐：新受控子代理在首次 tool/call 前保持 stage=idle（只暴露
      *  Minimal 工具面 + startup hint），不提前注入完整 role stage；只有
      *  options.afterFirstTool=true（session/event 首次 tool/call）或会话已非
@@ -1875,7 +1875,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           continue;
         }
         // 可复用：先更新角色记录为新 planItem（不清除），再投递下一轮；
-        // child 收到 coordinator/relay 后按终态重置规则进入 assess-delegation。
+        // child 收到 coordinator/relay 后按终态重置规则进入 plan-memory。
         const currentRecord = stageStore.getSubagentRole(childId);
         if (currentRecord !== null) {
           stageStore.setSubagentRole(childId, {
@@ -2774,7 +2774,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         // 首轮 startup hint：主模型与受控子代理在 idle + Minimal（首次工具调用前）
         // 都不注入完整 stage 正文；这里一次性提示先调用 memory_search / context_search
         // 解锁工作流。主模型首次 tool/call 后进入 assess-complexity；受控子代理首次
-        // tool/call 后进入其 role 首阶段（assess-complexity / assess-delegation）。
+        // tool/call 后进入其 role 首阶段（challenge-plan / plan-memory / plan-plugin）。
         const isMainStartupCandidate = controlledRoleNow === null && !subagentNow;
         const isControlledStartupCandidate = controlledRoleNow !== null;
         const shouldInjectStartupHint =

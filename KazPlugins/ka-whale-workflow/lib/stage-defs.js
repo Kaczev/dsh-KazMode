@@ -32,7 +32,6 @@ export const MAIN_STAGE_IDS = Object.freeze([
 
 /** worker 普通子代理 stage id（§4）。 */
 export const WORKER_STAGE_IDS = Object.freeze([
-  "assess-complexity",
   "challenge-plan",
   "working",
   "compass_context_before_communication",
@@ -41,7 +40,6 @@ export const WORKER_STAGE_IDS = Object.freeze([
 
 /** memoryMaintainer 子代理 stage id（§5）。 */
 export const MEMORY_MAINTAINER_STAGE_IDS = Object.freeze([
-  "assess-delegation",
   "plan-memory",
   "save-update",
   "delete-memory",
@@ -51,7 +49,6 @@ export const MEMORY_MAINTAINER_STAGE_IDS = Object.freeze([
 
 /** pluginMaintainer 子代理 stage id（§6）。 */
 export const PLUGIN_MAINTAINER_STAGE_IDS = Object.freeze([
-  "assess-delegation",
   "plan-plugin",
   "create-plugin",
   "update-plugin",
@@ -212,7 +209,7 @@ a small change to the same file should continue the child that already knows tha
 
 If no memoryMaintainer planItem exists, check whether the completed work has produced any insights, lessons learned, or reusable patterns worth saving. If so, advance to write-plan to add a memoryMaintainer planItem, then return to this stage.
 
-If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'assess-delegation' process, with the context from the previous round still present but the current round being an independent delegation.
+If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'plan-memory' process, with the context from the previous round still present but the current round being an independent delegation.
 
 **Before advancing to communication or calling compress_context_before_communication, we must first evaluate whether a private plugin would improve future efficiency. Consider: are there repetitive patterns, manual steps, or recurring operations in this work that could be automated? If yes, advance to write-plan to add a pluginMaintainer planItem, then proceed to plugin-maintenance. If no, we may proceed to communication.**
 
@@ -251,18 +248,6 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
     },
   },
   worker: {
-    "assess-complexity": {
-      allowedTools: [
-        "memory_search",
-        "memory_detail",
-        "memory_list",
-        "context_search",
-        "context_read",
-        "work_sub_whale_report",
-      ],
-      canAdvance: ["challenge-plan", "communication", "compass_context_before_communication", "working"],
-      task: "Judge whether the delegation is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If we have known the task clarity, we can advance to working. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
-    },
     "challenge-plan": {
       allowedTools: [
         "glob",
@@ -328,8 +313,8 @@ After calling work_sub_whale_report, do not call more tools. Write the full repo
     },
     communication: {
       allowedTools: ["work_sub_whale_report"],
-      canAdvance: ["assess-complexity"],
-      task: `Report results and candidate suggestions. If we have a extract task, advance to assess-complexity; otherwise, END the workflow.
+      canAdvance: ["challenge-plan"],
+      task: `Report results and candidate suggestions. If we have a extract task, advance to challenge-plan; otherwise, END the workflow.
 
 Report structure:
 - What was done (summary of actions taken)
@@ -340,17 +325,6 @@ Report structure:
     },
   },
   memoryMaintainer: {
-    "assess-delegation": {
-      allowedTools: [
-        "memory_search",
-        "memory_detail",
-        "context_search",
-        "context_read",
-        "memory_sub_whale_report",
-      ],
-      canAdvance: ["plan-memory", "communication", "compass_context_before_communication"],
-      task: "Judge whether the memory delegation is clear. If it's not clear, request more information. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
-    },
     "plan-memory": {
       allowedTools: [
         "memory_search",
@@ -402,23 +376,11 @@ Report structure:
     },
     communication: {
       allowedTools: ["memory_sub_whale_report"],
-      canAdvance: ["assess-delegation"],
-      task: "Report ids, evidence, and audit. If we have a extract task, advance to assess-delegation; otherwise, END the workflow.",
+      canAdvance: ["plan-memory"],
+      task: "Report ids, evidence, and audit. If we have a extract task, advance to plan-memory; otherwise, END the workflow.",
     },
   },
   pluginMaintainer: {
-    "assess-delegation": {
-      allowedTools: [
-        "memory_search",
-        "memory_detail",
-        "memory_list",
-        "context_search",
-        "context_read",
-        "plugin_maintainer_sub_whale_report",
-      ],
-      canAdvance: ["plan-plugin", "communication", "compass_context_before_communication"],
-      task: "Judge whether the plugin maintenance delegation is clear. If it's not clear, request more information. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
-    },
     "plan-plugin": {
       allowedTools: [
         "read",
@@ -502,8 +464,8 @@ Report structure:
     },
     communication: {
       allowedTools: ["plugin_maintainer_sub_whale_report"],
-      canAdvance: ["assess-delegation"],
-      task: "Report changed files, probe results, and rollback paths. If we have a extract task, advance to assess-delegation; otherwise, END the workflow.",
+      canAdvance: ["plan-plugin"],
+      task: "Report changed files, probe results, and rollback paths. If we have a extract task, advance to plan-plugin; otherwise, END the workflow.",
     },
   },
 };
@@ -603,8 +565,6 @@ export const STAGE_CONTEXT_NOTES = Object.freeze({
       "Before the final reply, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read.",
   }),
   worker: Object.freeze({
-    "assess-complexity":
-      "Before judging, if the delegation involves earlier session content, first use context_search then context_read to grasp the background.",
     "challenge-plan":
       "Before critiquing, if the delegation involves earlier session content, first use context_search then context_read to grasp the background.",
     communication:

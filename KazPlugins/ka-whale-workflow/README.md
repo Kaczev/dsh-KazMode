@@ -21,11 +21,12 @@
 - 双层语义（M3.3 + Minimal 收口）：stage `allowedTools` 是当前阶段的软闸门，
   不是首轮 Minimal 列表。主 `assess-complexity` 的 `allowedTools` 为
   `memory_search` / `context_search` / `context_read` / `whale_report`；受控子代理
-  初始 stage（`assess-complexity` / `assess-delegation`）为
-  `memory_search` / `context_search` / `context_read` + 各自报告工具；这些初始
-  stage 均不含 `read`，也不放 `context_compress`（compress 属于 compass_context_before_communication /
-  Stable 面）。主 `assess-complexity` 不放 `ask_user_question`（澄清需求先推进
-  `challenge-plan`）。
+  初始 stage 为其 planning stage（worker=`challenge-plan`，
+  memoryMaintainer=`plan-memory`，pluginMaintainer=`plan-plugin`），allowedTools 按
+  lib/stage-defs.js 中的 planning 面放行（read/grep/glob/memory/context + 各自
+  report 工具等），不依赖首轮 Minimal 列表，也不放 `context_compress`（compress
+  属于 compass_context_before_communication / Stable 面）。主 `assess-complexity`
+  不放 `ask_user_question`（澄清需求先推进 `challenge-plan`）。
 - 首轮 Minimal 与主/子代理对齐：真正的首轮 Minimal 由 kaz-mode `firstRoundTools` /
   `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 在“首次工具调用前”独立收口：
   主与受控子代理都是 `memory_search` + `context_search`。主模型和受控子代理在
@@ -40,7 +41,8 @@
   `worker`/`memoryMaintainer`/`pluginMaintainer` 不受
   `includeSubagents=false` 跳过。新受控子代理在首次 tool/call 前保持 stage=idle +
   Minimal；首次 tool/call 后才自动进入 role 首阶段
-  （`worker=assess-complexity`，其余 `=assess-delegation`），按 pending stage
+  （worker=`challenge-plan`，memoryMaintainer=`plan-memory`，
+  pluginMaintainer=`plan-plugin`），按 pending stage
   注入 role 专属 `[ka-whale-workflow <role-stage>]` 文本，并由 `tools/pre-execute`
   按该 role/stage 的 Allowed tools 软闸门约束；plugin 的 create/update/retire
   阶段注入携带实际 `lifecyclePath`。受控角色不再注入通用 subagent-flow 常量
@@ -76,14 +78,14 @@
 - 阶段级 Context 注记：`STAGE_CONTEXT_NOTES`（lib/stage-defs.js）为部分 stage
 - compass_context_before_communication：主/子代理压缩整理阶段；仅 context_compress + 各自 report/whale_report，只能去 communication（可从 main write-plan/memory-maintenance/plugin-maintenance、worker working、memory save-update/delete、plugin create/update/retire 进入）。
   定义 Context 提醒；`stageInjectionText` 在有注记的 stage 的 `Task:` 行后输出
-  `Context: <text>`，无注记不输出。覆盖 main/worker 的 assess-complexity、
-  challenge-plan、communication 与 memoryMaintainer/pluginMaintainer 的
-  communication：涉及早前会话内容时先 `context_search` 再 `context_read`
-  掌握/复现背景；main.communication 另在会话冗长收尾前先
-  `context_compress suggest` 预览（manual 优先、auto 兜底）。
-- B2.5 重启语义：Minimal 只在整段 session 第一次 tool/call 前发生；后续
-  workflow-run 重新进入 `assess-complexity` 但不重复 Minimal；
-  `assess-complexity -> communication (no-tool-call)` 是合法路径。
+  `Context: <text>`，无注记不输出。覆盖 main 的 assess-complexity/challenge-plan/
+  communication、worker 的 challenge-plan/communication 与
+  memoryMaintainer/pluginMaintainer 的 communication：涉及早前会话内容时先
+  `context_search` 再 `context_read` 掌握/复现背景；main.communication 另在会话
+  冗长收尾前先 `context_compress suggest` 预览（manual 优先、auto 兜底）。
+- B2.5 重启语义（main-role）：Minimal 只在整段 session 第一次 tool/call 前发生；
+  后续 workflow-run 重新进入主 `assess-complexity` 但不重复 Minimal；
+  主 `assess-complexity -> communication (no-tool-call)` 是合法路径。
 - 36.5 用户消息路由：真实用户消息在非终态活动阶段保留当前阶段，不重置成
   `assess-complexity`；只有 `idle`/`done`/`end`/`communication` 或历史
   `goal-active`/`working-resumed` 旧值才重置。
@@ -119,22 +121,22 @@
   唯一的硬停/汇报闸门——调用它（可选 `nextStage` 推进）后置 `awaitingParent` 并
   硬停；随后子代理把完整报告作为**最终消息**写出并结束回合，父主以单条
   `subagent-settled` 收到。父主审查后用一次 `send_message` 恢复子代理（子代理处于
-  terminal `communication` 时，该回复开启该角色新的一轮：worker=assess-complexity、
-  memoryMaintainer/pluginMaintainer=assess-delegation）。父主不得假设子代理在
-  report 工具调用后仍继续运行。
+  terminal `communication` 时，该回复开启该角色新的一轮：worker=`challenge-plan`、
+  memoryMaintainer=`plan-memory`、pluginMaintainer=`plan-plugin`）。父主不得假设
+  子代理在 report 工具调用后仍继续运行。
 - 子代理多轮复用：同一 memoryMaintainer 子代理可被多轮复用（`ka_sub_whale` 对同
   parent + 同 role + finalSurface 一致且终态空闲的 child 自动 followup 下一轮；每轮从
-  assess-delegation 开始，前一轮上下文仍在但本轮为独立委派）。worker/pluginMaintainer
+  plan-memory 开始，前一轮上下文仍在但本轮为独立委派）。worker/pluginMaintainer
   是否复用由主代理决定：可对同 surface+空闲 child 直接 `send_message`，否则
   `ka_sub_whale` 新开。
 - 36.7 challenge-plan 批评纪律：主/worker 的 challenge-plan 阶段要求先批评、
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
   批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与
   `KAZ_ROLE_PROMPTS` 同步更新，避免文档/代码漂移。
-- 36.8 worker 不提前终止：worker `challenge-plan` 只可推进到 `check-tools`；
-  challenge/check-tools 不是执行阶段，完整 working 文件工具面
+- 36.8 worker 不提前终止：worker `challenge-plan` 只可推进到 `working`；
+  challenge-plan 是批评/澄清阶段，不是执行阶段，完整 working 文件工具面
   （edit/write/pwsh/read）在 `working` 才授予；worker 不得在到达 working 前报告
-  工具不足。`check-tools` 仍保留 `communication`，但只用于 genuine blockers。
+  工具不足，也不再有从首阶段直接跳 communication 的捷径。
 - 36.8 mandatory memory-maintenance gate：主 `working` 只可推进到
   `write-plan`（改约）或 `memory-maintenance`；`working → communication` 与
   `working → plugin-maintenance` 已移除，`whale_report` 从 working 的默认推进
@@ -161,8 +163,8 @@
   受控子代理 `awaitingParent=true` 期间 tools/pre-execute 拒绝其继续调用任何工具
   （含再次 report），返回结构化 `subagent-report-wait-deny`；父主模型 `send_message`
   （DSH source `kind=coordinator`/`form=relay`）到达时清门——当前 stage 为
-  `communication` 终态则重置为该角色初始阶段（worker=assess-complexity、
-  memoryMaintainer/pluginMaintainer=assess-delegation）开始新的一轮，非终态仅清
+  `communication` 终态则重置为该角色初始阶段（worker=`challenge-plan`、
+  memoryMaintainer=`plan-memory`、pluginMaintainer=`plan-plugin`）开始新的一轮，非终态仅清
   `awaitingParent`、stage 保持不变继续当前轮。
 - `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` /
   `KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH` 由 `kaz-shared` 定义；

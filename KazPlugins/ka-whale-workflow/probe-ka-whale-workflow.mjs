@@ -156,9 +156,9 @@ check("双层语义：主 assess allowedTools = memory/context/whale_report（Mi
 }
 {
   const subagentInitialStages = {
-    worker: "assess-complexity",
-    memoryMaintainer: "assess-delegation",
-    pluginMaintainer: "assess-delegation",
+    worker: "challenge-plan",
+    memoryMaintainer: "plan-memory",
+    pluginMaintainer: "plan-plugin",
   };
   const subagentReportTools = {
     worker: "work_sub_whale_report",
@@ -166,10 +166,10 @@ check("双层语义：主 assess allowedTools = memory/context/whale_report（Mi
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
   check(
-    "双层语义：受控子代理初始 stage allowedTools 含 memory/context/report，不含 read/context_compress",
+    "受控子代理初始 planning stage 含各自 report/context tools 且不放 context_compress",
     Object.entries(subagentInitialStages).every(([role, stage]) => {
       const tools = stageDefinitionFor(role, stage)?.allowedTools ?? [];
-      return tools.includes("memory_search") && tools.includes("context_search") && tools.includes("context_read") && tools.includes(subagentReportTools[role]) && !tools.includes("read") && !tools.includes("context_compress");
+      return tools.includes(subagentReportTools[role]) && tools.includes("context_search") && tools.includes("context_read") && !tools.includes("context_compress");
     }),
   );
 }
@@ -244,7 +244,6 @@ check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlan
     ["main", "assess-complexity"],
     ["main", "challenge-plan"],
     ["main", "communication"],
-    ["worker", "assess-complexity"],
     ["worker", "challenge-plan"],
     ["worker", "communication"],
     ["memoryMaintainer", "communication"],

@@ -297,16 +297,16 @@ check("decide-goal/goal-active/working-resumed 均不在 MAIN_STAGE_IDS 且无 G
   const roles = ["main", "worker", "memoryMaintainer", "pluginMaintainer"];
   const initialStages = {
     main: "assess-complexity",
-    worker: "assess-complexity",
-    memoryMaintainer: "assess-delegation",
-    pluginMaintainer: "assess-delegation",
+    worker: "challenge-plan",
+    memoryMaintainer: "plan-memory",
+    pluginMaintainer: "plan-plugin",
   };
   check(
     "communication allowedTools 只含各自 report 工具（37.5/当前语义）",
     roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify([roleReportTools[role]])),
   );
   check(
-    "双层语义：stage 初始 allowedTools 含 memory/context/report，不含 context_compress（Minimal 不再由 stage 收口）",
+    "初始 stage（main assess / role planning stages）含 memory/context/report，不含 context_compress（Minimal 不再由 stage 收口）",
     roles.every((role) => {
       const allowed = stageDefinitionFor(role, initialStages[role])?.allowedTools ?? [];
       return (
@@ -319,8 +319,11 @@ check("decide-goal/goal-active/working-resumed 均不在 MAIN_STAGE_IDS 且无 G
     }),
   );
   check(
-    "stage 初始 allowedTools 仍不含 read（文件执行工具不属于初始阶段软闸门）",
-    roles.every((role) => !stageDefinitionFor(role, initialStages[role])?.allowedTools.includes("read")),
+    "初始 planning stage 不放写/执行工具（write/edit/pwsh），文件写工具仍留到 working/plugin 执行阶段",
+    ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => {
+      const allowed = stageDefinitionFor(role, initialStages[role])?.allowedTools ?? [];
+      return !allowed.includes("write") && !allowed.includes("edit") && !allowed.includes("pwsh");
+    }),
   );
 }
 check("37.5 新图：decide-tools-before-writing-plan 只到 write-plan，write-plan 可到 working/maintenance/communication", JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools-before-writing-plan")?.canAdvance) === JSON.stringify(["write-plan"]) && ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
@@ -330,8 +333,8 @@ check("goal-active/working-resumed 特殊文本导出已不存在", !Object.keys
 check("write-plan 注入格式含 taskPlanPath", stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/plan.json" }).includes("taskPlanPath: C:/plan.json"));
 check("create-plugin 注入格式含 lifecyclePath", stageInjectionText("pluginMaintainer", "create-plugin", { lifecyclePath: "C:/lifecycle.md" }).includes("lifecyclePath: C:/lifecycle.md"));
 check("Context 注记：STAGE_CONTEXT_NOTES 冻结且覆盖目标角色/stage", STAGE_CONTEXT_NOTES !== undefined && Object.isFrozen(STAGE_CONTEXT_NOTES) && ["main", "worker", "memoryMaintainer", "pluginMaintainer"].every((role) => Object.isFrozen(STAGE_CONTEXT_NOTES[role])));
-check("Context 注记：有注记 stage 在 Task 后输出，无注记 stage 不输出", ["main", "worker"].every((role) => stageInjectionText(role, "assess-complexity").includes("\nContext: ") && stageInjectionText(role, "challenge-plan").includes("\nContext: ")) && stageInjectionText("main", "communication").includes("\nContext: ") && stageInjectionText("worker", "communication").includes("\nContext: ") && stageInjectionText("memoryMaintainer", "communication").includes("\nContext: ") && stageInjectionText("pluginMaintainer", "communication").includes("\nContext: ") && !stageInjectionText(MAIN_ROLE, "working").includes("Context:"));
-check("Minimal 提示由 stageInjectionText 可选 minimalTools 参数承载：有值输出、缺省不输出", stageInjectionText("worker", "assess-complexity", { minimalTools: ["memory_search", "context_search"] }).includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.") && !stageInjectionText("worker", "assess-complexity").includes("Minimal (first round only):"));
+check("Context 注记：有注记 stage 在 Task 后输出，无注记 stage 不输出", stageInjectionText("main", "assess-complexity").includes("\nContext: ") && stageInjectionText("main", "challenge-plan").includes("\nContext: ") && stageInjectionText("worker", "challenge-plan").includes("\nContext: ") && stageInjectionText("main", "communication").includes("\nContext: ") && stageInjectionText("worker", "communication").includes("\nContext: ") && stageInjectionText("memoryMaintainer", "communication").includes("\nContext: ") && stageInjectionText("pluginMaintainer", "communication").includes("\nContext: ") && !stageInjectionText(MAIN_ROLE, "working").includes("Context:"));
+check("Minimal 提示由 stageInjectionText 可选 minimalTools 参数承载：有值输出、缺省不输出", stageInjectionText("main", "assess-complexity", { minimalTools: ["memory_search", "context_search"] }).includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.") && !stageInjectionText("main", "assess-complexity").includes("Minimal (first round only):"));
 check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity", "working") === false);
 {
   const challengeDef = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
@@ -485,7 +488,7 @@ check(
     session: { id: firstMemoryChildId, events: [] },
     options: { subagentDepth: 1 },
   };
-  // 新受控子代理先完成首次工具调用（真实路径：session/event 置 minimalDone 并进入 assess-delegation）。
+  // 新受控子代理先完成首次工具调用（真实路径：session/event 置 minimalDone 并进入 plan-memory）。
   childAgent.session.events.push({ type: "tool/call", data: { name: "memory_search" } });
   agentRegistry.set(firstMemoryChildId, childAgent);
   const sessionEventV09 = listeners.get("session/event")?.[0];
@@ -493,11 +496,15 @@ check(
     await sessionEventV09({ id: firstMemoryChildId }, { type: "tool/call", data: { name: "memory_search" } });
   }
   const memoryReport = registeredTools.get(MEMORY_SUB_WHALE_REPORT_TOOL);
+  const planToActionResult = await memoryReport.execute(
+    { nextStage: "save-update" },
+    { agent: childAgent, signal: new AbortController().signal },
+  );
   const reportResult = await memoryReport.execute(
     { nextStage: "communication" },
     { agent: childAgent, signal: new AbortController().signal },
   );
-  check("新 spawn memoryMaintainer child 报告到 communication 终态", reportResult?.stage === "communication" && reportResult?.advanced === true);
+  check("新 spawn memoryMaintainer child 经 plan-memory→save-update→communication 终态", planToActionResult?.stage === "save-update" && planToActionResult?.advanced === true && reportResult?.stage === "communication" && reportResult?.advanced === true);
   const startsBeforeReuse = startedSubagentRequests.length;
   const followsBeforeReuse = capturedFollowups.length;
   const secondMemory = await kaSubWhale.execute({ planItemId: "p-memory-2" }, { agent });

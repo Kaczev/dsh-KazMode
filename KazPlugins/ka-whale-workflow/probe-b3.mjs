@@ -76,9 +76,9 @@ check("首轮 role Minimal：pluginMaintainer = memory_search + context_search�
 check("各角色 Stable Base 含 context_compress/context_read/context_search", ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_compress") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_read") && V09_SUBAGENT_ROLE_STABLE_BASE[role].includes("context_search")));
 {
   const initialStages = {
-    worker: "assess-complexity",
-    memoryMaintainer: "assess-delegation",
-    pluginMaintainer: "assess-delegation",
+    worker: "challenge-plan",
+    memoryMaintainer: "plan-memory",
+    pluginMaintainer: "plan-plugin",
   };
   const roles = ["worker", "memoryMaintainer", "pluginMaintainer"];
   const roleReports = {
@@ -91,10 +91,10 @@ check("各角色 Stable Base 含 context_compress/context_read/context_search", 
     roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify([roleReports[role]])),
   );
   check(
-    "双层语义：stage-defs 子代理初始 allowedTools 含 context_search/context_read、不含 context_compress（Minimal 不再由 stage 收口）",
+    "双层语义：stage-defs 子代理初始 planning allowedTools 含 context_search/context_read、不含 context_compress/write/edit/pwsh（Minimal 不再由 stage 收口）",
     roles.every((role) => {
       const tools = stageDefinitionFor(role, initialStages[role])?.allowedTools ?? [];
-      return tools.includes("context_search") && tools.includes("context_read") && !tools.includes("context_compress") && !tools.includes("read");
+      return tools.includes("context_search") && tools.includes("context_read") && !tools.includes("context_compress") && !tools.includes("write") && !tools.includes("edit") && !tools.includes("pwsh");
     }),
   );
 }
@@ -358,8 +358,8 @@ childCatalog.set("mem-child-busy", {
   const childId = capturedStarts[0]?.spec?.childId;
   const childAgent = { id: childId, session: { id: childId, events: [] } };
   const reportDef = registeredTools.get("work_sub_whale_report");
-  const reportResult = await reportDef.execute({ nextStage: "communication" }, { agent: childAgent, signal });
-  check("*_sub_whale_report 不再调用 reportFrom（单一 subagent-settled 通道）", reportResult?.messageId === undefined && capturedReports.length === 0 && !Object.prototype.hasOwnProperty.call(reportDef.parameters ?? {}, "output"));
+  const reportResult = await reportDef.execute({ nextStage: "working" }, { agent: childAgent, signal });
+  check("*_sub_whale_report 不再调用 reportFrom（单一 subagent-settled 通道）", reportResult?.stage === "working" && reportResult?.messageId === undefined && capturedReports.length === 0 && !Object.prototype.hasOwnProperty.call(reportDef.parameters ?? {}, "output"));
   check("report 成功后返回硬等门 notice", typeof reportResult?.notice === "string" && reportResult.notice.includes("Stage advanced; now output your full report as your final message") && reportResult.notice.includes("parent receives it as subagent-settled") && reportResult.notice.includes("do not call further tools"));
   const storedAfterReport = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.[childId];
   check("report 成功后角色记录 awaitingParent=true", storedAfterReport?.awaitingParent === true);

@@ -1,6 +1,7 @@
 // ka-whale-workflow v0.9 受控子代理 workflow 探针：
 //   - includeSubagents=false 时受控 v0.9 子代理仍被治理（不跳过）；
-//   - idle 初始化 role 首阶段（worker=assess-complexity，其余=assess-delegation）；
+//   - idle 初始化 role planning 首阶段（worker=challenge-plan，
+//     memoryMaintainer=plan-memory，pluginMaintainer=plan-plugin）；
 //   - role 专属 [ka-whale-workflow <stage>] 按 pending 注入一次；首轮 Minimal（尚无
 //     工具调用）时正文含 Minimal (first round only) 行，首次工具调用后不再出现；
 //   - report 后等待期（awaitingParent=true）pre-step 不注入/不清 pending，
@@ -155,8 +156,11 @@ function withToolCall(agent) {
     }),
   );
   check(
-    "受控子代理初始 stage allowedTools 仍不含 read",
-    roles.every((role) => !stageDefinitionFor(role, V09_SUBAGENT_ROLE_INITIAL_STAGES[role])?.allowedTools.includes("read")),
+    "受控子代理初始 planning stage 不放 write/edit/pwsh（文件执行工具在后续阶段才授予）",
+    roles.every((role) => {
+      const allowed = stageDefinitionFor(role, V09_SUBAGENT_ROLE_INITIAL_STAGES[role])?.allowedTools ?? [];
+      return !allowed.includes("write") && !allowed.includes("edit") && !allowed.includes("pwsh");
+    }),
   );
   check(
     "Minimal 提示由 stageInjectionText 可选 minimalTools 参数承载（memory/plugin 初始 stage）",
@@ -225,19 +229,19 @@ const preStep = h1.listeners.get("agent/pre-step")?.[0];
 const userMessage = { content: [{ type: "text", text: "delegation" }], source: { kind: "user" } };
 const nextEnter = async () => ({ kind: "enter", messages: [] });
 
-check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确且无 pluginCreator", V09_SUBAGENT_ROLE_INITIAL_STAGES.worker === "assess-complexity" && V09_SUBAGENT_ROLE_INITIAL_STAGES.memoryMaintainer === "assess-delegation" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginMaintainer === "assess-delegation" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginCreator === undefined);
+check("V09_SUBAGENT_ROLE_INITIAL_STAGES 映射正确且无 pluginCreator", V09_SUBAGENT_ROLE_INITIAL_STAGES.worker === "challenge-plan" && V09_SUBAGENT_ROLE_INITIAL_STAGES.memoryMaintainer === "plan-memory" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginMaintainer === "plan-plugin" && V09_SUBAGENT_ROLE_INITIAL_STAGES.pluginCreator === undefined);
 check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugin_creator_sub_whale_report") === false);
 
 // Worker: includeSubagents=false 下 inbox claim 治理；受控子代理与主模型一样，
 // 首次 tool/call 前保持 idle + Minimal（只注入 startup hint），之后才进入
-// assess-complexity 并注入 role stage 正文。
+// challenge-plan 并注入 role stage 正文。
 {
   const agent = subagentAgent("child-worker");
   await claimed({ agent, message: userMessage, turn: 1 });
   check("includeSubagents=false：worker 受控子代理首轮 Minimal 仍保持 idle", stageFromFile(STORE_FILE, "child-worker") === null);
   const preToolDecision = await preStep({ agent, turn: 1, messages: [userMessage] }, nextEnter);
   const preToolText = messageText(preToolDecision?.messages ?? []);
-  check("worker 首轮 tool 前不注入 role stage 正文", !preToolText.includes("[ka-whale-workflow assess-complexity]"));
+  check("worker 首轮 tool 前不注入 role stage 正文", !preToolText.includes("[ka-whale-workflow challenge-plan]"));
   check("worker 首轮 tool 前注入 startup hint（含 memory_search/report 解锁说明）", preToolText.includes("[ka-whale-workflow first-round]") && preToolText.includes("memory_search or context_search") && preToolText.includes("work_sub_whale_report"));
   // 模拟首次 tool/call：真实路径由 session/event 置 minimalDone 并进入 role 首阶段。
   withToolCall(agent);
@@ -248,26 +252,25 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   }
   const postToolDecision = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
   const postToolText = messageText(postToolDecision?.messages ?? []);
-  check("首次 tool/call 后 worker 进入 assess-complexity", stageFromFile(STORE_FILE, "child-worker") === "assess-complexity");
-  check("首次 tool/call 后注入 assess-complexity 且不再含 Minimal line", postToolText.includes("[ka-whale-workflow assess-complexity]") && postToolText.includes("work_sub_whale_report") && !postToolText.includes("Minimal (first round only):"));
+  check("首次 tool/call 后 worker 进入 challenge-plan", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  check("首次 tool/call 后注入 challenge-plan 且不再含 Minimal line", postToolText.includes("[ka-whale-workflow challenge-plan]") && postToolText.includes("work_sub_whale_report") && !postToolText.includes("Minimal (first round only):"));
   check("worker 不注入旧通用 subagent-flow 文本", !postToolText.includes("[ka-whale-workflow subagent flow]"));
   check("worker 注入后 pending 已清除", pendingFromFile(STORE_FILE, "child-worker") === null);
   check(
     "Context 注记：worker/maintenance 目标 stage 注入注记，无注记 stage 不输出",
-    STAGE_CONTEXT_NOTES?.worker?.["assess-complexity"] !== undefined &&
-      stageInjectionText("worker", "assess-complexity").includes("Context: ") &&
+    STAGE_CONTEXT_NOTES?.worker?.["challenge-plan"] !== undefined &&
       stageInjectionText("worker", "challenge-plan").includes("Context: ") &&
       stageInjectionText("worker", "communication").includes("Context: ") &&
       stageInjectionText("memoryMaintainer", "communication").includes("Context: ") &&
       stageInjectionText("pluginMaintainer", "communication").includes("Context: ") &&
-      !stageInjectionText("memoryMaintainer", "assess-delegation").includes("Context:") &&
+      !stageInjectionText("memoryMaintainer", "plan-memory").includes("Context:") &&
       !stageInjectionText("pluginMaintainer", "create-plugin").includes("Context:"),
   );
-  const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
-  const allow = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
+  const deny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
+  const allow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
   const allowCtxRead = await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" }));
   const allowCtxCompress = await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" }));
-  check("worker assess-complexity 软闸门：read 拒绝、memory_search/context_read 放行、context_compress 当前不放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow" && allowCtxRead?.kind === "allow" && allowCtxCompress?.kind === "deny");
+  check("worker challenge-plan 软闸门：read/memory_search/context_read 放行、write/context_compress 拒绝", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow" && allowCtxRead?.kind === "allow" && allowCtxCompress?.kind === "deny");
 }
 
 // *_sub_whale_report：单一 subagent-settled 通道。nextStage 推进角色 workflow，
@@ -275,64 +278,12 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
 // 后由子代理把完整报告作为最终消息写出。
 {
   const agent = subagentAgent("child-worker");
-  // child-worker 已在上一段进入 assess-complexity；这里验证推进能力。
-  check("前置：child-worker 处于 assess-complexity", stageFromFile(STORE_FILE, "child-worker") === "assess-complexity");
+  // child-worker 已在上一段进入 challenge-plan（首阶段，不再有 assess-complexity）。
+  check("前置：child-worker 处于 challenge-plan", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
   const workReport = h1.registeredTools.get("work_sub_whale_report");
-  check("work_sub_whale_report description 含硬停等/父回复恢复/terminal 新轮/single settled", typeof workReport?.description === "string" && workReport.description.includes("hard stop") && workReport.description.includes("awaitingParent") && workReport.description.includes("send_message, which resumes it") && workReport.description.includes("fresh delegation at assess-complexity") && workReport.description.includes("parent receives it as subagent-settled") && !Object.prototype.hasOwnProperty.call(workReport.parameters ?? {}, "output"));
+  check("work_sub_whale_report description 含硬停等/父回复恢复/terminal 新轮/single settled", typeof workReport?.description === "string" && workReport.description.includes("hard stop") && workReport.description.includes("awaitingParent") && workReport.description.includes("send_message, which resumes it") && workReport.description.includes("fresh delegation at challenge-plan") && workReport.description.includes("parent receives it as subagent-settled") && !Object.prototype.hasOwnProperty.call(workReport.parameters ?? {}, "output"));
   const beforeReports = h1.capturedReports.length;
   const beforeRoundReports = h1.roundReports.length;
-  const result = await workReport.execute(
-    { nextStage: "challenge-plan" },
-    { agent, signal: new AbortController().signal },
-  );
-  check("report+nextStage 推进 worker assess-complexity → challenge-plan", result?.stage === "challenge-plan" && result?.role === "worker" && result?.messageId === undefined && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
-  // 真实受控子代理中 report 是一次 tool/call；模拟它，让后续 pre-step 证明
-  // Minimal (first round only) 提示在首次工具调用后不再出现。
-  withToolCall(agent);
-  check("report+nextStage 不再调用原生 reportFrom（单一 settled 通道）", h1.capturedReports.length === beforeReports);
-  const childRdReports = h1.roundReports
-    .slice(beforeRoundReports)
-    .filter((payload) => payload?.category === "subagent-report" && payload?.agent?.id === "child-worker");
-  check(
-    "single settled：work_sub_whale_report 不再 child-side 写 subagent-report 摘要",
-    childRdReports.length === 0,
-  );
-  // 延迟注入守卫：report+nextStage 已置 awaitingParent=true 且挂 pending
-  // challenge-plan；父主 send_message 清门前的 pre-step 不得注入或消费 pending。
-  const waitingStep = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
-  const waitingText = messageText(waitingStep?.messages ?? []);
-  check(
-    "report 后等待期 pre-step 不注入新 stage 文本（challenge-plan）",
-    !waitingText.includes("[ka-whale-workflow challenge-plan]") &&
-      roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true,
-  );
-  check(
-    "report 后等待期 pending 仍保留（未 clear）",
-    pendingFromFile(STORE_FILE, "child-worker") === "challenge-plan",
-  );
-  // report 成功已置 awaitingParent=true；先由父主 send_message 清门，才能验证
-  // challenge-plan 本身的 stage 软闸门（read 放行、write 拒绝）。
-  await claimed({
-    agent,
-    message: {
-      content: [{ type: "text", text: "continue after challenge report" }],
-      source: { kind: "coordinator", form: "relay", senderSessionId: "main-parent-session" },
-    },
-    turn: 1,
-  });
-  check("父主 send_message 清门后 stage 保持 challenge-plan", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false);
-  const relayedStep = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
-  const relayedText = messageText(relayedStep?.messages ?? []);
-  check(
-    "父 relay 清门后的下一 pre-step 才注入 challenge-plan 文本并清 pending；首次工具调用后不再含 Minimal 行",
-    relayedText.includes("[ka-whale-workflow challenge-plan]") &&
-      relayedText.includes("work_sub_whale_report") &&
-      !relayedText.includes("Minimal (first round only):") &&
-      pendingFromFile(STORE_FILE, "child-worker") === null,
-  );
-  const readAllow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
-  const writeDeny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
-  check("推进后 challenge-plan 软闸门：read 放行、write 拒绝", readAllow?.kind === "allow" && writeDeny?.kind === "deny");
   let badError = null;
   try {
     await workReport.execute(
@@ -352,7 +303,7 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   } catch (error) {
     earlyCommError = error;
   }
-  check("36.8 worker challenge-plan 不可直接推进 communication", earlyCommError !== null && String(earlyCommError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  check("worker challenge-plan 不可直接推进 communication", earlyCommError !== null && String(earlyCommError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
 
   // 硬等门：report 成功后 awaitingParent=true；等待期任何工具（含再次 report）被拒；
   // 父主 send_message 到达非终态仅清门；到达 communication 终态则重置新初始阶段。
@@ -364,7 +315,15 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     { nextStage: "working" },
     { agent, signal: new AbortController().signal },
   );
-  check("report+nextStage 到 working 后返回等待 notice", toWorking?.stage === "working" && toWorking?.messageId === undefined && typeof toWorking?.notice === "string" && toWorking.notice.includes("Stage advanced; now output your full report as your final message") && toWorking.notice.includes("parent receives it as subagent-settled") && toWorking.notice.includes("do not call further tools"));
+  check("report+nextStage challenge-plan → working 后返回等待 notice", toWorking?.stage === "working" && toWorking?.messageId === undefined && typeof toWorking?.notice === "string" && toWorking.notice.includes("Stage advanced; now output your full report as your final message") && toWorking.notice.includes("parent receives it as subagent-settled") && toWorking.notice.includes("do not call further tools"));
+  check("report+nextStage 不再调用原生 reportFrom（单一 settled 通道）", h1.capturedReports.length === beforeReports);
+  const childRdReports = h1.roundReports
+    .slice(beforeRoundReports)
+    .filter((payload) => payload?.category === "subagent-report" && payload?.agent?.id === "child-worker");
+  check(
+    "single settled：work_sub_whale_report 不再 child-side 写 subagent-report 摘要",
+    childRdReports.length === 0,
+  );
   check("report 成功后角色记录 awaitingParent=true", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true);
   const workingWaitingStep = await preStep({ agent, turn: 2, messages: [] }, nextEnter);
   const workingWaitingText = messageText(workingWaitingStep?.messages ?? []);
@@ -393,21 +352,21 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   );
   check("report→communication 终态且 awaitingParent=true", toCommunication?.stage === "communication" && stageFromFile(STORE_FILE, "child-worker") === "communication" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true);
   await claimed({ agent, message: parentRelay, turn: 3 });
-  check("父主 send_message 到达 communication 终态：重置 worker 初始 assess-complexity 并清门", stageFromFile(STORE_FILE, "child-worker") === "assess-complexity" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && pendingFromFile(STORE_FILE, "child-worker") === "assess-complexity");
+  check("父主 send_message 到达 communication 终态：重置 worker 初始 challenge-plan 并清门", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && pendingFromFile(STORE_FILE, "child-worker") === "challenge-plan");
   const newRoundDecision = await preStep({ agent, turn: 3, messages: [] }, nextEnter);
   const newRoundText = messageText(newRoundDecision?.messages ?? []);
-  check("终态父消息后的新轮注入初始 stage 文本", newRoundText.includes("[ka-whale-workflow assess-complexity]") && newRoundText.includes("work_sub_whale_report"));
+  check("终态父消息后的新轮注入初始 stage 文本", newRoundText.includes("[ka-whale-workflow challenge-plan]") && newRoundText.includes("work_sub_whale_report"));
 }
 
 // memoryMaintainer: 与 worker 一致，首次 tool/call 前保持 idle + startup hint；
-// 首次 tool/call 后才进入 assess-delegation 并注入 role 专属文本。
+// 首次 tool/call 后才进入 plan-memory 并注入 role 专属文本。
 {
   const agent = subagentAgent("child-memory");
   await claimed({ agent, message: userMessage, turn: 1 });
   check("includeSubagents=false：memoryMaintainer 受控子代理首轮 Minimal 仍保持 idle", stageFromFile(STORE_FILE, "child-memory") === null);
   const preToolDecision = await preStep({ agent, turn: 1, messages: [userMessage] }, nextEnter);
   const preToolText = messageText(preToolDecision?.messages ?? []);
-  check("memoryMaintainer 首轮 tool 前不注入 role stage 正文", !preToolText.includes("[ka-whale-workflow assess-delegation]"));
+  check("memoryMaintainer 首轮 tool 前不注入 role stage 正文", !preToolText.includes("[ka-whale-workflow plan-memory]"));
   check("memoryMaintainer 首轮 tool 前注入 startup hint（含 report 解锁说明）", preToolText.includes("[ka-whale-workflow first-round]") && preToolText.includes("memory_search or context_search") && preToolText.includes("memory_sub_whale_report"));
   withToolCall(agent);
   h1.agentRegistry.set(agent.id, agent);
@@ -417,40 +376,41 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   }
   const postToolDecision = await preStep({ agent, turn: 1, messages: [] }, nextEnter);
   const postToolText = messageText(postToolDecision?.messages ?? []);
-  check("首次 tool/call 后 memoryMaintainer 进入 assess-delegation", stageFromFile(STORE_FILE, "child-memory") === "assess-delegation");
-  check("首次 tool/call 后注入 assess-delegation 且不再含 Minimal line", postToolText.includes("[ka-whale-workflow assess-delegation]") && postToolText.includes("memory_sub_whale_report") && !postToolText.includes("Minimal (first round only):"));
+  check("首次 tool/call 后 memoryMaintainer 进入 plan-memory", stageFromFile(STORE_FILE, "child-memory") === "plan-memory");
+  check("首次 tool/call 后注入 plan-memory 且不再含 Minimal line", postToolText.includes("[ka-whale-workflow plan-memory]") && postToolText.includes("memory_sub_whale_report") && !postToolText.includes("Minimal (first round only):"));
   check("memoryMaintainer 不注入旧通用 subagent-flow 文本", !postToolText.includes("[ka-whale-workflow subagent flow]"));
-  const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
-  const allow = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
+  const allowReadPlan = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
+  const allowMemSearch = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
   const allowCtxCompress = await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" }));
-  check("memoryMaintainer assess-delegation 软闸门：read 拒绝、memory_search 放行、context_compress 当前不放行", deny?.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:") && allow?.kind === "allow" && allowCtxCompress?.kind === "deny");
+  const denyMemSavePlan = await preExecute({ name: "memory_save", agent }, async () => ({ kind: "allow" }));
+  check("memoryMaintainer plan-memory 软闸门：read/memory_search 放行、memory_save/context_compress 拒绝", allowReadPlan?.kind === "allow" && allowMemSearch?.kind === "allow" && denyMemSavePlan?.kind === "deny" && String(denyMemSavePlan.reason).startsWith("workflow-stage-deny:") && allowCtxCompress?.kind === "deny");
 
-  // Bug regression：report+nextStage 到 plan-memory 置 awaitingParent；父主
-  // send_message resume 后必须仍非 Minimal、注入 plan-memory、report 可用，
-  // memory_save 要到 save-update 才可用。
+  // Bug regression：report+nextStage 到 save-update 置 awaitingParent；父主
+  // send_message resume 后必须仍非 Minimal、注入 save-update、report 可用，
+  // memory_save 在 save-update 才可用。
   const memoryReport = h1.registeredTools.get("memory_sub_whale_report");
-  const planReport = await memoryReport.execute(
-    { nextStage: "plan-memory" },
+  const saveReport = await memoryReport.execute(
+    { nextStage: "save-update" },
     { agent, signal: new AbortController().signal },
   );
-  check("memory report+nextStage → plan-memory 且 awaitingParent=true", planReport?.stage === "plan-memory" && stageFromFile(STORE_FILE, "child-memory") === "plan-memory" && roleRecordFromFile(STORE_FILE, "child-memory")?.awaitingParent === true);
+  check("memory report+nextStage plan-memory → save-update 且 awaitingParent=true", saveReport?.stage === "save-update" && stageFromFile(STORE_FILE, "child-memory") === "save-update" && roleRecordFromFile(STORE_FILE, "child-memory")?.awaitingParent === true);
   check("memoryMaintainer minimalDone 已持久化（resume 不再回 Minimal）", roleRecordFromFile(STORE_FILE, "child-memory")?.minimalDone === true);
   const parentRelayMemory = {
-    content: [{ type: "text", text: "continue memory plan" }],
+    content: [{ type: "text", text: "continue memory work" }],
     source: { kind: "coordinator", form: "relay", senderSessionId: "main-parent-session" },
   };
   const waitingMemoryStep = await preStep({ agent, turn: 2, messages: [] }, nextEnter);
-  check("plan-memory 等待期 pre-step 不注入 plan-memory 正文", !messageText(waitingMemoryStep?.messages ?? []).includes("[ka-whale-workflow plan-memory]"));
+  check("save-update 等待期 pre-step 不注入 save-update 正文", !messageText(waitingMemoryStep?.messages ?? []).includes("[ka-whale-workflow save-update]"));
   await claimed({ agent, message: parentRelayMemory, turn: 2 });
-  check("父 relay 清门后 stage 保持 plan-memory", stageFromFile(STORE_FILE, "child-memory") === "plan-memory" && roleRecordFromFile(STORE_FILE, "child-memory")?.awaitingParent === false);
+  check("父 relay 清门后 stage 保持 save-update", stageFromFile(STORE_FILE, "child-memory") === "save-update" && roleRecordFromFile(STORE_FILE, "child-memory")?.awaitingParent === false);
   const relayedMemoryStep = await preStep({ agent, turn: 2, messages: [] }, nextEnter);
   const relayedMemoryText = messageText(relayedMemoryStep?.messages ?? []);
-  check("resume 后下一 pre-step 注入 plan-memory 正文且无 Minimal line", relayedMemoryText.includes("[ka-whale-workflow plan-memory]") && relayedMemoryText.includes("memory_sub_whale_report") && !relayedMemoryText.includes("Minimal (first round only):"));
+  check("resume 后下一 pre-step 注入 save-update 正文且无 Minimal line", relayedMemoryText.includes("[ka-whale-workflow save-update]") && relayedMemoryText.includes("memory_sub_whale_report") && !relayedMemoryText.includes("Minimal (first round only):"));
   check("resume 后 pending 已清除", pendingFromFile(STORE_FILE, "child-memory") === null);
   const allowMemReport = await preExecute({ name: "memory_sub_whale_report", agent }, async () => ({ kind: "allow" }));
-  const allowMemSearchPlan = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
-  const denyMemSavePlan = await preExecute({ name: "memory_save", agent }, async () => ({ kind: "allow" }));
-  check("plan-memory 软闸门：report/memory_search 放行、memory_save 拒绝（save-update 才放行）", allowMemReport?.kind === "allow" && allowMemSearchPlan?.kind === "allow" && denyMemSavePlan?.kind === "deny" && String(denyMemSavePlan.reason).startsWith("workflow-stage-deny:"));
+  const allowMemSearchSave = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
+  const allowMemSave = await preExecute({ name: "memory_save", agent }, async () => ({ kind: "allow" }));
+  check("save-update 软闸门：report/memory_search/memory_save 放行", allowMemReport?.kind === "allow" && allowMemSearchSave?.kind === "allow" && allowMemSave?.kind === "allow");
 }
 
 // pluginMaintainer create-plugin: pre-step 注入 lifecyclePath。
