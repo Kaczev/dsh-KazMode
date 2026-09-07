@@ -114,7 +114,11 @@ const DEFINITIONS = {
       ],
       canAdvance: ["decide-tools-before-writing-plan"],
       task:
-        "Critique the approach first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose some concrete enhancements that would make the result more polished, practical, or delightful — without overcomplicating. Present these ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.",
+        `Critique the approach first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose concrete enhancements that would make the result more polished, practical, and balanced — avoid extremes of over-engineering or under-delivering. Aim for a solution that is appropriate to the task's complexity and context.
+
+When proposing improvements, be specific. Instead of asking vague questions like “What would you prefer?”, ask concrete questions about the task's scope, priorities, constraints, edge cases, user expectations, or trade-offs that need to be made. Use ask_user_question as many times as needed to gather clear, actionable preferences. Do not settle for vague terms like “better” or “improved” — translate them into specific decisions.
+
+Present your enhancement ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.`,
     },
     "decide-tools-before-writing-plan": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
@@ -250,7 +254,11 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
       ],
       canAdvance: ["check-tools"],
       task:
-        "Critique the approach first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose some concrete enhancements that would make the result more polished, practical, or delightful — without overcomplicating. Present these ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.",
+        `Critique the assigned task first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose concrete enhancements that would make the result more polished, practical, and balanced — avoid extremes of over-engineering or under-delivering, and keep the solution appropriate to the task's complexity.
+
+When proposing improvements, be specific. Instead of vague suggestions, spell out concrete trade-offs, scope adjustments, priority shifts, edge cases, or user expectations that should be considered. Present these ideas clearly to the parent main agent and wait for its decision before proceeding. Do not assume approval — the parent must confirm or adjust.
+
+Do not write task plans here and do not call ka_sub_whale. Ask the parent main agent for clarification when the task intent is unclear.`,
     },
     "check-tools": {
       allowedTools: ["context_search", "context_read", "work_sub_whale_report"],
@@ -277,7 +285,22 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
       ],
       canAdvance: ["communication", "compass_context_before_communication"],
       task:
-        "Execute the delegated work. Do not write memories or plugins. When done, call work_sub_whale_report({nextStage:'compass_context_before_communication'}) to tidy context, or ({nextStage:'communication'}) to finish; then do not call more tools; write your full report as your final message, end the turn, and wait for the parent reply (received as subagent-settled). If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        `Execute the delegated work with care and completeness. We deliver work that is functional, readable, and properly tested — not just “done”, but done well.
+
+During execution:
+- Follow the task description closely. If ambiguity arises, we may ask the parent for clarification via the report.
+- We do not write memories or plugins. These are handled by the parent and the corresponding specialized subagents.
+- We keep our work self-contained within the delegated scope. We do not expand the scope without parent approval.
+
+Before finishing:
+- Review our own work: does it meet the objective? Are all steps completed? Are there any edge cases we missed?
+- If something is incomplete or uncertain, state it clearly in the report. Do not hide issues.
+- Report should be at communication stage.
+
+Context tidying:
+- If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.
+
+After calling work_sub_whale_report, do not call more tools. Write the full report as the final message, end the turn, and wait for the parent reply (received as subagent-settled).`,
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "work_sub_whale_report"],
@@ -288,7 +311,14 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
     communication: {
       allowedTools: ["work_sub_whale_report"],
       canAdvance: ["assess-complexity"],
-      task: "Report results and candidate suggestions. If we have a extract task, advance to assess-complexity; otherwise, END the workflow.",
+      task: `Report results and candidate suggestions. If we have a extract task, advance to assess-complexity; otherwise, END the workflow.
+
+Report structure:
+- What was done (summary of actions taken)
+- How it was done (key decisions, tools used, approach taken)
+- What was produced (files, changes, outputs)
+- What remains (open questions, incomplete items, risks, or follow-up work)
+- Any clarification needed from the parent`,
     },
   },
   memoryMaintainer: {
