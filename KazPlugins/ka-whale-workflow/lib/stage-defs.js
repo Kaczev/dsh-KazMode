@@ -139,6 +139,8 @@ PlanItem rules:
 Delegation rules:
 - Delegate every worker planItem to a subagent via "ka-sub-whale". Do not execute planItems directly.
 - Distribute tasks across multiple subagents when appropriate. Consider splitting heavy tasks into smaller, parallelizable pieces when dependencies allow.
+- When a task involves building or modifying a complex system, break it down by its natural subsystems or functional modules. Each subsystem should be a separate planItem with its own subagent, as long as they can be developed independently and integrated later.
+- Do not assign a large, multi-part task to a single subagent if it can be divided into parallel work streams. Prefer parallel execution over sequential when the work allows it.
 - When deciding which subagent to use: check whether an existing idle subagent has relevant expertise from previous tasks. Reuse it if possible; create a new one only when no suitable subagent is available.
 - For each delegated task, provide the fullest possible task description — include objective, detailed step-by-step actions, expected outputs, constraints, relevant context, assumptions, and potential pitfalls. When in doubt, include the information. Do not assume the subagent can infer what you mean; spell everything out.
 - Assigned tools cannot exceed 8 tools per planItem.
