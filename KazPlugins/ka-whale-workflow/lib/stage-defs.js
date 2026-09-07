@@ -118,7 +118,7 @@ const DEFINITIONS = {
 
 When proposing improvements, be specific. Instead of asking vague questions like “What would you prefer?”, ask concrete questions about the task's scope, priorities, constraints, edge cases, user expectations, or trade-offs that need to be made. Use ask_user_question as many times as needed to gather clear, actionable preferences. Do not settle for vague terms like “better” or “improved” — translate them into specific decisions.
 
-Present your enhancement ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions for true intent.`,
+Present your enhancement ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions as many times as needed for true intent.`,
     },
     "decide-tools-before-writing-plan": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
