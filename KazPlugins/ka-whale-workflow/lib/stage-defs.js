@@ -96,7 +96,19 @@ const DEFINITIONS = {
       ],
       canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
       task:
-        "Judge whether the request is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        `Judge complexity AND unpack intent.
+
+Before deciding, always form a compact Intent Map:
+1) What outcome does the user want to experience?
+2) What domain priors does this request evoke?
+   Example: "foam" => sticky, coalescing, bubbly, rough, lumpy, NOT isolated small balls.
+   Example: "UI" => visual hierarchy, whitespace, typography, aesthetics, not just layout.
+3) Does the user's wording conflict with the likely desired outcome? If so, state it.
+4) How should success be verified — by code review, by rendered output, or by user feel?
+
+Simple direct answers may advance to communication.
+Creative/visual/implementation-heavy requests advance to challenge-plan.
+Do not advance only to satisfy process; advance when a real decision needs scrutiny.`,
     },
     "challenge-plan": {
       allowedTools: [
@@ -118,7 +130,14 @@ const DEFINITIONS = {
 
 When proposing improvements, be specific. Instead of asking vague questions like “What would you prefer?”, ask concrete questions about the task's scope, priorities, constraints, edge cases, user expectations, or trade-offs that need to be made. Use ask_user_question as many times as needed to gather clear, actionable preferences. Do not settle for vague terms like “better” or “improved” — translate them into specific decisions.
 
-Present your enhancement ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions as many times as needed for true intent.`,
+Present your enhancement ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions as many times as needed for true intent.
+
+Treat user words as intent signals, not a final specification.
+Surface conflicts between wording and likely outcome.
+propose an outcome-level correction before accepting the implementation hint.
+
+For visual/creative tasks, ask about look-and-feel/references first.
+Do not ask about implementation knobs until the look is agreed.`,
     },
     "decide-tools-before-writing-plan": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
@@ -139,6 +158,12 @@ PlanItem rules:
 - "worker": delegated individually during Working.
 - "memoryMaintainer": create at least one if the work produces new insights, lessons, or reusable patterns — even if uncertain.
 - "pluginMaintainer": create a new private plugin only when existing plugins cannot meet requirements (e.g., repetitive work that could be automated).
+- Every build-type planItem must include, for visual/creative work:
+  (a) intended user experience;
+  (b) visual acceptance criteria ("what success looks like");
+  (c) explicit failure examples.
+- Reviewers must judge fidelity to the intended experience, not only whether code exists.
+- If rendered output cannot be produced/checked, say so in the task instead of pretending code review is enough.
 
 Delegation and splitting rules:
 - Delegate every worker planItem via "ka-sub-whale". Do not execute directly.
@@ -172,7 +197,13 @@ Communication rules:
 
 After ka_sub_whale, end the turn. The child's full report arrives as a single subagent-settled message after it calls *_sub_whale_report. When the report arrives, reply with send_message to resume it — the child must have a response to proceed. Let the child run its own workflow at its own pace; we do not rush it. We wait for the report, verify it, and decide the next step.
 
-Amend plans only through write-plan. When complete, advance to memory-maintenance before communication. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.`,
+Amend plans only through write-plan. When complete, advance to memory-maintenance before communication. Before calling ka_sub_whale:
+1. Call list_agents.
+2. If an idle child exists with matching context (same file / same domain / closely related objective), use send_message to continue that child.
+3. Only when no matching child exists, create a new one via ka_sub_whale.
+
+Do not open a new worker just because a new planItem exists;
+a small change to the same file should continue the child that already knows that file. Messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.`,
     },
     "memory-maintenance": {
       allowedTools: [
@@ -239,8 +270,8 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
         "context_read",
         "work_sub_whale_report",
       ],
-      canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
-      task: "Judge whether the delegation is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+      canAdvance: ["challenge-plan", "communication", "compass_context_before_communication", "working"],
+      task: "Judge whether the delegation is simple or complex. If simple, advance to communication (no-tool-call is legal). If complex, advance to challenge-plan. If we have known the task clarity, we can advance to working. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     "challenge-plan": {
       allowedTools: [
@@ -659,6 +690,7 @@ export const GOAL_ACTIVE_CONTEXT_TEXT = `[ka-whale-workflow goal-active]
 Mode: Goal is active; ka-whale-workflow ordinary stage progression is suspended.
 Allowed tools: [main stable surface minus whale_report progression usage]
 Use get_goal/update_goal per official Goal rules. Goal context and rounds are driven by the official Goal driver. Persona is unchanged.
+
 Context: Before continuing, if earlier exact goal/session content may have been summarized, use context_search then context_read.
 <`;
 
