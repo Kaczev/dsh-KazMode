@@ -1,2 +1,2 @@
 name: Kaz 模式
-description: 专门避免犯过往错误和经验的，高效思考的模式。工具面两阶段——首次工具调用前仅 memory_search，调用后恢复白名单上的全部工具。之后根据具体任务，使用特定的模式完成。此模式具有高自由度的配置面板，可以在配置面板进行调整。配置按工作区隔离。
+description: 专门避免犯过往错误和经验遗漏、保持高效思考的模式。工具面两阶段——首次工具调用前只保留 memory_search + context_search，首次工具调用后恢复代码级固定的 Stable Main Surface；之后按具体任务沿 ka-whale-workflow 阶段机推进。Kaz 面板可调整插件开关与参数，配置按项目隔离（同一项目所有对话共享）；无原生 Plan / Goal 模式。

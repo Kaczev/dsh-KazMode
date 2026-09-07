@@ -12,11 +12,11 @@
   `deployment:persona` 单段，主会话逐字使用 kaz-shared 的 `KAZ_ROLE_PROMPTS.main`
   （v0.9 §9.1 完整 Persona），不再叠加第二段 role body；受控子代理保留
   `KAZ_ROLE_PROMPTS.subagent.*` 原样 persona；
-- **工具面两阶段（无 round-minimal 插件）**：首次工具调用前由 kaz-mode 核心 Minimal 收敛（Kaz 恒开 ka-whale-memory → 只有 `memory_search`），首次工具调用后恢复代码级固定的 Stable Main Surface；真实工具面增删以 `category=tool-surface` 上报 round-display；
-- **工作流主流程（无 decide-goal / Goal mode）**：ka-whale-workflow 从 `write-plan` 直接进入 `working`，随后 `memory-maintenance`；Kaz 不再有 decide-goal / goal-active / working-resumed，也不挂载 Goal mode / `tool-goal`。没有原生 Plan 模式，没有 `create_plan`。
-- **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；
+- **工具面两阶段（无 round-minimal 插件）**：首次工具调用前由 kaz-mode 核心 Minimal 收敛（Kaz 恒开 ka-whale-memory → `memory_search` + `context_search`），首次工具调用后恢复代码级固定的 Stable Main Surface；真实工具面增删以 `category=tool-surface` 上报 round-display；
+- **工作流主流程（概要）**：主流程按 ka-whale-workflow 阶段机推进，无 decide-goal / Goal mode / 原生 Plan；
+- **配置按项目隔离**：同一项目的所有对话共享一套插件开关与参数；Kaz / 非 Kaz 模式各有默认状态，在 **Kaz 面板**里调整，互不干扰；
 - **功能按插件分离**：Kaz模式的功能是按插件分离的。如果仅想要Kaz模式的部分功能，也可以在 **Kaz面板** 里面单独开启；
-- **工具精选 / 固定面**：Kaz 首次工具调用前只有极简 Minimal，之后恢复代码级固定的 Stable Main Surface；其它插件工具默认不直接进入主面，需作为候选经受控委派 / 任务计划选择（不推荐加很多）。
+- **工具精选 / 固定面**：Kaz 首次工具调用前只保留 `memory_search` + `context_search` 两工具，之后恢复代码级固定的 Stable Main Surface；其它插件工具默认不直接进入主面，需作为候选经受控委派 / 任务计划选择（不推荐加很多）。
 
 - **注意：Kaz v0.9 没有原生 Plan 模式，`/plan` 与 `create_plan` 不适用；Goal mode / `tool-goal` 也已从 Kaz 移除（非 Kaz 预设仍可保留官方 Goal）。**
 - **推荐思考强度在high及以上**，low容易使用let me思维链。
@@ -55,7 +55,7 @@
 
 2. **预设目录名必须是 `kaz`（小写）**。  
    目标位置：`%USERPROFILE%\.dsh\.agent-presets\kaz`  
-   不要把预设装成 `Kaz`，也不要从 `KazPlugins\kaz-mode\kaz-preset` 安装预设。
+   不要把预设装成 `Kaz`；预设以仓库根目录 `kaz/` 为准，`kaz-mode` 不再内置预设副本。
 
 3. **`agent.cordis.yml` 和 `preset.yml` 必须直接位于 `.agent-presets\kaz\` 根部**。  
    dsh 的预设发现规则不递归扫描，嵌套会装不上。
@@ -82,7 +82,7 @@
 ## 三、配置（Kaz 面板）
 
 - **功能按插件分离**：Kaz 面板可单独开启 / 关闭每个插件。不喜欢某个插件？在 Kaz 面板直接关掉；还能把当前状态“设为 Kaz / 非 Kaz 模式的默认设置”，非常灵活。
-- **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰。
+- **配置按项目隔离**：同一项目的所有对话共享一套插件开关与参数；Kaz / 非 Kaz 模式各有默认状态，在 **Kaz 面板**里调整，互不干扰。
 - **固定工具面**：Kaz 主工具面由代码级 Stable Main Surface / workflow 面固定；工具控制面板只读展示，并只允许把外置 / 私有插件作为候选添加（不直接进主面）。
 - **面板「本地版本」**：读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段，发版逻辑见「八、文件与版本说明」。
 
@@ -106,17 +106,18 @@
 
 ```
 dsh-KazMode/
-├── KazPlugins/                     # 插件全家桶（含 kaz-shared 依赖包；6.0.2：round-minimal / create-plan 已删除，首阶段 Minimal 由 kaz-mode 核心拥有）
+├── KazPlugins/                     # 插件全家桶（含 kaz-shared 依赖包，非插件；首阶段 Minimal 与工具面收敛由 kaz-mode 核心拥有）
 │   ├── deepseek-default-model/
 │   ├── ka-whale-workflow/
 │   ├── kaz-agent-preset-display/
 │   ├── ka-whale-memory/
+│   ├── kaz-context-policy/          # 内部插件：context_search / context_read / context_compress + 压缩 provider
 │   ├── kaz-mode/
 │   ├── kaz-shared/                  # 依赖包（非插件）：Kaz 工具清单单一事实源
 │   ├── output-beep/
 │   ├── plugin-filter/
 │   ├── round-display/
-├── kaz/                            # kaz 预设（不是 KazPlugins/kaz-mode/kaz-preset）
+├── kaz/                            # kaz 预设（预设源唯一，kaz-mode 不再内置预设副本）
 │   ├── preset.yml
 │   └── agent.cordis.yml
 ├── ds安装指引.md / ds更新指引.md      # 给 DeepSeek 的安装/更新步骤（决策完备，勿让 DS 读 README）
@@ -141,6 +142,7 @@ dsh-KazMode/
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `ka-whale-memory` | `ka-whale-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
 | `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流（v0.9）：主/子阶段机 + tools/pre-execute 软闸门 + task plan 持久化 + `ka_sub_whale` 受控委派（worker / memoryMaintainer / pluginMaintainer）+ 子代理 report；Kaz 主流程无 Plan/Goal mode，无原生 Plan |
+| `kaz-context-policy` | `kaz-context-policy` | 内部 Cordis 插件：`context_search` / `context_read` / `context_compress` + 压缩 provider；经 `agent.cordis.yml` compaction 组（id `compaction-kaz`）按名称挂载，不经 cordis.patch 插入，无需单独开启 |
 
 其中几个值得知道的插件（完整清单见上表）：
 
@@ -179,7 +181,7 @@ DeepSeek 收到提示词后直接读对应指引文件，不要读本 README：
 ## 七、常见问题 / 踩坑
 
 - **把插件复制到 `plugins` 而不是 `KazPlugins`**：`package.json` 里写的是 `file:KazPlugins/...`，目录不对会找不到包或装成两份。
-- **把预设复制成 `KazPlugins/kaz-mode/kaz-preset`**：那是插件内置的预设副本，不是仓库根目录的 `kaz/` 预设源；预设发现不会递归扫描。
+- **预设来源搞错**：预设只以仓库根目录 `kaz/` 为准（安装到 `.agent-presets/kaz`）；`kaz-mode` 不再内置预设副本，不要从其它位置复制预设。
 - **预设目录名写成 `Kaz` / `KazMode`**：preset id 必须匹配 `^[a-z0-9][a-z0-9-]*$`，所以用 `kaz`。
 - **改完 `cordis.patch.yml` 不重启**：设置段（settings.yaml）可热重载，但插件装配和代码改动必须重启 dsh web。
 - **`npm install` 报 scripts 相关错误**：先执行 `Remove-Item Env:npm_config_allow_scripts`。
@@ -199,7 +201,6 @@ DeepSeek 收到提示词后直接读对应指引文件，不要读本 README：
 | `KazPlugins/<插件名>/lib/index.js` | 插件宿主逻辑（ESM） |
 | `KazPlugins/<插件名>/lib/client.js` | 部分插件的 Web 客户端逻辑 |
 | `KazPlugins/<插件名>/README.md` | 部分插件的独立说明 |
-| `KazPlugins/kaz-mode/kaz-preset/` | kaz-mode 内置的预设副本（安装预设时不从这里取） |
 | `kaz/preset.yml` | `kaz` 预设的显示名称与描述 |
 | `kaz/agent.cordis.yml` | `kaz` 预设的完整 Cordis 组合定义 |
 | `ds安装指引.md` | 给 DeepSeek 的全新安装步骤（决策完备，唯一做法） |
@@ -211,7 +212,7 @@ DeepSeek 收到提示词后直接读对应指引文件，不要读本 README：
 
 ### 8.2 发版提醒（给未来的我和 agent）
 
-Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段（当前仓库为 **6.0.2**）。
+Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段（当前仓库为 **6.0.3**）。
 
 **发新版本时，务必同步修改 `KazPlugins/kaz-mode/package.json` 里的 `version`，否则面板会用旧版本号和 GitHub tag 比较，产生错误的新版本提醒。**
 
@@ -227,7 +228,7 @@ node KazPlugins/kaz-mode/check-version.mjs
 
 ## 附录 A：`cordis.patch.yml` 完整示例
 
-完整内容（**8 个 Kaz insert 块**：ka-whale-memory / plugin-filter / kaz-mode / kaz-agent-preset-display / output-beep / round-display / deepseek-default-model / ka-whale-workflow；目标机上非 Kaz 自定义块如 `kaz-skill-*` 保留）见 **`ds安装指引.md` 第 6 步** / **`ds更新指引.md` 第 8 步**，README 不再重复维护，避免两处漂移。安装 / 更新时按指引步骤操作即可。
+完整内容（**8 个 Kaz insert 块**：ka-whale-memory / plugin-filter / kaz-mode / kaz-agent-preset-display / output-beep / round-display / deepseek-default-model / ka-whale-workflow；**不含内部 kaz-context-policy**——它由 `agent.cordis.yml` compaction 组按名称挂载；目标机上非 Kaz 自定义块如 `kaz-skill-*` 保留）见 **`ds安装指引.md` 第 6 步** / **`ds更新指引.md` 第 8 步**，README 不再重复维护，避免两处漂移。安装 / 更新时按指引步骤操作即可。
 
 ## 附录 B：`settings.yaml` 说明（纯方案 A）
 
@@ -236,7 +237,7 @@ node KazPlugins/kaz-mode/check-version.mjs
 - `~/.dsh/storages/kaz-defaults.json`（Kaz / 非Kaz 模式默认，自动创建）
 - `<项目>/.dsh/storages/kaz-project-states.json`（项目专属覆盖，同一项目所有对话共享，修改时自动创建）
 
-settings.yaml 仅承载 kaz-mode 和补丁插件的设置（这两个都有自愈写入）。被管理插件在 **Kaz 面板** 里改，「专属设置」按项目隔离（像工具控制面板一样），不再是按对话隔离。旧的 `kaz-session-states.json` 已不再读取，可直接删除。
+settings.yaml 仅承载 kaz-mode 和补丁插件的设置（这两个都有自愈写入）。被管理插件在 **Kaz 面板** 里改，「专属设置」按项目隔离（像工具控制面板一样），同一项目所有对话共享。旧的 `kaz-session-states.json` 已不再读取，可直接删除。
 
 ---
 

@@ -98,6 +98,7 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 "deepseek-default-model": "file:KazPlugins/deepseek-default-model",
 "ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
 "kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
+"kaz-context-policy": "file:KazPlugins/kaz-context-policy",
 "ka-whale-memory": "file:KazPlugins/ka-whale-memory",
 "kaz-mode": "file:KazPlugins/kaz-mode",
 "kaz-shared": "file:KazPlugins/kaz-shared",
@@ -106,7 +107,7 @@ Remove-Item "$env:USERPROFILE\.dsh\storages\kaz-session-states.json" -Force -Err
 "round-display": "file:KazPlugins/round-display",
 ```
 
-注意：`kaz-shared` 是必需依赖，漏装会导致 kaz-mode / ka-whale-memory / plugin-filter 加载失败；当前版本已删除 `round-minimal` 与 `create-plan`，**不要**把它们加回 package.json。
+注意：`kaz-shared` 是必需依赖，漏装会导致 kaz-mode / ka-whale-memory / plugin-filter 加载失败；当前版本已删除 `round-minimal` 与 `create-plan`，**不要**把它们加回 package.json。上面 Kaz 相关依赖共 **10 行**（9 个插件 + `kaz-shared`）；其中 `kaz-context-policy` 是随 kaz 预设使用的内部 compaction/context 插件，它在 `kaz/agent.cordis.yml` 的 compaction 组（`compaction-kaz`）按名称挂载，**不进入**第 8 步的 insert 块；依赖不能漏，漏装会让 preset 解析不到。
 
 文件用 UTF-8 **无 BOM** 保存。用 edit 工具改即可；若必须用 PowerShell 写文件，用（不要用 `Set-Content -Encoding UTF8`）：
 
@@ -235,6 +236,7 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 
 注意：
 - 上面是当前 `cordis.patch.yml` 中的 **8 个 Kaz insert 块**（不含 `kaz-skill-*` 私有块）；私有块按本步第 2 条保留在目标机已有位置。
+- 若旧配置里出现 `id: kaz-context-policy` 的 insert 块，应**删除**它：`kaz-context-policy` 是内部插件，只由 `kaz/agent.cordis.yml` 的 compaction 组按名称挂载，不属于本步的 8 个 insert 块。
 - 已没有 `create-plan` 插件 / 依赖行，Kaz v0.9 也没有原生 Plan 模式；**不要**把 `create_plan`、`/plan` 或 `create-plan` 相关行加回。
 - `kaz-mode` 默认 `enabled: false` 是**正常**的，它由"选择 kaz 预设"这一动作联动开启，**不要改成 true**。
 
@@ -244,7 +246,7 @@ npm.cmd prune --legacy-peer-deps --no-audit --no-fund
 
 **跳过本步骤，不要动 `%USERPROFILE%\.dsh\settings.yaml`。**
 
-原因（纯方案 A）：被管理插件（含 ka-whale-workflow）配置由 kazMode 服务自动从 `~/.dsh/storages/kaz-defaults.json` + `<项目>/.dsh/storages/kaz-project-states.json` 读取（自动创建）；工具面固定为代码级 Stable Main / workflow 面，工具控制面板只读展示并维护候选；`whale_report` 固定常驻，模式只有 normal / goal。已无 `create_plan`，`ka_tool_auto_on_setting.json` 不再被 Kaz 读取或写入。settings.yaml 只保留 kaz-mode / agent-default-model / agent-presets 等少量段，都有自愈写入。
+原因（纯方案 A）：被管理插件（含 ka-whale-workflow）配置由 kazMode 服务自动从 `~/.dsh/storages/kaz-defaults.json` + `<项目>/.dsh/storages/kaz-project-states.json` 读取（自动创建）；工具面固定为代码级 Stable Main / workflow 面，工具控制面板只读展示并维护候选；`whale_report` 固定常驻、仅做阶段记账；Goal mode 已移除。已无 `create_plan`，`ka_tool_auto_on_setting.json` 不再被 Kaz 读取或写入。settings.yaml 只保留 kaz-mode / agent-default-model / agent-presets 等少量段，都有自愈写入。
 
 若你在 settings.yaml 里看到旧版残留的 `toolWhitelist` / `minimalTools` / 被管理插件段，可以顺手删除这些字段；不删也不影响（新代码不读）。
 
@@ -273,8 +275,8 @@ dsh.cmd --profile web --dump-config
 >
 > 重启后自查：
 > - 新对话的思考内出现 "We need" / "Let's"，不再出现 "Let me"；
-> - 首次工具调用前工具面是极简状态（Kaz 恒开 ka-whale-memory → 只有 `memory_search`）；
-> - 第一次工具调用后恢复 Stable Main Surface（代码级固定面）；
+> - 首次工具调用前工具面是极简状态（`memory_search` + `context_search`）；
+> - 首次工具调用后恢复 Stable Main Surface（代码级固定面）；
 > - Kaz 面板出现各被管理插件的开关行。
 
 ---
