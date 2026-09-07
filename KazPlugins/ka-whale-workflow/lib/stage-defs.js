@@ -316,7 +316,7 @@ Before finishing:
 - Report should be at communication stage.
 
 Context tidying:
-- If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.
+- If we want to advance to communication, CONSIDER **compass_context_before_communication** FIRST for KEEPING THE SESSION TIDY(IMPORTANT).
 
 After calling work_sub_whale_report, do not call more tools. Write the full report as the final message, end the turn, and wait for the parent reply (received as subagent-settled).`,
     },
@@ -392,7 +392,7 @@ Report structure:
       ],
       canAdvance: ["communication", "compass_context_before_communication"],
       task:
-        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. If we want to advance to communication, CONSIDER **compass_context_before_communication** FIRST for KEEPING THE SESSION TIDY(IMPORTANT)",
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "memory_sub_whale_report"],
@@ -454,7 +454,7 @@ Report structure:
       ],
       canAdvance: ["update-plugin", "retire-plugin", "communication", "compass_context_before_communication"],
       task:
-        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. If we want to advance to communication, CONSIDER **compass_context_before_communication** FIRST for KEEPING THE SESSION TIDY(IMPORTANT)",
     },
     "update-plugin": {
       allowedTools: [
@@ -475,7 +475,7 @@ Report structure:
       ],
       canAdvance: ["create-plugin", "retire-plugin", "communication", "compass_context_before_communication"],
       task:
-        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. If we want to advance to communication, CONSIDER **compass_context_before_communication** FIRST for KEEPING THE SESSION TIDY(IMPORTANT)",
     },
     "retire-plugin": {
       allowedTools: [
@@ -492,7 +492,7 @@ Report structure:
       ],
       canAdvance: ["create-plugin", "update-plugin", "communication", "compass_context_before_communication"],
       task:
-        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
+        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. If we want to advance to communication, CONSIDER **compass_context_before_communication** FIRST for KEEPING THE SESSION TIDY(IMPORTANT)",
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "plugin_maintainer_sub_whale_report"],
