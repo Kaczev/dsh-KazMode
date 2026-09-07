@@ -41,7 +41,6 @@ export const WORKING_RESUMED_STAGE = "working-resumed";
 export const WORKER_STAGE_IDS = Object.freeze([
   "assess-complexity",
   "challenge-plan",
-  "check-tools",
   "working",
   "compass_context_before_communication",
   "communication",
@@ -286,19 +285,13 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
         "web_search",
         "work_sub_whale_report",
       ],
-      canAdvance: ["check-tools"],
+      canAdvance: ["working"],
       task:
         `Critique the assigned task first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose concrete enhancements that would make the result more polished, practical, and balanced — avoid extremes of over-engineering or under-delivering, and keep the solution appropriate to the task's complexity.
 
 When proposing improvements, be specific. Instead of vague suggestions, spell out concrete trade-offs, scope adjustments, priority shifts, edge cases, or user expectations that should be considered. Present these ideas clearly to the parent main agent and wait for its decision before proceeding. Do not assume approval — the parent must confirm or adjust.
 
 Do not write task plans here and do not call ka_sub_whale. Ask the parent main agent for clarification when the task intent is unclear.`,
-    },
-    "check-tools": {
-      allowedTools: ["context_search", "context_read", "work_sub_whale_report"],
-      canAdvance: ["working", "communication", "compass_context_before_communication"],
-      task:
-        "Verify whether assigned tools are enough. Advance to working, or to communication only for a genuine blocker. Do not report tool insufficiency before reaching working. If we want to advance to communication, consider compass_context_before_communication first for keeping the session tidy.",
     },
     working: {
       allowedTools: [
