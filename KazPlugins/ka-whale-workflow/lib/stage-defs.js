@@ -135,22 +135,25 @@ Only these private plugins and tool_jobs(job_list, job_output, job_kill) may be 
       task:`Create and finalize the complete task plan via "whale_report(finalPlanPayload)".
 
 PlanItem rules:
-- Use separate planItems per coherent task. Do not pack all work into one planItem.
-- "worker" planItems: delegated individually during the Working stage.
-- "memoryMaintainer" planItems: reserved for long-term memory maintenance. Create at least one memoryMaintainer planItem if the work produces new insights, lessons learned, or reusable patterns — even if you are not certain they need to be saved.
-- "pluginMaintainer" planItems: create a new private plugin only when existing plugins cannot meet the task requirements. Consider this when you notice repetitive work that could be automated.
+- One planItem per coherent task. Do not pack all work into one.
+- "worker": delegated individually during Working.
+- "memoryMaintainer": create at least one if the work produces new insights, lessons, or reusable patterns — even if uncertain.
+- "pluginMaintainer": create a new private plugin only when existing plugins cannot meet requirements (e.g., repetitive work that could be automated).
 
-Delegation rules:
-- Delegate every worker planItem to a subagent via "ka-sub-whale". Do not execute planItems directly.
-- Distribute tasks across multiple subagents when appropriate. Consider splitting heavy tasks into smaller, parallelizable pieces when dependencies allow.
-- When a task involves building or modifying a complex system, break it down by its natural subsystems or functional modules. Each subsystem should be a separate planItem with its own subagent, as long as they can be developed independently and integrated later.
-- Do not assign a large, multi-part task to a single subagent if it can be divided into parallel work streams. Prefer parallel execution over sequential when the work allows it.
-- When deciding which subagent to use: check whether an existing idle subagent has relevant expertise from previous tasks. Reuse it if possible; create a new one only when no suitable subagent is available.
-- For each delegated task, provide the fullest possible task description — include objective, detailed step-by-step actions, expected outputs, constraints, relevant context, assumptions, and potential pitfalls. When in doubt, include the information. Do not assume the subagent can infer what you mean; spell everything out.
-- Assigned tools cannot exceed 8 tools per planItem.
+Delegation and splitting rules:
+- Delegate every worker planItem via "ka-sub-whale". Do not execute directly.
+- Split heavy tasks into smaller, parallelizable pieces when dependencies allow.
+- For complex systems, break down by natural subsystems or functional modules — each as its own planItem with its own subagent, as long as they can be developed independently and integrated later.
+- Prefer parallel execution over sequential when possible.
+- Reuse existing idle subagents with relevant expertise; create new ones only when none suitable exists.
+- For each delegated task, provide the fullest possible description: objective, detailed step-by-step actions, expected outputs, constraints, relevant context, assumptions, potential pitfalls. When in doubt, include it. Spell everything out — do not assume the subagent can infer.
+- Max 8 tools per planItem.
+- Single delivery file (e.g., one HTML) is not a reason to use one subagent. Split when: >~300 lines of code, spans multiple domains (geometry/physics/rendering/UI), has independently verifiable acceptance criteria, or would benefit from independent review.
+- Every build-type task should include at least one "builder" and one "reviewer" planItem. The reviewer checks against requirements to avoid "author verifying own work."
+- Before finalizing, ask: "Is there at least one verification step independent of the builder?" If not, the plan is insufficiently split.
 
 Amendment rules:
-- In amendment mode, read the current plan first, persist the revised plan, then advance.
+- In amendment mode: read current plan first, persist revised plan, then advance.
 
 Communication rules:
 - Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,

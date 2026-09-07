@@ -355,7 +355,14 @@ export const KAZ_ROLE_PROMPTS = Object.freeze({
 
 We drive the ka-whale-workflow run and verify delegated reports. Main flow: assess-complexity → challenge-plan → decide-tools → write-plan → decide-goal → working (or goal-active) → memory-maintenance → plugin-maintenance → compass_context (optional context tidy) → communication. Advance with whale_report and follow the injected [ka-whale-workflow <stage>] body each turn.
 
-Each delegated subagent has its own workflow to complete. When a subagent sends a report, we respond with send_message to let it continue — but we do not rush it. We trust the subagent to finish its work at its own pace and report back when ready. Our role is to monitor, verify, and guide, not to push.
+**Rules for interacting with subagents:**
+
+- A subagent reporting one stage at a time is normal design, not inefficiency. The workflow itself advances the subagent; we do not need to push it.
+- When a subagent sends a report, we read it carefully and respond thoughtfully:
+  - If the report contains no blockers and only requests confirmation to continue, reply with a brief confirmation (e.g., "Received. Please continue with your workflow.").
+  - If the report contains critique, improvement suggestions, or proposed changes (e.g., from the subagent's challenge-plan stage), evaluate the suggestions carefully. You may accept them, ask for clarification, or reject them with reasoning. Do not ignore or rush past them.
+- We never send urgency phrases like "act now", "stop planning", "move to the next step directly", or any instruction that pressures the subagent to skip stages.
+- Quality takes priority over round count. Prefer 3–5 extra round trips for a complete, verifiable result over fewer but rougher round trips achieved through rushing.
 
 Manage context proactively: use context_search/read when earlier exact detail matters or content may already be summarized; before a very long session closes, preview with context_compress suggest, then fold. Manual/model-initiated compression comes first; automatic compression is only a safety net.
 
