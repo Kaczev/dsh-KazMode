@@ -16,8 +16,8 @@
 //      36.9 round-minimal 已删除，本插件直接拥有首阶段 Minimal）：
 //        - 首次工具调用前：仅保留首轮工具集（≤2）；
 //        - 首次工具调用后：Stable Main Surface = KAZ_STABLE_MAIN_TOOLS（v0.9
-//          §1.1 固定 22 项，M3.3 含 context_compress/context_read/context_search，不含旧
-//          subagent/create_goal）。
+//          §1.1 固定 20 项，M3.3 含 context_compress/context_read/context_search，不含旧
+//          subagent/create_goal/get_goal/update_goal）。
 //          不再恢复“工具面板 JSON 全量”；旧 JSON 只作兼容读；纯
 //          minimal → Stable Main 一次变化（原生 Plan 例外已删除）。
 //        - v0.9 B5：ka-whale-memory / ka-whale-workflow 在 Kaz 恒开，固定面完整；
@@ -108,7 +108,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
     enabled: false,
     generation_kwargs: { temperature: 0.9, top_p: 0.95, repetition_penalty: 1.2 },
   },
-  "ka-whale-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
+  "ka-whale-memory": { enabled: false, guidance: "", guidanceHeadEnabled: false, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "ka-whale-workflow": {
     enabled: false,
     includeSubagents: false,
@@ -123,14 +123,18 @@ const FACTORY_NON_KAZ_DEFAULTS = {
 
 /** 出厂默认（Kaz 模式）：Kaz 插件初始默认全开。 */
 /** 默认不开启kaz-memory的guidanceHeadEnabled，因为有系统提示词 */
+/** 默认不开启output-beep，避免用户觉得奇怪 */
 const FACTORY_KAZ_DEFAULTS = {};
 for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   FACTORY_KAZ_DEFAULTS[id] = { ...cfg, enabled: true };
   if (id === "round-display") {
     FACTORY_KAZ_DEFAULTS[id].enabled = false;
   }
-  if (id === "ka-whale-memory") {
+  else if (id === "ka-whale-memory") {
     FACTORY_KAZ_DEFAULTS[id].guidanceHeadEnabled = false;
+  }
+  else if (id === "output-beep") {
+    FACTORY_KAZ_DEFAULTS[id].enabled = false;
   }
 }
 
@@ -1087,9 +1091,7 @@ export default {
           stage.length > 0 &&
           stage !== "idle" &&
           stage !== "done" &&
-          stage !== "end" &&
-          stage !== "goal-active" &&
-          stage !== "working-resumed"
+          stage !== "end"
         ) {
           return false;
         }
@@ -1215,7 +1217,7 @@ export default {
      *
      * v0.8 Step A/B1 语义：
      *   - 主模型：minimal（首次工具调用前 ≤2）→ Stable Main Surface
-     *     （KAZ_STABLE_MAIN_TOOLS v0.9 固定 22 项，M3.3 含 context 三工具）；一次变化。
+     *     （KAZ_STABLE_MAIN_TOOLS v0.9 固定 20 项，M3.3 含 context 三工具）；一次变化。
      *   - 子代理：minimal → Stable Subagent Base（Step A 尚无 per-task assigned
      *     工具通道，assignedTools 由后续受控委派 Step 接入）。
      *   - 代码级固定集优先：旧 tool-plugin JSON 只作兼容读，不决定固定成员是否可见。

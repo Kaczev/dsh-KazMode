@@ -217,11 +217,10 @@ export const KAZ_V09_SUB_WHALE_REPORT_TOOLS = Object.freeze([
   "plugin_maintainer_sub_whale_report",
 ]);
 
-/** v0.9 Stable Main Surface（§1.1，22 个；M3.3 含 context_compress/context_search/context_read；不含 create_goal/subagent）。 */
+/** v0.9 Stable Main Surface（§1.1，20 个；M3.3 含 context_compress/context_search/context_read；不含 get_goal/update_goal/create_goal/subagent）。 */
 export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "ask_user_question",
   "edit",
-  "get_goal",
   "glob",
   "grep",
   "memory_detail",
@@ -237,15 +236,14 @@ export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "send_message",
   "interrupt_agent",
   "todo_write",
-  "update_goal",
   "web_search",
   "whale_report",
   "write",
 ]);
 
 /**
- * Stable Main Surface = v0.9 固定 22 项（M3.3 加入 context_compress/context_search/context_read）。
- * B5 后不再保留旧 subagent / create_goal 常量。
+ * Stable Main Surface = v0.9 固定 20 项（M3.3 加入 context_compress/context_search/context_read）。
+ * B5 后不再保留旧 subagent / create_goal 常量；Goal mode 移除后也不保留 get_goal/update_goal。
  */
 export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([...KAZ_V09_MAIN_TOOLS]);
 
@@ -353,7 +351,7 @@ export function stableSubagentSurface({ baseTools = KAZ_SUBAGENT_BASE_TOOLS, ass
 export const KAZ_ROLE_PROMPTS = Object.freeze({
   main: Object.freeze(`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
 
-We drive the ka-whale-workflow run and verify delegated reports. Main flow: assess-complexity → challenge-plan → decide-tools → write-plan → decide-goal → working (or goal-active) → memory-maintenance → plugin-maintenance → compass_context (optional context tidy) → communication. Advance with whale_report and follow the injected [ka-whale-workflow <stage>] body each turn.
+We drive the ka-whale-workflow run and verify delegated reports. Main flow: assess-complexity → challenge-plan → decide-tools → write-plan → working → memory-maintenance → plugin-maintenance → compass_context (optional context tidy) → communication. Advance with whale_report and follow the injected [ka-whale-workflow <stage>] body each turn.
 
 **Rules for interacting with subagents:**
 

@@ -69,10 +69,6 @@ export const TOOL_PLUGIN_CATALOG = {
   },
   "tool-workflow": {
     "workflow" : false
-  },
-  "goal": {
-    "get_goal" : false,
-    "update_goal" : false
   }
 };
 
@@ -92,8 +88,7 @@ export const TOOL_PLUGINS = {
   "tool-subagent-control" : false,
   "tool-subagent-list-agents" : false,
   "tool-subagent-report" : false,
-  "tool-workflow" : false,
-  "goal" : false
+  "tool-workflow" : false
 }
 
 /** DSH 官方插件（fiber.name 归一化后的 key）。 */
@@ -103,7 +98,6 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
   "tool-bash",
   "tool-fs",
   "tool-fs-search",
-  "tool-goal",
   "tool-jobs",
   "tool-pwsh",
   "tool-ralph",
@@ -113,8 +107,7 @@ export const OFFICIAL_TOOL_PLUGIN_KEYS = [
   "tool-subagent-report",
   "tool-todo",
   "tool-web",
-  "tool-workflow",
-  "goal",
+  "tool-workflow"
 ];
 
 /** Kaz 模式自家插件（用于 UI 面板分栏）。 */

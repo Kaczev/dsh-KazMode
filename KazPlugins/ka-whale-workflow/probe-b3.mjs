@@ -81,23 +81,27 @@ check("各角色 Stable Base 含 context_compress/context_read/context_search", 
     pluginMaintainer: "assess-delegation",
   };
   const roles = ["worker", "memoryMaintainer", "pluginMaintainer"];
-  const contextTools = ["context_search", "context_read", "context_compress"];
+  const roleReports = {
+    worker: "work_sub_whale_report",
+    memoryMaintainer: "memory_sub_whale_report",
+    pluginMaintainer: "plugin_maintainer_sub_whale_report",
+  };
   check(
-    "M3.3 stage-defs 子代理 communication 均含三 context 工具",
-    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify(contextTools)),
+    "37.5 stage-defs 子代理 communication 只含各自 report 工具",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify([roleReports[role]])),
   );
   check(
-    "双层语义：stage-defs 子代理初始 allowedTools 含三 context 工具（Minimal 不再由 stage 收口）",
+    "双层语义：stage-defs 子代理初始 allowedTools 含 context_search/context_read、不含 context_compress（Minimal 不再由 stage 收口）",
     roles.every((role) => {
       const tools = stageDefinitionFor(role, initialStages[role])?.allowedTools ?? [];
-      return contextTools.every((tool) => tools.includes(tool)) && !tools.includes("read");
+      return tools.includes("context_search") && tools.includes("context_read") && !tools.includes("context_compress") && !tools.includes("read");
     }),
   );
 }
 check("worker Stable Base 不含 memory_save/update/forget", ["memory_save", "memory_update", "memory_forget"].every((tool) => !V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes(tool)));
 check("worker Stable Base 含 work_sub_whale_report", V09_SUBAGENT_ROLE_STABLE_BASE.worker.includes("work_sub_whale_report"));
 check("memoryMaintainer Stable Base 含全部记忆写工具", ["memory_save", "memory_update", "memory_forget"].every((tool) => V09_SUBAGENT_ROLE_STABLE_BASE.memoryMaintainer.includes(tool)));
-check("tool-lists KAZ_V09_SUBAGENT_ROLE_TOOLS 与 v09 Stable Base 一致", JSON.stringify(KAZ_V09_SUBAGENT_ROLE_TOOLS) === JSON.stringify(V09_SUBAGENT_ROLE_STABLE_BASE));
+check("tool-lists KAZ_V09_SUBAGENT_ROLE_TOOLS 覆盖 v09 Stable Base（pluginMaintainer 另含 web_search）", ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => V09_SUBAGENT_ROLE_STABLE_BASE[role].every((tool) => KAZ_V09_SUBAGENT_ROLE_TOOLS[role].includes(tool))) && KAZ_V09_SUBAGENT_ROLE_TOOLS.pluginMaintainer.includes("web_search"));
 check("tool-jobs 固定集合", JSON.stringify(V09_TOOL_JOBS) === JSON.stringify(["job_list", "job_output", "job_kill"]));
 
 // ---------- pure layer: candidate registry v2 ----------
@@ -198,7 +202,6 @@ const base = {
     if (name === "settings") return settings;
     if (name === "tools") return toolsMock;
     if (name === "kazMode") return mockKazMode;
-    if (name === "goals") return { get: () => undefined };
     if (name === "roundDisplay") return { report: () => {} };
     if (name === "subagents") {
       return {

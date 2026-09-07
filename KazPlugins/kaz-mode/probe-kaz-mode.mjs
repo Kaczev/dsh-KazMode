@@ -45,7 +45,6 @@ const SESSIONS = {
   "s-plain-mem": { cwd: PROJECT_C, agentPreset: "router-standard" },
   "s-kaz-legacy": { cwd: PROJECT_D, agentPreset: "kaz" },
   "s-kaz-plan": { cwd: PROJECT_A, agentPreset: "kaz" },
-  "s-kaz-goal": { cwd: PROJECT_A, agentPreset: "kaz" },
   // v0.8 Step A：子代理 stable/minimal 会话（带 subagent/descriptor）。
   "s-kaz-sub": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true },
   "s-kaz-sub-min": { cwd: PROJECT_A, agentPreset: "kaz", subagent: true },
@@ -130,9 +129,6 @@ const agentsBySession = new Map();
 for (const [id, info] of Object.entries(SESSIONS)) {
   agentsBySession.set(id, { id, session: { header: { id, cwd: info.cwd, agentPreset: info.agentPreset }, events: eventsOf(id) } });
 }
-/** goal 模式 mock：s-kaz-goal 存在 active 目标。 */
-const goalsByAgent = new Map();
-goalsByAgent.set("s-kaz-goal", { phase: "active" });
 const WHITELIST = ["pwsh", "read", "edit", "web_search", "memory_save", "memory_search"];
 
 /** 鲸鱼工作流 stage mock：kaz-mode 不再消费旧 stage，统一返回 null 即可。 */
@@ -184,7 +180,6 @@ const ctx = {
     if (name in provided) return provided[name];
     if (name === "settings") return settings;
     if (name === "agents") return { get: (sid) => agentsBySession.get(sid) ?? undefined };
-    if (name === "goals") return { get: (agent) => goalsByAgent.get(agent?.id) ?? undefined };
     if (name === "kaWhaleWorkflow") return {
       stageOf: (agent) => whaleStages[agent?.id] ?? null,
       subagentRoleOf: (agent) => {
@@ -262,12 +257,12 @@ const sKazSubCtlStage = agentOf("s-kaz-sub-ctl-stage");
   const sub = kazMode.surfaceOf(sKazSub);
   const subMin = kazMode.surfaceOf(sKazSubMin);
   const subCtlMin = kazMode.surfaceOf(sKazSubCtlMin);
-  check("②.5 Stable Main Surface = 22（v0.9 §1.1；M3.3 含 context 三工具）", stable !== null && stable.size === 22 && stable.has("context_compress") && stable.has("context_read") && stable.has("context_search"));
-  check("②.5 主面含 get_goal/update_goal，不含 create_goal", kazMode.toolVisible(sKaz, "create_goal") === false && kazMode.toolVisible(sKaz, "get_goal") === true && kazMode.toolVisible(sKaz, "update_goal") === true);
+  check("②.5 Stable Main Surface = 20（v0.9 §1.1；M3.3 含 context 三工具）", stable !== null && stable.size === 20 && stable.has("context_compress") && stable.has("context_read") && stable.has("context_search"));
+  check("②.5 主面不含 get_goal/update_goal/create_goal", kazMode.toolVisible(sKaz, "create_goal") === false && kazMode.toolVisible(sKaz, "get_goal") === false && kazMode.toolVisible(sKaz, "update_goal") === false);
   check("②.5 主面含 whale_report/ka_sub_whale/controls，不含旧 subagent", kazMode.toolVisible(sKaz, "whale_report") === true && kazMode.toolVisible(sKaz, "ka_sub_whale") === true && kazMode.toolVisible(sKaz, "list_agents") === true && kazMode.toolVisible(sKaz, "send_message") === true && kazMode.toolVisible(sKaz, "interrupt_agent") === true && kazMode.toolVisible(sKaz, "subagent") === false);
   check("②.5 主面不含 enable_tool/workflow/subagent_fork", kazMode.toolVisible(sKaz, "enable_tool") === false && kazMode.toolVisible(sKaz, "workflow") === false && kazMode.toolVisible(sKaz, "subagent_fork") === false);
   check("②.5 主面不含 exit_plan_mode（v0.8 Step B1：原生 Plan 已移除）", kazMode.toolVisible(sKaz, "exit_plan_mode") === false);
-  check("②.5 Kaz 恒开：记忆关旧状态不再影响固定主面（仍 22 含记忆读/context）", nomem !== null && nomem.size === 22 && nomem.has("memory_search") && nomem.has("memory_list") && nomem.has("memory_detail") && nomem.has("context_compress") && nomem.has("context_read") && nomem.has("context_search") && nomem.has("get_goal"));
+  check("②.5 Kaz 恒开：记忆关旧状态不再影响固定主面（仍 20 含记忆读/context）", nomem !== null && nomem.size === 20 && nomem.has("memory_search") && nomem.has("memory_list") && nomem.has("memory_detail") && nomem.has("context_compress") && nomem.has("context_read") && nomem.has("context_search") && !nomem.has("get_goal"));
   check("②.5 子代理稳定面 = 保守 Subagent Base 14", sub !== null && sub.size === 14 && sub.has("read") && sub.has("context_compress") && sub.has("context_read") && sub.has("context_search") && sub.has("web_search") && !sub.has("create_goal") && !sub.has("whale_report") && !sub.has("subagent") && !sub.has("memory_save"));
   check("②.5 旧/未知子代理首轮回退 memory_search（≤2）", subMin !== null && subMin.size === 1 && subMin.has("memory_search"));
   check("②.5 受控 v0.9 子代理首轮 Minimal 恰为 memory_search+context_search（不含 report/context_compress）", subCtlMin !== null && subCtlMin.size === 2 && subCtlMin.has("memory_search") && subCtlMin.has("context_search") && !subCtlMin.has("work_sub_whale_report") && !subCtlMin.has("context_compress"));
@@ -363,9 +358,9 @@ const runAssemble = async (agent, tools) => {
 const ALL_TOOLS = [...WHITELIST, "workflow", "subagent", "subagent_fork", "create_goal", "get_goal", "update_goal", "whale_report", "ka_sub_whale", "list_agents", "send_message", "interrupt_agent", "enable_tool", "exit_plan_mode", "context_read", "context_search", "context_compress"];
 const kazNames = await runAssemble(sKaz, ALL_TOOLS);
 check("② Kaz 会话：白名单外工具被移除（workflow/subagent_fork/enable_tool/exit_plan_mode）", !kazNames.includes("workflow") && !kazNames.includes("subagent_fork") && !kazNames.includes("enable_tool") && !kazNames.includes("exit_plan_mode"));
-check("② Kaz 会话：v0.9 Stable Main 固定工具保留", kazNames.includes("read") && kazNames.includes("context_compress") && kazNames.includes("context_read") && kazNames.includes("context_search") && kazNames.includes("memory_search") && kazNames.includes("web_search") && kazNames.includes("ka_sub_whale") && kazNames.includes("list_agents") && kazNames.includes("send_message") && kazNames.includes("interrupt_agent") && kazNames.includes("whale_report") && !kazNames.includes("subagent") && !kazNames.includes("create_goal"));
+check("② Kaz 会话：v0.9 Stable Main 固定工具保留", kazNames.includes("read") && kazNames.includes("context_compress") && kazNames.includes("context_read") && kazNames.includes("context_search") && kazNames.includes("memory_search") && kazNames.includes("web_search") && kazNames.includes("ka_sub_whale") && kazNames.includes("list_agents") && kazNames.includes("send_message") && kazNames.includes("interrupt_agent") && kazNames.includes("whale_report") && !kazNames.includes("subagent") && !kazNames.includes("create_goal") && !kazNames.includes("get_goal") && !kazNames.includes("update_goal"));
 const kazNomemNames = await runAssemble(sKazNomem, ALL_TOOLS);
-check("② Kaz 会话（记忆关旧状态）：记忆读恒在、写工具不进、Goal 工具常驻", kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save") && kazNomemNames.includes("get_goal"));
+check("② Kaz 会话（记忆关旧状态）：记忆读恒在、写工具不进、Goal 工具不放行", kazNomemNames.includes("memory_search") && !kazNomemNames.includes("memory_save") && !kazNomemNames.includes("get_goal") && !kazNomemNames.includes("update_goal"));
 
 // ③ 组装层：非 Kaz 会话
 const plainNames = await runAssemble(sPlain, ALL_TOOLS);
@@ -409,11 +404,11 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
   check("⑥ Kaz 会话不再由 kaz-mode 过滤其它提示段", assembly.sections.some((s) => s.name === "other:policy"));
 }
 
-// ⑦ v0.8 Step A/B1/B2：Goal 三件套常驻；原生 Plan 与 kaz_tool_auto_on 均已移除
+// ⑦ v0.8 Step A/B1/B2 + 2026-09：原生 Plan 与 Goal mode 均已移除；旧
+// plan-mode/goal 工具控制 JSON 键只作 legacy 兼容读，不再产生 Plan/Goal 例外。
 {
   const rpc = rpcHandlers.get("/kaz-mode");
   const sKazPlan = agentOf("s-kaz-plan");
-  const sKazGoal = agentOf("s-kaz-goal");
   const sKazBase = agentOf("s-kaz");
 
   // 工具控制 JSON 仍可写旧 plan-mode/goal 键，用于验证固定主面不受这些 JSON 影响。
@@ -435,10 +430,9 @@ check("⑤ 服务判定不依赖全局注册状态（再次查询结果一致）
     "utf8",
   );
 
-  check("⑦ 稳定主面：Goal 读工具常驻、create_goal 不放行、exit_plan_mode 不可见", kazMode.toolVisible(sKazBase, "create_goal") === false && kazMode.toolVisible(sKazBase, "get_goal") === true && kazMode.toolVisible(sKazBase, "update_goal") === true && kazMode.toolVisible(sKazBase, "exit_plan_mode") === false);
-  check("⑦ 旧 plan/mode 事件已不再产生 Plan 例外（exit_plan_mode 不可见）", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false && kazMode.toolVisible(sKazPlan, "create_goal") === false && kazMode.toolVisible(sKazPlan, "get_goal") === true);
-  check("⑦ Goal 会话：Goal 常驻、无 Plan 例外", kazMode.toolVisible(sKazGoal, "get_goal") === true && kazMode.toolVisible(sKazGoal, "update_goal") === true && kazMode.toolVisible(sKazGoal, "exit_plan_mode") === false);
-  check("⑦ whale_report 常驻主面（不再依赖工作流阶段）", kazMode.toolVisible(sKazBase, "whale_report") === true && kazMode.toolVisible(sKazGoal, "whale_report") === true && kazMode.toolVisible(sKazPlan, "whale_report") === true);
+  check("⑦ 旧 plan-mode/goal JSON 键被忽略：create_goal/get_goal/update_goal/exit_plan_mode 均不可见", kazMode.toolVisible(sKazBase, "create_goal") === false && kazMode.toolVisible(sKazBase, "get_goal") === false && kazMode.toolVisible(sKazBase, "update_goal") === false && kazMode.toolVisible(sKazBase, "exit_plan_mode") === false);
+  check("⑦ 旧 plan/mode 事件已不再产生 Plan 例外（exit_plan_mode 不可见）", kazMode.toolVisible(sKazPlan, "exit_plan_mode") === false && kazMode.toolVisible(sKazPlan, "create_goal") === false && kazMode.toolVisible(sKazPlan, "get_goal") === false && kazMode.toolVisible(sKazPlan, "update_goal") === false);
+  check("⑦ whale_report 常驻主面（不再依赖工作流阶段）", kazMode.toolVisible(sKazBase, "whale_report") === true && kazMode.toolVisible(sKazPlan, "whale_report") === true);
 
   const snap = await rpc("getToolAutoOn", { sessionId: "s-kaz-plan" });
   check("⑦ getToolAutoOn 已退役（RPC unknown endpoint）", snap !== null && snap.ok === false);

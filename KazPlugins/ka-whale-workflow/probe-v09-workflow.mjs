@@ -12,11 +12,8 @@ import plugin, {
 import {
   MAIN_ROLE,
   MAIN_STAGE_IDS,
-  GOAL_ACTIVE_STAGE,
-  GOAL_ACTIVE_CONTEXT_TEXT,
   FIRST_ROUND_STARTUP_FORM,
   FIRST_ROUND_STARTUP_TEXT,
-  workingResumedContextText,
   WORKER_STAGE_IDS,
   MEMORY_MAINTAINER_STAGE_IDS,
   PLUGIN_MAINTAINER_STAGE_IDS,
@@ -139,7 +136,6 @@ const base = {
     if (name === "settings") return settings;
     if (name === "tools") return toolsMock;
     if (name === "kazMode") return mockKazMode;
-    if (name === "goals") return { get: () => undefined };
     if (name === "roundDisplay") return { report: (payload) => rdReports.push(payload) };
     if (name === "agents") return { get: (id) => agentRegistry.get(id) };
     if (name === "sessions") return { get: (id) => sessionsRegistry.get(id) };
@@ -288,9 +284,9 @@ childCatalog.set("child-memory-other-surface", {
 }
 
 // 纯函数层
-check("主 stage ids 与 v0.9/compass_context 一致", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools","write-plan","decide-goal","working","memory-maintenance","plugin-maintenance","compass_context","communication"]));
-check("worker/memory/plugin stage ids 齐全且含 compass_context", WORKER_STAGE_IDS.includes("check-tools") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_MAINTAINER_STAGE_IDS.includes("create-plugin") && WORKER_STAGE_IDS.includes("compass_context") && MEMORY_MAINTAINER_STAGE_IDS.includes("compass_context") && PLUGIN_MAINTAINER_STAGE_IDS.includes("compass_context"));
-check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_STAGE) && MAIN_STAGE_IDS.length === 10 && !MAIN_STAGE_IDS.includes("plugin-preflight"));
+check("主 stage ids 9 个且使用完整 stage 名", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools-before-writing-plan","write-plan","working","memory-maintenance","plugin-maintenance","compass_context_before_communication","communication"]));
+check("worker/memory/plugin stage ids 齐全且含 compass_context_before_communication", WORKER_STAGE_IDS.includes("working") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_MAINTAINER_STAGE_IDS.includes("create-plugin") && WORKER_STAGE_IDS.includes("compass_context_before_communication") && MEMORY_MAINTAINER_STAGE_IDS.includes("compass_context_before_communication") && PLUGIN_MAINTAINER_STAGE_IDS.includes("compass_context_before_communication"));
+check("decide-goal/goal-active/working-resumed 均不在 MAIN_STAGE_IDS 且无 Goal 常量导出", !MAIN_STAGE_IDS.includes("decide-goal") && !MAIN_STAGE_IDS.includes("goal-active") && !MAIN_STAGE_IDS.includes("working-resumed") && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight"));
 {
   const roleReportTools = {
     main: "whale_report",
@@ -327,38 +323,34 @@ check("goal-active 不在 MAIN_STAGE_IDS", !MAIN_STAGE_IDS.includes(GOAL_ACTIVE_
     roles.every((role) => !stageDefinitionFor(role, initialStages[role])?.allowedTools.includes("read")),
   );
 }
-check("37.5 新图：decide-tools 只到 write-plan，write-plan 可到 decide-goal/working/maintenance/communication", JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools")?.canAdvance) === JSON.stringify(["write-plan"]) && ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
+check("37.5 新图：decide-tools-before-writing-plan 只到 write-plan，write-plan 可到 working/maintenance/communication", JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools-before-writing-plan")?.canAdvance) === JSON.stringify(["write-plan"]) && ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
 check("37.5 plugin-preflight 无主 stage 定义/无 taskPlanPath 注入", stageDefinitionFor(MAIN_ROLE, "plugin-preflight") === null && !stageInjectionText(MAIN_ROLE, "write-plan").includes("plugin-preflight"));
-check("decide-goal 可推进 working 与 goal-active", canAdvance(MAIN_ROLE, "decide-goal", "working") === true && canAdvance(MAIN_ROLE, "decide-goal", GOAL_ACTIVE_STAGE) === true);
-check("decide-goal 注入含 goal-active task 口径", stageInjectionText(MAIN_ROLE, "decide-goal").includes("Can advance to: [working, goal-active]") && stageInjectionText(MAIN_ROLE, "decide-goal").includes("to enter goal-active"));
-check("decide-goal 注入含 NORMAL/GOAL 选择标准", stageInjectionText(MAIN_ROLE, "decide-goal").includes("NORMAL: completable in this workflow-run") && stageInjectionText(MAIN_ROLE, "decide-goal").includes("GOAL: clear objective that naturally needs multi-round autonomous iteration") && stageInjectionText(MAIN_ROLE, "decide-goal").includes("multi-step is still normal when the task plan can manage it"));
-check("goal-active §2.10 特殊文本存在且含 Context", GOAL_ACTIVE_CONTEXT_TEXT.includes("[ka-whale-workflow goal-active]") && GOAL_ACTIVE_CONTEXT_TEXT.includes("ordinary stage progression is suspended") && GOAL_ACTIVE_CONTEXT_TEXT.includes("get_goal/update_goal") && GOAL_ACTIVE_CONTEXT_TEXT.includes("Context: Before continuing, if earlier exact goal/session content may have been summarized"));
-check("working-resumed §2.11 特殊文本携带实际 taskPlanPath 且含 Task", workingResumedContextText("C:/actual-plan.json").includes("taskPlanPath: C:/actual-plan.json") && workingResumedContextText("C:/actual-plan.json").includes("workflow resumes as if working finished") && workingResumedContextText("C:/actual-plan.json").includes("Task: Continue as working-ended"));
+check("decide-goal 已移除：无主 stage 定义、write-plan 不可推进、注入为空", stageDefinitionFor(MAIN_ROLE, "decide-goal") === null && canAdvance(MAIN_ROLE, "write-plan", "decide-goal") === false && stageInjectionText(MAIN_ROLE, "decide-goal") === "");
+check("goal-active/working-resumed 特殊文本导出已不存在", !Object.keys(await import("./lib/stage-defs.js")).some((key) => key === "GOAL_ACTIVE_CONTEXT_TEXT" || key === "workingResumedContextText" || key === "GOAL_ACTIVE_STAGE" || key === "WORKING_RESUMED_STAGE"));
 check("write-plan 注入格式含 taskPlanPath", stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/plan.json" }).includes("taskPlanPath: C:/plan.json"));
 check("create-plugin 注入格式含 lifecyclePath", stageInjectionText("pluginMaintainer", "create-plugin", { lifecyclePath: "C:/lifecycle.md" }).includes("lifecyclePath: C:/lifecycle.md"));
 check("Context 注记：STAGE_CONTEXT_NOTES 冻结且覆盖目标角色/stage", STAGE_CONTEXT_NOTES !== undefined && Object.isFrozen(STAGE_CONTEXT_NOTES) && ["main", "worker", "memoryMaintainer", "pluginMaintainer"].every((role) => Object.isFrozen(STAGE_CONTEXT_NOTES[role])));
-check("Context 注记：有注记 stage 在 Task 后输出，无注记 stage 不输出", ["main", "worker"].every((role) => stageInjectionText(role, "assess-complexity").includes("\nContext: ") && stageInjectionText(role, "challenge-plan").includes("\nContext: ")) && stageInjectionText("main", "communication").includes("context_compress suggest") && stageInjectionText("worker", "communication").includes("\nContext: ") && stageInjectionText("memoryMaintainer", "communication").includes("\nContext: ") && stageInjectionText("pluginMaintainer", "communication").includes("\nContext: ") && !stageInjectionText(MAIN_ROLE, "working").includes("Context:"));
+check("Context 注记：有注记 stage 在 Task 后输出，无注记 stage 不输出", ["main", "worker"].every((role) => stageInjectionText(role, "assess-complexity").includes("\nContext: ") && stageInjectionText(role, "challenge-plan").includes("\nContext: ")) && stageInjectionText("main", "communication").includes("\nContext: ") && stageInjectionText("worker", "communication").includes("\nContext: ") && stageInjectionText("memoryMaintainer", "communication").includes("\nContext: ") && stageInjectionText("pluginMaintainer", "communication").includes("\nContext: ") && !stageInjectionText(MAIN_ROLE, "working").includes("Context:"));
 check("Minimal 提示由 stageInjectionText 可选 minimalTools 参数承载：有值输出、缺省不输出", stageInjectionText("worker", "assess-complexity", { minimalTools: ["memory_search", "context_search"] }).includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.") && !stageInjectionText("worker", "assess-complexity").includes("Minimal (first round only):"));
 check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity", "working") === false);
 {
   const challengeDef = stageDefinitionFor(MAIN_ROLE, "challenge-plan");
   const workerChallengeDef = stageDefinitionFor("worker", "challenge-plan");
-  const workerCheckToolsDef = stageDefinitionFor("worker", "check-tools");
   const workingText = stageInjectionText(MAIN_ROLE, "working", { taskPlanPath: "C:/plan.json" });
   const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
   check("challenge-plan 不持有 ka_sub_whale 且任务禁止写 plan/调用子代理", !challengeDef?.allowedTools.includes("ka_sub_whale") && typeof challengeDef?.task === "string" && challengeDef.task.includes("Do not write task plans here") && challengeDef.task.includes("do not call ka_sub_whale"));
   check("主 challenge-plan task 含批评纪律", typeof challengeDef?.task === "string" && challengeDef.task.includes("Critique the approach first") && challengeDef.task.includes("identify real weaknesses") && challengeDef.task.includes("do not manufacture criticism"));
-  check("worker challenge-plan task 含批评纪律", typeof workerChallengeDef?.task === "string" && workerChallengeDef.task.includes("Critique the delegation first") && workerChallengeDef.task.includes("do not manufacture criticism"));
-  check("worker challenge-plan 只可推进 check-tools", JSON.stringify(workerChallengeDef?.canAdvance) === JSON.stringify(["check-tools"]));
-  check("worker challenge task 说明文件工具只在 working；check-tools 含不得提前报告与阻断判定", typeof workerChallengeDef?.task === "string" && workerChallengeDef.task.includes("full working file-tool set (edit, write, pwsh, read) is granted in working, not here") && typeof workerCheckToolsDef?.task === "string" && workerCheckToolsDef.task.includes("genuine blocker") && workerCheckToolsDef.task.includes("Do not report tool insufficiency before reaching working"));
-  check("working 只可推进 write-plan/memory-maintenance/compass_context", JSON.stringify(workingDef?.canAdvance) === JSON.stringify(["write-plan", "memory-maintenance", "compass_context"]));
+  check("worker challenge-plan task 含批评纪律", typeof workerChallengeDef?.task === "string" && workerChallengeDef.task.includes("Critique the assigned task first") && workerChallengeDef.task.includes("do not manufacture criticism"));
+  check("worker challenge-plan 只可推进 working", JSON.stringify(workerChallengeDef?.canAdvance) === JSON.stringify(["working"]));
+  check("worker challenge-plan 不保留 check-tools stage", stageDefinitionFor("worker", "check-tools") === null);
+  check("working 只可推进 decide-tools-before-writing-plan/write-plan/memory-maintenance", JSON.stringify(workingDef?.canAdvance) === JSON.stringify(["decide-tools-before-writing-plan", "write-plan", "memory-maintenance"]));
   check("working task 含逐个 worker 委派/维护项保留/强制 memory gate", typeof workingDef?.task === "string" && workingDef.task.includes("delegate each persona=worker plan item individually via ka_sub_whale") && workingDef.task.includes("Do not delegate memory/plugin items here") && workingDef.task.includes("advance to memory-maintenance before communication") && !workingDef.task.includes("plugin-preflight"));
-  check("write-plan task 含按 coherent task 拆分 planItems", typeof stageDefinitionFor(MAIN_ROLE, "write-plan")?.task === "string" && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("separate planItems per coherent task") && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("do not pack all work into one planItem"));
+  check("write-plan task 含按 coherent task 拆分 planItems", typeof stageDefinitionFor(MAIN_ROLE, "write-plan")?.task === "string" && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("One planItem per coherent task") && stageDefinitionFor(MAIN_ROLE, "write-plan").task.includes("Do not pack all work into one."));
   check("write-plan/working/memory/plugin 主阶段不再引用 pluginCreator/plugin-preflight", ["write-plan", "working", "memory-maintenance", "plugin-maintenance"].every((stage) => !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("pluginCreator") && !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("plugin-preflight")));
   check("memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-maintenance", "write-plan") === true);
   check("working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
-  check("working task 含 single subagent-settled 到达且父回复一次 send_message 语义", typeof workingDef?.task === "string" && workingDef.task.includes("single subagent-settled message") && workingDef.task.includes("Reply once with send_message to resume it") && workingDef.task.includes("end the turn; the child's full report arrives"));
-  check("主 working/memory-maintenance/plugin-maintenance 任务含复用口径", stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("Whether to reuse is determined by the main agent") && stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes("memoryMaintainer sub-agent can be reused multiple times") && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes("Whether to reuse is determined by the main agent"));
+  check("working task 含 single subagent-settled 到达且父回复一次 send_message 语义", typeof workingDef?.task === "string" && workingDef.task.includes("single subagent-settled message") && workingDef.task.includes("reply with send_message to resume it") && workingDef.task.includes("child's full report arrives as a single"));
+  check("主 working/memory-maintenance/plugin-maintenance 任务含复用口径", stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message to continue that child") && stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes("memoryMaintainer sub-agent can be reused multiple times") && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes("Whether to reuse is determined by the main agent"));
 }
 
 // Task plan draft/finalized 骨架（planStore 在 plugin.apply 前预写，plugin store 可见）
@@ -399,6 +391,22 @@ check("assess 中调用 memory_search 放行", allowMem.kind === "allow");
 const allowCtxAssess = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));
 check("assess 软闸门放行 context_search/context_read，拒绝 context_compress（当前 assess 不放 compress）", allowCtxAssess?.kind === "allow" && (await preExecute({ name: "context_read", agent }, async () => ({ kind: "allow" })))?.kind === "allow" && (await preExecute({ name: "context_compress", agent }, async () => ({ kind: "allow" })))?.kind === "deny");
 
+// whale_report mode='goal' 已移除：任何阶段都返回结构化 workflow-stage-deny。
+{
+  let goalError = null;
+  try {
+    await whaleReport.execute({ mode: "goal", objective: "x", max_goal_rounds: 3 }, { agent });
+  } catch (error) {
+    goalError = error;
+  }
+  check(
+    "whale_report mode='goal' 被拒绝（workflow-stage-deny + Goal mode has been removed）",
+    goalError !== null &&
+      String(goalError.message).startsWith("workflow-stage-deny:") &&
+      String(goalError.message).includes("Goal mode has been removed"),
+  );
+}
+
 // whale_report 推进到 communication 后再闸门
 const result = await whaleReport.execute({ nextStage: "communication" }, { agent });
 check("whale_report assess→communication", result.ok === true && result.stage === "communication");
@@ -411,9 +419,9 @@ check("communication 软闸门拒绝 context_search/context_read/context_compres
 await claimed({ agent, message: userMessage, turn: 2 });
 check("36.5 communication 收到新一轮真实用户消息进入 assess-complexity", JSON.parse(readFileSync(STORE_FILE, "utf8")).sessions?.["s-v09"] === "assess-complexity");
 
-// 37.5 runtime: reach working through decide-tools → write-plan → decide-goal.
+// 37.5 runtime: reach working through decide-tools-before-writing-plan → write-plan.
 await whaleReport.execute({ nextStage: "challenge-plan" }, { agent });
-await whaleReport.execute({ nextStage: "decide-tools" }, { agent });
+await whaleReport.execute({ nextStage: "decide-tools-before-writing-plan" }, { agent });
 let draftPayloadError = null;
 try {
   await whaleReport.execute(
@@ -423,7 +431,7 @@ try {
 } catch (error) {
   draftPayloadError = error;
 }
-check("decide-tools 拒绝 draftPlanItems（只能在 write-plan 写入 task plan）", draftPayloadError !== null && String(draftPayloadError.message).includes("write-plan"));
+check("decide-tools-before-writing-plan 拒绝 draftPlanItems（只能在 write-plan 写入 task plan）", draftPayloadError !== null && String(draftPayloadError.message).includes("write-plan"));
 let badPayloadError = null;
 try {
   await whaleReport.execute(
@@ -433,9 +441,9 @@ try {
 } catch (error) {
   badPayloadError = error;
 }
-check("decide-tools 拒绝 finalPlanPayload（只能在 write-plan）", badPayloadError !== null && String(badPayloadError.message).includes("write-plan"));
+check("decide-tools-before-writing-plan 拒绝 finalPlanPayload（只能在 write-plan）", badPayloadError !== null && String(badPayloadError.message).includes("write-plan"));
 const defaultToWritePlan = await whaleReport.execute({}, { agent });
-check("whale_report 从 decide-tools 默认推进到 write-plan", defaultToWritePlan.ok === true && defaultToWritePlan.stage === "write-plan");
+check("whale_report 从 decide-tools-before-writing-plan 默认推进到 write-plan", defaultToWritePlan.ok === true && defaultToWritePlan.stage === "write-plan");
 await whaleReport.execute(
   {
     finalPlanPayload: {
@@ -447,11 +455,10 @@ await whaleReport.execute(
         { planItemId: "p-maintainer", persona: "pluginMaintainer", task: "Maintain plugin", assignedTools: [] },
       ],
     },
-    nextStage: "decide-goal",
+    nextStage: "working",
   },
   { agent },
 );
-await whaleReport.execute({ nextStage: "working" }, { agent });
 
 // 36.8 stage-persona mapping runtime: the runtime is already in working; verify
 // each stage only delegates its mapped persona.

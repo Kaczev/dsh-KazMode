@@ -257,7 +257,7 @@ window.__ModuleLoader__.load({
 					createElement(
 						"p",
 						{ className: "rd-note" },
-						"「当前轮」只显示该会话最近一轮（每次用户消息 = 一轮）的白名单注入；「全部轮次」显示落盘持久化的历史，child 会话结束 / dsh 重启后仍可查询。白名单（v0.9 B6）：系统提示词快照、工具面变化、稳定边界、Goal 上下文通知、任务契约、子代理 report 摘要、记忆快照注入。阶段切换 / whale_report 逐次噪音不再显示。格式：[插件名]>（信息内容）<。",
+						"「当前轮」只显示该会话最近一轮（每次用户消息 = 一轮）的白名单注入；「全部轮次」显示落盘持久化的历史，child 会话结束 / dsh 重启后仍可查询。白名单（v0.9 B6，2026-09 收敛六类）：系统提示词快照、工具面变化、稳定边界、任务契约、子代理 report 摘要、记忆快照注入。阶段切换 / whale_report 逐次噪音不再显示。格式：[插件名]>（信息内容）<。",
 						lastRpcError.length > 0 && createElement("span", { className: "rd-note" }, "  RPC 通道未就绪：" + lastRpcError),
 					),
 					createElement(

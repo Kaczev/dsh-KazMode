@@ -13,12 +13,12 @@
   （v0.9 §9.1 完整 Persona），不再叠加第二段 role body；受控子代理保留
   `KAZ_ROLE_PROMPTS.subagent.*` 原样 persona；
 - **工具面两阶段（无 round-minimal 插件）**：首次工具调用前由 kaz-mode 核心 Minimal 收敛（Kaz 恒开 ka-whale-memory → 只有 `memory_search`），首次工具调用后恢复代码级固定的 Stable Main Surface；真实工具面增删以 `category=tool-surface` 上报 round-display；
-- **工作流模式选择**：ka-whale-workflow 在 decide-goal 阶段用 `whale_report` 选择 **normal / goal**；**没有原生 Plan 模式**，没有 `create_plan`。
+- **工作流主流程（无 decide-goal / Goal mode）**：ka-whale-workflow 从 `write-plan` 直接进入 `working`，随后 `memory-maintenance`；Kaz 不再有 decide-goal / goal-active / working-resumed，也不挂载 Goal mode / `tool-goal`。没有原生 Plan 模式，没有 `create_plan`。
 - **配置按对话隔离**：每个对话、每种模式（Kaz / 非 Kaz）都有独立的插件开关与参数，在 **Kaz 面板**里调整，互不干扰；
 - **功能按插件分离**：Kaz模式的功能是按插件分离的。如果仅想要Kaz模式的部分功能，也可以在 **Kaz面板** 里面单独开启；
 - **工具精选 / 固定面**：Kaz 首次工具调用前只有极简 Minimal，之后恢复代码级固定的 Stable Main Surface；其它插件工具默认不直接进入主面，需作为候选经受控委派 / 任务计划选择（不推荐加很多）。
 
-- **注意：Kaz v0.9 没有原生 Plan 模式，`/plan` 与 `create_plan` 不适用；Goal 走官方 Goal 工具 / `whale_report({mode:'goal'})`，无需在工具面板手动开启固定面工具。**
+- **注意：Kaz v0.9 没有原生 Plan 模式，`/plan` 与 `create_plan` 不适用；Goal mode / `tool-goal` 也已从 Kaz 移除（非 Kaz 预设仍可保留官方 Goal）。**
 - **推荐思考强度在high及以上**，low容易使用let me思维链。
 
 > 有小概率出现Let me开始思考，但是无需担心，很快会变回Let's、We的表述
@@ -140,7 +140,7 @@ dsh-KazMode/
 | `round-display` | `round-display` | 显示每轮 Kaz 联动/附属插件给模型注入的信息 |
 | `deepseek-default-model` | `deepseek-default-model` | DeepSeek 采样参数：generation_kwargs（temperature / top_p / repetition_penalty）；默认模型由官方面板管理 |
 | `ka-whale-memory` | `ka-whale-memory` | 跨会话明文记忆：`memory_save/update/list/search/detail/forget` 六工具 + 自动载入 |
-| `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流（v0.9）：主/子阶段机 + tools/pre-execute 软闸门 + task plan 持久化 + `ka_sub_whale` 受控委派（worker / memoryMaintainer / pluginMaintainer）+ 子代理 report；`whale_report` 模式只有 normal / goal，无原生 Plan |
+| `ka-whale-workflow` | `ka-whale-workflow` | 鲸鱼工作流（v0.9）：主/子阶段机 + tools/pre-execute 软闸门 + task plan 持久化 + `ka_sub_whale` 受控委派（worker / memoryMaintainer / pluginMaintainer）+ 子代理 report；Kaz 主流程无 Plan/Goal mode，无原生 Plan |
 
 其中几个值得知道的插件（完整清单见上表）：
 

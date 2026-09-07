@@ -200,7 +200,7 @@ const sNoState = agentOf("s-nostate");
 for (const agent of [sSel, sEmpty, sNoState]) {
   const surface = kazMode.surfaceOf(agent);
   check(`surfaceOf(${agent.id}) 不含 safe_json_write（固定主面）`, surface !== null && !surface.has("safe_json_write"));
-  check(`surfaceOf(${agent.id}) 含 Goal/whale 固定工具且不含 Plan 例外`, surface.has("get_goal") && surface.has("whale_report") && !surface.has("exit_plan_mode"));
+  check(`surfaceOf(${agent.id}) 含 whale 固定工具、不含 Goal/Plan 例外`, surface.has("whale_report") && !surface.has("get_goal") && !surface.has("update_goal") && !surface.has("exit_plan_mode"));
 }
 
 // ② RPC：listToolPlugins 返回 agent 组；getExternalToolPlugins 返回 registry

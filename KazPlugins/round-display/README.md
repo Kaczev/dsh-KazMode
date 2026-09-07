@@ -1,20 +1,19 @@
 # round-display —— 每轮注入显示插件（Kaz 模式附属）
 
 > **作用**：记录并展示每一轮 Kaz 联动/附属插件给模型发送的**白名单信息**。
-> v0.9 B6 + 36.7（R-B6-2）起只显示七类：
+> v0.9 B6 + 36.7（R-B6-2，2026-09 白名单收敛六类）起只显示六类：
 > 1. 真实系统提示词快照（`system-prompt`）；
 > 2. 工具面变化（`tool-surface`，36.9 起由 kaz-mode assemble 监听器上报的增删明细）；
 > 3. Minimal → Stable Main/Sub Surface 的稳定边界（旧记录兼容）；
-> 4. Goal 上下文通知（进入/退出/round/wrapup）；
-> 5. 任务契约文本；
-> 6. 子代理 report 摘要；
-> 7. 记忆快照注入摘要。
+> 4. 任务契约文本；
+> 5. 子代理 report 摘要；
+> 6. 记忆快照注入摘要。
 >
 > 不显示：每次 stage 切换、逐 request 的 whale_report 状态噪音、首轮记忆指引、
 > first-round guidance 等非白名单内容。
 
 只负责「显示」，不向模型注入任何内容：记录每一轮开始时 Kaz 模式联动/附属插件
-给模型发送的上述七类信息，并在对话输入区右侧提供「本轮注入」按钮与面板，
+给模型发送的上述六类信息，并在对话输入区右侧提供「本轮注入」按钮与面板，
 按下后在对话框右侧显示本轮注入信息（格式：[插件名]>（信息内容）<）。
 
 ## 原理
@@ -32,8 +31,8 @@
   保持原有汇总，child 子代理页面也能看到自己的汇报摘要；child agent 结束/销毁后
   round-display 不删除其记录，child 历史页仍可读取。
 - **输出白名单**：`category` 必须在
-  `system-prompt / tool-surface / stable-boundary / goal-context / task-contract / subagent-report / memory-snapshot`
-  七类中；不带 `category` 的旧上报按来源/内容回退分类（`kaz-system-prompt` → system-prompt，
+  `system-prompt / tool-surface / stable-boundary / task-contract / subagent-report / memory-snapshot`
+  六类中；不带 `category` 的旧上报按来源/内容回退分类（`kaz-system-prompt` → system-prompt，
   `round-minimal` 历史记录仍兼容为 tool-surface/stable-boundary，`kaz-mode` 新上报始终带 category）。
   非白名单记录不进入内存、不落盘、也不从历史恢复，阶段切换与 whale_report
   噪音因此不再出现。

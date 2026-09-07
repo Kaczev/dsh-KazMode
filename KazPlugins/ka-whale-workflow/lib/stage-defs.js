@@ -17,25 +17,18 @@ export const V09_SUBAGENT_ROLES = Object.freeze([
   "pluginMaintainer",
 ]);
 
-/** 主模型主流程 stage id（§3 表格顺序；goal-active 是外部模式，不列入这里）。 */
+/** 主模型主流程 stage id（§3 表格顺序）。 */
 export const MAIN_STAGE_IDS = Object.freeze([
   "assess-complexity",
   "challenge-plan",
   "decide-tools-before-writing-plan",
   "write-plan",
-  "decide-goal",
   "working",
   "memory-maintenance",
   "plugin-maintenance",
   "compass_context_before_communication",
   "communication",
 ]);
-
-/** Goal 驱动器作用期间的外部模式标记（v0.9 §3 补充；不是普通 stage，不加入 MAIN_STAGE_IDS）。 */
-export const GOAL_ACTIVE_STAGE = "goal-active";
-
-/** Goal 结束后回到 working 语义的边界注入 id（不是普通 stage，也不作为持久化主 stage）。 */
-export const WORKING_RESUMED_STAGE = "working-resumed";
 
 /** worker 普通子代理 stage id（§4）。 */
 export const WORKER_STAGE_IDS = Object.freeze([
@@ -89,6 +82,8 @@ const DEFINITIONS = {
     "assess-complexity": {
       allowedTools: [
         "memory_search",
+        "memory_detail",
+        "memory_list",
         "context_search",
         "context_read",
         "whale_report",
@@ -149,7 +144,7 @@ Only these private plugins and tool_jobs(job_list, job_output, job_kill) may be 
     },
     "write-plan": {
       allowedTools: ["whale_report", "read", "grep", "glob", "web_search", "memory_detail", "memory_search", "memory_list",  "context_search", "context_read"],
-      canAdvance: ["decide-goal", "working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
+      canAdvance: ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
       task:`Create and finalize the complete task plan via "whale_report(finalPlanPayload)".
 
 PlanItem rules:
@@ -181,12 +176,6 @@ Amendment rules:
 
 Communication rules:
 - Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,
-    },
-    "decide-goal": {
-      allowedTools: ["whale_report"],
-      canAdvance: ["working", GOAL_ACTIVE_STAGE],
-      task:
-        "Decide whether to use Goal or normal. NORMAL: completable in this workflow-run, no cross-round auto-continuation; multi-step is still normal when the task plan can manage it. GOAL: clear objective that naturally needs multi-round autonomous iteration, progress tracking/resume, or an already active/paused Goal you want to continue. Note: Goal mode and normal mode expose the SAME Allowed tools; choosing Goal never changes your tool surface. If Goal is needed, call whale_report({mode:'goal', objective, max_goal_rounds?}) to enter goal-active; if normal, call whale_report to advance to working.",
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
@@ -265,6 +254,8 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
     "assess-complexity": {
       allowedTools: [
         "memory_search",
+        "memory_detail",
+        "memory_list",
         "context_search",
         "context_read",
         "work_sub_whale_report",
@@ -419,6 +410,8 @@ Report structure:
     "assess-delegation": {
       allowedTools: [
         "memory_search",
+        "memory_detail",
+        "memory_list",
         "context_search",
         "context_read",
         "plugin_maintainer_sub_whale_report",
@@ -677,16 +670,6 @@ export function stageInjectionText(role, stage, options = {}) {
   return lines.join("\n");
 }
 
-/** v0.9 §3.1 goal-active 上下文注入（进入 goal-active 时追加一次）。 */
-export const GOAL_ACTIVE_CONTEXT_TEXT = `[ka-whale-workflow goal-active]
->
-Mode: Goal is active; ka-whale-workflow ordinary stage progression is suspended.
-Allowed tools: [main stable surface minus whale_report progression usage]
-Use get_goal/update_goal per official Goal rules. Goal context and rounds are driven by the official Goal driver. Persona is unchanged.
-
-Context: Before continuing, if earlier exact goal/session content may have been summarized, use context_search then context_read.
-<`;
-
 /**
  * v0.9 首轮 startup hint：会话处于 idle + Minimal（尚无首次工具调用）时，
  * 主模型在 turn 1 的真实用户消息里只会看到 memory_search + context_search。
@@ -701,23 +684,3 @@ export const FIRST_ROUND_STARTUP_TEXT = `[ka-whale-workflow first-round]
 Mode: Minimal startup (first round, before the first tool call).
 Before we answer, call memory_search or context_search exactly once. After that first tool call, ka-whale-workflow enters assess-complexity and the stable tool surface unlocks. Do not end the turn before making the call.
 <`;
-
-/**
- * v0.9 §3.1 working-resumed 上下文注入。
- * @param {string} [taskPlanPath] 实际 task plan 路径；缺省时保留基准占位。
- * @returns {string}
- */
-export function workingResumedContextText(taskPlanPath) {
-  const path =
-    typeof taskPlanPath === "string" && taskPlanPath.trim().length > 0
-      ? taskPlanPath.trim()
-      : "{KAZ_TASK_PLAN_STORE_PATH}";
-  return `[ka-whale-workflow working-resumed]
->
-Mode: Goal ended; workflow resumes as if working finished.
-Allowed tools: [main stable surface]
-Can advance to: [write-plan (amendment), memory-maintenance]
-Task: Continue as working-ended: execute/amend remaining plan items under the same semantics as the end of working, then advance.
-taskPlanPath: ${path}
-<`;
-}

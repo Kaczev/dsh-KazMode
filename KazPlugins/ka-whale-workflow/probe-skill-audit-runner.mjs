@@ -103,7 +103,6 @@ const mockKazMode = {
   },
   toolVisible: () => true,
 };
-const goalsMock = { get: () => undefined, create: () => undefined };
 const base = {
   fiber: { state: 0 },
   logger: { info: () => {}, warn: (...a) => console.log("[mock:warn]", ...a), debug: () => {} },
@@ -126,7 +125,6 @@ const base = {
     if (name === "settings") return settings;
     if (name === "tools") return toolsMock;
     if (name === "kazMode") return mockKazMode;
-    if (name === "goals") return goalsMock;
     if (name === "agents") return { roots: () => [], list: () => [], currentInitiator: () => undefined };
     if (name === "roundDisplay") return { report: () => {} };
     return undefined;

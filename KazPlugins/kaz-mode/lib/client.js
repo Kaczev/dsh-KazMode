@@ -154,7 +154,7 @@ window.__ModuleLoader__.load({
 				namespace: "ka-whale-workflow",
 				name: "ka-whale-workflow",
 				tag: "鲸鱼工作流 · v0.9 阶段机",
-				note: "v0.9 主流程：assess-complexity → challenge-plan → decide-tools → write-plan → decide-goal → working；whale_report 固定常驻 Stable Main Surface；stage 注入与 task plan 由插件自身维护。",
+				note: "v0.9 主流程：assess-complexity → challenge-plan → decide-tools → write-plan → working；whale_report 固定常驻 Stable Main Surface；stage 注入与 task plan 由插件自身维护。",
 				fields: [
 					{ key: "enabled", kind: "boolean", label: "enabled（总开关：关闭后不进入鲸鱼工作流）" },
 					{ key: "includeSubagents", kind: "boolean", label: "includeSubagents（子代理也走鲸鱼工作流；默认关）" },

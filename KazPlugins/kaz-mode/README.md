@@ -30,11 +30,11 @@ Kaz 模式同时具备两个入口，双向同步：
 2. **工具面两阶段（v0.8 Step A/B1 固定集；36.9 起无 round-minimal 插件）**：
    - 首次工具调用前：kaz-mode 核心 Minimal 直接保留首轮工具集
      （Kaz 下 `ka-whale-memory` 恒开 → `memory_search` + `context_search`；≤2）；
-   - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 22 项，含
-     `context_compress/context_read/context_search/get_goal/update_goal/whale_report/ka_sub_whale/
-     list_agents/send_message/interrupt_agent`，不含旧 `create_goal/subagent`）。
+   - 首次工具调用后：恢复 **Stable Main Surface**（v0.9 §1.1 固定 20 项，含
+     `context_compress/context_read/context_search/whale_report/ka_sub_whale/
+     list_agents/send_message/interrupt_agent`，不含旧 `get_goal`/`update_goal`/`create_goal/subagent`）。
      代码级固定集不受旧 tool-plugin JSON 的 false 开关影响；外部/自创建工具不进主面。
-   - 纯 `minimal → Stable Main` 一次变化；原生 Plan 已实际移除，不再有 Plan 例外。
+   - 纯 `minimal → Stable Main` 一次变化；原生 Plan 与 Goal mode/tool-goal 已实际移除，不再有 Plan/Goal 例外。
 3. **记忆工具按项目生效（仅非 Kaz）**：v0.9 B5 起 `ka-whale-memory` 在 Kaz 恒开，
    旧项目状态把它关掉也不影响 Kaz 固定面；非 Kaz 模式关闭时，其六工具从该项目所有
    会话的工具面移出、调用被拒。
@@ -83,7 +83,7 @@ workflow / ralph 派生）同样是 Kaz 工具面。**
 > - UI/RPC/JSON 运行时读写已删除；`kaz-shared/lib/tool-auto-on.js` 已删除；
 > - `ka_tool_auto_on_setting.json` 不再被 Kaz 读取或写入。旧文件如需保留只作历史
 >   归档（备份区 `.dsh/backups/` 内已有完整改动前副本）；
-> - Goal 三件套与 `whale_report` 固定常驻 Stable Main Surface；原生 Plan 已移除。
+> - Goal mode/tool-goal 与 `kaz_tool_auto_on` 均已退役；`whale_report` 固定常驻 Stable Main Surface；原生 Plan 已移除。
 
 ---
 
@@ -194,8 +194,8 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    plan:policy / tool:goal）；
 2. 首次工具调用前工具面：Kaz = `memory_search` + `context_search`（ka-whale-memory 恒开；
    M3.2）；
-   第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 22 项，
-   含 `context_compress/context_read/context_search`，不含旧 `create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
+   第一次工具调用后恢复 Stable Main Surface（v0.9 §1.1 固定 20 项，
+   含 `context_compress/context_read/context_search`，不含旧 `get_goal`/`update_goal`/`create_goal/subagent`；Kaz 恒开，旧记忆关状态不再从固定面剔除）；
    受控子代理（v0.9 B3）按 kaWhaleWorkflow 持久化的 role Minimal/Stable Base +
    assignedTools 显示，旧/未知子代理回落到保守 Base；
    该 Minimal 是首轮特殊行为：ka-whale-workflow 初始 stage 的 `allowedTools`
@@ -210,5 +210,5 @@ node "$env:USERPROFILE\.dsh\profiles\web\KazPlugins\kaz-mode\probe-b4-readonly.m
    不新增/改写被管理插件的 settings.yaml 段，改动只落在 `kaz-defaults.json`、
    `kaz-project-states.json` 与工具候选 JSON。
 7. v0.9：纯 `minimal → Stable Main` 一次变化；`exit_plan_mode` / 旧
-   `create_goal/subagent` 永不出现在 Kaz v0.9 主面；Goal 读工具与 `whale_report`
+   `get_goal/update_goal/create_goal/subagent` 永不出现在 Kaz v0.9 主面；`whale_report`
    常驻，不再因 plan/goal/工作流阶段出现工具面抖动。

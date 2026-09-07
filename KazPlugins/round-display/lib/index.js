@@ -32,15 +32,14 @@ const NAMESPACE = settingsNamespace("round-display");
 /** 面板专用 RPC 通道。 */
 const RPC_CHANNEL = "/round-display";
 
-/** v0.9 B6 + 36.7：round-display 输出白名单（§10.4 R-B6-2）。
- *  只显示七类内容：系统提示词快照、工具面变化、稳定边界、Goal 上下文通知、
+/** v0.9 B6 + 36.7（2026-09 白名单收敛为六类）：round-display 输出白名单
+ *  （§10.4 R-B6-2）。只显示六类内容：系统提示词快照、工具面变化、稳定边界、
  *  任务契约、子代理 report 摘要、记忆快照注入；阶段切换 / whale_report
  *  逐次噪音 / 首轮记忆指引等一律不显示。 */
 export const ROUND_DISPLAY_ALLOWED_CATEGORIES = Object.freeze([
   "system-prompt",
   "tool-surface",
   "stable-boundary",
-  "goal-context",
   "task-contract",
   "subagent-report",
   "memory-snapshot",
@@ -72,18 +71,6 @@ export function classifyRoundDisplayReport(payload) {
     return "tool-surface";
   }
   if (plugin === "kaz-system-prompt") return "system-prompt";
-  if (plugin === "goal-round-driver" || plugin === "tool-goal") return "goal-context";
-  if (plugin === "ka-whale-workflow") {
-    if (
-      content.includes("[ka-whale-workflow goal-active]") ||
-      content.includes("[ka-whale-workflow working-resumed]") ||
-      content.includes("Goal 已结束") ||
-      content.includes("Goal 模式激活") ||
-      content.includes("收到新一轮消息：Goal active")
-    ) {
-      return "goal-context";
-    }
-  }
   if (plugin === "ka-whale-memory" && content.includes("[ka-whale-memory Auto-Load]")) {
     return "memory-snapshot";
   }

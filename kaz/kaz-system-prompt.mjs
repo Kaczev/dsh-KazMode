@@ -14,10 +14,6 @@
  *     第二段；受控子代理保留 request.persona 带入的
  *     KAZ_ROLE_PROMPTS.subagent.*，不再被本控制器覆盖成基础 persona。
  *     原生 plan:policy / tool:goal 段不再注入——v0.8 Step B1 已实际移除）；
- *   - agent/pre-step 扫描上报：
- *       - dsh-goal-round-driver 的 <goal_round>（source.kind === "goal"）；
- *       - dsh-tool-goal 的 <goal_complete>/<goal_blocked>
- *         （source.plugin === "tool-goal"）；
  *
  * 注意：不监听 session/event——kaz-system-prompt 挂在 agent scope 下，而
  * session/event 从 host 根 scope 派发，agent scope 监听器收不到（output-beep
@@ -94,8 +90,7 @@ async function loadKazShared(config) {
 }
 
 /** 把展示内容上报给 round-display（best-effort，服务不存在时静默跳过）。
- *  36.7：真实系统提示词显式带 category=system-prompt；goal 通知显式带
- *  category=goal-context，避免依赖旧回退分类。 */
+ *  36.7：真实系统提示词显式带 category=system-prompt。 */
 function reportRoundDisplay(
   ctx,
   agent,
@@ -123,48 +118,6 @@ function realPromptOf(sections) {
     if (text.trim().length > 0) parts.push(text)
   }
   return parts.join("\n\n")
-}
-
-/** 从 user 消息中提取纯文本（content 数组的 text 部分；缺失时回退 source.summary）。 */
-function textOfMessage(message) {
-  try {
-    if (message === null || typeof message !== "object") return ""
-    const content = Array.isArray(message.content) ? message.content : []
-    const parts = content
-      .filter(
-        (part) =>
-          part !== null &&
-          typeof part === "object" &&
-          typeof part.text === "string" &&
-          part.text.trim().length > 0,
-      )
-      .map((part) => part.text)
-    if (parts.length > 0) return parts.join("\n")
-    const source = message.source
-    if (source !== null && typeof source === "object" && typeof source.summary === "string") {
-      return source.summary
-    }
-    return ""
-  } catch {
-    return ""
-  }
-}
-
-/** 把一条带 source 的注入消息上报 round-display（goal_round / goal wrapup）。 */
-function reportInjectedMessage(ctx, agent, message) {
-  try {
-    const source = message === null || typeof message !== "object" ? undefined : message.source
-    if (source === null || typeof source !== "object") return
-    const text = textOfMessage(message)
-    if (text.length === 0) return
-    if (source.kind === "goal" && typeof source.round === "number" && source.round > 0) {
-      reportRoundDisplay(ctx, agent, text, "goal-round-driver", "goal round", "goal-context")
-    } else if (source.plugin === "tool-goal") {
-      reportRoundDisplay(ctx, agent, text, "tool-goal", "goal wrapup", "goal-context")
-    }
-  } catch {
-    // 上报失败不影响主流程
-  }
 }
 
 /**
@@ -299,34 +252,5 @@ export function apply(ctx, config = {}) {
     const finalPrompt = realPromptOf(finalAssembly?.sections)
     if (finalPrompt.length > 0) reportRoundDisplay(ctx, agent, finalPrompt)
     return nextResult
-  })
-
-  // goal 注入消息上报：
-  //   - agent/pre-step 直接扫描本次 step 的 messages（goal_round 由 followup 进
-  //     inbox、tool-goal wrapup 由 deferContext 进 next-step）。
-  //   - 原生 Plan 已移除，不再扫描 plan/mode 状态事件或上报 plan-mode 通知。
-  // 重复上报由 round-display 按 (plugin, content) 去重。
-  ctx.on('agent/pre-step', async (payload, next) => {
-    const decision = await next()
-    if (decision === null || typeof decision !== 'object' || decision.kind !== 'enter') return decision
-    const agent = payload?.agent
-    if (agent === null || agent === undefined || typeof agent !== 'object') return decision
-
-    // 非 Kaz 会话不应被这个 preset 脚本干预（防御性检查）。
-    try {
-      const svc = ctx.get('kazMode')
-      if (svc && typeof svc.kazEnabled === 'function' && agent && svc.kazEnabled(agent) !== true) {
-        return decision
-      }
-    } catch {
-      // 服务缺失时不拦截，继续按 Kaz 预设处理
-    }
-
-    const messages = Array.isArray(decision.messages) ? decision.messages : []
-    for (const message of messages) {
-      reportInjectedMessage(ctx, agent, message)
-    }
-
-    return decision
   })
 }

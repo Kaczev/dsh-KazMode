@@ -1,22 +1,21 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 33 世 Goal-active 补丁 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 worker 不提前终止 / memory-maintenance gate / stage-persona mapping / task splitting + 37.5 移除 plugin-preflight / 收紧 task-plan 创建与图 / 主 Persona 系统段与子代理 report 双写 + 子代理 report 硬等门 awaitingParent）。
+鲸鱼工作流组件（v0.9，31 世 + 32 世 B3/B3.5 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5 纠正范围 + 36.6 事件驱动等待与 report 路由 + 36.7 challenge-plan 批评纪律 + 36.8 memory-maintenance gate / stage-persona mapping / task splitting + 37.5 移除 plugin-preflight / 收紧 task-plan 创建与图 / 主 Persona 系统段与子代理 report 双写 + 子代理 report 硬等门 awaitingParent；Goal 模式已移除）。
 
 ## 范围
 
 - 主/子阶段机：英文 stage id，Allowed tools / Can advance to / Task 与 v0.9
-  表格一致；`decide-goal` 可推进 `working` 或外部模式 `goal-active`；
-  37.5 移除 `plugin-preflight`：主流程为
-  `decide-tools → write-plan → decide-goal → working → memory-maintenance → plugin-maintenance/communication`；
+  表格一致；37.5 移除 `plugin-preflight`，2026-09 用户决策再移除 `decide-goal`
+  （Goal 模式不再使用，因已有 subagents 可承担同类多轮/续接工作）。当前主流程为
+  `assess-complexity → challenge-plan → decide-tools-before-writing-plan → write-plan
+  → working → memory-maintenance → plugin-maintenance/communication`；
   受控子代理只含 worker / memoryMaintainer / pluginMaintainer 三角色。
-- Goal-active 外部模式：`whale_report({mode:'goal', objective, max_goal_rounds?})`
-  从 decide-goal 或非主 stage（idle/done/end）进入 `goal-active`；该值写入 stage
-  state，但不加入 `MAIN_STAGE_IDS`；goal-active 期间普通 `whale_report` 推进返回
-  `workflow-stage-deny`。
-- §3.1 边界注入：进入 `goal-active` 注入 Goal-active 上下文；Goal 结束后（无
-  active/paused goal）从 `goal-active` 自动切到 `working` 并注入
-  `working-resumed`，携带实际 `taskPlanPath`。两类注入都作为插件 user message，
-  按边界各一次。
+- Goal 模式移除：ka-whale-workflow 不再提供 `decide-goal`/`goal-active`/
+  `working-resumed` 生命周期，不再识别 `/goal` 手动命令旁路；`whale_report`
+  的 `mode='goal'`/`objective`/`max_goal_rounds` 一律返回
+  `workflow-stage-deny: ... Goal mode has been removed`。历史 stage store 中残留的
+  `goal-active`/`working-resumed` 字符串只按旧数据处理，新一轮真实用户消息会防御性
+  回到 `assess-complexity`，不保留任何 Goal 专用文案或边界注入。
 - `tools/pre-execute` 软闸门：主模型与受控 v0.9 子代理在当前 stage 调用非
   Allowed tools 返回 `workflow-stage-deny`，不视为模型失败惩罚。
 - 双层语义（M3.3 + Minimal 收口）：stage `allowedTools` 是当前阶段的软闸门，
@@ -24,7 +23,7 @@
   `memory_search` / `context_search` / `context_read` / `whale_report`；受控子代理
   初始 stage（`assess-complexity` / `assess-delegation`）为
   `memory_search` / `context_search` / `context_read` + 各自报告工具；这些初始
-  stage 均不含 `read`，也不放 `context_compress`（compress 属于 compass_context /
+  stage 均不含 `read`，也不放 `context_compress`（compress 属于 compass_context_before_communication /
   Stable 面）。主 `assess-complexity` 不放 `ask_user_question`（澄清需求先推进
   `challenge-plan`）。
 - 首轮 Minimal 与主/子代理对齐：真正的首轮 Minimal 由 kaz-mode `firstRoundTools` /
@@ -73,9 +72,9 @@
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/working/memory-maintenance/
   plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
-  `lifecyclePath`，在 decide-tools 阶段携带当前私有插件候选目录。
+  `lifecyclePath`，在 decide-tools-before-writing-plan 阶段携带当前私有插件候选目录。
 - 阶段级 Context 注记：`STAGE_CONTEXT_NOTES`（lib/stage-defs.js）为部分 stage
-- compass_context：主/子代理压缩整理阶段；仅 context_compress + 各自 report/whale_report，只能去 communication（可从 main write-plan/working/memory-maintenance、worker working、memory save-update/delete、plugin create/update/retire 进入）。
+- compass_context_before_communication：主/子代理压缩整理阶段；仅 context_compress + 各自 report/whale_report，只能去 communication（可从 main write-plan/memory-maintenance/plugin-maintenance、worker working、memory save-update/delete、plugin create/update/retire 进入）。
   定义 Context 提醒；`stageInjectionText` 在有注记的 stage 的 `Task:` 行后输出
   `Context: <text>`，无注记不输出。覆盖 main/worker 的 assess-complexity、
   challenge-plan、communication 与 memoryMaintainer/pluginMaintainer 的
@@ -83,19 +82,16 @@
   掌握/复现背景；main.communication 另在会话冗长收尾前先
   `context_compress suggest` 预览（manual 优先、auto 兜底）。
 - B2.5 重启语义：Minimal 只在整段 session 第一次 tool/call 前发生；后续
-  workflow-run 重新进入 `assess-complexity` 但不重复 Minimal；Goal 存在时不重复
-  assess；`assess-complexity -> communication (no-tool-call)` 是合法路径。
+  workflow-run 重新进入 `assess-complexity` 但不重复 Minimal；
+  `assess-complexity -> communication (no-tool-call)` 是合法路径。
 - 36.5 用户消息路由：真实用户消息在非终态活动阶段保留当前阶段，不重置成
-  `assess-complexity`；只有 `idle`/`done`/`end`/`communication` 才重置。
-- 36.5 verification-gap follow-up：`current === 'goal-active'` 但 Goal 已不在
-  active/paused（stale goal-active）时，新一轮真实用户消息回到
-  `assess-complexity`，不再保留失效的 `goal-active`；Goal 仍激活时仍保持
-  `goal-active`。
+  `assess-complexity`；只有 `idle`/`done`/`end`/`communication` 或历史
+  `goal-active`/`working-resumed` 旧值才重置。
 - 子代理回传不触发新一轮：DSH `subagent-report` / `subagent-settled` 等内部消息
   不是真实用户消息，`isUserMessage` 返回 false，不会把主模型 working 重置成
   `assess-complexity`。
 - Task plan：独立 `ka-whale-workflow-task-plan.json`；
-  `decide-tools` 不得写 draft planItems（会拒绝）；task plan 只在
+  `decide-tools-before-writing-plan` 不得写 draft planItems（会拒绝）；task plan 只在
   `write-plan` 通过 `whale_report(finalPlanPayload)` 创建/定稿（finalized）；
   memory-maintenance/plugin-maintenance 不能创建 task plan，只能经 write-plan
   读取/改约；
@@ -150,8 +146,8 @@
 - 36.8 task splitting：write-plan 必须为每个 coherent task 建独立 planItem；
   working 逐个委派 worker planItems；memory/plugin planItems 留给对应维护阶段；
   受控委派只覆盖 worker / memoryMaintainer / pluginMaintainer 三角色。
-- B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，正常/Goal
-  结束不再注入两类标题。
+- B3.5：`[ka-whale-memory Review]` / `[skill Review]` 复盘边界已移除，任务结束
+  不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 三个 `*_sub_whale_report`
   （单一 subagent-settled 通道：每个工具按角色不同流程推进 stage，可选 `nextStage`
   用于推进，省略 `nextStage` 只置硬等门；工具不再接收 `output`、不调用 DSH
@@ -195,9 +191,10 @@
 - 阶段状态：`~/.dsh/storages/ka-whale-workflow-stage.json`（version 6，
   含 sessions / contractState / workflowRuns /
   pendingStageInjection / subagentRoles；subagentRoles 每条记录含可选布尔
-  `awaitingParent`（旧记录缺省按 false 读，version 保持 6）；sessions 可存
-  `goal-active`，pendingStageInjection 可挂 `goal-active` / `working-resumed` 边界；
-  B5 起不再读写 taskToolState 与旧 reconstruction/classification/goal-recovery）。
+  `awaitingParent`（旧记录缺省按 false 读，version 保持 6）；Goal 模式移除后
+  sessions/pendingStageInjection 不再写入 `goal-active`/`working-resumed`，历史残留
+  值按未知丢弃或防御回 `assess-complexity`；不再读写 taskToolState 与旧
+  reconstruction/classification/goal-recovery）。
 - Task plan：`~/.dsh/storages/ka-whale-workflow-task-plan.json`。
 - 生命周期参考：`KazPlugins/ka-whale-workflow/PLUGIN_LIFECYCLE.md`。
 - 私有插件候选注册表：`~/.dsh/storages/kaz-agent-managed-tools.json`
