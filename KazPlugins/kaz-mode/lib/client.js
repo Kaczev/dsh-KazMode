@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
 
 		/** deepseek-default-model 的“官方值”与“Kaz 模式默认值”预设。 */
 		const DEEPSEEK_OFFICIAL_KWARGS = { temperature: 1, top_p: 1, repetition_penalty: 1 };
-		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.2, top_p: 0.9, repetition_penalty: 1.2 };
+		const DEEPSEEK_KAZ_KWARGS = { temperature: 0.9, top_p: 0.95, repetition_penalty: 1.2 };
 
 		/** Kaz 模式当前版本兜底值：正常会通过 RPC 读取 package.json 的 version，这里只在 RPC 失败时使用。 */
 		const KAZ_CURRENT_VERSION = "3.3.0";

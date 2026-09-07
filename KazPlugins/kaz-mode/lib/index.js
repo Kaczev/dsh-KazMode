@@ -106,7 +106,7 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   "round-display": { enabled: false },
   "deepseek-default-model": {
     enabled: false,
-    generation_kwargs: { temperature: 0.6, top_p: 0.95, repetition_penalty: 1.2 },
+    generation_kwargs: { temperature: 0.9, top_p: 0.95, repetition_penalty: 1.2 },
   },
   "ka-whale-memory": { enabled: false, guidance: "", guidanceHeadEnabled: true, guidanceHead: "", guidanceForgetEnabled: true, guidanceForget: "" },
   "ka-whale-workflow": {
