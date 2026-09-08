@@ -172,6 +172,23 @@ check(
     !threw && warns.length > 0 && warns.some((text) => text.includes("cost-meter")),
   );
 }
+{
+  const dir = join(TMP, "meter-read");
+  const writer = createCostMeterWriter({ directory: dir, debounceMs: 0, logger: null });
+  writer.recordAdd("sess", 7, { modelRequests: 2, turns: 1 });
+  const inMemory = writer.read("sess", 7);
+  check(
+    "cost-meter read prefers in-memory record before flush (hot-path O(1))",
+    inMemory.modelRequests === 2 && inMemory.turns === 1,
+  );
+  writer.flush();
+  const fresh = createCostMeterWriter({ directory: dir, debounceMs: 0, logger: null });
+  const fromDisk = fresh.read("sess", 7);
+  check(
+    "cost-meter read falls back to disk for a fresh plugin load (no in-memory record)",
+    fromDisk.modelRequests === 2 && fromDisk.turns === 1,
+  );
+}
 
 // ---------------------------------------------------------------------------
 // ② Live plugin harness: seed run + child, apply, drive pre-step.

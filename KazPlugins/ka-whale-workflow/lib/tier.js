@@ -12,6 +12,14 @@ export const TIER_IDS = Object.freeze(["S", "M", "L"]);
 /** 分类默认值：M。 */
 export const DEFAULT_TIER = "M";
 
+/** PM3-uncalibrated provisional S 档预算（§2.4/§A.2）。
+ *  PM3 实测前 N/M 未定稿：这里是显式占位常量，不内联魔法数字；
+ *  生产默认 flag off，探针用内部 config.sTierBudget 覆盖测试路径。 */
+export const PROVISIONAL_S_TIER_BUDGET = Object.freeze({
+  modelRequests: 100,
+  turns: 12,
+});
+
 /** tier 成本序（用于只升不降；S 最轻，L 最重）。 */
 const TIER_ORDER = Object.freeze({ S: 0, M: 1, L: 2 });
 
@@ -54,6 +62,33 @@ export function normalizeUpgradeHistory(value) {
   return out;
 }
 
+/** 归一化 session S 误判历史：只保留 "S" 记号，最多最近 2 次。 */
+export function normalizeSMisjudgmentHistory(value) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  for (const entry of value) {
+    if (entry !== "S") continue;
+    out.push("S");
+  }
+  return out.slice(-2);
+}
+
+/** S 档是否超预算（§2.4 规则 4；budget 默认 PM3 占位常量）。 */
+export function tierBudgetExceeded(metrics = {}, budget = PROVISIONAL_S_TIER_BUDGET) {
+  const meter = metrics !== null && typeof metrics === "object" ? metrics : {};
+  const requestLimit = Number(budget?.modelRequests);
+  const turnLimit = Number(budget?.turns);
+  const requests = Number(meter.modelRequests);
+  const turns = Number(meter.turns);
+  if (Number.isFinite(requestLimit) && Number.isFinite(requests) && requests >= requestLimit) {
+    return true;
+  }
+  if (Number.isFinite(turnLimit) && Number.isFinite(turns) && turns >= turnLimit) {
+    return true;
+  }
+  return false;
+}
+
 /** 两个 tier 是否允许 from → to（只升不降；同一 tier 不算升级但允许保持）。 */
 export function canUpgradeTier(from, to) {
   const fromRank = from === null ? -1 : TIER_ORDER[from];
@@ -63,11 +98,11 @@ export function canUpgradeTier(from, to) {
 }
 
 /**
- * 分类契约（§2.1/§2.4）：输入为机器可判定事实；输出 { tier, tierReason, tierSignals }。
+ * 分类核心（不含 session 默认覆盖）：§2.1/§2.4。
  * S = 恰好 1 个 changed file + 无风险词 + 现成 probe 覆盖 + probe 通过。
  * 任一事实缺失/不可判定或条件不满足 → M（绝不默认 S）。
  */
-export function classifyTier(facts = {}) {
+function classifyCore(facts) {
   const source = facts !== null && typeof facts === "object" ? facts : {};
   const changedFileCount = Number.isSafeInteger(source.changedFileCount)
     ? source.changedFileCount
@@ -101,12 +136,30 @@ export function classifyTier(facts = {}) {
   };
 }
 
-/** 追加一次 S 误判记录；只保留最近 2 次（用于连续误判默认 M）。 */
+/**
+ * 分类契约（§2.1/§2.4/§2.4 规则 4）：输入为机器可判定事实；
+ * sessionDefaultTier="M"（连续 S 误判后）强制返回 M。
+ */
+export function classifyTier(facts = {}, sessionDefaultTier = null) {
+  const base = classifyCore(facts);
+  if (normalizeTier(sessionDefaultTier) !== "M") return base;
+  const signals = base.tierSignals.includes("session-default-m")
+    ? base.tierSignals
+    : [...base.tierSignals, "session-default-m"];
+  return {
+    tier: DEFAULT_TIER,
+    tierReason: "session 连续 2 次 S 误判后默认 M（可读 API 强制覆盖分类）",
+    tierSignals: signals,
+  };
+}
+
+/**
+ * 追加一次 S 误判记录；只保留最近 2 次。
+ * wasMisjudgedS=false 表示一次成功的 S run 完成 → 清零连续误判计数。
+ */
 export function recordSMisjudgment(history, wasMisjudgedS = true) {
-  const base = Array.isArray(history)
-    ? history.filter((entry) => entry === "S")
-    : [];
-  if (wasMisjudgedS !== true) return base.slice(-2);
+  if (wasMisjudgedS !== true) return [];
+  const base = normalizeSMisjudgmentHistory(history);
   return [...base, "S"].slice(-2);
 }
 

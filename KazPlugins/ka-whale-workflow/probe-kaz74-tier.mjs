@@ -1,11 +1,11 @@
-// ka-whale-workflow 7.4 P1 tier fast lane 探针：
-//   - S 分类契约（四个机器可判定条件 + 默认 M + 连续误判默认 M）；
+// ka-whale-workflow 7.4 P1/P1b tier fast lane 探针：
+//   - S 分类契约（四个机器可判定条件 + 默认 M + session-default 覆盖）；
 //   - tier-aware canAdvance / advanceListFor / stageInjectionText 三种形态；
 //   - static def.canAdvance 数组与 7.3.5 逐字节一致；
 //   - stage-store tier 持久化 + legacy 无 tier 文件兼容；
 //   - whale_report 同调用 tier:"S"+nextStage:"working" 的 ORDERING；
-//   - requiresUserConfirmation 触发 S→M（带 upgradeHistory）且不可降级；
-//   - ka_sub_whale 在 run tier=S 时结构化拒绝。
+//   - requiresUserConfirmation / budget-exceeded / working-entry 自动 S→M；
+//   - session 连续误判默认 M 持久化；flag off 全部不触发（7.3.5 parity）。
 // 运行：node KazPlugins/ka-whale-workflow/probe-kaz74-tier.mjs
 import plugin, { createStageStore, DEFAULT_SECTION } from "./lib/index.js";
 import {
@@ -21,6 +21,9 @@ import {
   sessionDefaultTierAfterMisjudgments,
   normalizeTierSignals,
   normalizeUpgradeHistory,
+  normalizeSMisjudgmentHistory,
+  tierBudgetExceeded,
+  PROVISIONAL_S_TIER_BUDGET,
 } from "./lib/tier.js";
 import { persistFinalPlanRun } from "./lib/task-plan-store.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -37,6 +40,11 @@ const TMP = mkdtempSync(join(tmpdir(), "whale-kaz74-tier-"));
 const LEGACY_STORE = join(TMP, "legacy.json");
 const TIER_STORE = join(TMP, "tier.json");
 const LIVE_STORE = join(TMP, "live.json");
+const MISJUDGE_STORE = join(TMP, "misjudge.json");
+const BUDGET_STORE = join(TMP, "budget.json");
+const ENTRY_STORE = join(TMP, "entry.json");
+const OFF_STORE = join(TMP, "off.json");
+const RESET_STORE = join(TMP, "reset.json");
 const RUN_DIR = join(TMP, "run");
 mkdirSync(RUN_DIR, { recursive: true });
 
@@ -125,11 +133,12 @@ function makeBase({ tierFastLane }) {
   return { base, listeners, registeredTools, provided, roundReports };
 }
 
-const mainAgentOf = () => ({
-  id: "main",
-  session: { id: "main", header: { cwd: RUN_DIR }, events: [] },
+const agentOf = (id) => ({
+  id,
+  session: { id, header: { cwd: RUN_DIR }, events: [] },
   options: {},
 });
+const mainAgentOf = () => agentOf("main");
 
 // ---------------------------------------------------------------------------
 // ① Pure contract: classification / graph / injection text / static arrays.
@@ -167,6 +176,29 @@ const mainAgentOf = () => ({
     "two consecutive S misjudgments make the session default M; non-S resets",
     sessionDefaultTierAfterMisjudgments(history) === "M" &&
       sessionDefaultTierAfterMisjudgments(recordSMisjudgment([], false)) === null,
+  );
+  const forcedBySession = classifyTier(
+    {
+      changedFileCount: 1,
+      riskWordHit: false,
+      probeCovers: true,
+      probePasses: true,
+    },
+    "M",
+  );
+  check(
+    "classifyTier: session default M forces S facts down to M with session-default-m signal",
+    forcedBySession.tier === "M" &&
+      forcedBySession.tierSignals.includes("session-default-m") &&
+      forcedBySession.tierSignals.includes("single-file"),
+  );
+  check(
+    "provisional S budget is a named PM3-uncalibrated constant; exceed is threshold-based",
+    PROVISIONAL_S_TIER_BUDGET?.modelRequests > 0 &&
+      PROVISIONAL_S_TIER_BUDGET?.turns > 0 &&
+      tierBudgetExceeded({ modelRequests: 2, turns: 1 }, { modelRequests: 2, turns: 9 }) === true &&
+      tierBudgetExceeded({ modelRequests: 1, turns: 9 }, { modelRequests: 2, turns: 9 }) === true &&
+      tierBudgetExceeded({ modelRequests: 1, turns: 8 }, { modelRequests: 2, turns: 9 }) === false,
   );
   const assessStatic = stageDefinitionFor(MAIN_ROLE, "assess-complexity")?.canAdvance;
   const workingStatic = stageDefinitionFor(MAIN_ROLE, "working")?.canAdvance;
@@ -278,7 +310,42 @@ const mainAgentOf = () => ({
   check(
     "normalizers drop malformed signals/history entries",
     JSON.stringify(normalizeTierSignals(["single-file", 1, "", "single-file"])) === JSON.stringify(["single-file"]) &&
-      normalizeUpgradeHistory([{ from: "S", to: "M", trigger: "ok", at: "now" }, { from: "X" }]).length === 1,
+      normalizeUpgradeHistory([{ from: "S", to: "M", trigger: "ok", at: "now" }, { from: "X" }]).length === 1 &&
+      JSON.stringify(normalizeSMisjudgmentHistory(["S", "X", "S"])) === JSON.stringify(["S", "S"]) &&
+      JSON.stringify(normalizeSMisjudgmentHistory(["S", "S", "S"])) === JSON.stringify(["S", "S"]),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ②b Session S-misjudgment counter: durable, two-consecutive default M, reset.
+// ---------------------------------------------------------------------------
+{
+  const misjudge = createStageStore(MISJUDGE_STORE);
+  const first = misjudge.recordSessionSMisjudgment("main", true);
+  const reloaded = createStageStore(MISJUDGE_STORE);
+  const reloadedHistory = reloaded.getSessionTierMisjudgmentHistory("main");
+  const second = reloaded.recordSessionSMisjudgment("main", true);
+  const afterTwo = createStageStore(MISJUDGE_STORE);
+  check(
+    "session S-misjudgment counter is durable; two consecutive yield session default M",
+    first?.ok === true &&
+      first?.history?.length === 1 &&
+      first?.defaultTier === null &&
+      reloadedHistory?.length === 1 &&
+      second?.ok === true &&
+      second?.history?.length === 2 &&
+      second?.defaultTier === "M" &&
+      afterTwo.sessionTierDefaultOf("main") === "M",
+  );
+  const reset = afterTwo.recordSessionSMisjudgment("main", false);
+  const afterReset = createStageStore(MISJUDGE_STORE);
+  check(
+    "successful non-misjudged outcome resets consecutive counter (history empty, default null)",
+    reset?.ok === true &&
+      reset?.history?.length === 0 &&
+      reset?.defaultTier === null &&
+      afterReset.getSessionTierMisjudgmentHistory("main")?.length === 0 &&
+      afterReset.sessionTierDefaultOf("main") === null,
   );
 }
 
@@ -412,6 +479,234 @@ const mainAgentOf = () => ({
   check(
     "after S→M upgrade, M-only edge reopens and whale_report accepts it",
     secondAdvance?.ok === true && secondAdvance?.stage === "write-plan",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ④ P1b runtime budget-exceeded auto-upgrade (S→M + counter, in-memory meter).
+// ---------------------------------------------------------------------------
+{
+  const sessionId = "budget-main";
+  const seedStore = createStageStore(BUDGET_STORE);
+  seedStore.set(sessionId, "assess-complexity");
+  seedStore.beginWorkflowRun(sessionId);
+  const { base, listeners, registeredTools, provided } = makeBase({ tierFastLane: true });
+  await plugin.apply(base, {
+    stageStore: BUDGET_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: true,
+    sTierBudget: { modelRequests: 3, turns: 99 },
+    costMeterDirectory: join(TMP, "meter-budget"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const whale = registeredTools.get("whale_report");
+  const workflow = provided["kaWhaleWorkflow"];
+  const agent = agentOf(sessionId);
+  const signal = () => new AbortController().signal;
+  const advanceS = await whale.execute(
+    {
+      tier: "S",
+      tierReason: "single file; probe passes",
+      tierSignals: ["single-file", "no-risk-word", "existing-probe", "probe-pass"],
+      nextStage: "working",
+    },
+    { agent, signal: signal() },
+  );
+  const preStep = listeners.get("agent/pre-step")?.[0];
+  const runPre = async () =>
+    preStep(
+      { agent, messages: [], turn: 1 },
+      async () => ({ kind: "enter", messages: [] }),
+    );
+  await runPre();
+  await runPre();
+  await runPre(); // 第 3 次 request 达到 sTierBudget.modelRequests=3 → 自动升 M
+  const afterDisk = createStageStore(BUDGET_STORE);
+  const afterTier = afterDisk.getWorkflowRunTier(sessionId);
+  const history = afterDisk.getSessionTierMisjudgmentHistory(sessionId);
+  check(
+    "budget-exceeded: S run past provisional budget auto-upgrades S→M with trigger and counts one misjudgment",
+    advanceS?.ok === true &&
+      advanceS?.stage === "working" &&
+      afterTier?.tier === "M" &&
+      afterTier?.upgradeHistory?.length === 1 &&
+      afterTier.upgradeHistory[0].trigger === "budget-exceeded" &&
+      JSON.stringify(history) === JSON.stringify(["S"]) &&
+      workflow.sessionTierDefaultOf(sessionId) === null,
+  );
+  const downgradeDenied = await workflow.upgradeRunTier(agent, {
+    to: "S",
+    trigger: "manual-downgrade",
+  });
+  check(
+    "budget-exceeded upgrade is irreversible within the run",
+    downgradeDenied?.ok === false && downgradeDenied?.code === "tier-downgrade-denied",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑤ P1b working-entry re-evaluation fires BEFORE stage text is injected.
+// ---------------------------------------------------------------------------
+{
+  const sessionId = "entry-main";
+  const seedStore = createStageStore(ENTRY_STORE);
+  seedStore.set(sessionId, "assess-complexity");
+  seedStore.beginWorkflowRun(sessionId);
+  persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId,
+    runId: 1,
+    payload: {
+      status: "finalized",
+      items: [
+        {
+          planItemId: "p-memory",
+          persona: "memoryMaintainer",
+          task: "Memory work found at working entry",
+          assignedTools: [],
+        },
+      ],
+    },
+  });
+  const { base, listeners, registeredTools, provided } = makeBase({ tierFastLane: true });
+  await plugin.apply(base, {
+    stageStore: ENTRY_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: true,
+    costMeterDirectory: join(TMP, "meter-entry"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const whale = registeredTools.get("whale_report");
+  const workflow = provided["kaWhaleWorkflow"];
+  const agent = agentOf(sessionId);
+  const signal = () => new AbortController().signal;
+  const advanceS = await whale.execute(
+    {
+      tier: "S",
+      tierReason: "single file; probe passes",
+      tierSignals: ["single-file", "no-risk-word", "existing-probe", "probe-pass"],
+      nextStage: "working",
+    },
+    { agent, signal: signal() },
+  );
+  const preStep = listeners.get("agent/pre-step")?.[0];
+  const injected = await preStep(
+    { agent, messages: [], turn: 1 },
+    async () => ({ kind: "enter", messages: [] }),
+  );
+  const injectedText = String(
+    injected?.messages?.[0]?.content?.[0]?.text ?? "",
+  );
+  const afterDisk = createStageStore(ENTRY_STORE);
+  const afterTier = afterDisk.getWorkflowRunTier(sessionId);
+  check(
+    "working-entry: S run with plan item upgrades before working stage text is injected",
+    advanceS?.ok === true &&
+      afterTier?.tier === "M" &&
+      afterTier?.upgradeHistory?.length === 1 &&
+      afterTier.upgradeHistory[0].trigger === "working-entry" &&
+      injectedText.includes("Can advance to: [decide-tools-before-writing-plan, write-plan, memory-maintenance]") &&
+      !injectedText.includes("Can advance to: [communication]") &&
+      workflow.sessionTierDefaultOf(sessionId) === null,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑥ Flag OFF: no budget/working-entry anti-gaming fires (7.3.5 parity).
+// ---------------------------------------------------------------------------
+{
+  const sessionId = "off-main";
+  const seedStore = createStageStore(OFF_STORE);
+  seedStore.set(sessionId, "working");
+  seedStore.beginWorkflowRun(sessionId);
+  seedStore.setWorkflowRunTier(sessionId, {
+    tier: "S",
+    tierReason: "seeded S (flag off must ignore it)",
+    tierSignals: ["single-file"],
+  });
+  seedStore.setPendingStageInjection(sessionId, "working");
+  persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId,
+    runId: 1,
+    payload: {
+      status: "finalized",
+      items: [{ planItemId: "p-worker", persona: "worker", task: "Worker task", assignedTools: [] }],
+    },
+  });
+  const { base, listeners } = makeBase({ tierFastLane: false });
+  await plugin.apply(base, {
+    stageStore: OFF_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: false,
+    sTierBudget: { modelRequests: 1, turns: 1 },
+    costMeterDirectory: join(TMP, "meter-off"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const agent = agentOf(sessionId);
+  const preStep = listeners.get("agent/pre-step")?.[0];
+  const runPre = async () =>
+    preStep(
+      { agent, messages: [], turn: 1 },
+      async () => ({ kind: "enter", messages: [] }),
+    );
+  await runPre();
+  await runPre();
+  await runPre();
+  const afterDisk = createStageStore(OFF_STORE);
+  const afterTier = afterDisk.getWorkflowRunTier(sessionId);
+  const history = afterDisk.getSessionTierMisjudgmentHistory(sessionId);
+  check(
+    "flag OFF: stored S + plan item + tiny budget still inject static M edges; no upgrade/no misjudgment",
+    afterTier?.tier === "S" &&
+      afterTier?.upgradeHistory?.length === 0 &&
+      history?.length === 0 &&
+      afterDisk.sessionTierDefaultOf(sessionId) === null,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑦ Successful S run reaching communication resets the session counter.
+// ---------------------------------------------------------------------------
+{
+  const sessionId = "reset-main";
+  const seedStore = createStageStore(RESET_STORE);
+  seedStore.set(sessionId, "assess-complexity");
+  seedStore.beginWorkflowRun(sessionId);
+  seedStore.recordSessionSMisjudgment(sessionId, true);
+  const { base, registeredTools } = makeBase({ tierFastLane: true });
+  await plugin.apply(base, {
+    stageStore: RESET_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: true,
+    costMeterDirectory: join(TMP, "meter-reset"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const whale = registeredTools.get("whale_report");
+  const agent = agentOf(sessionId);
+  const signal = () => new AbortController().signal;
+  const toWorking = await whale.execute(
+    {
+      tier: "S",
+      tierReason: "single file; probe passes",
+      tierSignals: ["single-file", "no-risk-word", "existing-probe", "probe-pass"],
+      nextStage: "working",
+    },
+    { agent, signal: signal() },
+  );
+  const toCommunication = await whale.execute(
+    { nextStage: "communication" },
+    { agent, signal: signal() },
+  );
+  const afterDisk = createStageStore(RESET_STORE);
+  const history = afterDisk.getSessionTierMisjudgmentHistory(sessionId);
+  check(
+    "successful S run reaching communication without auto-upgrade resets consecutive misjudgments",
+    toWorking?.ok === true &&
+      toCommunication?.ok === true &&
+      toCommunication?.stage === "communication" &&
+      history?.length === 0 &&
+      afterDisk.sessionTierDefaultOf(sessionId) === null,
   );
 }
 

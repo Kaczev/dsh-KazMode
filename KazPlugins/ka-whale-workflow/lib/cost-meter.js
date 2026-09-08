@@ -267,8 +267,16 @@ export function createCostMeterWriter({ directory, logger, debounceMs = 250 } = 
       }
       flushNow();
     },
-    /** 读取当前内存/落盘聚合（读盘只发生在首个 key 或显式 read）。 */
+    /**
+     * 读取当前聚合：进程内已加载/已累加的 record 优先（O(1)，热路径不需要 flush）；
+     * 全新进程（无内存 record）回退读盘。返回值是归一化副本，不暴露内部对象。
+     */
     read(sessionId, runId) {
+      const key = keyOf(sessionId, runId);
+      const inMemory = meters.get(key);
+      if (inMemory !== undefined) {
+        return normalizeCostMeter(inMemory, sessionId, runId);
+      }
       const file = costMeterFileFor(dir, sessionId, runId);
       const raw = readCostMeterFile(file);
       return normalizeCostMeter(raw, sessionId, runId);

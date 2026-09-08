@@ -110,7 +110,12 @@ import {
   normalizeTier,
   normalizeTierSignals,
   normalizeUpgradeHistory,
+  normalizeSMisjudgmentHistory,
+  recordSMisjudgment,
+  sessionDefaultTierAfterMisjudgments,
   canUpgradeTier,
+  tierBudgetExceeded,
+  PROVISIONAL_S_TIER_BUDGET,
 } from "./tier.js";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
@@ -586,6 +591,7 @@ export function createStageStore(file) {
   const pendingStageInjection = {};
   const subagentRoles = {};
   const subagentRoleParents = {};
+  const sessionTierMisjudgments = {};
   try {
     if (file !== undefined && file !== null && existsSync(file)) {
       let raw = readFileSync(file, "utf8");
@@ -605,6 +611,15 @@ export function createStageStore(file) {
           if (id.length === 0) continue;
           const normalized = normalizeContractStateValue(rawContract);
           if (normalized !== null) contractState[id] = normalized;
+        }
+      }
+      const rawMisjudgments =
+        parsed !== null && typeof parsed === "object" ? parsed.sessionTierMisjudgments : undefined;
+      if (rawMisjudgments !== null && typeof rawMisjudgments === "object") {
+        for (const [id, rawHistory] of Object.entries(rawMisjudgments)) {
+          if (id.length === 0) continue;
+          const history = normalizeSMisjudgmentHistory(rawHistory);
+          if (history.length > 0) sessionTierMisjudgments[id] = history;
         }
       }
       const rawRuns = parsed !== null && typeof parsed === "object" ? parsed.workflowRuns : undefined;
@@ -719,6 +734,7 @@ export function createStageStore(file) {
             pendingStageInjection,
             subagentRoles,
             subagentRoleParents,
+            sessionTierMisjudgments,
           },
           null,
           2,
@@ -779,6 +795,36 @@ export function createStageStore(file) {
       delete contractState[sessionId];
       persist();
       return true;
+    },
+    /** session 级连续 S 误判历史（跨 run 持久；最多最近 2 次 "S"）。 */
+    getSessionTierMisjudgmentHistory(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return [];
+      return [...normalizeSMisjudgmentHistory(sessionTierMisjudgments[sessionId])];
+    },
+    /** 连续 2 次 S 误判 → 返回 "M"；否则 null（分类时用该 API 覆盖 S）。 */
+    sessionTierDefaultOf(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      return sessionDefaultTierAfterMisjudgments(
+        normalizeSMisjudgmentHistory(sessionTierMisjudgments[sessionId]),
+      );
+    },
+    /** 记录一次 S 误判（true=升 M 自动误判；false=成功 S run 完成，清零连续计数）。 */
+    recordSessionSMisjudgment(sessionId, wasMisjudgedS = true) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "tier-session-invalid", history: [], defaultTier: null };
+      }
+      const next = recordSMisjudgment(
+        normalizeSMisjudgmentHistory(sessionTierMisjudgments[sessionId]),
+        wasMisjudgedS === true,
+      );
+      if (next.length > 0) sessionTierMisjudgments[sessionId] = next;
+      else delete sessionTierMisjudgments[sessionId];
+      persist();
+      return {
+        ok: true,
+        history: [...next],
+        defaultTier: sessionDefaultTierAfterMisjudgments(next),
+      };
     },
     /** workflow-run 状态：{ runId, enteredStages }。 */
     getWorkflowRun(sessionId) {
@@ -1178,6 +1224,14 @@ export default {
       directory: costMeterDirectory,
       logger: ctx.logger,
     });
+    // 7.4 P1b：S 档预算。生产用 PROVISIONAL_S_TIER_BUDGET（PM3 未定稿）；
+    // config.sTierBudget 只是探针内部测试缝，绝不进 settings schema / 模型面。
+    const sTierBudget =
+      config?.sTierBudget !== null &&
+      config?.sTierBudget !== undefined &&
+      typeof config?.sTierBudget === "object"
+        ? config.sTierBudget
+        : PROVISIONAL_S_TIER_BUDGET;
 
     // -----------------------------------------------------------------------
     // Project-root / per-run task plan resolution（k10-project-store）。
@@ -1273,6 +1327,13 @@ export default {
       ensureActiveWorkflowRunForAgent(agent);
       const tier = normalizeTier(value?.tier);
       if (tier === null) return { ok: false, code: "tier-invalid" };
+      if (tier === "S" && stageStore.sessionTierDefaultOf(sessionId) === "M") {
+        return {
+          ok: false,
+          code: "tier-session-default-m",
+          reason: "session 连续 S 误判默认 M；本 run 不接受 S 分类",
+        };
+      }
       const existing = stageStore.getWorkflowRunTier(sessionId);
       if (existing !== null && existing.tier !== tier) {
         return { ok: false, code: "tier-upgrade-requires-history" };
@@ -1284,6 +1345,93 @@ export default {
         tierSignals: normalizeTierSignals(value?.tierSignals),
       });
       return done ? { ok: true, tier } : { ok: false, code: "tier-persist-failed" };
+    }
+
+    /** 7.4 P1b：唯一内部 S→M 自动升级入口。
+     *  写 upgradeHistory（只升不降）并对本次自动升级计一次 session S 误判。 */
+    function autoUpgradeMainRunTier(agent, { to = "M", trigger, reason, at } = {}) {
+      if (!tierFastLaneEnabledFor(agent)) return { ok: false, code: "tier-disabled" };
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "tier-session-invalid" };
+      }
+      if (activeWorkflowRunForAgent(agent) === null) {
+        return { ok: false, code: "tier-no-active-run" };
+      }
+      const current = workflowRunTierRecordFor(agent);
+      const target = normalizeTier(to);
+      if (target === null) return { ok: false, code: "tier-invalid" };
+      const result = stageStore.upgradeWorkflowRunTier(sessionId, {
+        to: target,
+        trigger,
+        reason,
+        at,
+      });
+      // 只在真实发生 S→M/L 自动升级时计一次误判；M→X/降级/无当前 tier 不计。
+      if (result.ok === true && current !== null && current.tier === "S") {
+        stageStore.recordSessionSMisjudgment(sessionId, true);
+      }
+      return result;
+    }
+
+    /** 成功 S run 到达 communication（无自动升级）→ 清零连续误判计数。 */
+    function resetSessionSMisjudgmentAfterSuccessfulS(agent) {
+      if (!tierFastLaneEnabledFor(agent)) return false;
+      const record = workflowRunTierRecordFor(agent);
+      if (record === null || record.tier !== "S") return false;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      stageStore.recordSessionSMisjudgment(sessionId, false);
+      return true;
+    }
+
+    /** 读取当前 run 的 cost-meter 聚合（内存优先；无则读盘）。 */
+    function currentCostMeterForAgent(agent) {
+      const key = costMeterKeyFor(agent);
+      if (key === null) return null;
+      return costMeter.read(key.sessionId, key.runId);
+    }
+
+    /** S run 实际工作量超预算 → 自动升 M（trigger=budget-exceeded）。 */
+    function autoUpgradeBudgetExceeded(agent) {
+      if (!tierFastLaneEnabledFor(agent)) return null;
+      const current = workflowRunTierRecordFor(agent);
+      if (current === null || current.tier !== "S") return null;
+      const meter = currentCostMeterForAgent(agent);
+      if (meter === null || !tierBudgetExceeded(meter, sTierBudget)) return null;
+      return autoUpgradeMainRunTier(agent, {
+        to: "M",
+        trigger: "budget-exceeded",
+        reason: `modelRequests=${meter.modelRequests} turns=${meter.turns} 超过 PM3 provisional S 预算`,
+      });
+    }
+
+    /** S run 进入 working 且活动 run 已存在任何 plan item → 自动升 M（trigger=working-entry）。 */
+    function autoUpgradeMainRunAtWorkingEntry(agent) {
+      if (!tierFastLaneEnabledFor(agent)) return null;
+      if (workflowRunTierOf(agent) !== "S") return null;
+      const context = taskPlanContextForAgent(agent);
+      if (
+        context.mode !== "run" ||
+        !(context.runId > 0) ||
+        context.planFile === null ||
+        typeof context.planFile !== "string"
+      ) {
+        return null;
+      }
+      let items = [];
+      try {
+        if (existsSync(context.planFile)) items = readRunPlanItems(context.planFile);
+      } catch {
+        items = [];
+      }
+      if (!Array.isArray(items) || items.length === 0) return null;
+      const personas = [...new Set(items.map((item) => item?.persona).filter((p) => typeof p === "string"))];
+      return autoUpgradeMainRunTier(agent, {
+        to: "M",
+        trigger: "working-entry",
+        reason: `working 入口复评：S run 已有 ${items.length} 个 plan item（personas=[${personas.join(", ")}]）；S 是 main-only`,
+      });
     }
 
     /** cost-meter key：与 task-plan 存储同源的 session/run 解析。
@@ -2146,9 +2294,15 @@ Before we answer, call memory_search or context_search exactly once. After that 
               const error = new Error(
                 `tier-invalid: whale_report could not record tier "${declaredTier}": ${initialResult.code}.`,
               );
-              error.code = "tier-invalid";
+              error.code =
+                initialResult.code === "tier-session-default-m"
+                  ? "tier-session-default-m"
+                  : "tier-invalid";
               return Promise.reject(error);
             }
+            // 预算反作弊：初始 S 刚落盘就按当前 meter 检查一次，超预算立即升 M，
+            // 因此同调用的 S-only nextStage 会在升 M 后被拒绝。
+            autoUpgradeBudgetExceeded(agent);
           }
         }
 
@@ -2270,6 +2424,11 @@ Before we answer, call memory_search or context_search exactly once. After that 
             `Current allowed tools: [${def.allowedTools.join(", ")}]. Can advance to: [${legalNext.join(", ")}]. ` +
             `Suggested: call whale_report with a legal nextStage from the Can advance to list.`;
           return Promise.reject(new Error(reason));
+        }
+
+        // 成功的 S run 到达 communication（没有触发任何自动升级）→ 清零连续误判。
+        if (target === "communication") {
+          resetSessionSMisjudgmentAfterSuccessfulS(agent);
         }
 
         if (target !== "end") {
@@ -3079,19 +3238,14 @@ Before we answer, call memory_search or context_search exactly once. After that 
         read: (sessionId, runId) => costMeter.read(sessionId, runId),
         fileFor: (sessionId, runId) => costMeter.fileFor(sessionId, runId),
       },
-      /** 7.4 P1 tier：只读记录 + 内部升级入口（P2 intentMap 接线；不是模型可见工具）。 */
+      /** 7.4 P1/P1b tier：只读记录 + 内部自动升级入口（P2 intentMap 接线；不是模型可见工具）。 */
       tierRecordOf: (agent) => workflowRunTierRecordFor(agent),
       upgradeRunTier: (agent, patch) => {
-        if (!tierFastLaneEnabledFor(agent)) return { ok: false, code: "tier-disabled" };
-        const sessionId = sessionIdOf(agent);
-        if (typeof sessionId !== "string" || sessionId.length === 0) {
-          return { ok: false, code: "tier-session-invalid" };
-        }
-        if (activeWorkflowRunForAgent(agent) === null) {
-          return { ok: false, code: "tier-no-active-run" };
-        }
-        return stageStore.upgradeWorkflowRunTier(sessionId, patch ?? {});
+        // 统一走自动升级 helper：S→M 自动升级计一次 session 误判，写 upgradeHistory。
+        return autoUpgradeMainRunTier(agent, patch ?? {});
       },
+      /** session 级默认 tier 读 API（连续 2 次 S 误判 → "M"；分类阶段使用）。 */
+      sessionTierDefaultOf: (sessionId) => stageStore.sessionTierDefaultOf(sessionId),
       lifecycleReferencePath,
       /** v0.9 B3：受控子代理角色记录 / 最终工具面（kaz-mode 组装时读取）。 */
       subagentRoleOf: (agent) => {
@@ -3422,6 +3576,9 @@ Before we answer, call memory_search or context_search exactly once. After that 
               recordCostMeterTurn(agent, userTurn);
             }
           }
+          // 7.4 P1b：每次 request 增量后检查预算（主 S run 超预算立即升 M；
+          // flag off / 非 S / 非 main 由 helper 内部短路，零行为变化）。
+          autoUpgradeBudgetExceeded(agent);
         }
         // 受控 v0.9 子代理：先清父主 send_message 硬等门（claimed 已处理时此处幂等），
         // 再确保 role 专属首阶段已初始化，不走主模型新任务路由。
@@ -3633,6 +3790,12 @@ Before we answer, call memory_search or context_search exactly once. After that 
             isMainWorkflowStage(pendingStage) &&
             !subagentNow
           ) {
+            // 7.4 P1b：S run 进入 working 的入口复评必须发生在 stage 文本计算前；
+            // 若该 run 已有任何 plan item（含 memory/plugin 需求），先升 M 再注入，
+            // 使注入的 Can advance to: 行反映 M/static 边而非 S-only 边。
+            if (pendingStage === "working") {
+              autoUpgradeMainRunAtWorkingEntry(agent);
+            }
             // Minimal 首轮提示：仅当会话尚未发生首次工具调用时随 main stage 正文输出。
             const mainMinimalTools = isMinimal(agent)
               ? ["memory_search", "context_search"]
