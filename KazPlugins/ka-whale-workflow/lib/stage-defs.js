@@ -145,7 +145,7 @@ PlanItem rules:
 - Required item fields: planItemId, persona, task. Optional structured fields: summary (one-line purpose), dependsOn (planItemIds this item depends on), targets (files/dirs/domains), verification (concrete checks), assignedTools.
 - whale_report validates the entire payload first: an invalid persona, a missing required field, or a malformed payload rejects the whole payload with a structured plan-item-invalid error; nothing is persisted and no item is silently dropped.
 - "worker": delegated individually during Working.
-- "memoryMaintainer": create at least one if the work produces new insights, lessons, or reusable patterns — even if uncertain.
+- "memoryMaintainer": on demand only. First memory_search (a hit means no item; memory_update still goes through CANDIDATE/review); otherwise keep the insight in the run work-log. Create an item only when durable + reusable + evidence-backed + rederivation cost > storage cost — never on uncertainty alone.
 - "pluginMaintainer": create a new private plugin only when existing plugins cannot meet requirements (e.g., repetitive work that could be automated).
 - Every build-type planItem must include, for visual/creative work:
   (a) intended user experience;
@@ -163,8 +163,7 @@ Delegation and splitting rules:
 - For each delegated task, provide the fullest possible description: objective, detailed step-by-step actions, expected outputs, constraints, relevant context, assumptions, potential pitfalls. When in doubt, include it. Spell everything out — do not assume the subagent can infer.
 - Max 8 tools per planItem.
 - Single delivery file (e.g., one HTML) is not a reason to use one subagent. Split when: >~300 lines of code, spans multiple domains (geometry/physics/rendering/UI), has independently verifiable acceptance criteria, or would benefit from independent review.
-- Every build-type task should include at least one "builder" and one "reviewer" planItem. The reviewer checks against requirements to avoid "author verifying own work."
-- Before finalizing, ask: "Is there at least one verification step independent of the builder?" If not, the plan is insufficiently split.
+- Reviewer: never routine; risk-triggered only, at most one independent reviewer per run, single pass, bound to a trigger id. T1 ambiguous high-impact intent / T2 contradictory prompt / T3 security-permission-privacy-secret-destructive (auto→parent) / T4 cross ≥3 modules-public API-schema (auto) / T5 external compliance / T6 no-oracle silent-failure logic (auto) / T7 aesthetic-UX judgment — T1/T2/T5/T7 are parent-decided, T3/T4/T6 are auto. T8 (missing evidence) → build a harness, never a reviewer.
 
 Amendment rules:
 - In amendment mode: use plan_read to read the current run plan first, persist revised plan, then advance.
