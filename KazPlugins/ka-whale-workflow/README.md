@@ -1,6 +1,16 @@
 # ka-whale-workflow
 
-鲸鱼工作流组件（v0.9/v0.10，31 世 + 32 世 B3/B3.5 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5–37.5 纠正范围 + 38 世热重载 + 39 世 v0.10 纠正：persona 固定枚举 / finalPlanPayload 原子校验 / 子代理尾部合并 / per-project per-run task-plan + plan_read / work-log / memory auto-load 文档同步；Goal 模式已移除）。
+鲸鱼工作流组件（v0.9/v0.10，31 世 + 32 世 B3/B3.5 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5–37.5 纠正范围 + 38 世热重载 + 39 世 v0.10 纠正 + **Kaz 7.4**：tier fast lane / Intent Map / evidence & delivery gate / memory on demand / risk-triggered reviewer / prompt-description slimming。核心：persona 固定枚举 / finalPlanPayload 原子校验 / 子代理尾部合并 / per-project per-run task-plan + plan_read / work-log / memory auto-load 文档同步；Goal 模式已移除）。
+
+## Kaz 7.4 概览
+
+- **S/M/L fast lane**：S = main-only 执行（assess-complexity → working → communication，tier-gated，默认 off）；M/L 保留 7.3.5 静态边。分类默认 M，任一机器可判定条件不满足即 M。
+- **Intent Map**：run 级持久化 goal / trueGoal / inferredFrom / defects / assumptions / confidence / requiresUserConfirmation / discriminatingSignal / acceptanceSignals；discriminatingSignal 必填，缺失 → low confidence + requiresUserConfirmation。
+- **Evidence & delivery gate**：evidenceChecklist 持久化；mainRerun.matches === true 至少一条才能过 gate；notVerified 必填且每项 ≤200 chars，永不 gate-blocking。flag 默认 off。
+- **Memory on demand**：先 memory_search，命中不新建；先落 work-log；只有 durable + reusable + evidence-backed + 重推成本 > 存储成本才建；never on uncertainty。memory_update 仍走 CANDIDATE/review。
+- **Reviewer**：never routine；risk-triggered only；每 run 至多 1 个独立 reviewer、单 pass、绑定 trigger id。T1/T2/T5/T7 parent-decided，T3/T4/T6 auto，T8 = 补 harness 不是 reviewer。
+- **Cost meter**：aggregate-only 计数器（modelRequests / turns / injectedChars / spawns / reports / stageAdvances / toolCallsByName / gatePassRate），不注册模型可见工具。
+- **Slimming**：stage task、persona、非 report 工具描述已精简；固定工件总量 < 40563 chars。完整细节见下方 §Stage/tool detail reference。
 
 ## 范围
 
@@ -188,6 +198,46 @@
 - `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` /
   `KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH` 由 `kaz-shared` 定义；
   `PLUGIN_LIFECYCLE.md` 放本组件目录并受 Git 跟踪。
+
+## Stage/tool detail reference（7.4 on-demand home）
+
+Read this section with `read KazPlugins/ka-whale-workflow/README.md` only when the slimmed stage text says a rule lives here.
+
+### Plan-item & delegation rules (write-plan)
+
+- One planItem per coherent task; don't pack all work into one. persona fixed enum: main / worker / memoryMaintainer / pluginMaintainer. Required planItemId/persona/task; optional summary/dependsOn/targets/verification/assignedTools (see `plan_read` output schema for exact field meanings).
+- `whale_report(finalPlanPayload)` atomically validates the whole payload: invalid persona, missing required field, or malformed payload → structured `plan-item-invalid`; nothing persisted, no item silently dropped.
+- worker items are delegated individually in Working via `ka_sub_whale`. memory/plugin items are reserved for memory-maintenance / plugin-maintenance.
+- pluginMaintainer: create a new private plugin only when existing plugins cannot meet requirements (e.g., repetitive work that could be automated).
+- Before communication, memory-maintenance re-evaluates plugin feasibility: if completed work reveals repetitive/manual/recurring steps, advance to write-plan to add a pluginMaintainer item, then plugin-maintenance; otherwise proceed to communication.
+- Split heavy tasks into smaller parallelizable pieces; prefer parallel execution when dependencies allow; reuse existing idle children with relevant context; max 8 tools per item; fully describe delegated task objective/steps/outputs/constraints/pitfalls. Single delivery file is not a reason to use one subagent — split when >~300 LOC, multiple domains, independent acceptance checks, or independent review would help.
+- Working delegation detail: after `ka_sub_whale`, end the turn; when a delegated planItem has `dependsOn`, include the actual `workLogFile` path from `plan_read` in the delegation/follow-up message (parallel subagents do not see each other's raw logs); child may pause mid-work, and reuse decisions follow the main persona.
+- Amendment: use `plan_read` to read the current run plan first, then persist the revised plan via write-plan, then advance.
+- Before communication, call `compass_context_before_communication` to compact/tidy context.
+
+### Visual/creative criteria (not a routine-reviewer mandate)
+
+- Every build-type planItem must include, for visual/creative work: intended user experience, visual acceptance criteria ("what success looks like"), and explicit failure examples.
+- Reviewers must judge fidelity to the intended experience, not only whether code exists. If rendered output cannot be produced/checked, say so instead of pretending code review is enough.
+
+### Memory on demand (§5.1)
+
+- First memory_search: a hit means no new item; memory_update still goes through CANDIDATE/review (new content lands as CANDIDATE, audited before effective).
+- Otherwise keep the insight in the run work-log.
+- Create a memoryMaintainer item only when durable + reusable + evidence-backed + rederivation cost > storage cost — never on uncertainty alone.
+- Delete: search first, delete only explicitly listed items, preserve audit.
+
+### Reviewer risk triggers (§4)
+
+- Reviewer: never routine; risk-triggered only; at most one independent reviewer per run, single pass, bound to a trigger id.
+- T1 ambiguous high-impact intent / T2 contradictory prompt / T3 security-permission-privacy-secret-destructive (auto→parent) / T4 cross ≥3 modules-public API-schema (auto) / T5 external compliance / T6 no-oracle silent-failure logic (auto) / T7 aesthetic-UX judgment — T1/T2/T5/T7 are parent-decided, T3/T4/T6 are auto.
+- T8 (missing evidence) → build a harness, never a reviewer.
+
+### Tool contract detail (whale_report / ka_sub_whale / plan_read)
+
+- `whale_report` params retain the machine contract: `finalPlanPayload` writes plans only in write-plan; persona enum is main/worker/memoryMaintainer/pluginMaintainer; item fields planItemId/persona/task/summary/dependsOn/targets/verification/assignedTools/tier/tierReason/tierSignals; invalid payloads → plan-item-invalid, nothing persisted. `tier`/`tierReason`/`tierSignals`/`intentMap`/`evidenceChecklist`/`notVerified` are 7.4 optional params. Goal mode removed.
+- `ka_sub_whale`: pass only a finalized planItemId; persona/task/assignedTools are bound from the plan; draft/missing/persona=main/unknown/tier-S delegations are rejected; after a successful start, end the turn and await the child's report/finished message (no pwsh sleep / no list_agents polling; list_agents/send_message are not wait primitives).
+- `plan_read`: main-only; reads current run summary, plan items, run files, work-log, run-level intentMap/evidenceChecklist; optional numeric runId reads a historical run; unknown runId → `plan-read-not-found`; legacy single-file mode reads the legacy store. Prefer over raw JSON reads.
 
 ## 未做（留给后续世代）
 

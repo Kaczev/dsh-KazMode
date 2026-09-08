@@ -310,7 +310,7 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   // child-worker 已在上一段进入 challenge-plan（首阶段，不再有 assess-complexity）。
   check("前置：child-worker 处于 challenge-plan", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
   const workReport = h1.registeredTools.get("work_sub_whale_report");
-  check("work_sub_whale_report description 含硬停等/父回复恢复/terminal 新轮/single settled", typeof workReport?.description === "string" && workReport.description.includes("hard stop") && workReport.description.includes("awaitingParent") && workReport.description.includes("send_message, which resumes it") && workReport.description.includes("fresh delegation at challenge-plan") && workReport.description.includes("parent receives it as subagent-settled") && !Object.prototype.hasOwnProperty.call(workReport.parameters ?? {}, "output"));
+  check("work_sub_whale_report description 含硬停等/父回复恢复/terminal 新轮/single settled", typeof workReport?.description === "string" && workReport.description.includes("hard stop") && workReport.description.includes("awaitingParent") && workReport.description.includes("send_message, which resumes it") && workReport.description.includes("fresh delegation starts at challenge-plan") && workReport.description.includes("parent receives it as subagent-settled") && !Object.prototype.hasOwnProperty.call(workReport.parameters ?? {}, "output"));
   const beforeReports = h1.capturedReports.length;
   const beforeRoundReports = h1.roundReports.length;
   let badError = null;

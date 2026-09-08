@@ -81,19 +81,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
       task:
-        `Judge complexity AND unpack intent.
-
-Before deciding, always form a compact Intent Map:
-1) What outcome does the user want to experience?
-2) What domain priors does this request evoke?
-   Example: "foam" => sticky, coalescing, bubbly, rough, lumpy, NOT isolated small balls.
-   Example: "UI" => visual hierarchy, whitespace, typography, aesthetics, not just layout.
-3) Does the user's wording conflict with the likely desired outcome? If so, state it.
-4) How should success be verified — by code review, by rendered output, or by user feel?
-
-Simple direct answers may advance to communication.
-Creative/visual/implementation-heavy requests advance to challenge-plan.
-Do not advance only to satisfy process; advance when a real decision needs scrutiny.`,
+        `Judge complexity AND unpack intent. Form a compact Intent Map before deciding: wanted outcome, domain priors, wording-vs-goal conflicts, and how success is verified (rendered output / code review / user feel). Simple direct answers may advance to communication; creative/visual/implementation-heavy requests advance to challenge-plan. Do not advance merely to satisfy process — advance when a real decision needs scrutiny.`,
     },
     "challenge-plan": {
       allowedTools: [
@@ -111,81 +99,23 @@ Do not advance only to satisfy process; advance when a real decision needs scrut
       ],
       canAdvance: ["decide-tools-before-writing-plan"],
       task:
-        `Critique the approach first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose concrete enhancements that would make the result more polished, practical, and balanced — avoid extremes of over-engineering or under-delivering. Aim for a solution that is appropriate to the task's complexity and context.
-
-When proposing improvements, be specific. Instead of asking vague questions like “What would you prefer?”, ask concrete questions about the task's scope, priorities, constraints, edge cases, user expectations, or trade-offs that need to be made. Use ask_user_question as many times as needed to gather clear, actionable preferences. Do not settle for vague terms like “better” or “improved” — translate them into specific decisions.
-
-Present your enhancement ideas to the user and ask for their preference before proceeding. Do not write task plans here and do not call ka_sub_whale. Ask user questions as many times as needed for true intent.
-
-Treat user words as intent signals, not a final specification.
-Surface conflicts between wording and likely outcome.
-propose an outcome-level correction before accepting the implementation hint.
-
-For visual/creative tasks, ask about look-and-feel/references first.
-Do not ask about implementation knobs until the look is agreed.`,
+        `Critique the approach first; identify real weaknesses and missed opportunities; do not manufacture criticism. Propose concrete, specific enhancements; avoid over-engineering. Ask concrete scope/priority/trade-off questions. Do not write task plans here and do not call ka_sub_whale. Treat user words as intent signals; surface conflicts; ask about look/feel before implementation knobs. Present ideas and wait for a decision.`,
     },
     "decide-tools-before-writing-plan": {
       allowedTools: ["context_search", "context_read", "context_compress", "whale_report"],
       canAdvance: ["write-plan"],
-      task:`Decide which tools from the candidate private plugins list are required for this work. Do not write task plans here — persistence is handled by the write-plan stage. Advance to write-plan when ready.
-
-The candidate tools (private plugins) are: <candidate tools: name: description>.
-
-Only these private plugins and tool_jobs(job_list, job_output, job_kill) may be included in assignedTools. Regular file tools and memory tools are part of the base role surface and must not be listed.`,
+      task:`Choose required tools from the candidate private plugins list. Do not write task plans here — write-plan persists plans. Candidates: <candidate tools: name: description>. Only these private plugins and tool_jobs (job_list/job_output/job_kill) may go in assignedTools; regular file/memory tools are base surface and must not be listed. Advance to write-plan when ready.`,
     },
     "write-plan": {
       allowedTools: ["whale_report", "plan_read", "read", "grep", "glob", "web_search", "memory_detail", "memory_search", "memory_list",  "context_search", "context_read"],
       canAdvance: ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
-      task:`Create and finalize the complete task plan via "whale_report(finalPlanPayload)".
-Use plan_read to inspect the active run plan and its work-log; prefer it over raw read of JSON files. Completed subagent terminal reports are appended to the run work-log beside the task plan; later delegations can reference that work-log path when dependsOn points at earlier items.
-
-PlanItem rules:
-- One planItem per coherent task. Do not pack all work into one.
-- persona is a fixed enum and must be exactly one of: main, worker, memoryMaintainer, pluginMaintainer.
-- Required item fields: planItemId, persona, task. Optional structured fields: summary (one-line purpose), dependsOn (planItemIds this item depends on), targets (files/dirs/domains), verification (concrete checks), assignedTools.
-- whale_report validates the entire payload first: an invalid persona, a missing required field, or a malformed payload rejects the whole payload with a structured plan-item-invalid error; nothing is persisted and no item is silently dropped.
-- "worker": delegated individually during Working.
-- "memoryMaintainer": on demand only. First memory_search (a hit means no item; memory_update still goes through CANDIDATE/review); otherwise keep the insight in the run work-log. Create an item only when durable + reusable + evidence-backed + rederivation cost > storage cost — never on uncertainty alone.
-- "pluginMaintainer": create a new private plugin only when existing plugins cannot meet requirements (e.g., repetitive work that could be automated).
-- Every build-type planItem must include, for visual/creative work:
-  (a) intended user experience;
-  (b) visual acceptance criteria ("what success looks like");
-  (c) explicit failure examples.
-- Reviewers must judge fidelity to the intended experience, not only whether code exists.
-- If rendered output cannot be produced/checked, say so in the task instead of pretending code review is enough.
-
-Delegation and splitting rules:
-- Delegate every worker planItem via "ka-sub-whale". Do not execute directly.
-- Split heavy tasks into smaller, parallelizable pieces when dependencies allow.
-- For complex systems, break down by natural subsystems or functional modules — each as its own planItem with its own subagent, as long as they can be developed independently and integrated later.
-- Prefer parallel execution over sequential when possible.
-- Reuse existing idle subagents with relevant expertise; create new ones only when none suitable exists.
-- For each delegated task, provide the fullest possible description: objective, detailed step-by-step actions, expected outputs, constraints, relevant context, assumptions, potential pitfalls. When in doubt, include it. Spell everything out — do not assume the subagent can infer.
-- Max 8 tools per planItem.
-- Single delivery file (e.g., one HTML) is not a reason to use one subagent. Split when: >~300 lines of code, spans multiple domains (geometry/physics/rendering/UI), has independently verifiable acceptance criteria, or would benefit from independent review.
-- Reviewer: never routine; risk-triggered only, at most one independent reviewer per run, single pass, bound to a trigger id. T1 ambiguous high-impact intent / T2 contradictory prompt / T3 security-permission-privacy-secret-destructive (auto→parent) / T4 cross ≥3 modules-public API-schema (auto) / T5 external compliance / T6 no-oracle silent-failure logic (auto) / T7 aesthetic-UX judgment — T1/T2/T5/T7 are parent-decided, T3/T4/T6 are auto. T8 (missing evidence) → build a harness, never a reviewer.
-
-Amendment rules:
-- In amendment mode: use plan_read to read the current run plan first, persist revised plan, then advance.
-
-Communication rules:
-- Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,
+      task:`Finalize plan via whale_report(finalPlanPayload); use plan_read. One planItem per coherent task; do not pack all work into one. persona: main, worker, memoryMaintainer, pluginMaintainer; required planItemId/persona/task; optional summary (one-line purpose), dependsOn (planItemIds this item depends on), targets (files/dirs/domains), verification (concrete checks), assignedTools. Invalid payloads are rejected with structured plan-item-invalid error; nothing is persisted and no item is silently dropped. Delegation/memory/reviewer/visual rules: README §7.4.`,
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
       canAdvance: ["decide-tools-before-writing-plan", "write-plan", "memory-maintenance"],
       task:
-        `Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance.
-
-After ka_sub_whale, end the turn. The child works inside its execution stage; it may pause mid-work with a *_sub_whale_report that has neither final:true nor nextStage (reply with send_message to resume). When finished, it evaluates optional context_compress and sends its TERMINAL full report via *_sub_whale_report({ final: true }); that report arrives as a single subagent-settled message, after which you reply with send_message to resume it or begin the next round. The child must have a response to proceed. Let the child run its own workflow at its own pace; we do not rush it. We wait for the report, verify it, and decide the next step.
-
-Amend plans only through write-plan. Use plan_read to inspect the active run plan and its work-log; prefer it over raw read of JSON. When delegating a planItem whose dependsOn references earlier completed items, include the actual workLogFile path from plan_read in the delegation/follow-up message; parallel subagents do not see each other's raw logs. When complete, advance to memory-maintenance before communication. Before calling ka_sub_whale:
-1. Call list_agents.
-2. If an idle child exists with matching context (same file / same domain / closely related objective), use send_message to continue that child.
-3. Only when no matching child exists, create a new one via ka_sub_whale.
-
-Do not open a new worker just because a new planItem exists;
-a small change to the same file should continue the child that already knows that file. Messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.`,
+        `Delegate each persona=worker plan item individually via ka_sub_whale; do not delegate memory/plugin items here; advance to memory-maintenance before communication. After ka_sub_whale, end the turn. Child may pause mid-work (report without final:true/nextStage) — reply with send_message to resume it; finished child sends TERMINAL full report via *_sub_whale_report({ final: true }) as a single subagent-settled message. We wait for the report, verify it, decide next. Reuse an idle child with matching context via send_message to continue that child; else ka_sub_whale. Amend via write-plan.`,
     },
     "memory-maintenance": {
       allowedTools: [
@@ -203,15 +133,7 @@ a small change to the same file should continue the child that already knows tha
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan", "compass_context_before_communication"],
       task:
-        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. Each child works inside save-update-then-compress-context-then-report/delete-memory-then-compress-context-then-report; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via memory_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a memory planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
-
-If no memoryMaintainer planItem exists, check whether the completed work has produced any insights, lessons learned, or reusable patterns worth saving. If so, advance to write-plan to add a memoryMaintainer planItem, then return to this stage.
-
-If the plan must change, advance to write-plan first; otherwise continue or advance. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the 'plan-memory' process, with the context from the previous round still present but the current round being an independent delegation.
-
-**Before advancing to communication or calling compress_context_before_communication, we must first evaluate whether a private plugin would improve future efficiency. Consider: are there repetitive patterns, manual steps, or recurring operations in this work that could be automated? If yes, advance to write-plan to add a pluginMaintainer planItem, then proceed to plugin-maintenance. If no, we may proceed to communication.**
-
-Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,
+        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. A child may pause mid-work (report without final/nextStage) and sends its TERMINAL full report via memory_sub_whale_report({ final: true }) as one subagent-settled message. Review with plan_read; plan changes go through write-plan. The same memoryMaintainer sub-agent can be reused multiple times; each round starts at plan-memory. Before communication, call compass_context_before_communication. Memory/plugin on-demand rules: read KazPlugins/ka-whale-workflow/README.md §7.4.`,
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -226,13 +148,7 @@ Before advancing to communication, call "compass_context_before_communication" t
       ],
       canAdvance: ["write-plan", "communication", "compass_context_before_communication"],
       task:
-        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. Each child works inside create-plugin-then-compress-context-then-report/update-plugin-then-compress-context-then-report/retire-plugin-then-compress-context-then-report; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via plugin_maintainer_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a plugin planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
-
-If no pluginMaintainer planItem exists, check whether the completed work reveals repetitive patterns or manual steps that could be automated with a private plugin. If so, advance to write-plan to add a pluginMaintainer planItem, then return to this stage.
-
-If a new plan item is needed, advance to write-plan first. Whether to reuse is determined by the main agent: messages can be sent directly to the same 'surface + idle child', otherwise a new ka_sub_whale will be opened.
-
-After pluginMaintainer tasks are complete, advance to communication. Before advancing to communication, call "compass_context_before_communication" to compact and tidy the session context.`,
+        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. A child may pause mid-work (report without final/nextStage) and sends its TERMINAL full report via plugin_maintainer_sub_whale_report({ final: true }) as one subagent-settled message. Review with plan_read; plan changes go through write-plan. Whether to reuse is determined by the main agent: send_message to the same surface + idle child, otherwise ka_sub_whale. Before communication, call compass_context_before_communication. Full lifecycle rules: read KazPlugins/ka-whale-workflow/README.md §7.4.`,
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "whale_report", "plan_read"],
@@ -262,11 +178,7 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
       ],
       canAdvance: ["working-then-compress-context-then-report"],
       task:
-        `Critique the assigned task first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose concrete enhancements that would make the result more polished, practical, and balanced — avoid extremes of over-engineering or under-delivering, and keep the solution appropriate to the task's complexity.
-
-When proposing improvements, be specific. Instead of vague suggestions, spell out concrete trade-offs, scope adjustments, priority shifts, edge cases, or user expectations that should be considered. Present these ideas clearly to the parent main agent and wait for its decision before proceeding. Do not assume approval — the parent must confirm or adjust.
-
-Do not write task plans here and do not call ka_sub_whale. Ask the parent main agent for clarification when the task intent is unclear.`,
+        `Critique the assigned task first; identify real weaknesses and missed opportunities; do not manufacture criticism. Propose concrete enhancements and present them clearly to the parent main agent, then wait for its decision — do not assume approval. Do not write task plans here and do not call ka_sub_whale. Ask the parent for clarification when task intent is unclear.`,
     },
     "working-then-compress-context-then-report": {
       allowedTools: [
@@ -289,21 +201,7 @@ Do not write task plans here and do not call ka_sub_whale. Ask the parent main a
       canAdvance: ["challenge-plan"],
       terminal: true,
       task:
-        `Execute the delegated work with care and completeness. We deliver work that is functional, readable, and properly tested — not just “done”, but done well.
-
-During execution:
-- Follow the task description closely. If ambiguity arises, we may ask the parent for clarification via the report.
-- We do not write memories or plugins. These are handled by the parent and the corresponding specialized subagents.
-- We keep our work self-contained within the delegated scope. We do not expand the scope without parent approval.
-
-When work is finished, first review our own work: does it meet the objective? Are all steps completed? Are there any edge cases missed?
-THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback.
-Then call work_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report as the final message, then end the turn:
-- What was done (summary of actions taken)
-- How it was done (key decisions, tools used, approach taken)
-- What was produced (files, changes, outputs)
-- What remains (open questions, incomplete items, risks, or follow-up work)
-- Any clarification needed from the parent`,
+        `Execute the delegated work with care; follow the task closely; stay self-contained; no memories/plugins. When finished, review own work. THEN **OPTIONAL BUT IMPORTANT**: context_compress suggest, then fold when large (manual primary, auto fallback). Call work_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report, then end turn: what/how/produced/remains/clarification.`,
     },
   },
   memoryMaintainer: {
@@ -352,7 +250,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
       canAdvance: ["plan-memory", "save-update-then-compress-context-then-report"],
       terminal: true,
       task:
-        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
+        "Delete only items explicitly listed in the brief; memory_forget does backup/audit — do not claim backup without an auditable record. When finished, review; THEN **OPTIONAL BUT IMPORTANT**: preview with context_compress suggest first, fold when large (manual primary, auto fallback). Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit), then end turn.",
     },
   },
   pluginMaintainer: {
@@ -393,7 +291,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
       canAdvance: ["plan-plugin"],
       terminal: true,
       task:
-        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
+        "Create a new private plugin under KazPrivatePlugins: CANDIDATE → implementation → probe → registration/versioning, then sync the candidate registry. When finished, review; THEN **OPTIONAL BUT IMPORTANT**: preview with context_compress suggest first before reporting, fold when large (manual primary, auto fallback). Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report, then end turn.",
     },
     "update-plugin-then-compress-context-then-report": {
       allowedTools: [
@@ -416,7 +314,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
       canAdvance: ["plan-plugin"],
       terminal: true,
       task:
-        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
+        "Update/version an existing private plugin: record change/CANDIDATE, edit KazPrivatePlugins/<plugin>/, probe + node --check, version/register, sync candidate registry. THEN **OPTIONAL BUT IMPORTANT**: preview with context_compress suggest first before reporting, fold when large (manual primary, auto fallback). Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report, then end turn.",
     },
     "retire-plugin-then-compress-context-then-report": {
       allowedTools: [
@@ -435,7 +333,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
       canAdvance: ["plan-plugin"],
       terminal: true,
       task:
-        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
+        "Retire/delete only plugins explicitly listed in the brief: backup/audit, remove only listed KazPrivatePlugins/<plugin>/, sync candidate registry; no public/official deletions. When finished, review; optional: context_compress suggest, then fold when large (manual primary, auto fallback). Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report, then end turn.",
     },
   },
 };

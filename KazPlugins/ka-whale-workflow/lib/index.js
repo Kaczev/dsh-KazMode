@@ -2380,7 +2380,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 workflow bookkeeping to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. Task plans can only be written/finalized in write-plan via finalPlanPayload. persona must be exactly one of main/worker/memoryMaintainer/pluginMaintainer. Allowed finalPlanPayload item fields: planItemId, persona, task, summary, dependsOn, targets, verification, assignedTools. An invalid payload is rejected with a structured error and nothing is persisted. Goal mode has been removed: mode='goal' is rejected with a workflow-stage-deny error.",
+        "Report v0.9 bookkeeping and advance legal next stages; plans only in write-plan via finalPlanPayload. Detail: README.md §Tool contract detail.",
       parameters: {
         mode: {
           type: "string",
@@ -2952,7 +2952,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     const kaSubWhaleDef = defineTool({
       name: KA_SUB_WHALE_TOOL,
       description:
-        "Kaz controlled delegation tool: create a continuable subagent from a finalized task-plan planItemId. The persona, task, and assignedTools are bound from the persisted task plan; pass only planItemId. Draft, missing, or not-yet-persisted ids are rejected with a structured refusal. After a successful start, the subagent runs asynchronously: end the current turn and await its report/finished message; do not use pwsh sleep or poll list_agents, and list_agents/send_message are not wait primitives.",
+        "Controlled delegation from a finalized planItemId; end the current turn and await its report/finished message; do not poll/sleep. Detail: README.md §Tool contract detail.",
       parameters: {
         planItemId: {
           type: "string",
@@ -3230,15 +3230,12 @@ Before we answer, call memory_search or context_search exactly once. After that 
       const reportDef = defineTool({
         name: reportTool,
         description:
-          `Advance/report through the v0.9 ${role} subagent workflow (${roleFlow}). ` +
-          `This tool is available only inside the matching v0.9 subagent role. ` +
-          `Pass nextStage to advance this role's ka-whale-workflow stage (planning → execution; must be in the current stage's ` +
-          `Can advance to list). Pass final:true only from the role's last execution stage to send the TERMINAL full report; ` +
-          `it must NOT be combined with nextStage. Omit both final and nextStage for a mid-work pause (awaitingParent only). ` +
-          `A successful call is a hard stop: the child sets awaitingParent and waits for the parent main model's ` +
-          `reply via send_message, which resumes it; the parent receives it as subagent-settled. ` +
-          `A final:true call additionally sets terminalFinal=true; after the parent reply, ` +
-          `the child starts a fresh delegation at ${roleFlow.split(" → ")[0]}.`,
+          `Advance/report through the v0.9 ${role} subagent workflow (${roleFlow}); available only inside the matching role. ` +
+          `Pass nextStage for planning → execution (must be in Can advance to); omit both final and nextStage for a mid-work pause; ` +
+          `pass final:true only from the role's last execution stage and do NOT combine it with nextStage. ` +
+          `A successful call is a hard stop: the child sets awaitingParent and waits for the parent main model's reply via send_message, ` +
+          `which resumes it; the parent receives it as subagent-settled. final:true also sets terminalFinal=true; ` +
+          `after the parent reply a fresh delegation starts at ${roleFlow.split(" → ")[0]}.`,
         parameters: {
           nextStage: {
             type: "string",
@@ -3363,7 +3360,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     const planReadDef = defineTool({
       name: PLAN_READ_TOOL,
       description:
-        "Read the active workflow-run task plan for the main agent. Returns the current run summary plus full plan items (planItemId, persona, status, summary, task, dependsOn, targets, verification, assignedTools, tier/tierReason/tierSignals, timestamps), the run-level intentMap/evidenceChecklist (stage-store run record canonical; v3 file fallback), the active run file path, and the run work-log (workLogFile + entries from completed terminal subagent reports). Prefer this over reading raw task-plan JSON via read. Optional runId (numeric) reads that run of the same session; unknown runId is rejected. In legacy single-file mode this tool reads the legacy store.",
+        "Read current/historical run task-plan/work-log (items, intentMap, evidenceChecklist) for main; prefer over raw JSON. Detail: README.md §Tool contract detail.",
       parameters: {
         runId: {
           type: "string",
