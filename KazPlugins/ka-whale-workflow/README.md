@@ -144,7 +144,9 @@
   parent + 同 role + finalSurface 一致且终态空闲的 child 自动 followup 下一轮；每轮从
   plan-memory 开始，前一轮上下文仍在但本轮为独立委派）。worker/pluginMaintainer
   是否复用由主代理决定：可对同 surface+空闲 child 直接 `send_message`，否则
-  `ka_sub_whale` 新开。
+  `ka_sub_whale` 新开。经 `send_message` 把 child 续接到新 plan item 时，relay
+  首行应写 `planItemId: <id>`（与 ka_sub_whale followup 同格式），使下一轮
+  terminal full report 计入该 item；无该行或未知 id 则保留原记录。
 - 36.7 challenge-plan 批评纪律：主/worker 的 challenge-plan 阶段要求先批评、
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
   批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与

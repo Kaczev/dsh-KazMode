@@ -17,9 +17,10 @@ import plugin, {
 } from "./lib/index.js";
 import { stageDefinitionFor, stageInjectionText, STAGE_CONTEXT_NOTES, isFinalReportStage, terminalStageIdsForRole } from "./lib/stage-defs.js";
 import { runPlanFileFor, currentRunPointerFileFor, readRunPlanItems, persistFinalPlanRun, workLogFileFor } from "./lib/task-plan-store.js";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { validateJsonSchemaValue } from "@deepseek-ai/dsh-tools";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 let failures = 0;
 const check = (label, ok) => {
@@ -128,6 +129,9 @@ function messageText(messages) {
 }
 function subagentAgent(id) {
   return { id, session: { id, events: [] }, options: { subagentDepth: 1 } };
+}
+function subagentAgentWithCwd(id, cwd) {
+  return { id, session: { id, header: { cwd }, events: [] }, options: { subagentDepth: 1 } };
 }
 function withToolCall(agent) {
   agent.session.events.push({ type: "tool/call", data: { name: "memory_search" } });
@@ -538,6 +542,10 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
   const seedStore = createStageStore(RUN_STORE);
   seedStore.set("main-run-session", "write-plan");
   seedStore.beginWorkflowRun("main-run-session");
+  // Active run without a finalized plan file: exercises plan_read run-file-missing
+  // (implicit and explicit) plus the empty-run-file notice branch after seeding.
+  seedStore.set("no-plan-run-session", "write-plan");
+  seedStore.beginWorkflowRun("no-plan-run-session");
   seedStore.setSubagentRole("child-log", {
     planItemId: "p-current",
     persona: "worker",
@@ -560,6 +568,21 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
     terminalFinal: true,
   });
   seedStore.set("child-log-2", "save-update-then-compress-context-then-report");
+  // Reused-child relay attribution: two worker children seeded on p1. One is
+  // relayed with `planItemId: p2`, the other with a plain relay (no line).
+  for (const childId of ["child-relay", "child-relay-keep"]) {
+    seedStore.setSubagentRole(childId, {
+      planItemId: "p1",
+      persona: "worker",
+      parentId: "main-run-session",
+      stage: "working-then-compress-context-then-report",
+      assignedTools: [],
+      finalTools: [],
+      awaitingParent: true,
+      terminalFinal: true,
+    });
+    seedStore.set(childId, "working-then-compress-context-then-report");
+  }
   const h3 = makeBase({
     includeSubagents: false,
     stageStoreFile: RUN_STORE,
@@ -589,6 +612,8 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
         items: [
           { planItemId: "p-current", persona: "worker", task: "Current run item", summary: "run", targets: ["src"], assignedTools: [] },
           { planItemId: "p-main", persona: "main", task: "Main current item", assignedTools: [] },
+          { planItemId: "p1", persona: "worker", task: "Initial relay item", assignedTools: [] },
+          { planItemId: "p2", persona: "worker", task: "Follow-up relay item", assignedTools: [] },
         ],
       },
     },
@@ -661,6 +686,66 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
       logRaw2.entries[1].role === "memoryMaintainer" &&
       logRaw2.entries[1].planItemId === "p-added" &&
       logRaw2.entries[1].report.includes("MemoryMaintainer terminal report"),
+  );
+  // Reused-child relay attribution: relay leading `planItemId: p2` updates the
+  // child role record; a plain relay keeps p1. Then complete one terminal round
+  // for each and assert the work-log entries carry the correct planItemId.
+  const claimedRelay = h3.listeners.get("agent/inbox/claimed")?.[0];
+  const workReportH3 = h3.registeredTools.get("work_sub_whale_report");
+  const relaySource = { kind: "coordinator", form: "relay", senderSessionId: "main-run-session" };
+  const plainRelay = { content: [{ type: "text", text: "continue" }], source: relaySource };
+  const childRelay = subagentAgentWithCwd("child-relay", RUN_DIR);
+  const relayP2 = {
+    content: [{ type: "text", text: "planItemId: p2\n\nFollow-up worker task" }],
+    source: relaySource,
+  };
+  await claimedRelay({ agent: childRelay, message: relayP2, turn: 6 });
+  const relayRecord = roleRecordFromFile(RUN_STORE, "child-relay");
+  check(
+    "relay leading planItemId updates reusable child role record before next round",
+    relayRecord?.planItemId === "p2" &&
+      relayRecord?.terminalFinal === false &&
+      relayRecord?.awaitingParent === false &&
+      stageFromFile(RUN_STORE, "child-relay") === "challenge-plan",
+  );
+  const childKeep = subagentAgentWithCwd("child-relay-keep", RUN_DIR);
+  await claimedRelay({ agent: childKeep, message: plainRelay, turn: 6 });
+  const keepRecord = roleRecordFromFile(RUN_STORE, "child-relay-keep");
+  check(
+    "relay without leading planItemId keeps prior planItemId p1",
+    keepRecord?.planItemId === "p1" &&
+      keepRecord?.terminalFinal === false &&
+      keepRecord?.awaitingParent === false &&
+      stageFromFile(RUN_STORE, "child-relay-keep") === "challenge-plan",
+  );
+  const signal = () => new AbortController().signal;
+  async function finishReusedChildRound(child, childId, turn) {
+    await workReportH3.execute(
+      { nextStage: "working-then-compress-context-then-report" },
+      { agent: child, signal: signal() },
+    );
+    await claimedRelay({ agent: child, message: plainRelay, turn: turn + 1 });
+    await workReportH3.execute({ final: true }, { agent: child, signal: signal() });
+    const settled = {
+      content: [{ type: "text", text: `${childId} terminal report full text` }],
+      source: { kind: "subagent-settled", form: "notice", senderSessionId: childId, summary: `${childId} summary` },
+    };
+    await preStepH3(
+      { agent: mainAgent, turn: turn + 2 },
+      async () => ({ kind: "enter", messages: [settled] }),
+    );
+  }
+  await finishReusedChildRound(childRelay, "child-relay", 8);
+  await finishReusedChildRound(childKeep, "child-relay-keep", 10);
+  const logRawRelay = JSON.parse(readFileSync(logFile, "utf8"));
+  const relayEntries = (logRawRelay?.entries ?? []).slice(-2);
+  check(
+    "relay planItemId: p2 logs terminal report under p2; plain relay keeps p1 attribution",
+    relayEntries.length === 2 &&
+      relayEntries[0].planItemId === "p2" &&
+      relayEntries[0].report.includes("child-relay terminal report") &&
+      relayEntries[1].planItemId === "p1" &&
+      relayEntries[1].report.includes("child-relay-keep terminal report"),
   );
   // Legacy/no-run best-effort: settled from an unmanaged child must not throw or write a run log.
   const beforeLegacyLogExists = existsSync(logFile);
@@ -736,6 +821,61 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
   const noPlanRunSession = { id: "fresh-session", session: { id: "fresh-session", header: { cwd: RUN_DIR }, events: [] } };
   const prEmpty = await planRead.execute({}, { agent: noPlanRunSession, signal: new AbortController().signal });
   check("plan_read before a run finalizes returns empty items + notice without crash", prEmpty.ok === true && prEmpty.items.length === 0 && typeof prEmpty.notice === "string");
+
+  // plan_read exhaustive branch probe through the host validation seam: the
+  // registered output.schema is compiled by @deepseek-ai/dsh-tools and
+  // validateJsonSchemaValue is the exact validator createSuccessResult uses
+  // (dsh-tools lib/index.js L3404-3407).
+  const prNoAgent = await planRead.execute({}, {});
+  const prDenied = await planRead.execute(
+    {},
+    { agent: subagentAgent("child-log"), signal: new AbortController().signal },
+  );
+  const legacyPlanRead = h1.registeredTools.get("plan_read");
+  const legacyAgent = { id: "legacy-main", session: { id: "legacy-main", events: [] }, options: {} };
+  const prLegacy = await legacyPlanRead.execute({}, { agent: legacyAgent, signal: new AbortController().signal });
+  const prLegacyRequested = await legacyPlanRead.execute({ runId: "1" }, { agent: legacyAgent, signal: new AbortController().signal });
+  const prNonNumeric = await planRead.execute({ runId: "abc" }, { agent: mainAgent, signal: new AbortController().signal });
+  const activeNoPlanSession = { id: "no-plan-run-session", session: { id: "no-plan-run-session", header: { cwd: RUN_DIR }, events: [] } };
+  const prMissingImplicit = await planRead.execute({}, { agent: activeNoPlanSession, signal: new AbortController().signal });
+  const prMissingExplicit = await planRead.execute({ runId: "1" }, { agent: activeNoPlanSession, signal: new AbortController().signal });
+  const emptyRunFile = runPlanFileFor(RUN_DIR, "no-plan-run-session", 1);
+  mkdirSync(dirname(emptyRunFile), { recursive: true });
+  writeFileSync(emptyRunFile, JSON.stringify({ version: 2, plans: {} }), "utf8");
+  const prEmptyFile = await planRead.execute({}, { agent: activeNoPlanSession, signal: new AbortController().signal });
+  const planReadBranches = [
+    ["agent-unavailable", prNoAgent],
+    ["main-tool-denied", prDenied],
+    ["legacy-no-run-id", prLegacy],
+    ["legacy-requested-run", prLegacyRequested],
+    ["no-active-run", prEmpty],
+    ["non-numeric-run", prNonNumeric],
+    ["run-file-missing-implicit", prMissingImplicit],
+    ["run-file-missing-explicit", prMissingExplicit],
+    ["run-file-empty-items", prEmptyFile],
+    ["active-run", pr1],
+    ["historical-run", readOld],
+    ["unknown-run", readUnknown],
+    ["post-amendment", prAfterAmend],
+  ];
+  const planReadSchema = planRead.output.schema;
+  const invalidPlanReadBranches = [];
+  for (const [name, value] of planReadBranches) {
+    const violations = validateJsonSchemaValue(planReadSchema, value, "value");
+    if (violations.length > 0) invalidPlanReadBranches.push(`${name}: ${violations.join("; ")}`);
+  }
+  const nullDeclaredString = planReadBranches.some(([, value]) =>
+    ["runId", "sessionId", "planFile", "workLogFile"].some(
+      (key) => Object.hasOwn(value, key) && value[key] === null,
+    ),
+  );
+  check(
+    "plan_read every reachable branch validates through real dsh-tools schema; no declared string field is null",
+    invalidPlanReadBranches.length === 0 &&
+      nullDeclaredString === false &&
+      planReadBranches.length >= 10,
+  );
+  if (invalidPlanReadBranches.length > 0) console.log("  invalid plan_read branches:", invalidPlanReadBranches.join(" | "));
 }
 
 rmSync(TMP, { recursive: true, force: true });

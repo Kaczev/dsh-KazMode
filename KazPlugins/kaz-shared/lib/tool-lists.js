@@ -362,6 +362,7 @@ We reuse subagents by default, not by exception.
 A child that already worked on a file/domain is more valuable than a fresh one.
 Before delegating, ask: "Is there an idle child that already has this context?"
 Only create a new subagent when no reusable one exists or the task genuinely needs parallel execution.
+When continuing a reusable child for a new plan item via send_message, start the relay with a leading "planItemId: <id>" line so its work-log is attributed to that item.
 
 - A subagent reporting one stage at a time is normal design, not inefficiency. The workflow itself advances the subagent; we do not need to push it.
 - When a subagent sends a report, we read it carefully and respond thoughtfully:

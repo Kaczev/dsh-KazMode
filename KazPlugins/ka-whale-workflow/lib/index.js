@@ -1385,13 +1385,52 @@ Before we answer, call memory_search or context_search exactly once. After that 
 <`;
     }
 
+    /** 解析父主 relay 的规范首行 `planItemId: <id>`（与 ka_sub_whale followup 同格式）。
+     *  返回空串表示没有该行；不剥离正文，不影响原消息语义。 */
+    function relayPlanItemIdOf(message) {
+      const text = messageTextOf(message);
+      const match = /^planItemId:[ \t]*(\S+)[ \t]*(?:\r?\n|$)/.exec(text);
+      return match === null ? "" : match[1];
+    }
+
+    /** 检查 relay 声称的 planItemId 是否存在于父主活动 run 的 finalized plan 文件。
+     *  复用 appendChildWorkLog 的 parent 伪 agent 构造：parentId + 子代理 cwd。
+     *  任何解析失败/未知都视为不存在，调用方保持原行为。 */
+    function relayPlanItemExistsInParentRun(record, agent, planItemId) {
+      try {
+        const parentId = typeof record.parentId === "string" ? record.parentId : "";
+        const cwd = cwdOfAgent(agent);
+        if (parentId.length === 0 || typeof cwd !== "string" || cwd.length === 0) return false;
+        const parentAgentLike = {
+          id: parentId,
+          session: { id: parentId, header: { cwd } },
+        };
+        const context = taskPlanContextForAgent(parentAgentLike);
+        if (
+          context.mode !== "run" ||
+          !(context.runId > 0) ||
+          context.planFile === null ||
+          typeof context.planFile !== "string"
+        ) {
+          return false;
+        }
+        return readRunPlanItems(context.planFile).some(
+          (item) => item.planItemId === planItemId,
+        );
+      } catch {
+        return false;
+      }
+    }
+
     /** 父主模型 send_message（coordinator/relay）到达受控子代理时清门：
      *  - terminalFinal=true（child 已发 final:true terminal full report）：重置为
      *    该角色初始阶段并清除 terminalFinal（新的一轮）；
      *  - 旧 in-flight legacy（旧 communication / compress_context_then_communication
      *    pending 已消费）也按终态重置，保证 reload 不崩；
      *  - 其它 mid-work pause / nextStage advance：只清 awaitingParent，stage 保持。
-     *  只有 awaitingParent=true 且确实是父主 relay 时才动作。 */
+     *  只有 awaitingParent=true 且确实是父主 relay 时才动作。
+     *  relay 若带规范首行 `planItemId: <id>` 且该 id 存在于父主活动 run，先更新
+     *  子代理角色记录的 planItemId，使下一轮 terminal full report 计入新 item。 */
     function clearAwaitingParentOnParentReply(agent, message) {
       if (!isParentMainSendMessage(message)) return false;
       const sessionId = sessionIdOf(agent);
@@ -1399,6 +1438,17 @@ Before we answer, call memory_search or context_search exactly once. After that 
       const record = stageStore.getSubagentRole(sessionId);
       if (record === null || record.awaitingParent !== true) return false;
       const role = record.persona;
+      const relayedPlanItemId = relayPlanItemIdOf(message);
+      if (
+        relayedPlanItemId.length > 0 &&
+        relayedPlanItemId !== record.planItemId &&
+        relayPlanItemExistsInParentRun(record, agent, relayedPlanItemId)
+      ) {
+        stageStore.setSubagentRole(sessionId, {
+          ...record,
+          planItemId: relayedPlanItemId,
+        });
+      }
       const current = stageOfAgent(agent);
       const pendingStage = stageStore.getPendingStageInjection(sessionId);
       const legacyOldFinal =
@@ -2655,10 +2705,10 @@ Before we answer, call memory_search or context_search exactly once. After that 
           return Promise.resolve({
             ok: true,
             mode: "legacy",
-            runId: null,
+            runId: "",
             sessionId: typeof sessionId === "string" ? sessionId : "",
             planFile: context.file,
-            workLogFile: null,
+            workLogFile: "",
             workLog: [],
             items: context.store.list(),
           });
@@ -2679,10 +2729,10 @@ Before we answer, call memory_search or context_search exactly once. After that 
           return Promise.resolve({
             ok: true,
             mode: "run",
-            runId: null,
+            runId: "",
             sessionId: typeof sessionId === "string" ? sessionId : "",
-            planFile: null,
-            workLogFile: null,
+            planFile: "",
+            workLogFile: "",
             workLog: [],
             items: [],
             notice: "no active workflow run has been started yet.",
@@ -2705,7 +2755,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
             mode: "run",
             runId: String(targetRunId),
             sessionId,
-            planFile: null,
+            planFile: "",
             workLogFile,
             workLog,
             items: [],
