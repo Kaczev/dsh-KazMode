@@ -25,6 +25,20 @@ export const INTENT_DEFECT_TYPES = Object.freeze([
   "incomplete",
 ]);
 
+/** §3.2 evidence kind 枚举（evidence gate 机器校验用）。 */
+export const EVIDENCE_KINDS = Object.freeze([
+  "probe",
+  "test",
+  "build-lint",
+  "command",
+  "rendered",
+  "diff",
+  "audit",
+]);
+
+/** §3.2 evidence status 枚举。 */
+export const EVIDENCE_STATUSES = Object.freeze(["met", "unmet", "waived"]);
+
 /** Intent Map 顶层字段白名单（§8.1）。 */
 const INTENT_MAP_KEYS = new Set([
   "goal",
@@ -106,6 +120,44 @@ export function normalizeEvidenceChecklist(value) {
     out.push(normalized);
   }
   return out;
+}
+
+/** 校验用户提交的 evidenceChecklist（§3.2 机器可校验形状）。 */
+export function validateEvidenceChecklistInput(value) {
+  const invalid = (reason) => ({ ok: false, code: "evidence-checklist-invalid", reason });
+  if (!Array.isArray(value)) return invalid("evidenceChecklist must be an array when present.");
+  const requiredText = ["id", "command", "expected", "actualTail", "at"];
+  for (let index = 0; index < value.length; index += 1) {
+    const entry = value[index];
+    const label = `evidenceChecklist[${index}]`;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return invalid(`${label} must be an object.`);
+    }
+    for (const key of requiredText) {
+      if (typeof entry[key] !== "string" || entry[key].trim().length === 0) {
+        return invalid(`${label}.${key} must be a non-empty string.`);
+      }
+    }
+    if (!EVIDENCE_KINDS.includes(entry.kind)) {
+      return invalid(`${label}.kind must be one of ${EVIDENCE_KINDS.join("/")}.`);
+    }
+    if (!EVIDENCE_STATUSES.includes(entry.status)) {
+      return invalid(`${label}.status must be one of ${EVIDENCE_STATUSES.join("/")}.`);
+    }
+    if (entry.mainRerun !== undefined && entry.mainRerun !== null) {
+      const rerun = entry.mainRerun;
+      const rerunLabel = `${label}.mainRerun`;
+      if (rerun === null || typeof rerun !== "object" || Array.isArray(rerun)) {
+        return invalid(`${rerunLabel} must be null or an object.`);
+      }
+      if (typeof rerun.command !== "string" || rerun.command.trim().length === 0) {
+        return invalid(`${rerunLabel}.command must be a non-empty string.`);
+      }
+      if (typeof rerun.actualTail !== "string") return invalid(`${rerunLabel}.actualTail must be a string.`);
+      if (typeof rerun.matches !== "boolean") return invalid(`${rerunLabel}.matches must be a boolean.`);
+    }
+  }
+  return { ok: true };
 }
 
 /**

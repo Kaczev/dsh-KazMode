@@ -122,8 +122,16 @@ import {
   normalizeEvidenceChecklist,
   normalizeIntentMap,
   runPromptDefectPass,
+  validateEvidenceChecklistInput,
   validateIntentMapInput,
 } from "./intent-map.js";
+import {
+  evaluateEvidenceGate,
+  normalizeNotVerifiedList,
+  runMainRerunOnce,
+  MAIN_RERUN_TIMEOUT_MS,
+  NOT_VERIFIED_MAX_CHARS,
+} from "./evidence-gate.js";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
@@ -199,6 +207,8 @@ const SETTINGS_SCHEMA = z.object({
   skillLifecycleMaxAutoActions: z.number().min(1).default(1),
   /** 7.4 P1 S/M/L fast lane：默认 off（off = 无 tier ctx，7.3.5 静态行为）。 */
   tierFastLane: z.boolean().default(false),
+  /** 7.4 P3 evidence/delivery gate：默认 off（off = advisory/不阻断，7.3.5 行为）。 */
+  evidenceGate: z.boolean().default(false),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
@@ -215,6 +225,7 @@ export const DEFAULT_SECTION = {
   skillLifecycleAuditIntervalHours: 24,
   skillLifecycleMaxAutoActions: 1,
   tierFastLane: false,
+  evidenceGate: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -556,6 +567,12 @@ export function normalizeSubagentRoleRecord(raw) {
     // 7.0/2026-09：受控子代理首次 tool/call 后置 true 并持久化，避免 resume 后
     // kaz-mode 只依赖会话 tool/call 事件而把已解锁子代理重新判成 Minimal。
     minimalDone: raw.minimalDone === true,
+    // 7.4 P3：terminal report notVerified 列表（由 *_sub_whale_report final:true 携带；
+    // 旧记录缺省空数组 + missing marker）。
+    notVerified: Array.isArray(raw.notVerified)
+      ? raw.notVerified.filter((entry) => typeof entry === "string" && entry.trim().length > 0)
+      : [],
+    notVerifiedMissing: raw.notVerifiedMissing === true,
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : "",
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
   };
@@ -1358,6 +1375,10 @@ export default {
     function tierFastLaneEnabledFor(agent) {
       return liveFor(agent)?.tierFastLane === true;
     }
+    /** 7.4 P3：evidence/delivery gate 开关（off = 不阻断、不执行 main 复跑）。 */
+    function evidenceGateEnabledFor(agent) {
+      return liveFor(agent)?.evidenceGate === true;
+    }
     /** 当前 run 显式 tier 记录；无 run / 无 tier / flag off 返回 null。 */
     function workflowRunTierRecordFor(agent) {
       if (!tierFastLaneEnabledFor(agent)) return null;
@@ -1486,6 +1507,119 @@ export default {
       });
     }
 
+    /** 当前 run 的 canonical evidenceChecklist（stage-store workflowRuns）。 */
+    function evidenceChecklistForAgent(agent) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return [];
+      return stageStore.getWorkflowRunIntent(sessionId).evidenceChecklist;
+    }
+
+    /** 把整份 normalized evidenceChecklist 写回 stage-store canonical。 */
+    function persistEvidenceChecklistForAgent(agent, checklist) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const result = stageStore.setWorkflowRunIntent(sessionId, {
+        evidenceChecklist: normalizeEvidenceChecklist(checklist),
+      });
+      return result.ok === true;
+    }
+
+    /** main whale_report 到达 communication 时追加 main 的 notVerified work-log 条目。
+     *  §9.3：列表是报告的一部分；此条目只在该行为 flag on 时产生（7.3.5 parity）。 */
+    function appendMainCommunicationWorkLog(agent, notVerifiedInfo) {
+      try {
+        const context = taskPlanContextForAgent(agent);
+        if (context.mode !== "run" || !(context.runId > 0)) return false;
+        const result = appendWorkLogEntry({
+          projectRoot: context.projectRoot,
+          sessionId: context.sessionId,
+          runId: context.runId,
+          role: "main",
+          planItemId: "",
+          summary: "main whale_report advanced to communication",
+          report: "",
+          at: new Date().toISOString(),
+          notVerified: notVerifiedInfo.notVerified,
+          notVerifiedMissing: notVerifiedInfo.markers.includes("notVerifiedMissing"),
+        });
+        return result.ok === true;
+      } catch {
+        return false;
+      }
+    }
+
+    /** 7.4 P3 live delivery gate（flag on、main 推进 communication 时调用）：
+     *  任一 unmet → 拒绝；否则由本插件实际复跑第一条可复跑 met evidence（单命令、
+     *  120s、无自动重试）。复跑结果写回 canonical checklist。 */
+    async function enforceEvidenceGateOnCommunication(agent) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "evidence-gate-error", reason: "session unavailable." };
+      }
+      let checklist = normalizeEvidenceChecklist(evidenceChecklistForAgent(agent));
+      if (checklist.length === 0) {
+        return {
+          ok: false,
+          code: "evidence-no-evidence",
+          reason: "evidence gate requires at least one evidence entry before communication.",
+        };
+      }
+      const unmet = checklist.filter((entry) => entry.status === "unmet");
+      if (unmet.length > 0) {
+        return {
+          ok: false,
+          code: "evidence-unmet",
+          reason: `evidence gate blocked by unmet entries: ${unmet.map((entry) => entry.id).join(", ")}.`,
+          unmetIds: unmet.map((entry) => entry.id),
+        };
+      }
+      const candidates = checklist.filter(
+        (entry) =>
+          entry.status === "met" &&
+          typeof entry.command === "string" &&
+          entry.command.trim().length > 0,
+      );
+      if (candidates.length === 0) {
+        return {
+          ok: false,
+          code: "evidence-main-rerun-missing",
+          reason: "delivery gate requires at least one met evidence command that main can rerun.",
+        };
+      }
+      const chosen = candidates[0];
+      const cwd = cwdOfAgent(agent);
+      const rerun = await runMainRerunOnce({
+        command: chosen.command,
+        expected: chosen.expected,
+        cwd,
+        timeoutMs: MAIN_RERUN_TIMEOUT_MS,
+      });
+      const updated = normalizeEvidenceChecklist(
+        checklist.map((entry) => {
+          if (entry.id !== chosen.id) return entry;
+          return {
+            ...entry,
+            status: rerun.matches ? entry.status : "unmet",
+            mainRerun: {
+              command: chosen.command,
+              actualTail: rerun.actualTail,
+              matches: rerun.matches === true,
+            },
+          };
+        }),
+      );
+      persistEvidenceChecklistForAgent(agent, updated);
+      if (rerun.matches === true) {
+        return { ok: true, reason: `main reran evidence "${chosen.command}" and matches=true.` };
+      }
+      return {
+        ok: false,
+        code: rerun.code === "evidence-timeout" ? "evidence-timeout" : "evidence-main-rerun-failed",
+        reason: `main rerun of "${chosen.command}" did not match (${rerun.code ?? "failed"}); no automatic retry.`,
+        runnerCode: rerun.code,
+      };
+    }
+
     /** cost-meter key：与 task-plan 存储同源的 session/run 解析。
      *  child 没有自己的 workflowRun → runId=0（与基线 child workflowRunId=0 一致）。 */
     function costMeterKeyFor(agent) {
@@ -1552,6 +1686,8 @@ export default {
           summary,
           report: messageTextOf(message),
           at: new Date().toISOString(),
+          notVerified: Array.isArray(roleRecord.notVerified) ? roleRecord.notVerified : [],
+          notVerifiedMissing: roleRecord.notVerifiedMissing === true,
         });
         if (appendResult.ok === true) {
           loggedChildIds.add(childId);
@@ -2284,6 +2420,17 @@ Before we answer, call memory_search or context_search exactly once. After that 
           description:
             "7.4 P2 optional Intent Map object (assess-complexity only): goal/trueGoal/inferredFrom/defects/assumptions/confidence/requiresUserConfirmation/discriminatingSignal/acceptanceSignals.",
         },
+        evidenceChecklist: {
+          type: "array",
+          items: { type: "json" },
+          description:
+            "7.4 P3 optional run evidenceChecklist update (§3.2 entries; main stages).",
+        },
+        notVerified: {
+          type: "array",
+          items: { type: "string" },
+          description: `7.4 P3 optional notVerified list (each ≤${NOT_VERIFIED_MAX_CHARS} chars; never gate-blocking).`,
+        },
       },
       output: {
         schema: {
@@ -2419,12 +2566,34 @@ Before we answer, call memory_search or context_search exactly once. After that 
           });
         }
 
+        // 7.4 P3 evidenceChecklist run-record update（main stages；非 write-plan 的
+        // finalPlanPayload 自带清单时由 write-plan 持久化块统一同步）。
+        const hasFinalPlanPayload =
+          args?.finalPlanPayload !== null && args?.finalPlanPayload !== undefined;
+        const hasEvidenceChecklist = args?.evidenceChecklist !== null && args?.evidenceChecklist !== undefined;
+        const finalPayloadCarriesEvidence =
+          hasFinalPlanPayload &&
+          args?.finalPlanPayload?.evidenceChecklist !== undefined &&
+          args?.finalPlanPayload?.evidenceChecklist !== null;
+        if (hasEvidenceChecklist && !(current === "write-plan" && finalPayloadCarriesEvidence)) {
+          const evidenceCheck = validateEvidenceChecklistInput(args.evidenceChecklist);
+          if (evidenceCheck.ok !== true) {
+            const error = new Error(`evidence-checklist-invalid: ${evidenceCheck.reason}`);
+            error.code = evidenceCheck.code;
+            return Promise.reject(error);
+          }
+          ensureActiveWorkflowRunForAgent(agent);
+          if (!persistEvidenceChecklistForAgent(agent, args.evidenceChecklist)) {
+            const error = new Error("evidence-checklist-invalid: whale_report could not persist evidenceChecklist.");
+            error.code = "evidence-checklist-invalid";
+            return Promise.reject(error);
+          }
+        }
+
         // v0.9 task plan persistence stage guard:
         // Task plans can only be written/finalized in write-plan via finalPlanPayload.
         // decide-tools cannot draft; memory/plugin-maintenance can only read/amend via write-plan.
         const hasDraftPlanItems = Array.isArray(args?.draftPlanItems);
-        const hasFinalPlanPayload =
-          args?.finalPlanPayload !== null && args?.finalPlanPayload !== undefined;
         if (hasDraftPlanItems) {
           return Promise.reject(
             new Error(
@@ -2556,8 +2725,21 @@ Before we answer, call memory_search or context_search exactly once. After that 
           return Promise.reject(new Error(reason));
         }
 
-        // 成功的 S run 到达 communication（没有触发任何自动升级）→ 清零连续误判。
+        // 7.4 P3 live delivery gate（flag on）：communication 前实际复跑一条 evidence
+        // 命令；unmet/超时/失败/缺 mainRerun 都结构化拒绝，不推进 stage。
         if (target === "communication") {
+          if (evidenceGateEnabledFor(agent)) {
+            const gateResult = await enforceEvidenceGateOnCommunication(agent);
+            if (gateResult.ok !== true) {
+              const error = new Error(
+                `delivery-gate-deny: whale_report cannot advance to communication because ${gateResult.reason}`,
+              );
+              error.code = gateResult.code;
+              return Promise.reject(error);
+            }
+            appendMainCommunicationWorkLog(agent, normalizeNotVerifiedList(args?.notVerified));
+          }
+          // 成功的 S run 到达 communication（没有触发任何自动升级）→ 清零连续误判。
           resetSessionSMisjudgmentAfterSuccessfulS(agent);
         }
 
@@ -3066,6 +3248,11 @@ Before we answer, call memory_search or context_search exactly once. After that 
             type: "boolean",
             description: `Optional terminal flag. final:true is valid only from the last execution stage of this role (one of: ${terminalStageIdsForRole(role).join(" / ")}) and must not be combined with nextStage. It sets terminalFinal=true and signals the FULL final report.`,
           },
+          notVerified: {
+            type: "array",
+            items: { type: "string" },
+            description: `7.4 P3 optional notVerified list (each ≤${NOT_VERIFIED_MAX_CHARS} chars; never gate-blocking).`,
+          },
         },
         output: {
           schema: {
@@ -3138,6 +3325,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             }
           }
           const terminalFinal = isFinal;
+          // 7.4 P3：terminal report 的 notVerified（可选参数；missing → marker）。
+          const notVerifiedInfo = normalizeNotVerifiedList(args?.notVerified);
           // 单一 subagent-settled 通道：工具不发送报告正文；子代理随后把报告
           // 作为最终消息写出，父主以 subagent-settled 收到。此处只置硬等门。
           const childId = sessionIdOf(agent);
@@ -3148,6 +3337,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
                 ...record,
                 terminalFinal,
                 stage: nextStage.length > 0 ? nextStage : current,
+                notVerified: notVerifiedInfo.notVerified,
+                notVerifiedMissing: notVerifiedInfo.markers.includes("notVerifiedMissing"),
               });
             }
             stageStore.setSubagentRoleAwaitingParent(childId, true);

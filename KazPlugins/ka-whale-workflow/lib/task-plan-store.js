@@ -24,6 +24,7 @@ import {
   normalizeEvidenceChecklist,
   normalizeIntentMap,
   runPromptDefectPass,
+  validateEvidenceChecklistInput,
   validateIntentMapInput,
 } from "./intent-map.js";
 import { normalizeTier, normalizeTierSignals } from "./tier.js";
@@ -139,22 +140,21 @@ export function validateFinalPlanPayload(payload) {
       };
     }
   }
-  if (
-    payload.evidenceChecklist !== undefined &&
-    payload.evidenceChecklist !== null &&
-    !Array.isArray(payload.evidenceChecklist)
-  ) {
-    return {
-      ok: false,
-      code: "plan-item-invalid",
-      rejected: [
-        {
-          planItemId: null,
-          code: "evidence-checklist-invalid",
-          reason: "finalPlanPayload.evidenceChecklist must be an array when present.",
-        },
-      ],
-    };
+  if (payload.evidenceChecklist !== undefined && payload.evidenceChecklist !== null) {
+    const evidenceCheck = validateEvidenceChecklistInput(payload.evidenceChecklist);
+    if (evidenceCheck.ok !== true) {
+      return {
+        ok: false,
+        code: "plan-item-invalid",
+        rejected: [
+          {
+            planItemId: null,
+            code: evidenceCheck.code,
+            reason: evidenceCheck.reason,
+          },
+        ],
+      };
+    }
   }
   return { ok: true };
 }
@@ -694,6 +694,11 @@ function normalizeWorkLogEntry(raw, index) {
     planItemId: typeof raw.planItemId === "string" ? raw.planItemId : "",
     summary: typeof raw.summary === "string" ? raw.summary : "",
     report: typeof raw.report === "string" ? raw.report : "",
+    // 7.4 P3：terminal report notVerified（old entries 缺省 []）。
+    notVerified: Array.isArray(raw.notVerified)
+      ? raw.notVerified.filter((entry) => typeof entry === "string" && entry.trim().length > 0)
+      : [],
+    notVerifiedMissing: raw.notVerifiedMissing === true,
   };
 }
 
@@ -722,7 +727,7 @@ export function readWorkLogEntries(projectRoot, sessionId, runId) {
  * 原子 read-modify-write（同步单文件写）；任何 I/O/形状异常返回 ok:false，
  * 不向上抛错。返回 { ok, file?, seq? }。
  */
-export function appendWorkLogEntry({ projectRoot, sessionId, runId, role, planItemId, summary, report, at }) {
+export function appendWorkLogEntry({ projectRoot, sessionId, runId, role, planItemId, summary, report, at, notVerified, notVerifiedMissing }) {
   try {
     const file = workLogFileFor(projectRoot, sessionId, runId);
     const existing = readWorkLogEntries(projectRoot, sessionId, runId);
@@ -734,6 +739,10 @@ export function appendWorkLogEntry({ projectRoot, sessionId, runId, role, planIt
       planItemId: typeof planItemId === "string" ? planItemId : "",
       summary: typeof summary === "string" ? summary : "",
       report: typeof report === "string" ? report : "",
+      notVerified: Array.isArray(notVerified)
+        ? notVerified.filter((item) => typeof item === "string" && item.trim().length > 0)
+        : [],
+      notVerifiedMissing: notVerifiedMissing === true,
     };
     const nextEntries = [...existing, entry].map((item, index) =>
       normalizeWorkLogEntry(item, index),
