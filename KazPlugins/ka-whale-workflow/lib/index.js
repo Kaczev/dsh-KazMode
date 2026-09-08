@@ -77,6 +77,7 @@ import {
   stageInjectionText,
   stageIdsForRole,
   canAdvance,
+  advanceListFor,
   isFinalReportStage,
   isMainWorkflowStage,
   isSubagentWorkflowStage,
@@ -105,6 +106,12 @@ import {
   defaultCostMeterDirectory,
   createCostMeterWriter,
 } from "./cost-meter.js";
+import {
+  normalizeTier,
+  normalizeTierSignals,
+  normalizeUpgradeHistory,
+  canUpgradeTier,
+} from "./tier.js";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
@@ -178,6 +185,8 @@ const SETTINGS_SCHEMA = z.object({
   skillLifecyclePendingDays: z.number().min(1).default(7),
   skillLifecycleAuditIntervalHours: z.number().min(1).default(24),
   skillLifecycleMaxAutoActions: z.number().min(1).default(1),
+  /** 7.4 P1 S/M/L fast lane：默认 off（off = 无 tier ctx，7.3.5 静态行为）。 */
+  tierFastLane: z.boolean().default(false),
 });
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
@@ -193,6 +202,7 @@ export const DEFAULT_SECTION = {
   skillLifecyclePendingDays: 7,
   skillLifecycleAuditIntervalHours: 24,
   skillLifecycleMaxAutoActions: 1,
+  tierFastLane: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -262,6 +272,7 @@ function normalizeConfig(raw) {
     skillLifecyclePendingDays: intDefault(value.skillLifecyclePendingDays, 7),
     skillLifecycleAuditIntervalHours: intDefault(value.skillLifecycleAuditIntervalHours, 24),
     skillLifecycleMaxAutoActions: 1, // 硬性护栏：每周期最多 1 个自动动作
+    tierFastLane: value.tierFastLane === true,
   };
 }
 
@@ -559,7 +570,8 @@ const KNOWN_SESSION_STAGES = new Set([
  * 结构：{ version: 6,
  *        sessions: { "<sessionId>": "<v0.9 stage>" },
  *        contractState: { "<sessionId>": {...} },
- *        workflowRuns: { "<sessionId>": { runId, enteredStages } },
+ *        workflowRuns: { "<sessionId>": { runId, enteredStages,
+ *          tier?, tierReason?, tierSignals?, upgradeHistory? } },
  *        pendingStageInjection: { "<sessionId>": "<stage>" },
  *        subagentRoles: { "<childSessionId>": { planItemId, persona, parentId,
  *          stage, assignedTools, finalTools, awaitingParent, createdAt, updatedAt } },
@@ -603,7 +615,19 @@ export function createStageStore(file) {
           const enteredStages = Array.isArray(rawRun.enteredStages)
             ? rawRun.enteredStages.filter((item) => typeof item === "string")
             : [];
-          workflowRuns[id] = { runId, enteredStages };
+          const runRecord = { runId, enteredStages };
+          const tier = normalizeTier(rawRun.tier);
+          if (tier !== null) {
+            runRecord.tier = tier;
+            if (typeof rawRun.tierReason === "string" && rawRun.tierReason.trim().length > 0) {
+              runRecord.tierReason = rawRun.tierReason.trim();
+            }
+            const signals = normalizeTierSignals(rawRun.tierSignals);
+            if (signals.length > 0) runRecord.tierSignals = signals;
+            const history = normalizeUpgradeHistory(rawRun.upgradeHistory);
+            if (history.length > 0) runRecord.upgradeHistory = history;
+          }
+          workflowRuns[id] = runRecord;
         }
       }
       const rawPending = parsed !== null && typeof parsed === "object" ? parsed.pendingStageInjection : undefined;
@@ -761,11 +785,82 @@ export function createStageStore(file) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return null;
       return JSON.parse(JSON.stringify(runStateOf(sessionId)));
     },
+    /** 当前 run 的 7.4 tier 记录；无显式 tier 返回 null（= 静态 7.3.5 行为）。 */
+    getWorkflowRunTier(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const run = runStateOf(sessionId);
+      if (run.tier === undefined || normalizeTier(run.tier) === null) return null;
+      return {
+        tier: run.tier,
+        tierReason: typeof run.tierReason === "string" ? run.tierReason : "",
+        tierSignals: normalizeTierSignals(run.tierSignals),
+        upgradeHistory: normalizeUpgradeHistory(run.upgradeHistory),
+      };
+    },
+    /** 写入初始 tier 记录（同 run 内禁止降级；仅当尚无 tier 或等价保持时成功）。 */
+    setWorkflowRunTier(sessionId, value) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const tier = normalizeTier(value?.tier);
+      if (tier === null) return false;
+      const state = runStateOf(sessionId);
+      if (state.tier !== undefined && state.tier !== null && state.tier !== tier) {
+        if (!canUpgradeTier(state.tier, tier)) return false;
+      }
+      state.tier = tier;
+      state.tierReason =
+        typeof value?.tierReason === "string" && value.tierReason.trim().length > 0
+          ? value.tierReason.trim()
+          : "";
+      const signals = normalizeTierSignals(value?.tierSignals);
+      if (signals.length > 0) state.tierSignals = signals;
+      else delete state.tierSignals;
+      const history = normalizeUpgradeHistory(value?.upgradeHistory);
+      if (history.length > 0) state.upgradeHistory = history;
+      else delete state.upgradeHistory;
+      return persist();
+    },
+    /** run 内升级（S→M/L）；写 upgradeHistory，只升不降。 */
+    upgradeWorkflowRunTier(sessionId, { to, trigger, reason, at } = {}) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "tier-session-invalid" };
+      }
+      const target = normalizeTier(to);
+      if (target === null) return { ok: false, code: "tier-invalid" };
+      const state = runStateOf(sessionId);
+      const from = normalizeTier(state.tier);
+      if (from === null) return { ok: false, code: "tier-no-current-tier" };
+      if (!canUpgradeTier(from, target)) return { ok: false, code: "tier-downgrade-denied" };
+      const history = normalizeUpgradeHistory(state.upgradeHistory);
+      const entry = {
+        from,
+        to: target,
+        trigger:
+          typeof trigger === "string" && trigger.trim().length > 0 ? trigger.trim() : "unknown",
+        at: typeof at === "string" && at.trim().length > 0 ? at : new Date().toISOString(),
+      };
+      history.push(entry);
+      const persisted = this.setWorkflowRunTier(sessionId, {
+        tier: target,
+        tierReason:
+          typeof reason === "string" && reason.trim().length > 0
+            ? reason.trim()
+            : typeof state.tierReason === "string"
+              ? state.tierReason
+              : "",
+        tierSignals: state.tierSignals,
+        upgradeHistory: history,
+      });
+      return persisted ? { ok: true, from, to: target, entry } : { ok: false, code: "tier-persist-failed" };
+    },
     beginWorkflowRun(sessionId) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       const state = runStateOf(sessionId);
       state.runId = Number.isSafeInteger(state.runId) ? state.runId + 1 : 1;
       state.enteredStages = [];
+      delete state.tier;
+      delete state.tierReason;
+      delete state.tierSignals;
+      delete state.upgradeHistory;
       return persist();
     },
     addWorkflowRunStage(sessionId, stage) {
@@ -1151,6 +1246,44 @@ export default {
       if (existing !== null) return existing;
       stageStore.beginWorkflowRun(sessionId);
       return activeWorkflowRunForAgent(agent);
+    }
+
+    /** 7.4 P1：tier fast lane 开关（off = 不注入/不读取 tier ctx）。 */
+    function tierFastLaneEnabledFor(agent) {
+      return liveFor(agent)?.tierFastLane === true;
+    }
+    /** 当前 run 显式 tier 记录；无 run / 无 tier / flag off 返回 null。 */
+    function workflowRunTierRecordFor(agent) {
+      if (!tierFastLaneEnabledFor(agent)) return null;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      return stageStore.getWorkflowRunTier(sessionId);
+    }
+    /** 当前 run tier 字符串（无 = null）；子代理永远 null（tier ctx main-only）。 */
+    function workflowRunTierOf(agent) {
+      return workflowRunTierRecordFor(agent)?.tier ?? null;
+    }
+    /** 把 whale_report 携带的初始分类写入当前 run；只允许 main + assess-complexity。
+     *  已有不同 tier 时拒绝（后续变更必须走带 upgradeHistory 的升级入口）。 */
+    function persistInitialWorkflowRunTier(agent, value) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "tier-session-invalid" };
+      }
+      ensureActiveWorkflowRunForAgent(agent);
+      const tier = normalizeTier(value?.tier);
+      if (tier === null) return { ok: false, code: "tier-invalid" };
+      const existing = stageStore.getWorkflowRunTier(sessionId);
+      if (existing !== null && existing.tier !== tier) {
+        return { ok: false, code: "tier-upgrade-requires-history" };
+      }
+      const done = stageStore.setWorkflowRunTier(sessionId, {
+        tier,
+        tierReason:
+          typeof value?.tierReason === "string" ? value.tierReason : "",
+        tierSignals: normalizeTierSignals(value?.tierSignals),
+      });
+      return done ? { ok: true, tier } : { ok: false, code: "tier-persist-failed" };
     }
 
     /** cost-meter key：与 task-plan 存储同源的 session/run 解析。
@@ -1933,6 +2066,19 @@ Before we answer, call memory_search or context_search exactly once. After that 
           description:
             "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, summary?, dependsOn?, targets?, verification?, assignedTools? }] } to create/finalize the complete task plan. persona must be exactly one of main/worker/memoryMaintainer/pluginMaintainer; allowed item fields are planItemId/persona/task/summary/dependsOn/targets/verification/assignedTools. Invalid payloads (wrong persona, missing required fields, malformed container) are rejected with a structured plan-item-invalid error and nothing is persisted.",
         },
+        tier: {
+          type: "string",
+          description: "7.4 optional run tier: S/M/L (assess-complexity only).",
+        },
+        tierReason: {
+          type: "string",
+          description: "7.4 optional classification evidence; requires tier.",
+        },
+        tierSignals: {
+          type: "array",
+          items: { type: "string" },
+          description: "7.4 optional checkable signals; requires tier.",
+        },
       },
       output: {
         schema: {
@@ -1968,6 +2114,42 @@ Before we answer, call memory_search or context_search exactly once. After that 
             `(current="${current}"). Current allowed tools: ${def.allowedTools.join(", ")}. ` +
             `Suggested: start a new task through assess-complexity.`;
           return Promise.reject(new Error(reason));
+        }
+
+        // 7.4 P1 tier classification carrier（assess-complexity only；flag off 时忽略）。
+        const tierArgPresent =
+          typeof args?.tier === "string" && args.tier.trim().length > 0;
+        if (tierArgPresent) {
+          const declaredTier = normalizeTier(args.tier.trim());
+          if (declaredTier === null) {
+            const error = new Error(
+              `tier-invalid: whale_report tier must be one of S/M/L (got "${String(args.tier)}").`,
+            );
+            error.code = "tier-invalid";
+            return Promise.reject(error);
+          }
+          if (current !== "assess-complexity") {
+            const error = new Error(
+              `tier-invalid: whale_report tier can only be recorded in assess-complexity (current="${current}").`,
+            );
+            error.code = "tier-invalid";
+            return Promise.reject(error);
+          }
+          if (tierFastLaneEnabledFor(agent)) {
+            const initialResult = persistInitialWorkflowRunTier(agent, {
+              tier: declaredTier,
+              tierReason:
+                typeof args?.tierReason === "string" ? args.tierReason : "",
+              tierSignals: Array.isArray(args?.tierSignals) ? args.tierSignals : [],
+            });
+            if (initialResult.ok !== true) {
+              const error = new Error(
+                `tier-invalid: whale_report could not record tier "${declaredTier}": ${initialResult.code}.`,
+              );
+              error.code = "tier-invalid";
+              return Promise.reject(error);
+            }
+          }
         }
 
         // v0.9 task plan persistence stage guard:
@@ -2076,10 +2258,16 @@ Before we answer, call memory_search or context_search exactly once. After that 
             : null;
         const target = requested !== null ? requested : defaultNext;
 
-        if (target === null || !canAdvance(MAIN_ROLE, current, target)) {
+        const tierCtx = workflowRunTierRecordFor(agent);
+        const effectiveTierCtx = tierCtx !== null ? { tier: tierCtx.tier } : undefined;
+        const legalNext = advanceListFor(MAIN_ROLE, current, effectiveTierCtx);
+        if (
+          target === null ||
+          !canAdvance(MAIN_ROLE, current, target, effectiveTierCtx)
+        ) {
           const reason =
             `workflow-stage-deny: whale_report cannot advance from "${current}" to "${String(target)}". ` +
-            `Current allowed tools: [${def.allowedTools.join(", ")}]. Can advance to: [${def.canAdvance.join(", ")}]. ` +
+            `Current allowed tools: [${def.allowedTools.join(", ")}]. Can advance to: [${legalNext.join(", ")}]. ` +
             `Suggested: call whale_report with a legal nextStage from the Can advance to list.`;
           return Promise.reject(new Error(reason));
         }
@@ -2340,6 +2528,16 @@ Before we answer, call memory_search or context_search exactly once. After that 
             ok: false,
             code: "subagent-delegation-denied",
             reason: "ka_sub_whale is available only to the main agent; subagents cannot create further delegated subagents.",
+          });
+        }
+        // 7.4 P1：S run = main-only；任何委派在 tier=S 时结构化拒绝（不自动降级）。
+        if (workflowRunTierOf(agent) === "S") {
+          return Promise.resolve({
+            ok: false,
+            code: "tier-s-delegation-denied",
+            reason:
+              "ka_sub_whale rejected delegation because the current run tier is S (main-only fast lane). " +
+              "Upgrade the run to M (e.g. requires-user-confirmation / working re-evaluation) before delegating.",
           });
         }
         const context = taskPlanContextForAgent(agent);
@@ -2881,6 +3079,19 @@ Before we answer, call memory_search or context_search exactly once. After that 
         read: (sessionId, runId) => costMeter.read(sessionId, runId),
         fileFor: (sessionId, runId) => costMeter.fileFor(sessionId, runId),
       },
+      /** 7.4 P1 tier：只读记录 + 内部升级入口（P2 intentMap 接线；不是模型可见工具）。 */
+      tierRecordOf: (agent) => workflowRunTierRecordFor(agent),
+      upgradeRunTier: (agent, patch) => {
+        if (!tierFastLaneEnabledFor(agent)) return { ok: false, code: "tier-disabled" };
+        const sessionId = sessionIdOf(agent);
+        if (typeof sessionId !== "string" || sessionId.length === 0) {
+          return { ok: false, code: "tier-session-invalid" };
+        }
+        if (activeWorkflowRunForAgent(agent) === null) {
+          return { ok: false, code: "tier-no-active-run" };
+        }
+        return stageStore.upgradeWorkflowRunTier(sessionId, patch ?? {});
+      },
       lifecycleReferencePath,
       /** v0.9 B3：受控子代理角色记录 / 最终工具面（kaz-mode 组装时读取）。 */
       subagentRoleOf: (agent) => {
@@ -2978,6 +3189,9 @@ Before we answer, call memory_search or context_search exactly once. After that 
       if (def === null) return next();
       const name = exec?.name;
       if (typeof name !== "string" || def.allowedTools.includes(name)) return next();
+      const mainTierRecord = workflowRunTierRecordFor(agent);
+      const mainTierCtx =
+        mainTierRecord !== null ? { tier: mainTierRecord.tier } : undefined;
       ctx.logger.info(
         `[ka-whale-workflow] workflow-stage-deny: "${name}" not allowed in stage "${current}"`,
       );
@@ -2985,7 +3199,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         kind: "deny",
         reason:
           `workflow-stage-deny: "${name}" is not allowed in current ka-whale-workflow stage "${current}". ` +
-          `Allowed tools: [${def.allowedTools.join(", ")}]. Can advance to: [${def.canAdvance.join(", ")}]. ` +
+          `Allowed tools: [${def.allowedTools.join(", ")}]. Can advance to: [${advanceListFor(MAIN_ROLE, current, mainTierCtx).join(", ")}]. ` +
           `Suggested: use one of the allowed tools, or call whale_report with a legal nextStage to advance.`,
       };
     });
@@ -3423,10 +3637,12 @@ Before we answer, call memory_search or context_search exactly once. After that 
             const mainMinimalTools = isMinimal(agent)
               ? ["memory_search", "context_search"]
               : undefined;
+            const mainTierRecord = workflowRunTierRecordFor(agent);
             const options = {
               ...(Array.isArray(mainMinimalTools) && mainMinimalTools.length > 0
                 ? { minimalTools: mainMinimalTools }
                 : {}),
+              ...(mainTierRecord !== null ? { tier: mainTierRecord.tier } : {}),
               ...(stageNeedsTaskPlanPath(pendingStage)
                 ? { taskPlanPath: taskPlanPathForAgent(agent) }
                 : {}),

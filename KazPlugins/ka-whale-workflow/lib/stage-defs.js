@@ -484,11 +484,33 @@ export function isSubagentWorkflowStage(stage) {
   return V09_STAGE_IDS.includes(stage) && !MAIN_STAGE_IDS.includes(stage);
 }
 
-/** 判断 role/stage 是否允许推进到 nextStage。 */
-export function canAdvance(role, stage, nextStage) {
-  if (typeof nextStage !== "string") return false;
+/** 7.4 P1：S-only gated 主流程边（只有 ctx.tier==="S" + role==="main" 时可见）。 */
+const S_ONLY_MAIN_ADVANCE = Object.freeze({
+  "assess-complexity": Object.freeze(["working"]),
+  working: Object.freeze(["communication"]),
+});
+
+/**
+ * 单一派生函数：某 role/stage 在给定 tier ctx 下的合法 nextStage 列表。
+ * - role==="main" 且 ctx.tier==="S"：只输出 S gated 边；其它主 stage 无合法 S 边。
+ * - 其余情况（含所有子代理、无 ctx、tier M/L）原样返回静态 def.canAdvance。
+ */
+export function advanceListFor(role, stage, ctx) {
   const def = stageDefinitionFor(role, stage);
-  return def !== null && def.canAdvance.includes(nextStage);
+  if (def === null) return [];
+  const tier = ctx !== null && ctx !== undefined && typeof ctx === "object" ? ctx.tier : undefined;
+  if (role === MAIN_ROLE && tier === "S") {
+    return S_ONLY_MAIN_ADVANCE[stage] !== undefined
+      ? [...S_ONLY_MAIN_ADVANCE[stage]]
+      : [];
+  }
+  return [...def.canAdvance];
+}
+
+/** 判断 role/stage 是否允许推进到 nextStage（ctx.tier 只对 main 生效）。 */
+export function canAdvance(role, stage, nextStage, ctx) {
+  if (typeof nextStage !== "string") return false;
+  return advanceListFor(role, stage, ctx).includes(nextStage);
 }
 
 /** 判断 role/stage 是否为该 role 的 terminal（final:true 合法）执行阶段。 */
@@ -573,19 +595,27 @@ export const STAGE_CONTEXT_NOTES = Object.freeze({
  * 构造 v0.9 阶段入口注入文本。
  * @param {string} role
  * @param {string} stage
- * @param {{taskPlanPath?: string, lifecyclePath?: string, candidateToolDirectory?: string, minimalTools?: string[]}} options
+ * @param {{taskPlanPath?: string, lifecyclePath?: string, candidateToolDirectory?: string, minimalTools?: string[], tier?: "S"|"M"|"L", ctx?: {tier?: "S"|"M"|"L"}}} options
  * options.minimalTools：可选；提供时在 `Can advance to:` 行后、`Task:` 行前输出
  * `Minimal (first round only): [...] until your first tool call; then the Allowed tools above unlock.`
+ * options.tier / options.ctx：7.4 P1 可选 tier ctx；仅 main 且 tier==="S" 时改变
+ * `Can advance to:` 行（缺省 = 静态 def.canAdvance，与 7.3.5 逐字节一致）。
  * @returns {string} 注入文本；role/stage 未知时返回空串。
  */
 export function stageInjectionText(role, stage, options = {}) {
   const def = stageDefinitionFor(role, stage);
   if (def === null) return "";
+  const tierCtx =
+    options && options.ctx !== null && options.ctx !== undefined && typeof options.ctx === "object"
+      ? options.ctx
+      : typeof options?.tier === "string"
+        ? { tier: options.tier }
+        : undefined;
   const lines = [];
   lines.push(`[ka-whale-workflow ${stage}]`);
   lines.push(">");
   lines.push(`Allowed tools: [${def.allowedTools.join(", ")}]`);
-  lines.push(`Can advance to: [${def.canAdvance.join(", ")}]`);
+  lines.push(`Can advance to: [${advanceListFor(role, stage, tierCtx).join(", ")}]`);
   if (
     options &&
     Array.isArray(options.minimalTools) &&
