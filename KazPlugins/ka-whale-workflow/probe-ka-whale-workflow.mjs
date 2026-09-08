@@ -31,9 +31,10 @@ import {
   STAGE_CONTEXT_NOTES,
   canAdvance,
   stageIdsForRole,
+  SUBAGENT_TERMINAL_STAGE,
 } from "./lib/stage-defs.js";
-import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { createTaskPlanStore, resolvePlanItemForDelegation, TASK_PLAN_STORE_VERSION, PLAN_PERSONAS, validateFinalPayloadItems, validateFinalPlanPayload, taskPlansDirectoryFor, runPlanFileFor, currentRunPointerFileFor, readRunPlanItems, readCurrentRunPointer, persistFinalPlanRun } from "./lib/task-plan-store.js";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,18 +86,18 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
     planItemId: "p-mem",
     persona: "memoryMaintainer",
     parentId: "s-whale",
-    stage: "communication",
+    stage: SUBAGENT_TERMINAL_STAGE,
     assignedTools: [],
     finalTools: ["memory_search", "memory_sub_whale_report"],
     awaitingParent: true,
   });
-  store.set("mem-child-reuse", "communication");
+  store.set("mem-child-reuse", SUBAGENT_TERMINAL_STAGE);
   let parsed = JSON.parse(readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, ""));
   check(
     "subagentRoleParents 持久化 parent→role→child 且角色记录含 parentId/stage",
     parsed.subagentRoleParents?.["s-whale"]?.["memoryMaintainer"]?.includes("mem-child-reuse") === true &&
       parsed.subagentRoles?.["mem-child-reuse"]?.parentId === "s-whale" &&
-      parsed.subagentRoles?.["mem-child-reuse"]?.stage === "communication",
+      parsed.subagentRoles?.["mem-child-reuse"]?.stage === SUBAGENT_TERMINAL_STAGE,
   );
   const reusable = store.getReusableSubagentChildren("s-whale", "memoryMaintainer");
   check(
@@ -128,6 +129,7 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
 
 check("36.5 终态新消息进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity" && nextStageOnUserMessage("end", 3) === "assess-complexity" && nextStageOnUserMessage("idle", 1) === "assess-complexity");
 check("36.5/37.5 活动阶段新消息保留当前阶段", nextStageOnUserMessage("working", 2) === "working" && nextStageOnUserMessage("challenge-plan", 3) === "challenge-plan" && nextStageOnUserMessage("decide-tools-before-writing-plan", 2) === "decide-tools-before-writing-plan" && nextStageOnUserMessage("write-plan", 2) === "write-plan" && nextStageOnUserMessage("memory-maintenance", 2) === "memory-maintenance");
+check("nextStageOnUserMessage 把受控子代理 merged 终态视为 terminal", nextStageOnUserMessage(SUBAGENT_TERMINAL_STAGE, 2) === "assess-complexity");
 check("stale goal-active/working-resumed 旧值回到 assess-complexity", nextStageOnUserMessage("goal-active", 2, { goalActive: true }) === "assess-complexity" && nextStageOnUserMessage("goal-active", 2) === "assess-complexity" && nextStageOnUserMessage("working-resumed", 2) === "assess-complexity");
 
 check("真实用户消息判定", isUserMessage({ content: [], source: { kind: "user" } }) === true && isUserMessage({ content: [] }) === true);
@@ -196,8 +198,9 @@ check("双层语义：主 assess allowedTools = memory/context/whale_report（Mi
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
   check(
-    "各角色 communication 阶段只含各自 report 工具",
-    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify([reportTools[role]])),
+    "main communication allowedTools = whale_report+plan_read；受控子代理 merged 终态 = context_compress + 各自 report",
+    JSON.stringify(stageDefinitionFor("main", "communication")?.allowedTools) === JSON.stringify(["whale_report", "plan_read"]) &&
+      ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => JSON.stringify(stageDefinitionFor(role, SUBAGENT_TERMINAL_STAGE)?.allowedTools) === JSON.stringify(["context_compress", reportTools[role]])),
   );
 }
 check("37.5 新图：write-plan 可到 working/maintenance/communication", ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
@@ -236,7 +239,7 @@ check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.
   );
 }
 check("decide-goal 无主 stage 定义且不可从 write-plan 推进", stageDefinitionFor(MAIN_ROLE, "decide-goal") === null && canAdvance(MAIN_ROLE, "write-plan", "decide-goal") === false);
-check("子代理 role stage 定义齐全", ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => stageIdsForRole(role).length >= 4));
+check("子代理 role stage 定义齐全且尾部唯一", stageIdsForRole("worker").length === 3 && stageIdsForRole("memoryMaintainer").length === 4 && stageIdsForRole("pluginMaintainer").length === 5 && ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => stageIdsForRole(role).at(-1) === SUBAGENT_TERMINAL_STAGE));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });
 check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlanText.includes("taskPlanPath: C:/tmp/task-plan.json"));
 {
@@ -245,9 +248,9 @@ check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlan
     ["main", "challenge-plan"],
     ["main", "communication"],
     ["worker", "challenge-plan"],
-    ["worker", "communication"],
-    ["memoryMaintainer", "communication"],
-    ["pluginMaintainer", "communication"],
+    ["worker", SUBAGENT_TERMINAL_STAGE],
+    ["memoryMaintainer", SUBAGENT_TERMINAL_STAGE],
+    ["pluginMaintainer", SUBAGENT_TERMINAL_STAGE],
   ];
   check(
     "Context 注记：STAGE_CONTEXT_NOTES 覆盖目标角色/stage",
@@ -278,28 +281,257 @@ check(
   const waitStages = ["working", "memory-maintenance", "plugin-maintenance"];
   const waitOk = waitStages.every((stage) => {
     const text = stageInjectionText(MAIN_ROLE, stage);
-    if (stage === "working") {
-      return (
-        text.includes("single subagent-settled message") &&
-        text.includes("reply with send_message to resume it")
-      );
-    }
     return (
-      text.includes("each child's full report arrives as one subagent-settled message") &&
-      text.includes("reply once with send_message to resume")
+      text.includes("intermediate") &&
+      text.includes("send_message") &&
+      text.includes("subagent-settled message") &&
+      text.includes("terminal full report")
     );
   });
   check("working/memory-maintenance/plugin-maintenance 阶段注入含等待/回复恢复语义", waitOk);
   check("working/memory-maintenance/plugin-maintenance 阶段注入含多轮复用口径", stageInjectionText(MAIN_ROLE, "working").includes("send_message to continue that child") && stageInjectionText(MAIN_ROLE, "memory-maintenance").includes("memoryMaintainer sub-agent can be reused multiple times") && stageInjectionText(MAIN_ROLE, "plugin-maintenance").includes("Whether to reuse is determined by the main agent"));
 }
 
+check("TASK_PLAN_STORE_VERSION 升至 v2 且 PLAN_PERSONAS 固定为四值", TASK_PLAN_STORE_VERSION === 2 && JSON.stringify([...PLAN_PERSONAS]) === JSON.stringify(["main", "worker", "memoryMaintainer", "pluginMaintainer"]));
+
 {
   const PLAN_FILE = join(TMP, "ka-whale-workflow-task-plan.json");
   const planStore = createTaskPlanStore(PLAN_FILE);
   planStore.persistDraftItems([{ planItemId: "p1", persona: "worker", task: "Do work", assignedTools: [] }]);
   check("内部 store draft 兼容项仍不可委派（workflow 只在 write-plan 写 plan）", planStore.get("p1")?.status === "draft" && resolvePlanItemForDelegation(planStore, "p1").ok === false);
-  planStore.persistFinalPayload({ status: "finalized", items: [{ planItemId: "p1", persona: "worker", task: "Do work", assignedTools: [] }] });
-  check("write-plan 定稿为 finalized 且可委派", planStore.get("p1")?.status === "finalized" && resolvePlanItemForDelegation(planStore, "p1").ok === true);
+
+  const finalResult = planStore.persistFinalPayload({
+    status: "finalized",
+    items: [
+      {
+        planItemId: "p1",
+        persona: "worker",
+        task: "Do work",
+        summary: "  Build the module  ",
+        dependsOn: ["p0", "", "p0", "p2"],
+        targets: ["src/a.js", "src/a.js"],
+        verification: ["node --check", "node --check"],
+        assignedTools: ["job_list", "", "job_list"],
+      },
+      {
+        planItemId: "p-main",
+        persona: "main",
+        task: "Main line task",
+        summary: 42,
+        dependsOn: "not-an-array",
+        targets: [123],
+        verification: [null],
+        assignedTools: [],
+      },
+    ],
+  });
+  const p1After = planStore.get("p1");
+  const pMainAfter = planStore.get("p-main");
+  check(
+    "valid finalPlanPayload persists new schema v2 fields readable back",
+    finalResult.ok === true &&
+      p1After?.status === "finalized" &&
+      p1After?.summary === "Build the module" &&
+      JSON.stringify(p1After?.dependsOn) === JSON.stringify(["p0", "p2"]) &&
+      JSON.stringify(p1After?.targets) === JSON.stringify(["src/a.js"]) &&
+      JSON.stringify(p1After?.verification) === JSON.stringify(["node --check"]) &&
+      JSON.stringify(p1After?.assignedTools) === JSON.stringify(["job_list"]) &&
+      resolvePlanItemForDelegation(planStore, "p1").ok === true,
+  );
+  check(
+    "malformed optional strings treated as absent and malformed optional arrays normalized like assignedTools",
+    finalResult.ok === true &&
+      pMainAfter?.summary === "" &&
+      JSON.stringify(pMainAfter?.dependsOn) === "[]" &&
+      JSON.stringify(pMainAfter?.targets) === "[]" &&
+      JSON.stringify(pMainAfter?.verification) === "[]",
+  );
+
+  const beforeInvalid = readFileSync(PLAN_FILE, "utf8");
+  const invalidPersona = planStore.persistFinalPayload({
+    status: "finalized",
+    items: [{ planItemId: "bad-persona", persona: "coder", task: "Bad persona task" }],
+  });
+  check(
+    "free-text persona rejects with structured plan-item-invalid/invalid-persona and file unchanged",
+    invalidPersona.ok === false &&
+      invalidPersona.code === "plan-item-invalid" &&
+      invalidPersona.rejected.some((entry) => entry.planItemId === "bad-persona" && entry.code === "invalid-persona" && entry.reason.includes("main, worker, memoryMaintainer, pluginMaintainer")) &&
+      readFileSync(PLAN_FILE, "utf8") === beforeInvalid &&
+      planStore.get("bad-persona") === null,
+  );
+
+  const missingTask = planStore.persistFinalPayload({
+    status: "finalized",
+    items: [{ planItemId: "no-task", persona: "worker", task: "   " }],
+  });
+  check(
+    "empty/missing task rejects with structured code missing-task and file unchanged",
+    missingTask.ok === false &&
+      missingTask.code === "plan-item-invalid" &&
+      missingTask.rejected.some((entry) => entry.planItemId === "no-task" && entry.code === "missing-task") &&
+      readFileSync(PLAN_FILE, "utf8") === beforeInvalid &&
+      planStore.get("no-task") === null,
+  );
+
+  const beforeMix = readFileSync(PLAN_FILE, "utf8");
+  const mixed = planStore.persistFinalPayload({
+    status: "finalized",
+    items: [
+      { planItemId: "valid-in-mix", persona: "worker", task: "Should not be kept", assignedTools: [] },
+      { planItemId: "bad-in-mix", persona: "coder", task: "Invalid persona" },
+    ],
+  });
+  check(
+    "partial invalid + valid mix rejects everything atomically (nothing persisted, no partial memory commit)",
+    mixed.ok === false &&
+      mixed.code === "plan-item-invalid" &&
+      mixed.rejected.some((entry) => entry.planItemId === "bad-in-mix" && entry.code === "invalid-persona") &&
+      readFileSync(PLAN_FILE, "utf8") === beforeMix &&
+      planStore.get("valid-in-mix") === null &&
+      planStore.get("bad-in-mix") === null,
+  );
+
+  const badStatus = planStore.persistFinalPayload({
+    status: "draft",
+    items: [{ planItemId: "status-ok", persona: "worker", task: "Task" }],
+  });
+  check("top-level status must be finalized (plan-item-invalid rejection before persist)", badStatus.ok === false && badStatus.code === "plan-item-invalid" && badStatus.rejected.some((entry) => entry.code === "invalid-final-status"));
+
+  const emptyItems = planStore.persistFinalPayload({ status: "finalized", items: [] });
+  check("top-level items must be a non-empty array (plan-item-invalid rejection)", emptyItems.ok === false && emptyItems.code === "plan-item-invalid" && emptyItems.rejected.some((entry) => entry.code === "empty-plan-items"));
+
+  const helper = validateFinalPayloadItems([
+    {},
+    { planItemId: "", persona: "", task: "" },
+    { planItemId: 7, persona: "coder", task: "" },
+    { planItemId: "ok", persona: "worker", task: "ok" },
+  ]);
+  const helperCodes = helper.rejected.map((entry) => entry.code);
+  check(
+    "validateFinalPayloadItems returns canonical per-item codes",
+    helper.ok === false &&
+      helper.code === "plan-item-invalid" &&
+      helperCodes.includes("missing-plan-item-id") &&
+      helperCodes.includes("invalid-plan-item-id") &&
+      helperCodes.includes("missing-persona") &&
+      helperCodes.includes("invalid-persona") &&
+      helperCodes.includes("missing-task"),
+  );
+  check("validateFinalPlanPayload rejects non-finalized/non-array top-level containers", validateFinalPlanPayload(null).ok === false && validateFinalPlanPayload({ status: "draft", items: [] }).ok === false && validateFinalPlanPayload({ status: "finalized", items: [{ planItemId: "x", persona: "worker", task: "ok" }] }).ok === true);
+}
+
+{
+  const V1_FILE = join(TMP, "ka-whale-workflow-task-plan-v1.json");
+  writeFileSync(
+    V1_FILE,
+    JSON.stringify(
+      {
+        version: 1,
+        plans: {
+          old: { planItemId: "old", status: "draft", persona: "worker", task: "Old v1 task", assignedTools: ["job_list"] },
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  const v1Store = createTaskPlanStore(V1_FILE);
+  const oldBefore = v1Store.get("old");
+  v1Store.persistFinalPayload({
+    status: "finalized",
+    items: [{ planItemId: "old", persona: "worker", task: "Old v1 task", assignedTools: ["job_list"] }],
+  });
+  const parsedV1 = JSON.parse(readFileSync(V1_FILE, "utf8"));
+  check(
+    "v1 task-plan file loads compatibly and is re-emitted as schema v2",
+    oldBefore?.status === "draft" &&
+      oldBefore?.summary === "" &&
+      JSON.stringify(oldBefore?.dependsOn) === "[]" &&
+      JSON.stringify(oldBefore?.targets) === "[]" &&
+      JSON.stringify(oldBefore?.verification) === "[]" &&
+      parsedV1?.version === 2 &&
+      parsedV1?.plans?.old?.status === "finalized",
+  );
+}
+
+{
+  // k10-project-store run-scoped unit coverage: run file + current.json + amendment.
+  const PROJECT = join(TMP, "project-run-store");
+  const SESSION = "s-run-session";
+  const RUN = 7;
+  const planFile = runPlanFileFor(PROJECT, SESSION, RUN);
+  const currentFile = currentRunPointerFileFor(PROJECT);
+  const first = persistFinalPlanRun({
+    projectRoot: PROJECT,
+    sessionId: SESSION,
+    runId: RUN,
+    payload: {
+      status: "finalized",
+      items: [
+        { planItemId: "p-run", persona: "worker", task: "Run item", summary: "run summary", targets: ["src"], assignedTools: [] },
+        { planItemId: "p-main-run", persona: "main", task: "Main run item", assignedTools: [] },
+      ],
+    },
+  });
+  const pointer1 = JSON.parse(readFileSync(currentFile, "utf8"));
+  check(
+    "write-plan run finalization writes run file + current.json pointer",
+    first.ok === true &&
+      existsSync(planFile) &&
+      pointer1?.version === 1 &&
+      pointer1?.sessionId === SESSION &&
+      pointer1?.runId === RUN &&
+      pointer1?.planFile === planFile,
+  );
+  const runItems1 = readRunPlanItems(planFile);
+  check(
+    "run file items readable back and do not include unrelated global/legacy items",
+    runItems1.some((item) => item.planItemId === "p-run" && item.summary === "run summary") &&
+      runItems1.some((item) => item.planItemId === "p-main-run") &&
+      !runItems1.some((item) => item.planItemId === "p-global"),
+  );
+
+  const second = persistFinalPlanRun({
+    projectRoot: PROJECT,
+    sessionId: SESSION,
+    runId: RUN,
+    payload: {
+      status: "finalized",
+      items: [
+        { planItemId: "p-run", persona: "worker", task: "Run item amended", summary: "updated", assignedTools: [] },
+        { planItemId: "p-added", persona: "memoryMaintainer", task: "Added in amendment", assignedTools: [] },
+      ],
+    },
+  });
+  const pointer2 = JSON.parse(readFileSync(currentFile, "utf8"));
+  const runFiles = readdirSync(taskPlansDirectoryFor(PROJECT)).filter((name) => name.endsWith(".json") && name !== "current.json");
+  check(
+    "amendment rewrites same run file and current pointer (no new run accumulation)",
+    second.ok === true &&
+      pointer2?.runId === RUN &&
+      pointer2?.planFile === planFile &&
+      runFiles.length === 1 &&
+      readRunPlanItems(planFile).some((item) => item.planItemId === "p-added"),
+  );
+
+  const beforeInvalid = readFileSync(planFile, "utf8");
+  const invalidRun = persistFinalPlanRun({
+    projectRoot: PROJECT,
+    sessionId: SESSION,
+    runId: RUN,
+    payload: {
+      status: "finalized",
+      items: [{ planItemId: "bad", persona: "coder", task: "bad" }],
+    },
+  });
+  check(
+    "invalid final payload in run mode rejects atomically and leaves run file/pointer unchanged",
+    invalidRun.ok === false &&
+      invalidRun.code === "plan-item-invalid" &&
+      readFileSync(planFile, "utf8") === beforeInvalid,
+  );
 }
 
 rmSync(TMP, { recursive: true, force: true });

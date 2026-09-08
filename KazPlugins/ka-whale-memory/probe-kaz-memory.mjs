@@ -807,7 +807,15 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   const d1 = await primeAndStep(h1, agentA);
   check("⑫ 首次：memory_search 可用时注入自动载入消息", hasRecall(d1) === true);
   const recallJson = JSON.stringify(d1);
-  check("⑫ 快照只注入 id+summary（≤8），不含 content 正文", recallJson.includes("id: auto-1") && recallJson.includes("summary: Auto Mem") && !recallJson.includes("Auto content"));
+  check(
+    "⑫ 快照注入 id+summary+完整 context（≤8），header 带预算且无 has_paths",
+    recallJson.includes("id: auto-1") &&
+      recallJson.includes("summary: Auto Mem") &&
+      recallJson.includes("# Auto Mem") &&
+      recallJson.includes("Auto content") &&
+      recallJson.includes("memory snapshot, id + summary + context + paths, 1/8") &&
+      !recallJson.includes("has_paths"),
+  );
   check("⑫ 标记文件已写入且含 agent id", existsSync(storePath) && readFileSync(storePath, "utf8").includes("session-test-A"));
 
   const d2 = await primeAndStep(h1, agentA);
@@ -960,7 +968,7 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   const overUpdate = await updateTool.execute({ id: rec.id, paths: nine }, execProjA).then(() => null, () => "rejected");
   check("⑯ 单条 >8 paths 在 memory_update 被拒绝", overUpdate === "rejected");
 
-  // 任务开始快照：只带 has_paths 标记，不展开路径文本。
+  // 任务开始快照：完整 content + 完整 paths 展开注入；has_paths 标记不再出现。
   const autoStore = join(tmpdir(), "km-paths-auto-" + Date.now() + ".json");
   const autoRecords = [
     {
@@ -972,6 +980,18 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
       content: "Paths auto content",
       summary: "Paths auto summary",
       paths: [{ path: "C:/hidden/path.txt", purpose: "hidden" }],
+      created_at: iso(Date.now() - 20),
+      updated_at: iso(Date.now() - 20),
+    },
+    {
+      id: "auto-plain",
+      namespace: "global",
+      status: "applied",
+      autoLoad: true,
+      name: "Plain Auto",
+      content: "Plain auto full body\nsecond line",
+      summary: "Plain auto summary",
+      paths: [],
       created_at: iso(Date.now() - 10),
       updated_at: iso(Date.now() - 10),
     },
@@ -998,14 +1018,41 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   await apply(autoCtx, { autoInjectedStore: autoStore });
   await new Promise((resolve) => setTimeout(resolve, 20));
   const preAuto = autoListeners.get("agent/pre-step")[0];
-  const decision = await preAuto(
-    { step: 1, agent: { id: "session-paths-auto", session: { header: { cwd: "C:/projA" }, events: [] } } },
-    async () => ({ kind: "enter", messages: [] }),
-  );
-  const autoText = JSON.stringify(decision?.messages ?? []);
+  const runAutoStep = (agent) =>
+    preAuto({ step: 1, agent }, async () => ({ kind: "enter", messages: [] }));
+  // 主 agent 与会话内子代理风格 agent 走同一条注入路径，均应收到完整正文与路径。
+  const mainAgent = { id: "session-paths-auto", kind: "main", session: { header: { cwd: "C:/projA" }, events: [] } };
+  const subAgent = { id: "session-paths-sub", kind: "subagent", role: "worker", session: { header: { cwd: "C:/projA" }, events: [] } };
+  const mainDecision = await runAutoStep(mainAgent);
+  const autoText = JSON.stringify(mainDecision?.messages ?? []);
   check(
-    "⑯ 任务开始快照只带 has_paths 标记，不展开路径文本",
-    autoText.includes("has_paths: true") && !autoText.includes("C:/hidden/path.txt"),
+    "⑯ 快照 header 更新为 id + summary + context + paths 且带预算",
+    autoText.includes("memory snapshot, id + summary + context + paths, 2/8"),
+  );
+  check(
+    "⑯ 自动载入注入完整 content（多条记录、多行正文不截断）",
+    autoText.includes("Paths auto content") &&
+      autoText.includes("Plain auto full body") &&
+      autoText.includes("second line"),
+  );
+  check(
+    "⑯ 自动载入注入完整 paths（path + purpose），无 has_paths 标记",
+    autoText.includes("- path: C:/hidden/path.txt | purpose: hidden") && !autoText.includes("has_paths"),
+  );
+  check(
+    "⑯ 无 paths 记录不展开 paths 段；每条记录有清晰分隔块",
+    (autoText.match(/---- memory /g) ?? []).length === 2 &&
+      (autoText.match(/paths:/g) ?? []).length === 1 &&
+      (autoText.match(/- path:/g) ?? []).length === 1,
+  );
+  const subDecision = await runAutoStep(subAgent);
+  const subText = JSON.stringify(subDecision?.messages ?? []);
+  check(
+    "⑯ 子代理风格 agent 同样收到完整 content + paths（不按角色分支）",
+    subText.includes("Plain auto full body") &&
+      subText.includes("C:/hidden/path.txt") &&
+      subText.includes("- path: C:/hidden/path.txt | purpose: hidden") &&
+      !subText.includes("has_paths"),
   );
 }
 // ⑭ BM25 评分单元检查（vendored okapibm25 + lib/bm25.js）

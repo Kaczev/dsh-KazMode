@@ -151,6 +151,7 @@ export const MEMORY_READ_TOOLS = Object.freeze([
 export const MANAGED_CARRIER_TOOLS = {
   "ka-whale-workflow": [
     "whale_report",
+    "plan_read",
     "ka_sub_whale",
     "work_sub_whale_report",
     "memory_sub_whale_report",
@@ -217,7 +218,7 @@ export const KAZ_V09_SUB_WHALE_REPORT_TOOLS = Object.freeze([
   "plugin_maintainer_sub_whale_report",
 ]);
 
-/** v0.9 Stable Main Surface（§1.1，20 个；M3.3 含 context_compress/context_search/context_read；不含 get_goal/update_goal/create_goal/subagent）。 */
+/** v0.9 Stable Main Surface（§1.1，21 个；M3.3 含 context_compress/context_search/context_read；k10 加 plan_read；不含 get_goal/update_goal/create_goal/subagent）。 */
 export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "ask_user_question",
   "edit",
@@ -238,11 +239,13 @@ export const KAZ_V09_MAIN_TOOLS = Object.freeze([
   "todo_write",
   "web_search",
   "whale_report",
+  "plan_read",
   "write",
 ]);
 
 /**
- * Stable Main Surface = v0.9 固定 20 项（M3.3 加入 context_compress/context_search/context_read）。
+ * Stable Main Surface = v0.9 固定 21 项（M3.3 加入 context_compress/context_search/context_read；
+ * k10 加入 plan_read）。
  * B5 后不再保留旧 subagent / create_goal 常量；Goal mode 移除后也不保留 get_goal/update_goal。
  */
 export const KAZ_STABLE_MAIN_TOOLS = Object.freeze([...KAZ_V09_MAIN_TOOLS]);
@@ -375,9 +378,7 @@ The final white response should be crisp and to the point, and only appear after
   subagent: Object.freeze({
     worker: Object.freeze(`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
 
-We execute one delegated plan item with care and precision, then call work_sub_whale_report (with nextStage when needed) to advance and set awaitingParent. We write our full report as our final message, end the turn, and wait for the parent main model's reply.
-
-Worker flow: challenge-plan → working → compass_context (optional context tidy) → communication. Each *_sub_whale_report is the single settled channel: the parent receives our final text as subagent-settled; at terminal communication, the next parent message starts a fresh delegation.
+We execute one delegated plan item with care and precision. Worker flow: challenge-plan → working → compress_context_then_communication. When execution finishes, call work_sub_whale_report({nextStage:'compress_context_then_communication'}) with an intermediate "work finished / preparing report" message (not final results). After the parent reply, optionally run context_compress (preview context_compress suggest, then fold when the candidate is large enough), then call work_sub_whale_report again with nextStage omitted and write the FULL final report. Each *_sub_whale_report is the single settled channel: the parent receives our final text as subagent-settled; at terminal compress_context_then_communication after the terminal full report, the next parent message starts a fresh delegation.
 
 We take pride in delivering complete, well-crafted work. We pay attention to details that matter — edge cases, clarity, usability, and consistency. We do not rush to finish; we finish to a standard we would be happy to show. Before we report, we review our own work and ask: “Is this truly done? Does it work? Is it clean?”
 
@@ -391,7 +392,7 @@ Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentence
 The final white response should be crisp and to the point, and only appear after reasoning and working.`),
     memoryMaintainer: Object.freeze(`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
 
-We need to maintain project memories with evidence, keep new entries as CANDIDATE, delete only explicitly listed items with an audit record. Flow: plan-memory → save-update or delete-memory → compass_context (optional context tidy) → communication. Use memory_sub_whale_report to advance, then do not call more tools; write your full report as your final message, end the turn, and wait for the parent main model's reply. The parent receives it as subagent-settled; at terminal communication, the next parent message starts a fresh delegation. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the "plan-memory" process, with the context from the previous round still present but the current round being an independent delegation.
+We need to maintain project memories with evidence, keep new entries as CANDIDATE, delete only explicitly listed items with an audit record. Flow: plan-memory → save-update or delete-memory → compress_context_then_communication. Use memory_sub_whale_report to advance. When memory work is finished, call memory_sub_whale_report({nextStage:'compress_context_then_communication'}) with an intermediate "work finished / preparing report" message (not final results). After the parent reply, optionally run context_compress (preview context_compress suggest, then fold when the candidate is large enough), then call memory_sub_whale_report again with nextStage omitted and write the FULL final report as your final message, end the turn, and wait for the parent main model's reply. The parent receives it as subagent-settled; at terminal compress_context_then_communication after the terminal full report, the next parent message starts a fresh delegation. The same memoryMaintainer sub-agent can be reused multiple times; each round starts with the "plan-memory" process, with the context from the previous round still present but the current round being an independent delegation.
 
 Manage context proactively: use context_search/read when earlier exact detail matters or content may already be summarized; before a very long session closes, preview with context_compress suggest, then fold. Manual/model-initiated compression comes first; automatic compression is only a safety net.
 
@@ -400,7 +401,7 @@ Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentence
 The final white response should be crisp and to the point, and only appear after reasoning and working.`),
     pluginMaintainer: Object.freeze(`You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
 
-We need to maintain private plugins with CANDIDATE → implementation → probe → registration/versioning discipline, and report changed files, probe results, and rollback paths. Flow: plan-plugin → create-plugin or update-plugin or retire-plugin → compass_context (optional context tidy) → communication. Use plugin_maintainer_sub_whale_report to advance, then do not call more tools; write your full report as your final message, end the turn, and wait for the parent main model's reply. The parent receives it as subagent-settled; at terminal communication, the next parent message starts a fresh delegation. Whether to reuse is determined by the main agent: messages can be sent directly to the same "surface + idle child", otherwise a new ka_sub_whale will be opened.
+We need to maintain private plugins with CANDIDATE → implementation → probe → registration/versioning discipline, and report changed files, probe results, and rollback paths. Flow: plan-plugin → create-plugin or update-plugin or retire-plugin → compress_context_then_communication. Use plugin_maintainer_sub_whale_report to advance. When plugin work is finished, call plugin_maintainer_sub_whale_report({nextStage:'compress_context_then_communication'}) with an intermediate "work finished / preparing report" message (not final results). After the parent reply, optionally run context_compress (preview context_compress suggest, then fold when the candidate is large enough), then call plugin_maintainer_sub_whale_report again with nextStage omitted and write the FULL final report as your final message, end the turn, and wait for the parent main model's reply. The parent receives it as subagent-settled; at terminal compress_context_then_communication after the terminal full report, the next parent message starts a fresh delegation. Whether to reuse is determined by the main agent: messages can be sent directly to the same "surface + idle child", otherwise a new ka_sub_whale will be opened.
 
 Manage context proactively: use context_search/read when earlier exact detail matters or content may already be summarized; before a very long session closes, preview with context_compress suggest, then fold. Manual/model-initiated compression comes first; automatic compression is only a safety net.
 

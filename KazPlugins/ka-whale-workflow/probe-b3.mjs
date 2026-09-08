@@ -1,7 +1,7 @@
 // ka-whale-workflow v0.9 B3 探针：受控委派投影 + 候选注册表 + role surface。
 // 运行：node KazPlugins/ka-whale-workflow/probe-b3.mjs
 import plugin, { createStageStore } from "./lib/index.js";
-import { stageDefinitionFor } from "./lib/stage-defs.js";
+import { stageDefinitionFor, SUBAGENT_TERMINAL_STAGE } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
 import {
   V09_SUBAGENT_ROLE_IDS,
@@ -87,8 +87,8 @@ check("各角色 Stable Base 含 context_compress/context_read/context_search", 
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
   check(
-    "37.5 stage-defs 子代理 communication 只含各自 report 工具",
-    roles.every((role) => JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) === JSON.stringify([roleReports[role]])),
+    "37.5 stage-defs 子代理 merged 终态 allowedTools = context_compress + 各自 report",
+    roles.every((role) => JSON.stringify(stageDefinitionFor(role, SUBAGENT_TERMINAL_STAGE)?.allowedTools) === JSON.stringify(["context_compress", roleReports[role]])),
   );
   check(
     "双层语义：stage-defs 子代理初始 planning allowedTools 含 context_search/context_read、不含 context_compress/write/edit/pwsh（Minimal 不再由 stage 收口）",
@@ -280,12 +280,12 @@ planStore.persistFinalPayload({
     planItemId: "m-a1",
     persona: "memoryMaintainer",
     parentId: "s-b3-main",
-    stage: "communication",
+    stage: SUBAGENT_TERMINAL_STAGE,
     assignedTools: [],
     finalTools: MEM_BASE_SURFACE,
     awaitingParent: true,
   });
-  preStore.set("mem-child-a", "communication");
+  preStore.set("mem-child-a", SUBAGENT_TERMINAL_STAGE);
   preStore.setSubagentRole("mem-child-busy", {
     planItemId: "m-a1",
     persona: "memoryMaintainer",
@@ -399,7 +399,7 @@ childCatalog.set("mem-child-busy", {
   const sameSurface = await kaSubWhale.execute({ planItemId: "m-a2" }, { agent, signal });
   const afterReuse = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.["mem-child-a"];
   check(
-    "memoryMaintainer 同 surface 第二项复用同一 terminal communication child",
+    "memoryMaintainer 同 surface 第二项复用同一 terminal compress_context_then_communication child",
     sameSurface.ok === true &&
       sameSurface.code === "subagent-reused" &&
       sameSurface.reused === true &&

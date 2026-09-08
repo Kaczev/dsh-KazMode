@@ -13,9 +13,11 @@
 import plugin, {
   createStageStore,
   V09_SUBAGENT_ROLE_INITIAL_STAGES,
+  PLAN_READ_TOOL,
 } from "./lib/index.js";
-import { stageDefinitionFor, stageInjectionText, STAGE_CONTEXT_NOTES } from "./lib/stage-defs.js";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { stageDefinitionFor, stageInjectionText, STAGE_CONTEXT_NOTES, SUBAGENT_TERMINAL_STAGE } from "./lib/stage-defs.js";
+import { runPlanFileFor, currentRunPointerFileFor, readRunPlanItems, persistFinalPlanRun, workLogFileFor } from "./lib/task-plan-store.js";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -94,6 +96,9 @@ function makeBase({ includeSubagents, stageStoreFile, planFile }) {
             capturedReports.push({ content, options });
             return "report-1";
           },
+          listChildren: async () => [],
+          followup: async (_parent, childId, content) => `msg-${childId}`,
+          startContinuable: async (spec) => ({ childId: spec?.childId }),
         };
       }
       return undefined;
@@ -136,10 +141,10 @@ function withToolCall(agent) {
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
   check(
-    "子代理 communication 只含各自 report 工具（37.5/当前语义）",
+    "受控子代理 merged 终态 allowedTools = context_compress + 各自 report（新尾部）",
     roles.every((role) =>
-      JSON.stringify(stageDefinitionFor(role, "communication")?.allowedTools) ===
-      JSON.stringify([roleReportTools[role]]),
+      JSON.stringify(stageDefinitionFor(role, SUBAGENT_TERMINAL_STAGE)?.allowedTools) ===
+      JSON.stringify(["context_compress", roleReportTools[role]]),
     ),
   );
   check(
@@ -204,17 +209,17 @@ const h1 = makeBase({ includeSubagents: false, stageStoreFile: STORE_FILE, planF
   // can assert lifecyclePath is injected through the runtime pre-step path.
   store.set("child-plugin-maintainer-create", "create-plugin");
   store.setPendingStageInjection("child-plugin-maintainer-create", "create-plugin");
-  // memoryMaintainer 强制复用：parent→role→child 注册的终态 child（随后验证 dispose 清理）。
+  // memoryMaintainer 强制复用：parent→role→child 注册的 merged 终态 child（随后验证 dispose 清理）。
   store.setSubagentRole("child-dispose-reuse", {
     planItemId: "p-mem-reuse",
     persona: "memoryMaintainer",
     parentId: "parent-main",
-    stage: "communication",
+    stage: SUBAGENT_TERMINAL_STAGE,
     assignedTools: [],
     finalTools: ["memory_search", "context_search"],
     awaitingParent: true,
   });
-  store.set("child-dispose-reuse", "communication");
+  store.set("child-dispose-reuse", SUBAGENT_TERMINAL_STAGE);
 }
 await plugin.apply(h1.base, {
   stageStore: STORE_FILE,
@@ -260,9 +265,9 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     "Context 注记：worker/maintenance 目标 stage 注入注记，无注记 stage 不输出",
     STAGE_CONTEXT_NOTES?.worker?.["challenge-plan"] !== undefined &&
       stageInjectionText("worker", "challenge-plan").includes("Context: ") &&
-      stageInjectionText("worker", "communication").includes("Context: ") &&
-      stageInjectionText("memoryMaintainer", "communication").includes("Context: ") &&
-      stageInjectionText("pluginMaintainer", "communication").includes("Context: ") &&
+      stageInjectionText("worker", SUBAGENT_TERMINAL_STAGE).includes("Context: ") &&
+      stageInjectionText("memoryMaintainer", SUBAGENT_TERMINAL_STAGE).includes("Context: ") &&
+      stageInjectionText("pluginMaintainer", SUBAGENT_TERMINAL_STAGE).includes("Context: ") &&
       !stageInjectionText("memoryMaintainer", "plan-memory").includes("Context:") &&
       !stageInjectionText("pluginMaintainer", "create-plugin").includes("Context:"),
   );
@@ -294,19 +299,19 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     badError = error;
   }
   check("非法 nextStage 被拒绝且 stage 不变", badError !== null && String(badError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
-  let earlyCommError = null;
+  let earlyTailError = null;
   try {
     await workReport.execute(
-      { nextStage: "communication" },
+      { nextStage: SUBAGENT_TERMINAL_STAGE },
       { agent, signal: new AbortController().signal },
     );
   } catch (error) {
-    earlyCommError = error;
+    earlyTailError = error;
   }
-  check("worker challenge-plan 不可直接推进 communication", earlyCommError !== null && String(earlyCommError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  check("worker challenge-plan 不可直接推进 compress_context_then_communication", earlyTailError !== null && String(earlyTailError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
 
   // 硬等门：report 成功后 awaitingParent=true；等待期任何工具（含再次 report）被拒；
-  // 父主 send_message 到达非终态仅清门；到达 communication 终态则重置新初始阶段。
+  // 父主 send_message 到达非终态仅清门；到达 merged 终态 terminal report 后重置新轮。
   const parentRelay = {
     content: [{ type: "text", text: "continue" }],
     source: { kind: "coordinator", form: "relay", senderSessionId: "main-parent-session" },
@@ -346,14 +351,30 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   );
   const reportAllowedAfterClear = await preExecute({ name: "work_sub_whale_report", agent }, async () => ({ kind: "allow" }));
   check("清门后允许继续调用 report（继续当前轮）", reportAllowedAfterClear?.kind === "allow");
-  const toCommunication = await workReport.execute(
-    { nextStage: "communication" },
+  const toMerged = await workReport.execute(
+    { nextStage: SUBAGENT_TERMINAL_STAGE },
     { agent, signal: new AbortController().signal },
   );
-  check("report→communication 终态且 awaitingParent=true", toCommunication?.stage === "communication" && stageFromFile(STORE_FILE, "child-worker") === "communication" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true);
+  check("report+nextStage working → compress_context_then_communication 中间态且 awaitingParent=true", toMerged?.stage === SUBAGENT_TERMINAL_STAGE && toMerged?.advanced === true && stageFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true && pendingFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE);
+  const mergedWaitingStep = await preStep({ agent, turn: 3, messages: [] }, nextEnter);
+  check("merged 中间态等待期不注入 merged 正文、pending 保留", !messageText(mergedWaitingStep?.messages ?? []).includes(`[ka-whale-workflow ${SUBAGENT_TERMINAL_STAGE}]`) && pendingFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE);
   await claimed({ agent, message: parentRelay, turn: 3 });
-  check("父主 send_message 到达 communication 终态：重置 worker 初始 challenge-plan 并清门", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && pendingFromFile(STORE_FILE, "child-worker") === "challenge-plan");
-  const newRoundDecision = await preStep({ agent, turn: 3, messages: [] }, nextEnter);
+  check("父主 send_message 到达 merged 中间态：仅清 awaitingParent、保持 merged stage（不重置新轮）", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && stageFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE && pendingFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE);
+  const mergedRelayedStep = await preStep({ agent, turn: 3, messages: [] }, nextEnter);
+  const mergedRelayedText = messageText(mergedRelayedStep?.messages ?? []);
+  check(
+    "merged 中间态父回复后的下一 pre-step 注入 merged 正文并清 pending",
+    mergedRelayedText.includes(`[ka-whale-workflow ${SUBAGENT_TERMINAL_STAGE}]`) &&
+      pendingFromFile(STORE_FILE, "child-worker") === null,
+  );
+  const terminalResult = await workReport.execute(
+    {},
+    { agent, signal: new AbortController().signal },
+  );
+  check("terminal no-nextStage report 在 merged stage 置 awaitingParent 且 stage 不变", terminalResult?.stage === SUBAGENT_TERMINAL_STAGE && terminalResult?.advanced === false && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true && stageFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE && pendingFromFile(STORE_FILE, "child-worker") === null);
+  await claimed({ agent, message: parentRelay, turn: 4 });
+  check("父主 send_message 到达 merged terminal full report：重置 worker 初始 challenge-plan 并清门", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && pendingFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  const newRoundDecision = await preStep({ agent, turn: 4, messages: [] }, nextEnter);
   const newRoundText = messageText(newRoundDecision?.messages ?? []);
   check("终态父消息后的新轮注入初始 stage 文本", newRoundText.includes("[ka-whale-workflow challenge-plan]") && newRoundText.includes("work_sub_whale_report"));
 }
@@ -469,6 +490,214 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
   const decision = await preStep2({ agent, turn: 2, messages: [] }, nextEnter);
   const text = messageText(decision?.messages ?? []);
   check("includeSubagents=true：旧/未知子代理不再注入通用 subagent-flow 文本", !text.includes("[ka-whale-workflow subagent flow]"));
+}
+
+// ---------------------------------------------------------------------------
+// Harness 3：k10-project-store run mode（projectRoot override，无 taskPlanStore
+// 单文件 override）。验证 run 文件 + current.json + plan_read + current-run ka_sub。
+// ---------------------------------------------------------------------------
+{
+  const RUN_DIR = join(TMP, "run-mode-project");
+  const RUN_STORE = join(RUN_DIR, "stage.json");
+  const seedStore = createStageStore(RUN_STORE);
+  seedStore.set("main-run-session", "write-plan");
+  seedStore.beginWorkflowRun("main-run-session");
+  seedStore.setSubagentRole("child-log", {
+    planItemId: "p-current",
+    persona: "worker",
+    parentId: "main-run-session",
+    stage: SUBAGENT_TERMINAL_STAGE,
+    assignedTools: [],
+    finalTools: [],
+    awaitingParent: true,
+  });
+  seedStore.set("child-log", SUBAGENT_TERMINAL_STAGE);
+  seedStore.setSubagentRole("child-log-2", {
+    planItemId: "p-added",
+    persona: "memoryMaintainer",
+    parentId: "main-run-session",
+    stage: SUBAGENT_TERMINAL_STAGE,
+    assignedTools: [],
+    finalTools: [],
+    awaitingParent: true,
+  });
+  seedStore.set("child-log-2", SUBAGENT_TERMINAL_STAGE);
+  const h3 = makeBase({
+    includeSubagents: false,
+    stageStoreFile: RUN_STORE,
+    planFile: join(RUN_DIR, "legacy-should-not-be-used.json"),
+  });
+  await plugin.apply(h3.base, {
+    stageStore: RUN_STORE,
+    projectRoot: RUN_DIR,
+    lifecyclePath: join(RUN_DIR, "LIFECYCLE.md"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const mainAgent = {
+    id: "main-run-session",
+    session: { id: "main-run-session", header: { cwd: RUN_DIR }, events: [] },
+    options: {},
+  };
+  const whale = h3.registeredTools.get("whale_report");
+  const planRead = h3.registeredTools.get("plan_read");
+  const kaSub = h3.registeredTools.get("ka_sub_whale");
+  check("run-mode harness registers plan_read main-only tool", typeof planRead?.execute === "function" && h3.registeredTools.has("plan_read"));
+  const runFile = runPlanFileFor(RUN_DIR, "main-run-session", 1);
+  const currentFile = currentRunPointerFileFor(RUN_DIR);
+  const writeResult = await whale.execute(
+    {
+      finalPlanPayload: {
+        status: "finalized",
+        items: [
+          { planItemId: "p-current", persona: "worker", task: "Current run item", summary: "run", targets: ["src"], assignedTools: [] },
+          { planItemId: "p-main", persona: "main", task: "Main current item", assignedTools: [] },
+        ],
+      },
+    },
+    { agent: mainAgent, signal: new AbortController().signal },
+  );
+  check(
+    "run mode write-plan finalization writes run file + current.json with session/run",
+    writeResult.ok === true &&
+      existsSync(runFile) &&
+      JSON.parse(readFileSync(currentFile, "utf8"))?.sessionId === "main-run-session" &&
+      JSON.parse(readFileSync(currentFile, "utf8"))?.runId === 1 &&
+      JSON.parse(readFileSync(currentFile, "utf8"))?.planFile === runFile,
+  );
+  const pr1 = await planRead.execute({}, { agent: mainAgent, signal: new AbortController().signal });
+  check(
+    "plan_read returns current run items and active run file (not historical/legacy items)",
+    pr1.ok === true &&
+      pr1.mode === "run" &&
+      pr1.runId === "1" &&
+      pr1.planFile === runFile &&
+      pr1.items.some((item) => item.planItemId === "p-current") &&
+      !pr1.items.some((item) => item.planItemId === "p-old-run"),
+  );
+  // k10-work-log：terminal subagent-settled delivery appends work-log entries.
+  const preStepH3 = h3.listeners.get("agent/pre-step")?.[0];
+  const logFile = workLogFileFor(RUN_DIR, "main-run-session", 1);
+  const firstSettled = {
+    content: [{ type: "text", text: "Worker terminal report full text" }],
+    source: { kind: "subagent-settled", form: "notice", senderSessionId: "child-log", summary: "worker settled summary" },
+  };
+  await preStepH3(
+    { agent: mainAgent, turn: 4 },
+    async () => ({ kind: "enter", messages: [firstSettled] }),
+  );
+  const logRaw1 = JSON.parse(readFileSync(logFile, "utf8"));
+  check(
+    "terminal subagent-settled delivery writes work-log with role/planItemId/summary/report and seq 1",
+    existsSync(logFile) &&
+      logRaw1?.version === 1 &&
+      logRaw1?.runId === 1 &&
+      logRaw1?.entries?.length === 1 &&
+      logRaw1.entries[0].seq === 1 &&
+      logRaw1.entries[0].role === "worker" &&
+      logRaw1.entries[0].planItemId === "p-current" &&
+      logRaw1.entries[0].summary.includes("Worker terminal report") &&
+      logRaw1.entries[0].report === "Worker terminal report full text",
+  );
+  const prLog = await planRead.execute({}, { agent: mainAgent, signal: new AbortController().signal });
+  check(
+    "plan_read returns workLogFile and current run work-log entries",
+    prLog.ok === true &&
+      prLog.workLogFile === logFile &&
+      Array.isArray(prLog.workLog) &&
+      prLog.workLog.length === 1 &&
+      prLog.workLog[0].seq === 1,
+  );
+  const secondSettled = {
+    content: [{ type: "text", text: "MemoryMaintainer terminal report full text" }],
+    source: { kind: "subagent-settled", form: "notice", senderSessionId: "child-log-2", summary: "memory settled summary" },
+  };
+  await preStepH3(
+    { agent: mainAgent, turn: 5 },
+    async () => ({ kind: "enter", messages: [secondSettled] }),
+  );
+  const logRaw2 = JSON.parse(readFileSync(logFile, "utf8"));
+  check(
+    "second terminal report appends seq 2 and role/planItemId are captured",
+    logRaw2?.entries?.length === 2 &&
+      logRaw2.entries[1].seq === 2 &&
+      logRaw2.entries[1].role === "memoryMaintainer" &&
+      logRaw2.entries[1].planItemId === "p-added" &&
+      logRaw2.entries[1].report.includes("MemoryMaintainer terminal report"),
+  );
+  // Legacy/no-run best-effort: settled from an unmanaged child must not throw or write a run log.
+  const beforeLegacyLogExists = existsSync(logFile);
+  const noRunPreStep = h3.listeners.get("agent/pre-step")?.[0];
+  const orphanSettled = {
+    content: [{ type: "text", text: "orphan report" }],
+    source: { kind: "subagent-settled", form: "notice", senderSessionId: "no-run-child", summary: "orphan" },
+  };
+  await noRunPreStep(
+    { agent: { id: "fresh-session", session: { id: "fresh-session", header: { cwd: RUN_DIR }, events: [] } }, turn: 1 },
+    async () => ({ kind: "enter", messages: [orphanSettled] }),
+  );
+  check(
+    "work-log legacy/no-run delivery does not throw and does not create a run log",
+    beforeLegacyLogExists === true && existsSync(logFile) === true,
+  );
+
+  // 旧 run（同 session runId=2）存在时：ka_sub 只解析 current run（runId=1），
+  // plan_read 可用 runId=2 显式读取历史 run，未知 runId 拒绝。
+  persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId: "main-run-session",
+    runId: 2,
+    payload: {
+      status: "finalized",
+      items: [{ planItemId: "p-old-run", persona: "worker", task: "Old run item", assignedTools: [] }],
+    },
+  });
+  const currentDelegation = await kaSub.execute({ planItemId: "p-current" }, { agent: mainAgent, signal: new AbortController().signal });
+  const oldDelegation = await kaSub.execute({ planItemId: "p-old-run" }, { agent: mainAgent, signal: new AbortController().signal });
+  const readOld = await planRead.execute({ runId: "2" }, { agent: mainAgent, signal: new AbortController().signal });
+  const readUnknown = await planRead.execute({ runId: "999" }, { agent: mainAgent, signal: new AbortController().signal });
+  check(
+    "ka_sub_whale resolves current-run item and rejects old-run item; plan_read supports historical runId and rejects unknown runId",
+    currentDelegation.ok === true &&
+      currentDelegation.persona === "worker" &&
+      oldDelegation.ok === false &&
+      oldDelegation.code === "plan-item-not-found" &&
+      readOld.ok === true &&
+      readOld.items.some((item) => item.planItemId === "p-old-run") &&
+      readUnknown.ok === false &&
+      readUnknown.code === "plan-read-not-found",
+  );
+  // 主流程回 write-plan 做 amendment（同一 active run）。
+  const backToWritePlan = await whale.execute(
+    { nextStage: "write-plan" },
+    { agent: mainAgent, signal: new AbortController().signal },
+  );
+  check("run mode revisits write-plan for amendment within same run", backToWritePlan.ok === true && backToWritePlan.stage === "write-plan");
+  const amendResult = await whale.execute(
+    {
+      finalPlanPayload: {
+        status: "finalized",
+        items: [
+          { planItemId: "p-current", persona: "worker", task: "Current run item amended", summary: "updated", assignedTools: [] },
+          { planItemId: "p-added", persona: "memoryMaintainer", task: "Added in amendment", assignedTools: [] },
+        ],
+      },
+    },
+    { agent: mainAgent, signal: new AbortController().signal },
+  );
+  const pointerAfterAmend = JSON.parse(readFileSync(currentFile, "utf8"));
+  const prAfterAmend = await planRead.execute({}, { agent: mainAgent, signal: new AbortController().signal });
+  check(
+    "write-plan amendment rewrites same run file and plan_read sees updated current-run items",
+    amendResult.ok === true &&
+      pointerAfterAmend?.runId === 1 &&
+      pointerAfterAmend?.planFile === runFile &&
+      prAfterAmend.ok === true &&
+      prAfterAmend.items.some((item) => item.planItemId === "p-added") &&
+      prAfterAmend.items.some((item) => item.planItemId === "p-current" && item.task.includes("amended")),
+  );
+  const noPlanRunSession = { id: "fresh-session", session: { id: "fresh-session", header: { cwd: RUN_DIR }, events: [] } };
+  const prEmpty = await planRead.execute({}, { agent: noPlanRunSession, signal: new AbortController().signal });
+  check("plan_read before a run finalizes returns empty items + notice without crash", prEmpty.ok === true && prEmpty.items.length === 0 && typeof prEmpty.notice === "string");
 }
 
 rmSync(TMP, { recursive: true, force: true });

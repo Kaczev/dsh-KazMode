@@ -68,6 +68,7 @@ import {
   MAIN_STAGE_IDS,
   FIRST_ROUND_STARTUP_FORM,
   FIRST_ROUND_STARTUP_TEXT,
+  SUBAGENT_TERMINAL_STAGE,
   V09_SUBAGENT_ROLES,
   V09_STAGE_IDS,
   V09_ROLE_PERSONAS,
@@ -85,6 +86,19 @@ import {
 import {
   createTaskPlanStore,
   resolvePlanItemForDelegation,
+  PLAN_PERSONAS,
+  validateFinalPlanPayload,
+  validateFinalPayloadItems,
+  taskPlansDirectoryFor,
+  runPlanFileFor,
+  currentRunPointerFileFor,
+  readRunPlanItems,
+  readCurrentRunPointer,
+  writeCurrentRunPointer,
+  persistFinalPlanRun,
+  workLogFileFor,
+  readWorkLogEntries,
+  appendWorkLogEntry,
 } from "./task-plan-store.js";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
@@ -108,6 +122,9 @@ function defaultAgentManagedRegistryFile() {
 
 /** whale_report：v0.9 主模型 stage 推进/任务计划持久化工具。 */
 export const WHALE_REPORT_TOOL = "whale_report";
+
+/** plan_read：主模型结构化读取当前 workflow-run task plan。 */
+export const PLAN_READ_TOOL = "plan_read";
 
 /** v0.9 受控委派工具名（32 世实际 continuable 委派层）。 */
 export const KA_SUB_WHALE_TOOL = "ka_sub_whale";
@@ -142,6 +159,8 @@ const SETTINGS_SCHEMA = z.object({
   enabled: z.boolean().default(true),
   /** 子代理是否也走鲸鱼工作流；默认关（与首阶段 Minimal 的默认语义一致）。 */
   includeSubagents: z.boolean().default(false),
+  /** 显式项目根覆盖；空串时从主 agent 会话 cwd 解析。 */
+  projectRoot: z.string().default(""),
   /** 自主 skill 管理总开关；关闭后回到一阶段“按需自升级”。 */
   skillAutonomyEnabled: z.boolean().default(true),
   /** 每个安全边界允许的技能变更数上限（v2.0 硬上限为 1，设置值会被钳制到 1）。 */
@@ -160,6 +179,7 @@ const SETTINGS_SCHEMA = z.object({
 export const DEFAULT_SECTION = {
   enabled: true,
   includeSubagents: false,
+  projectRoot: "",
   skillAutonomyEnabled: true,
   skillAutonomyMaxChangesPerBoundary: 1,
   skillPrivateRoot: "",
@@ -221,6 +241,10 @@ function normalizeConfig(raw) {
   return {
     enabled: value.enabled !== false,
     includeSubagents: value.includeSubagents === true,
+    projectRoot:
+      typeof value.projectRoot === "string" && value.projectRoot.trim().length > 0
+        ? value.projectRoot.trim()
+        : "",
     skillAutonomyEnabled: value.skillAutonomyEnabled !== false,
     skillAutonomyMaxChangesPerBoundary: maxChanges,
     skillPrivateRoot:
@@ -951,7 +975,8 @@ export function hasInjectedInTurn(agent, form, turn) {
 /** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）的路由。
  *  36.5 语义（Goal 模式已移除）：
  *  - 真实用户消息出现在非终态活动阶段时保留当前阶段，不重置为 assess-complexity；
- *  - 只有 idle/done/end/communication 等终态或未开始状态才进入 assess-complexity
+ *  - 只有 idle/done/end/communication/compress_context_then_communication 等终态
+ *    或未开始状态才进入 assess-complexity
  *    （Minimal 不再重复，由 kaz-mode/ka-whale-workflow 按“会话第一次 tool/call”判定）；
  *  - 历史持久化的 goal-active/working-resumed 值只是旧数据：无 Goal 生命周期可恢复，
  *    一律按 assess-complexity 处理（不回退、不保留、无 Goal 特定文案）。
@@ -965,7 +990,8 @@ export function nextStageOnUserMessage(current, _turn, _context = {}) {
     current === "idle" ||
     current === "done" ||
     current === "end" ||
-    current === "communication"
+    current === "communication" ||
+    current === SUBAGENT_TERMINAL_STAGE
   ) {
     return "assess-complexity";
   }
@@ -1028,6 +1054,133 @@ export default {
         ? config.taskPlanStore.trim()
         : KAZ_TASK_PLAN_STORE_PATH,
     );
+
+    // -----------------------------------------------------------------------
+    // Project-root / per-run task plan resolution（k10-project-store）。
+    // 与 ka-whale-memory 同源：优先显式 projectRoot，其次主 agent 会话
+    // session.header.cwd。config.taskPlanStore 为 legacy 单文件模式（探针兼容）；
+    // 项目根解析成功后写入 <project>/.dsh/storages/ka-whale-workflow/task-plans/。
+    // -----------------------------------------------------------------------
+    /** agent 会话 cwd（与 ka-whale-memory cwdOf 完全同 pattern）。 */
+    function cwdOfAgent(agent) {
+      return agent &&
+        agent.session &&
+        agent.session.header &&
+        typeof agent.session.header.cwd === "string"
+        ? agent.session.header.cwd
+        : undefined;
+    }
+    const legacyTaskPlanOverride =
+      typeof config.taskPlanStore === "string" && config.taskPlanStore.trim().length > 0
+        ? config.taskPlanStore.trim()
+        : "";
+    function projectRootForAgent(agent) {
+      const liveProjectRoot = source().projectRoot;
+      if (typeof liveProjectRoot === "string" && liveProjectRoot.length > 0) return liveProjectRoot;
+      return cwdOfAgent(agent);
+    }
+    function activeWorkflowRunForAgent(agent) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const run = stageStore.getWorkflowRun(sessionId);
+      if (run === null || !(Number.isSafeInteger(run.runId) && run.runId > 0)) return null;
+      return run;
+    }
+    /**
+     * 当前 agent 的 task-plan 上下文。
+     * 返回 { mode:'legacy', store, file } 或
+     *      { mode:'run', projectRoot, sessionId, runId, planFile, legacyFile }。
+     * run mode 仅当 projectRoot 可解析且未显式 config.taskPlanStore。
+     */
+    function taskPlanContextForAgent(agent) {
+      const projectRoot = projectRootForAgent(agent);
+      if (legacyTaskPlanOverride.length > 0 || projectRoot === undefined) {
+        return { mode: "legacy", store: taskPlanStore, file: taskPlanStore.file };
+      }
+      const sessionId = sessionIdOf(agent);
+      const run = activeWorkflowRunForAgent(agent);
+      const runId = run === null ? 0 : run.runId;
+      return {
+        mode: "run",
+        projectRoot,
+        sessionId: typeof sessionId === "string" ? sessionId : "",
+        runId,
+        planFile: runId > 0 ? runPlanFileFor(projectRoot, sessionId, runId) : null,
+        legacyFile: taskPlanStore.file,
+      };
+    }
+    /** 注入用 task plan 路径：run mode 有活动 run → run 文件；否则 legacy 路径。 */
+    function taskPlanPathForAgent(agent) {
+      const context = taskPlanContextForAgent(agent);
+      return context.mode === "run" && context.planFile !== null ? context.planFile : context.file;
+    }
+    /** 活动 run 不存在时补一次 beginWorkflowRun（真实路径 assess 已 begin；兜底防 0）。 */
+    function ensureActiveWorkflowRunForAgent(agent) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const existing = activeWorkflowRunForAgent(agent);
+      if (existing !== null) return existing;
+      stageStore.beginWorkflowRun(sessionId);
+      return activeWorkflowRunForAgent(agent);
+    }
+
+    /**
+     * k10-work-log：把一条 terminal child full report 追加到 parent 的 active run
+     * work-log。只记录“终态 full report”（compress_context_then_communication 且
+     * pending 已消费，或旧 communication 兼容）；intermediate/preparing 不进 log。
+     * best-effort：legacy/no-run/任何 I/O 失败都不抛错。
+     * 返回 true/false。
+     */
+    function appendChildWorkLog({ parentAgent, childId, childRecord, message, loggedChildIds }) {
+      try {
+        if (childId === null || childId === undefined || childId === "") return false;
+        if (loggedChildIds.has(childId)) return false;
+        const roleRecord =
+          childRecord !== null && typeof childRecord === "object"
+            ? childRecord
+            : stageStore.getSubagentRole(childId);
+        if (roleRecord === null || typeof roleRecord !== "object") return false;
+        const childStage =
+          typeof roleRecord.stage === "string" && roleRecord.stage.length > 0
+            ? roleRecord.stage
+            : stageStore.get(childId) || "";
+        const pending = stageStore.getPendingStageInjection(childId);
+        const terminalFullReport =
+          childStage === SUBAGENT_TERMINAL_STAGE && pending !== childStage;
+        const legacyTerminal = childStage === "communication";
+        if (!terminalFullReport && !legacyTerminal) return false;
+        const summary = subagentReportSummaryOf(message);
+        if (summary.length === 0) return false;
+        const parentSessionId =
+          typeof roleRecord.parentId === "string" && roleRecord.parentId.length > 0
+            ? roleRecord.parentId
+            : sessionIdOf(parentAgent);
+        if (typeof parentSessionId !== "string" || parentSessionId.length === 0) return false;
+        const parentForContext = {
+          id: parentSessionId,
+          session: { id: parentSessionId, header: { cwd: cwdOfAgent(parentAgent) } },
+        };
+        const context = taskPlanContextForAgent(parentForContext);
+        if (context.mode !== "run" || context.runId <= 0) return false;
+        const appendResult = appendWorkLogEntry({
+          projectRoot: context.projectRoot,
+          sessionId: parentSessionId,
+          runId: context.runId,
+          role: roleRecord.persona,
+          planItemId: roleRecord.planItemId,
+          summary,
+          report: messageTextOf(message),
+          at: new Date().toISOString(),
+        });
+        if (appendResult.ok === true) {
+          loggedChildIds.add(childId);
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    }
 
     /** 生命周期参考文件实际路径（config.lifecyclePath 可覆盖，探针用临时文件）。 */
     const lifecycleReferencePath =
@@ -1223,8 +1376,11 @@ Before we answer, call memory_search or context_search exactly once. After that 
     }
 
     /** 父主模型 send_message（coordinator/relay）到达受控子代理时清门：
-     *  - communication 终态：stage 重置为该角色初始阶段（新的一轮）；
-     *  - 非终态：仅清 awaitingParent，stage 保持不变（继续当前轮）。
+     *  - 真终态（旧 communication 兼容；或 compress_context_then_communication 的
+     *    pending 已被消费、terminal full report 已发出）：stage 重置为该角色初始阶段；
+     *  - 合并尾部中间态：compress_context_then_communication 且 pendingStage 仍等于
+     *    该 stage（刚由 intermediate *_sub_whale_report 进入、尚未注入 stage 正文/
+     *    尚未写 terminal report）：只清 awaitingParent，stage 保持，等待子代理压缩并终报。
      *  只有 awaitingParent=true 且确实是父主 relay 时才动作。 */
     function clearAwaitingParentOnParentReply(agent, message) {
       if (!isParentMainSendMessage(message)) return false;
@@ -1234,12 +1390,16 @@ Before we answer, call memory_search or context_search exactly once. After that 
       if (record === null || record.awaitingParent !== true) return false;
       const role = record.persona;
       const current = stageOfAgent(agent);
-      if (current === "communication") {
+      const pendingStage = stageStore.getPendingStageInjection(sessionId);
+      const mergedIntermediate =
+        current === SUBAGENT_TERMINAL_STAGE && pendingStage === current;
+      const terminalReply = current === "communication" || (current === SUBAGENT_TERMINAL_STAGE && !mergedIntermediate);
+      if (terminalReply) {
         const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role] ?? current;
         if (setStageAgent(agent, initial)) {
           reportRoundDisplay(
             agent,
-            `父主模型 send_message 到达：${role} 从 communication 重置到 ${initial}（新的一轮）。`,
+            `父主模型 send_message 到达：${role} 从 ${current} 重置到 ${initial}（新的一轮）。`,
             "阶段切换",
           );
         }
@@ -1647,7 +1807,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 workflow bookkeeping to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. Task plans can only be written/finalized in write-plan via finalPlanPayload. Goal mode has been removed: mode='goal' is rejected with a workflow-stage-deny error.",
+        "Report v0.9 workflow bookkeeping to ka-whale-workflow. Use whale_report to advance to a legal next stage. Pass nextStage to select the target stage. Task plans can only be written/finalized in write-plan via finalPlanPayload. persona must be exactly one of main/worker/memoryMaintainer/pluginMaintainer. Allowed finalPlanPayload item fields: planItemId, persona, task, summary, dependsOn, targets, verification, assignedTools. An invalid payload is rejected with a structured error and nothing is persisted. Goal mode has been removed: mode='goal' is rejected with a workflow-stage-deny error.",
       parameters: {
         mode: {
           type: "string",
@@ -1666,7 +1826,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
         },
         finalPlanPayload: {
           type: "json",
-          description: "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, assignedTools }] } to create/finalize the complete task plan.",
+          description:
+            "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, summary?, dependsOn?, targets?, verification?, assignedTools? }] } to create/finalize the complete task plan. persona must be exactly one of main/worker/memoryMaintainer/pluginMaintainer; allowed item fields are planItemId/persona/task/summary/dependsOn/targets/verification/assignedTools. Invalid payloads (wrong persona, missing required fields, malformed container) are rejected with a structured plan-item-invalid error and nothing is persisted.",
         },
       },
       output: {
@@ -1738,9 +1899,57 @@ Before we answer, call memory_search or context_search exactly once. After that 
               ),
             );
           }
-          const persisted = taskPlanStore.persistFinalPayload(payload);
+          const rejectPayload = (rejected) => {
+            const codes = [...new Set(rejected.map((entry) => entry.code))];
+            const ids = [
+              ...new Set(
+                rejected
+                  .map((entry) => entry.planItemId)
+                  .filter((id) => typeof id === "string" && id.length > 0),
+              ),
+            ];
+            const reasons = rejected.map((entry) => entry.reason);
+            const error = new Error(
+              `plan-item-invalid: finalPlanPayload rejected before persistence; ` +
+                `codes=[${codes.join(", ")}] ids=[${ids.join(", ")}] ` +
+                `allowedPersonas=[${PLAN_PERSONAS.join(", ")}] reasons=${JSON.stringify(reasons)}`,
+            );
+            error.code = "plan-item-invalid";
+            error.invalidCodes = codes;
+            error.rejected = rejected.map((entry) => ({ ...entry }));
+            error.allowedPersonas = [...PLAN_PERSONAS];
+            return error;
+          };
+          const shapeCheck = validateFinalPlanPayload(payload);
+          if (shapeCheck.ok !== true) {
+            return Promise.reject(rejectPayload(shapeCheck.rejected));
+          }
+          const itemCheck = validateFinalPayloadItems(payload.items);
+          if (itemCheck.ok !== true) {
+            return Promise.reject(rejectPayload(itemCheck.rejected));
+          }
+          const context = taskPlanContextForAgent(agent);
+          let persisted;
+          if (context.mode === "run") {
+            const activeRun = ensureActiveWorkflowRunForAgent(agent);
+            const sessionId = sessionIdOf(agent);
+            persisted =
+              activeRun !== null
+                ? persistFinalPlanRun({
+                    projectRoot: context.projectRoot,
+                    sessionId,
+                    runId: activeRun.runId,
+                    payload,
+                  })
+                : taskPlanStore.persistFinalPayload(payload);
+          } else {
+            persisted = taskPlanStore.persistFinalPayload(payload);
+          }
           if (persisted.ok !== true) {
-            return Promise.reject(new Error("whale_report failed to persist finalized task plan; task plan store write failed."));
+            if (persisted.code === "plan-persist-failed") {
+              return Promise.reject(new Error("whale_report failed to persist finalized task plan; task plan store write failed."));
+            }
+            return Promise.reject(rejectPayload(persisted.rejected ?? []));
           }
         }
 
@@ -1813,7 +2022,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
     }
 
     /** memoryMaintainer 强制复用：同 parent + 同 role、finalSurface 集合一致、且
-     *  终态 communication / ready 非忙碌的 child 才通过 followup 投递下一轮。
+     *  已发出 terminal full report 的 compress_context_then_communication（或旧
+     *  communication 兼容）/ ready 非忙碌 child 才通过 followup 投递下一轮。
      *  返回 null 表示没有可复用/复用服务不可用，调用方继续正常 spawn。 */
     async function tryReuseMemoryMaintainer({ parentId, agent, item, assignedTools, finalSurface, subagents, exec }) {
       if (
@@ -1864,10 +2074,21 @@ Before we answer, call memory_search or context_search exactly once. After that 
           agents !== undefined && agents !== null && typeof agents.get === "function"
             ? agents.get(childId)
             : undefined;
+        // 真终态可复用：
+        //  - 旧 communication 兼容；
+        //  - 新 compress_context_then_communication 只在 pending 已被消费
+        //    （terminal full report 已发出）时可复用；pending 仍等于该 stage 时
+        //    是 intermediate 等待父主回复，必须视为 busy。
+        const pendingStage = stageStore.getPendingStageInjection(childId);
+        const mergedIntermediate =
+          stageNow === SUBAGENT_TERMINAL_STAGE && pendingStage === stageNow;
+        const terminalFinal =
+          stageNow === "communication" ||
+          (stageNow === SUBAGENT_TERMINAL_STAGE && !mergedIntermediate);
         const isBusy =
-          stageNow !== "communication" &&
+          !terminalFinal &&
           (record.awaitingParent === true || liveAgent !== undefined || entry.activity === "running");
-        if (stageNow !== "communication" && isBusy) {
+        if (!terminalFinal && isBusy) {
           if (busyChildId === null) {
             busyChildId = childId;
             busyStage = stageNow;
@@ -2020,7 +2241,14 @@ Before we answer, call memory_search or context_search exactly once. After that 
             reason: "ka_sub_whale is available only to the main agent; subagents cannot create further delegated subagents.",
           });
         }
-        const resolved = resolvePlanItemForDelegation(taskPlanStore, args?.planItemId);
+        const context = taskPlanContextForAgent(agent);
+        // Run mode resolves ONLY against the active run file (no legacy global
+        // fallback). Legacy mode uses the single-file store for compatibility.
+        const resolutionStore =
+          context.mode === "run"
+            ? createTaskPlanStore(context.planFile ?? "")
+            : taskPlanStore;
+        const resolved = resolvePlanItemForDelegation(resolutionStore, args?.planItemId);
         if (resolved.ok !== true) {
           return Promise.resolve({
             ok: false,
@@ -2236,15 +2464,17 @@ Before we answer, call memory_search or context_search exactly once. After that 
           `This tool is available only inside the matching v0.9 subagent role. ` +
           `Pass nextStage to advance this role's ka-whale-workflow stage (must be in the current stage's ` +
           `Can advance to list); if nextStage is omitted, only awaitingParent is set and the stage stays unchanged. ` +
-          `Stage advanced; now output your full report as your final message and end the turn; ` +
+          `When nextStage is 'compress_context_then_communication' from an execution stage, this is an INTERMEDIATE report: ` +
+          `output only an intermediate "work finished / preparing report" message, not final results. ` +
+          `When nextStage is omitted at the terminal stage, output the FULL final report as your final message and end the turn; ` +
           `parent receives it as subagent-settled. Do not call further tools. ` +
           `A successful call is a hard stop: the child sets awaitingParent and waits for the parent main model's ` +
-          `reply via send_message, which resumes it; if the child is at terminal communication, that parent reply ` +
-          `starts a fresh delegation at ${roleFlow.split(" → ")[0]}.`,
+          `reply via send_message, which resumes it. If the child is at terminal ${SUBAGENT_TERMINAL_STAGE} ` +
+          `after its terminal full report, that parent reply starts a fresh delegation at ${roleFlow.split(" → ")[0]}.`,
         parameters: {
           nextStage: {
             type: "string",
-            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before the final report.`,
+            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before this report message; execution-stage calls use 'compress_context_then_communication' as the intermediate tail transition.`,
           },
         },
         output: {
@@ -2315,17 +2545,156 @@ Before we answer, call memory_search or context_search exactly once. After that 
       subWhaleReportDefs.push(reportDef);
     }
 
+    // -----------------------------------------------------------------------
+    // plan_read：主模型专用，读取当前/指定 run 的 task plan（结构化 JSON）。
+    // 子代理不持有；受控子代理经 ka_sub_whale 从 plan item 拿 task，不需要该工具。
+    // -----------------------------------------------------------------------
+    const planReadDef = defineTool({
+      name: PLAN_READ_TOOL,
+      description:
+        "Read the active workflow-run task plan for the main agent. Returns the current run summary plus full plan items (planItemId, persona, status, summary, task, dependsOn, targets, verification, assignedTools, timestamps), the active run file path, and the run work-log (workLogFile + entries from completed terminal subagent reports). Prefer this over reading raw task-plan JSON via read. Optional runId (numeric) reads that run of the same session; unknown runId is rejected. In legacy single-file mode this tool reads the legacy store.",
+      parameters: {
+        runId: {
+          type: "string",
+          description:
+            "Optional numeric run id to read. Omit to read the current active run of this session. Unknown run ids are rejected with plan-read-not-found.",
+        },
+      },
+      output: {
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            ok: { type: "boolean", required: true },
+            mode: { type: "string" },
+            runId: { type: "string" },
+            sessionId: { type: "string" },
+            planFile: { type: "string" },
+            workLogFile: { type: "string" },
+            workLog: { type: "array", items: { type: "json" } },
+            notice: { type: "string" },
+            items: { type: "array", items: { type: "json" } },
+            code: { type: "string" },
+            reason: { type: "string" },
+          },
+        },
+        render: (_args, value) => [{ type: "text", text: JSON.stringify(value) }],
+      },
+      async execute(args, exec) {
+        const agent = exec?.agent;
+        if (agent === null || agent === undefined || typeof agent !== "object") {
+          return Promise.resolve({
+            ok: false,
+            code: "agent-unavailable",
+            reason: "plan_read requires a calling agent.",
+          });
+        }
+        if (controlledSubagentRoleOfAgent(agent) !== null) {
+          return Promise.resolve({
+            ok: false,
+            code: "main-tool-denied",
+            reason: "plan_read is available only to the main agent.",
+          });
+        }
+        const sessionId = sessionIdOf(agent);
+        const context = taskPlanContextForAgent(agent);
+        const requestedRaw =
+          typeof args?.runId === "string" ? args.runId.trim() : "";
+        if (context.mode === "legacy") {
+          if (requestedRaw.length > 0) {
+            return Promise.resolve({
+              ok: false,
+              code: "plan-read-not-found",
+              reason: `plan_read cannot read runId "${requestedRaw}" because this agent is in legacy single-file task-plan mode.`,
+            });
+          }
+          return Promise.resolve({
+            ok: true,
+            mode: "legacy",
+            runId: null,
+            sessionId: typeof sessionId === "string" ? sessionId : "",
+            planFile: context.file,
+            workLogFile: null,
+            workLog: [],
+            items: context.store.list(),
+          });
+        }
+        const activeRunId = context.runId;
+        let targetRunId = activeRunId;
+        if (requestedRaw.length > 0) {
+          if (!/^\d+$/.test(requestedRaw)) {
+            return Promise.resolve({
+              ok: false,
+              code: "plan-read-not-found",
+              reason: `plan_read cannot resolve runId "${requestedRaw}"; run ids are numeric for this session.`,
+            });
+          }
+          targetRunId = Number(requestedRaw);
+        }
+        if (typeof sessionId !== "string" || sessionId.length === 0 || !(targetRunId > 0)) {
+          return Promise.resolve({
+            ok: true,
+            mode: "run",
+            runId: null,
+            sessionId: typeof sessionId === "string" ? sessionId : "",
+            planFile: null,
+            workLogFile: null,
+            workLog: [],
+            items: [],
+            notice: "no active workflow run has been started yet.",
+          });
+        }
+        const planFile = runPlanFileFor(context.projectRoot, sessionId, targetRunId);
+        const workLogFile = workLogFileFor(context.projectRoot, sessionId, targetRunId);
+        const workLog = readWorkLogEntries(context.projectRoot, sessionId, targetRunId);
+        const requestedExplicit = requestedRaw.length > 0;
+        if (!existsSync(planFile)) {
+          if (requestedExplicit) {
+            return Promise.resolve({
+              ok: false,
+              code: "plan-read-not-found",
+              reason: `plan_read cannot find run file for runId "${targetRunId}" (${planFile}).`,
+            });
+          }
+          return Promise.resolve({
+            ok: true,
+            mode: "run",
+            runId: String(targetRunId),
+            sessionId,
+            planFile: null,
+            workLogFile,
+            workLog,
+            items: [],
+            notice: "no finalized plan for current run yet.",
+          });
+        }
+        const items = readRunPlanItems(planFile);
+        return Promise.resolve({
+          ok: true,
+          mode: "run",
+          runId: String(targetRunId),
+          sessionId,
+          planFile,
+          workLogFile,
+          workLog,
+          items,
+          ...(items.length === 0 ? { notice: "run file exists but contains no plan items." } : {}),
+        });
+      },
+    });
+
     let toolDisposers = [];
     function installTools() {
       if (toolDisposers.length > 0) return;
       try {
         toolDisposers.push(ctx.tools.register(whaleReportDef));
+        toolDisposers.push(ctx.tools.register(planReadDef));
         toolDisposers.push(ctx.tools.register(kaSubWhaleDef));
         for (const reportDef of subWhaleReportDefs) {
           toolDisposers.push(ctx.tools.register(reportDef));
         }
       } catch (error) {
-        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL}/${KA_SUB_WHALE_TOOL}/sub-whale-report 失败：${error instanceof Error ? error.message : String(error)}`);
+        ctx.logger.warn(`[ka-whale-workflow] 注册 ${WHALE_REPORT_TOOL}/${KA_SUB_WHALE_TOOL}/plan_read/sub-whale-report 失败：${error instanceof Error ? error.message : String(error)}`);
       }
     }
     function uninstallTools() {
@@ -2352,6 +2721,21 @@ Before we answer, call memory_search or context_search exactly once. After that 
       stageOf: (agent) => stageOfAgent(agent),
       enabledFor: (agent) => liveFor(agent).enabled === true,
       taskPlanStoreFile: taskPlanStore.file,
+      /** k10-project-store：当前 agent 实际注入/使用的 task plan 文件（run 或 legacy）。 */
+      taskPlanFileFor: (agent) => taskPlanPathForAgent(agent),
+      /** k10-project-store：返回 taskPlanContextForAgent 的公开只读摘要。 */
+      taskPlanContextFor: (agent) => {
+        const context = taskPlanContextForAgent(agent);
+        return context.mode === "run"
+          ? {
+              mode: "run",
+              projectRoot: context.projectRoot,
+              sessionId: context.sessionId,
+              runId: context.runId,
+              planFile: context.planFile,
+            }
+          : { mode: "legacy", file: context.file };
+      },
       lifecycleReferencePath,
       /** v0.9 B3：受控子代理角色记录 / 最终工具面（kaz-mode 组装时读取）。 */
       subagentRoleOf: (agent) => {
@@ -2540,8 +2924,9 @@ Before we answer, call memory_search or context_search exactly once. After that 
       // 受控 v0.9 子代理不受 includeSubagents=false 跳过：idle 时先进入其 role 首阶段。
       const controlledRole = controlledSubagentRoleOfAgent(agent);
       if (controlledRole !== null) {
-        // 父主模型 send_message（coordinator/relay）到达：终态 communication 重置新轮，
-        // 非终态仅清门；先清门再 ensure，保证新轮从 role 初始阶段开始。
+        // 父主模型 send_message（coordinator/relay）到达：真终态（旧 communication
+        // 兼容 / 合并尾部 terminal full report 已发出）重置新轮，中间态仅清门；
+        // 先清门再 ensure，保证新轮从 role 初始阶段开始。
         clearAwaitingParentOnParentReply(agent, message);
         ensureControlledSubagentStarted(agent);
         return;
@@ -2552,8 +2937,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
       const current = stageOfAgent(agent);
       // 第 2、3、4……轮（turn>=2，模型不在运行）：非终态活动阶段保留当前阶段；
-      // 只有 idle/done/end/communication 或历史 goal-active/working-resumed 旧值
-      // 才重新进入 assess-complexity（36.5；Goal 模式已移除）。
+      // 只有 idle/done/end/communication/compress_context_then_communication 或历史
+      // goal-active/working-resumed 旧值才重新进入 assess-complexity（36.5；Goal 已移除）。
       if (typeof turn === "number" && turn >= 2) {
         const next = nextStageOnUserMessage(current, turn);
         if (setStageAgent(agent, next)) {
@@ -2751,6 +3136,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         !skipSubagentNow &&
         !subagentNow
       ) {
+        const loggedChildIds = new Set();
         for (const message of messages) {
           const summary = subagentReportSummaryOf(message);
           if (summary.length === 0) continue;
@@ -2761,6 +3147,13 @@ Before we answer, call memory_search or context_search exactly once. After that 
             if (childTarget !== null) {
               reportRoundDisplay(childTarget, summary, "子代理汇报", "subagent-report");
             }
+            appendChildWorkLog({
+              parentAgent: agent,
+              childId,
+              childRecord: null,
+              message,
+              loggedChildIds,
+            });
           }
         }
       }
@@ -2873,7 +3266,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
                 ? { minimalTools: mainMinimalTools }
                 : {}),
               ...(stageNeedsTaskPlanPath(pendingStage)
-                ? { taskPlanPath: taskPlanStore.file }
+                ? { taskPlanPath: taskPlanPathForAgent(agent) }
                 : {}),
               ...(stageNeedsLifecyclePath(pendingStage)
                 ? { lifecyclePath: lifecycleReferencePath }

@@ -21,9 +21,9 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 | `resolveFirstRoundTools({ kazMemoryEnabled })` | kaz-mode / computeSurface | 按 kaz-memory 启用状态解析首轮工具白名单（统一管理点） |
 | `DEFAULT_DISABLED_TOOLS` | plugin-filter / kaz-mode | 默认禁用清单默认值 |
 | `MANAGED_PLUGINS` / `FIXED_PERSONA` | kaz-mode 面板 | 被管理插件目录 / 默认 persona（实际提示词由 kaz 预设脚本控制） |
-| `KAZ_BASE_TOOLS` / `KAZ_STABLE_MAIN_TOOLS` / `KAZ_V09_MAIN_TOOLS` / `KAZ_V09_SUBAGENT_ROLE_TOOLS` / `KAZ_SUBAGENT_BASE_TOOLS` / `stableMainSurface` / `stableSubagentSurface` | kaz-mode / ka-whale-workflow（v0.9） | Stable Main Surface = v0.9 §1.1 固定 20 项（M3.3 含 context_compress/context_read/context_search；无 get_goal/update_goal/create_goal/subagent）；子代理 role 面与报告工具；B5 后旧 Goal/subagent 工具常量已删除 |
-| `KAZ_ROLE_PROMPTS` | ka-whale-workflow / kaz-mode / kaz-system-prompt | Kaz7.0v2 §1 四角色 Persona 唯一收口（main + worker/memoryMaintainer/pluginMaintainer，骨架逐字 + 角色流程一句 + context 纪律，不含旧大段机制块）；主会话真实系统由 kaz-system-prompt 把 `deployment:persona` 设为 `KAZ_ROLE_PROMPTS.main` 全文；stage-defs 的 `V09_ROLE_PERSONAS` 与 main/subagent flow 文本由此派生。Persona 含复用口径：同一 memoryMaintainer 子代理可被多轮复用（每轮从 plan-memory 开始，前一轮上下文仍在但本轮为独立委派）；worker/pluginMaintainer 是否复用由主代理决定（可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开） |
-| `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` / `KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH` | ka-whale-workflow / kaz-mode 探针 | v0.9 task plan 独立存储绝对路径；私有插件生命周期参考文件绝对路径；私有插件候选注册表（与 agent-managed 同源）绝对路径 |
+| `KAZ_BASE_TOOLS` / `KAZ_STABLE_MAIN_TOOLS` / `KAZ_V09_MAIN_TOOLS` / `KAZ_V09_SUBAGENT_ROLE_TOOLS` / `KAZ_SUBAGENT_BASE_TOOLS` / `stableMainSurface` / `stableSubagentSurface` | kaz-mode / ka-whale-workflow（v0.9/v0.10） | Stable Main Surface = v0.9 §1.1 固定 21 项（M3.3 含 context_compress/context_read/context_search；v0.10 加 `plan_read`；无 get_goal/update_goal/create_goal/subagent）；子代理 role 面与报告工具；B5 后旧 Goal/subagent 工具常量已删除 |
+| `KAZ_ROLE_PROMPTS` | ka-whale-workflow / kaz-mode / kaz-system-prompt | Kaz7.0v2 §1 Persona 唯一收口（main + worker/memoryMaintainer/pluginMaintainer 三角色，骨架逐字 + 角色流程一句 + context 纪律，不含旧大段机制块）；主会话真实系统由 kaz-system-prompt 把 `deployment:persona` 设为 `KAZ_ROLE_PROMPTS.main` 全文；stage-defs 的 `V09_ROLE_PERSONAS` 与 main/subagent flow 文本由此派生。Persona 含复用口径：同一 memoryMaintainer 子代理可被多轮复用（每轮从 plan-memory 开始，前一轮上下文仍在但本轮为独立委派）；worker/pluginMaintainer 是否复用由主代理决定（可对同 surface+空闲 child 直接 send_message，否则 ka_sub_whale 新开） |
+| `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` / `KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH` | ka-whale-workflow / kaz-mode 探针 | v0.10 task plan：项目 run-scoped 实际文件在 `<project>/.dsh/storages/ka-whale-workflow/task-plans/`（`<sessionId>-<runId>.json` + `current.json` + `.work-log.json`），`KAZ_TASK_PLAN_STORE_PATH` 为 legacy 单文件兜底；私有插件生命周期参考文件绝对路径；私有插件候选注册表（与 agent-managed 同源）绝对路径 |
 | `V09_SUBAGENT_ROLE_IDS` / `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` / `V09_SUBAGENT_ROLE_STABLE_BASE` / `V09_SUBAGENT_ROLE_PERSONA_REFS` / `V09_SUBAGENT_ROLE_TOOL_FILTERS` / `computeV09FinalSurface` / `resolveV09AssignedTools` | ka-whale-workflow / kaz-mode（v0.9 B3） | 三角色（worker/memoryMaintainer/pluginMaintainer）的 Minimal/Stable Base/personaRef/toolFilter；assignedTools 来源（tool-jobs + 私有插件候选）与数量校验；最终角色面计算 |
 | `normalizeAgentManagedCandidateRegistry` / `privatePluginCandidateToolNames` / `availablePrivatePluginCandidateToolNames` / `upsertPrivatePluginCandidate` / `removePrivatePluginCandidate` | ka-whale-workflow / 插件生命周期（v0.9 B3） | 候选注册表 schema version 2：顶层 `candidates`（tool/description/source/available）的归一化/查询/新增/更新/退休同步 |
 | `toolCallable` | ka-whale-workflow / kaz-memory | 工具可用性判定（B3.5 已移除 Review 文案） |
@@ -48,10 +48,10 @@ Kaz 模式的工具清单 / 工具控制面板模型**全部集中在这里**，
 - **官方出厂**：`TOOL_PLUGIN_CATALOG` + `TOOL_PLUGINS`（tool-fs / tool-pwsh / ... / kaz-memory）。
 - **旧 `kaz-mode.toolWhitelist` 已弃用**：kaz-mode 不再读取/写入 settings.yaml 的该字段；
   `TOOL_WHITELIST` / `effectiveToolWhitelist` 仅保留给 kaz-memory 可用性兜底等旧路径。
-- **Kaz 模式**（kaz-mode.enabled=true，v0.9）：
+- **Kaz 模式**（kaz-mode.enabled=true，v0.9/v0.10）：
   - 稳定阶段主模型 = `stableMainSurface()` = `KAZ_V09_MAIN_TOOLS`（v0.9 §1.1
-    固定 20 项：含 `context_compress`/`context_read`/`context_search`/`ka_sub_whale`/`list_agents`/
-    `send_message`/`interrupt_agent`/`whale_report`；
+    固定 21 项：含 `context_compress`/`context_read`/`context_search`/`ka_sub_whale`/
+    `list_agents`/`send_message`/`interrupt_agent`/`whale_report`/`plan_read`；
     不含旧 `get_goal`/`update_goal`/`create_goal/subagent`）；
   - 子代理稳定阶段 = `stableSubagentSurface()`（保守 Base 兜底；v0.9 受控 role 面由
     `KAZ_V09_SUBAGENT_ROLE_TOOLS` 表达，供 ka_sub_whale 使用）；

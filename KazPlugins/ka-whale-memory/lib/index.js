@@ -658,30 +658,48 @@ export async function apply(ctx, config = {}) {
     // 方向1：DEPRECATED 不自动载入。
     const activeRecords = records.filter(record => record.lifecycle_status !== 'DEPRECATED');
     if (activeRecords.length === 0) return undefined;
-    // Kaz 5.0 记忆快照单通道：autoLoad 折叠进任务开始快照，只注入 id + summary，
-    // 预算 ≤8 条；不再把 content 正文整段注入（C05/R-C05）。
+    // Kaz 5.0 记忆快照单通道：autoLoad 折叠进任务开始快照，预算 ≤8 条。
+    // autoLoad 由用户逐条控制，因此每条都注入完整 content（原样、不截断）
+    // 与完整 paths 列表；has_paths 布尔标记不再需要（路径已实际展开）。
     const SNAPSHOT_BUDGET = 8;
     const snapshot = activeRecords.slice(0, SNAPSHOT_BUDGET);
-    const lines = [
+    const parts = [
       "[ka-whale-memory Auto-Load]",
       ">",
-      "We know (memory snapshot, id + summary, " + snapshot.length + "/" + SNAPSHOT_BUDGET + "):",
+      `We know (memory snapshot, id + summary + context + paths, ${snapshot.length}/${SNAPSHOT_BUDGET}):`,
     ];
-    for (const record of snapshot) {
+    snapshot.forEach((record, index) => {
       const summary =
         typeof record.summary === "string" && record.summary.trim().length > 0
           ? record.summary.trim()
           : typeof record.name === "string" && record.name.trim().length > 0
             ? record.name.trim()
             : "(no summary)";
+      const rawContent = typeof record.content === "string" ? record.content : "";
+      // content 缺失/空时回退到 summary；非空 content 一律原样注入（verbatim）。
+      const content = rawContent.trim().length > 0 ? rawContent : summary;
       const id = String(record.id ?? "");
-      // v0.9 R-B6-3：快照只带“含 paths”标记，不展开路径文本。
-      const hasPaths = Array.isArray(record.paths) && record.paths.length > 0;
-      lines.push(`- id: ${id} | summary: ${summary.replace(/\r?\n/g, " ")}${hasPaths ? " | has_paths: true" : ""}`);
-    }
-    lines.push("<");
+      parts.push(`---- memory ${index + 1}/${snapshot.length} ----`);
+      parts.push(`id: ${id}`);
+      parts.push(`summary: ${summary.replace(/\r?\n/g, " ")}`);
+      parts.push("context:");
+      parts.push(content);
+      const paths = Array.isArray(record.paths) ? record.paths : [];
+      const pathEntries = paths.filter((item) => item !== null && typeof item === "object" && typeof item.path === "string" && item.path.length > 0);
+      if (pathEntries.length > 0) {
+        parts.push("paths:");
+        for (const item of pathEntries) {
+          const purpose =
+            typeof item.purpose === "string" && item.purpose.trim().length > 0
+              ? item.purpose.trim()
+              : "";
+          parts.push(`- path: ${item.path}${purpose.length > 0 ? ` | purpose: ${purpose}` : ""}`);
+        }
+      }
+    });
+    parts.push("<");
     return createUserMessage({
-      content: [{ type: "text", text: lines.join("\n") }],
+      content: [{ type: "text", text: parts.join("\n") }],
       source: { kind: "plugin", plugin: "ka-whale-memory", form: "recall" },
     });
   }
@@ -937,6 +955,17 @@ export async function apply(ctx, config = {}) {
     return "";
   }
 
+  /** round-display 展示副本最长字符数（仅用于显示上报；绝不截断注入消息本体）。 */
+  const ROUND_DISPLAY_CAP = 8000;
+
+  /** 生成 round-display 的展示副本：超长只在显示副本上截断，注入消息保持完整。 */
+  function displayCopyOf(text, max = ROUND_DISPLAY_CAP) {
+    if (typeof text !== "string") return "";
+    const cap = Number.isFinite(Number(max)) && Number(max) > 0 ? Math.trunc(Number(max)) : ROUND_DISPLAY_CAP;
+    if (text.length <= cap) return text;
+    return text.slice(0, cap) + "\n…(truncated for round display)";
+  }
+
   /** 从 tool/call 事件里取工具名（兼容 event.name 与 event.data.name）。 */
   function toolCallNameOf(event) {
     if (event === null || typeof event !== "object" || event.type !== "tool/call") return undefined;
@@ -1121,7 +1150,8 @@ export async function apply(ctx, config = {}) {
       persistInjected();
     }
     // 告诉 round-display 显示插件本轮发送了什么（best-effort；B6 只允许记忆快照类别）。
-    reportRoundDisplay(agent, recallTextOf(recall), "memory-snapshot");
+    // 展示副本可能超长，因此只给 round-display 截断副本；注入消息本体保持完整不截断。
+    reportRoundDisplay(agent, displayCopyOf(recallTextOf(recall)), "memory-snapshot");
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, recall] : decision.messages };
   });
 
@@ -1240,7 +1270,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_save",
       description:
-        'Save one cross-session memory. It takes effect immediately (status is "applied") — no manual confirmation is needed. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). You may optionally add structured metadata: type (e.g. success_pattern/error_pattern/insight), evidence (concrete source/probe/file/code/user feedback; required to set confidence high), confidence (unknown/low/medium/high; default unknown unless evidence is concrete). New memories start lifecycle_status=CANDIDATE. These metadata fields are independent of BM25 — search documents remain content + summary + keywords. You may optionally add up to 8 paths [{path,purpose}]; paths are returned by memory_detail, never expanded in search/snapshot, and file existence is not checked. namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
+        'Save one cross-session memory. It takes effect immediately (status is "applied") — no manual confirmation is needed. Provide a short name (title), anchor keywords, the full content, and a one-sentence summary (~100 chars) that you write yourself when saving (the plugin does not generate it). You may optionally add structured metadata: type (e.g. success_pattern/error_pattern/insight), evidence (concrete source/probe/file/code/user feedback; required to set confidence high), confidence (unknown/low/medium/high; default unknown unless evidence is concrete). New memories start lifecycle_status=CANDIDATE. These metadata fields are independent of BM25 — search documents remain content + summary + keywords. You may optionally add up to 8 paths [{path,purpose}]; paths are not included in memory_search/memory_list result views; for applied memories marked autoLoad=true the conversation-start [ka-whale-memory Auto-Load] snapshot injects full content and full paths once, otherwise use memory_detail to read them. File existence is not checked. namespace=project stores it in the current project folder (<project>/.dsh/storages/memory_project.json). On success returns { saved: true } only (no memory content).',
       parameters: {
         name: { type: "string", required: true, description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
         keywords: { type: "array", items: { type: "string" }, required: true, description: "Anchor keywords used by memory_search (BM25)." },
@@ -1249,7 +1279,7 @@ export async function apply(ctx, config = {}) {
         type: { type: "string", description: "Structured memory type (e.g. success_pattern, error_pattern, insight, design, reference); optional." },
         evidence: { type: "string", description: "Concrete evidence supporting this memory (probe/file/code/user feedback); optional, but must be non-empty to set confidence=high." },
         confidence: { type: "string", enum: ["unknown", "low", "medium", "high"], description: "Confidence level (default unknown); never set high without concrete evidence." },
-        paths: { type: "array", items: PATH_ITEM_SCHEMA, description: "Optional file/folder paths [{path,purpose}] up to 8; stored with the memory and returned by memory_detail. Path text is not expanded in search/snapshots and file existence is not checked." },
+        paths: { type: "array", items: PATH_ITEM_SCHEMA, description: "Optional file/folder paths [{path,purpose}] up to 8; stored with the memory. Path text is not included in memory_search/memory_list result views; autoLoad=true applied memories include full paths in the startup [ka-whale-memory Auto-Load] snapshot, otherwise memory_detail returns them on demand. File existence is not checked." },
         namespace: { type: "string", enum: ["global", "project"], description: "Scope: global (harness home) / project (current project folder); default global." },
       },
       output: {
@@ -1285,7 +1315,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_update",
       description:
-        'Update an existing memory by id. You can change name, summary, keywords, content, and the optional structured metadata type/evidence/confidence. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content keeps the memory applied (no re-confirmation). These metadata fields are independent of BM25 — search documents remain content + summary + keywords. You may also replace paths with up to 8 [{path,purpose}] (pass [] to clear); paths are returned by memory_detail, never expanded in search/snapshot, and file existence is not checked. On success returns { updated: true } only (no memory content).',
+        'Update an existing memory by id. You can change name, summary, keywords, content, and the optional structured metadata type/evidence/confidence. Omit name to keep the current title (titles are never auto-derived). For keywords, pass keywordsAdd/keywordsRemove to add/remove items, or keywords to replace the whole list (do not combine). For content, pass content to replace the whole body, or edits for precise literal edits: replace/insertAfter/insertBefore/append/prepend. Use before/after context to make a match unique; if it is still ambiguous, add occurrence (1-based) or "all". Changing content keeps the memory applied (no re-confirmation). These metadata fields are independent of BM25 — search documents remain content + summary + keywords. You may also replace paths with up to 8 [{path,purpose}] (pass [] to clear); paths are not included in memory_search/memory_list result views; for applied memories marked autoLoad=true the conversation-start [ka-whale-memory Auto-Load] snapshot injects full content and full paths once, otherwise use memory_detail to read them. File existence is not checked. On success returns { updated: true } only (no memory content).',
       parameters: {
         id: { type: "string", required: true, description: "Memory id (from memory_list or memory_search)." },
         name: { type: "string", description: "Short title for the memory (<= 80 chars, ideally 5–10 words)." },
@@ -1296,7 +1326,7 @@ export async function apply(ctx, config = {}) {
         type: { type: "string", description: "Structured memory type (e.g. success_pattern, error_pattern, insight, design, reference); optional." },
         evidence: { type: "string", description: "Concrete evidence supporting this memory (probe/file/code/user feedback); optional, but must be non-empty to set confidence=high." },
         confidence: { type: "string", enum: ["unknown", "low", "medium", "high"], description: "Confidence level (default unknown); never set high without concrete evidence." },
-        paths: { type: "array", items: PATH_ITEM_SCHEMA, description: "Optional file/folder paths [{path,purpose}] up to 8; replaces existing paths when provided (pass [] to clear). Path text is not expanded in search/snapshots and file existence is not checked." },
+        paths: { type: "array", items: PATH_ITEM_SCHEMA, description: "Optional file/folder paths [{path,purpose}] up to 8; replaces existing paths when provided (pass [] to clear). Path text is not included in memory_search/memory_list result views; autoLoad=true applied memories include full paths in the startup [ka-whale-memory Auto-Load] snapshot, otherwise memory_detail returns them on demand. File existence is not checked." },
         content: { type: "string", description: "Full memory content (plain text)." },
         edits: { type: "array", items: EDIT_SCHEMA, description: "Precise literal content edits; applied sequentially and atomically." },
       },
@@ -1328,7 +1358,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_list",
       description:
-        "List memories sorted by time, newest first (by updated_at, falling back to created_at), limited to limit entries. Each entry contains only id/name/updated_at/keywords (name = title line or first line, truncated to 140 chars) — no content, no namespace/status/autoLoad. Use memory_search for relevance hits, memory_detail for the full content of a single memory.",
+        "List memories sorted by time, newest first (by updated_at, falling back to created_at), limited to limit entries. Each entry contains only id/name/updated_at/keywords (name = title line or first line, truncated to 140 chars) — no content, no namespace/status/autoLoad, no paths text. For applied memories marked autoLoad=true, the [ka-whale-memory Auto-Load] startup snapshot already injects full content and full paths; otherwise use memory_search for relevance hits or memory_detail to read one memory's full content and paths.",
       parameters: {
         namespace: { type: "string", enum: ["global", "project"], description: "Restrict to a namespace; project = current project folder." },
         status: { type: "string", enum: ["ignored", "applied"], description: "Restrict to a status." },
@@ -1363,7 +1393,7 @@ export async function apply(ctx, config = {}) {
   defineTool({
       name: "memory_search",
       description:
-        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score/has_paths — content and paths text are NOT included; use memory_detail to read the full content and stored paths of a hit. has_paths is a boolean marker only. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the ka-whale-memory.bm25 settings section. DEPRECATED memories are excluded by default. Returns an empty array when nothing matches; errors when the query is empty.",
+        "Search memories by BM25 relevance and return summaries sorted by score (descending), with pagination. Each hit contains id/name/summary/keywords/score/has_paths — content and paths text are NOT included in this result view; use memory_detail to read the full content and stored paths of a hit. For applied memories marked autoLoad=true, the [ka-whale-memory Auto-Load] startup snapshot already injects full content and full paths. has_paths is a boolean marker only. Scores are computed over content (primary) + summary + keywords with the tunable k1/b parameters from the ka-whale-memory.bm25 settings section. DEPRECATED memories are excluded by default. Returns an empty array when nothing matches; errors when the query is empty.",
       parameters: {
         query: { type: "string", required: true, description: "Search query (BM25 over content + summary + keywords)." },
         limit: { type: "number", description: "Max hits to return (default 10, max 100)." },
