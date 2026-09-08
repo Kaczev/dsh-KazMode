@@ -211,7 +211,7 @@ function makeSettings() {
     const headerCount = assembledSystem.split(headerPhrase).length - 1;
     const footerPhrase = "The final white response should be crisp and to the point, and only appear after reasoning and working.";
     const footerCount = assembledSystem.split(footerPhrase).length - 1;
-    const keepGrayPhrase = "Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences.";
+    const keepGrayPhrase = "Keep gray reasoning concise — short English sentences.";
     const keepGrayCount = assembledSystem.split(keepGrayPhrase).length - 1;
     const roleGuidancePhrase = "We drive the ka-whale-workflow run and verify delegated reports.";
     const roleGuidanceCount = assembledSystem.split(roleGuidancePhrase).length - 1;
