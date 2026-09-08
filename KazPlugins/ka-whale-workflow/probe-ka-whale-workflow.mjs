@@ -31,6 +31,8 @@ import {
   STAGE_CONTEXT_NOTES,
   canAdvance,
   stageIdsForRole,
+  isFinalReportStage,
+  terminalStageIdsForRole,
 } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation, TASK_PLAN_STORE_VERSION, PLAN_PERSONAS, validateFinalPayloadItems, validateFinalPlanPayload, taskPlansDirectoryFor, runPlanFileFor, currentRunPointerFileFor, readRunPlanItems, readCurrentRunPointer, persistFinalPlanRun } from "./lib/task-plan-store.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
@@ -85,19 +87,19 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
     planItemId: "p-mem",
     persona: "memoryMaintainer",
     parentId: "s-whale",
-    stage: "save-update",
+    stage: "save-update-then-compress-context-then-report",
     assignedTools: [],
     finalTools: ["memory_search", "memory_sub_whale_report"],
     awaitingParent: true,
     terminalFinal: true,
   });
-  store.set("mem-child-reuse", "save-update");
+  store.set("mem-child-reuse", "save-update-then-compress-context-then-report");
   let parsed = JSON.parse(readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, ""));
   check(
     "subagentRoleParents 持久化 parent→role→child 且角色记录含 parentId/stage/terminalFinal",
     parsed.subagentRoleParents?.["s-whale"]?.["memoryMaintainer"]?.includes("mem-child-reuse") === true &&
       parsed.subagentRoles?.["mem-child-reuse"]?.parentId === "s-whale" &&
-      parsed.subagentRoles?.["mem-child-reuse"]?.stage === "save-update" &&
+      parsed.subagentRoles?.["mem-child-reuse"]?.stage === "save-update-then-compress-context-then-report" &&
       parsed.subagentRoles?.["mem-child-reuse"]?.terminalFinal === true,
   );
   const reusable = store.getReusableSubagentChildren("s-whale", "memoryMaintainer");
@@ -178,9 +180,9 @@ check("双层语义：主 assess allowedTools = memory/context/whale_report（Mi
 }
 {
   const subagentNonMinimal = {
-    worker: ["challenge-plan", "working"],
-    memoryMaintainer: ["plan-memory", "save-update", "delete-memory"],
-    pluginMaintainer: ["plan-plugin", "create-plugin", "update-plugin", "retire-plugin"],
+    worker: ["challenge-plan", "working-then-compress-context-then-report"],
+    memoryMaintainer: ["plan-memory", "save-update-then-compress-context-then-report", "delete-memory-then-compress-context-then-report"],
+    pluginMaintainer: ["plan-plugin", "create-plugin-then-compress-context-then-report", "update-plugin-then-compress-context-then-report", "retire-plugin-then-compress-context-then-report"],
   };
   check(
     "受控子代理执行阶段均含 context_search+context_read（回溯纪律）",
@@ -199,12 +201,12 @@ check("双层语义：主 assess allowedTools = memory/context/whale_report（Mi
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
   const finalStages = {
-    worker: ["working"],
-    memoryMaintainer: ["save-update", "delete-memory"],
-    pluginMaintainer: ["create-plugin", "update-plugin", "retire-plugin"],
+    worker: ["working-then-compress-context-then-report"],
+    memoryMaintainer: ["save-update-then-compress-context-then-report", "delete-memory-then-compress-context-then-report"],
+    pluginMaintainer: ["create-plugin-then-compress-context-then-report", "update-plugin-then-compress-context-then-report", "retire-plugin-then-compress-context-then-report"],
   };
   check(
-    "main communication allowedTools = whale_report+plan_read；各 role 最后执行阶段 = context_compress + 各自 report 且 canAdvance=[]",
+    "main communication allowedTools = whale_report+plan_read；各 role 最后执行阶段 = context_compress + 各自 report 且 terminal:true",
     JSON.stringify(stageDefinitionFor("main", "communication")?.allowedTools) === JSON.stringify(["whale_report", "plan_read"]) &&
       Object.entries(finalStages).every(([role, stages]) =>
         stages.every((stage) => {
@@ -212,9 +214,18 @@ check("双层语义：主 assess allowedTools = memory/context/whale_report（Mi
           return def !== null &&
             def.allowedTools.includes("context_compress") &&
             def.allowedTools.includes(reportTools[role]) &&
-            JSON.stringify(def.canAdvance) === "[]";
+            def.terminal === true;
         }),
       ),
+  );
+  check(
+    "terminal 不变量：worker/memoryMaintainer/pluginMaintainer 恰为其执行阶段，planning stage 不是 terminal",
+    JSON.stringify(terminalStageIdsForRole("worker")) === JSON.stringify(["working-then-compress-context-then-report"]) &&
+      JSON.stringify(terminalStageIdsForRole("memoryMaintainer")) === JSON.stringify(["save-update-then-compress-context-then-report", "delete-memory-then-compress-context-then-report"]) &&
+      JSON.stringify(terminalStageIdsForRole("pluginMaintainer")) === JSON.stringify(["create-plugin-then-compress-context-then-report", "update-plugin-then-compress-context-then-report", "retire-plugin-then-compress-context-then-report"]) &&
+      !isFinalReportStage("worker", "challenge-plan") &&
+      !isFinalReportStage("memoryMaintainer", "plan-memory") &&
+      !isFinalReportStage("pluginMaintainer", "plan-plugin"),
   );
 }
 check("37.5 新图：write-plan 可到 working/maintenance/communication", ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
@@ -240,8 +251,8 @@ check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.
       workerChallenge.task.includes("do not manufacture criticism"),
   );
   check(
-    "worker challenge-plan 只可推进 working",
-    JSON.stringify(workerChallenge?.canAdvance) === JSON.stringify(["working"]),
+    "worker challenge-plan 只可推进 working-then-compress-context-then-report",
+    JSON.stringify(workerChallenge?.canAdvance) === JSON.stringify(["working-then-compress-context-then-report"]),
   );
   check(
     "主 working task 含委派后 single settled 到达/复核报告/强制 memory gate 语义",
@@ -253,7 +264,7 @@ check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.
   );
 }
 check("decide-goal 无主 stage 定义且不可从 write-plan 推进", stageDefinitionFor(MAIN_ROLE, "decide-goal") === null && canAdvance(MAIN_ROLE, "write-plan", "decide-goal") === false);
-check("子代理 role stage 定义无独立 terminal 阶段", stageIdsForRole("worker").length === 2 && stageIdsForRole("memoryMaintainer").length === 3 && stageIdsForRole("pluginMaintainer").length === 4 && ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => !stageIdsForRole(role).includes("compress_context_then_communication")));
+check("子代理 role stage 定义无旧终态阶段（长度固定且无 compress_context_then_communication）", stageIdsForRole("worker").length === 2 && stageIdsForRole("memoryMaintainer").length === 3 && stageIdsForRole("pluginMaintainer").length === 4 && ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => !stageIdsForRole(role).includes("compress_context_then_communication")));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });
 check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlanText.includes("taskPlanPath: C:/tmp/task-plan.json"));
 {
@@ -262,12 +273,12 @@ check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlan
     ["main", "challenge-plan"],
     ["main", "communication"],
     ["worker", "challenge-plan"],
-    ["worker", "working"],
-    ["memoryMaintainer", "save-update"],
-    ["memoryMaintainer", "delete-memory"],
-    ["pluginMaintainer", "create-plugin"],
-    ["pluginMaintainer", "update-plugin"],
-    ["pluginMaintainer", "retire-plugin"],
+    ["worker", "working-then-compress-context-then-report"],
+    ["memoryMaintainer", "save-update-then-compress-context-then-report"],
+    ["memoryMaintainer", "delete-memory-then-compress-context-then-report"],
+    ["pluginMaintainer", "create-plugin-then-compress-context-then-report"],
+    ["pluginMaintainer", "update-plugin-then-compress-context-then-report"],
+    ["pluginMaintainer", "retire-plugin-then-compress-context-then-report"],
   ];
   check(
     "Context 注记：STAGE_CONTEXT_NOTES 覆盖目标角色/stage",

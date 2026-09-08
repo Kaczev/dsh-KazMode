@@ -77,10 +77,12 @@ import {
   stageInjectionText,
   stageIdsForRole,
   canAdvance,
+  isFinalReportStage,
   isMainWorkflowStage,
   isSubagentWorkflowStage,
   stageNeedsLifecyclePath,
   stageNeedsTaskPlanPath,
+  terminalStageIdsForRole,
 } from "./stage-defs.js";
 import {
   createTaskPlanStore,
@@ -2486,8 +2488,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           },
           final: {
             type: "boolean",
-            description:
-              "Optional terminal flag. final:true is valid only from the last execution stage of this role (working / save-update / delete-memory / create-plugin / update-plugin / retire-plugin) and must not be combined with nextStage. It sets terminalFinal=true and signals the FULL final report.",
+            description: `Optional terminal flag. final:true is valid only from the last execution stage of this role (one of: ${terminalStageIdsForRole(role).join(" / ")}) and must not be combined with nextStage. It sets terminalFinal=true and signals the FULL final report.`,
           },
         },
         output: {
@@ -2536,13 +2537,10 @@ Before we answer, call memory_search or context_search exactly once. After that 
             return Promise.reject(error);
           }
           if (isFinal) {
-            const isExecutionTail =
-              def !== null &&
-              def.canAdvance.length === 0 &&
-              def.allowedTools.includes(reportTool);
+            const isExecutionTail = isFinalReportStage(role, current);
             if (!isExecutionTail) {
               const error = new Error(
-                `final-report-stage-invalid: ${reportTool} final:true is valid only from the last execution stage of role "${role}", not from current="${current}".`,
+                `final-report-stage-invalid: ${reportTool} final:true is valid only from the last execution stage of role "${role}" (one of: ${terminalStageIdsForRole(role).join(" / ")}), not from current="${current}".`,
               );
               error.code = "final-report-stage-invalid";
               return Promise.reject(error);

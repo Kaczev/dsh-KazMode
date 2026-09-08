@@ -1,4 +1,4 @@
-﻿# ka-whale-workflow
+# ka-whale-workflow
 
 鲸鱼工作流组件（v0.9/v0.10，31 世 + 32 世 B3/B3.5 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5–37.5 纠正范围 + 38 世热重载 + 39 世 v0.10 纠正：persona 固定枚举 / finalPlanPayload 原子校验 / 子代理尾部合并 / per-project per-run task-plan + plan_read / work-log / memory auto-load 文档同步；Goal 模式已移除）。
 
@@ -44,7 +44,7 @@
   （worker=`challenge-plan`，memoryMaintainer=`plan-memory`，
   pluginMaintainer=`plan-plugin`），按 pending stage
   注入 role 专属 `[ka-whale-workflow <role-stage>]` 文本，并由 `tools/pre-execute`
-  按该 role/stage 的 Allowed tools 软闸门约束；plugin 的 create/update/retire
+  按该 role/stage 的 Allowed tools 软闸门约束；pluginMaintainer 的 create-plugin-then-compress-context-then-report/update-plugin-then-compress-context-then-report/retire-plugin-then-compress-context-then-report
   阶段注入携带实际 `lifecyclePath`。受控角色不再注入通用 subagent-flow 常量
   （role Persona 已由 ka_sub_whale 的 `request.persona` 提供，并被
   kaz-system-prompt 原样保留）；旧/未知子代理在
@@ -54,9 +54,12 @@
   会让父主 send_message 恢复时丢失受控角色与 pending 注入）；真正已移除子代理的
   脏记录由 memoryMaintainer 复用对账经 `listChildren` 清理。
 - 阶段终态：主 `communication` allowedTools = `whale_report` + `plan_read`；
-  受控子代理没有独立 terminal stage；worker=working、memoryMaintainer=
-  save-update/delete-memory、pluginMaintainer=create/update/retire-plugin 的
-  最后执行阶段已含 `context_compress` + 各自 report，`canAdvance=[]`。
+  受控子代理没有独立 terminal stage；worker 的最后执行阶段 =
+   `working-then-compress-context-then-report`、memoryMaintainer =
+  `save-update-then-compress-context-then-report`/`delete-memory-then-compress-context-then-report`、pluginMaintainer =
+   `create-plugin-then-compress-context-then-report`/`update-plugin-then-compress-context-then-report`/
+   `retire-plugin-then-compress-context-then-report` 的
+  最后执行阶段已含 `context_compress` + 各自 report，stage 定义携带 `terminal: true`。
   `*_sub_whale_report({ final: true })` 在最后执行阶段发出 terminal full report。
 - B6 收口：`KAZ_ROLE_PROMPTS`（v0.9 §9.1–9.5）作为全量 Persona 唯一源存放在
   `kaz-shared`，本组件 `V09_ROLE_PERSONAS` 由它派生；旧的一次性
@@ -75,12 +78,12 @@
   agent 结束后 round-display 仍保留 child 记录。
 - 阶段注入：进入 v0.9 stage 时追加 `[ka-whale-workflow <stage-id>]` 上下文，携带
   Allowed / Can advance / Task，并在 write-plan/working/memory-maintenance/
-  plugin-maintenance 阶段携带 `taskPlanPath`，在 create/update/retire-plugin 阶段携带
+  plugin-maintenance 阶段携带 `taskPlanPath`，在 create-plugin-then-compress-context-then-report/update-plugin-then-compress-context-then-report/retire-plugin-then-compress-context-then-report 阶段携带
   `lifecyclePath`，在 decide-tools-before-writing-plan 阶段携带当前私有插件候选目录。
 - 阶段级 Context 注记：`STAGE_CONTEXT_NOTES`（lib/stage-defs.js）为部分 stage
   定义 Context 提醒；`stageInjectionText` 在有注记的 stage 的 `Task:` 行后输出
   `Context: <text>`，无注记不输出。覆盖 main 的 assess-complexity/challenge-plan/
-  communication、worker 的 challenge-plan/working 与 memoryMaintainer/pluginMaintainer
+  communication、worker 的 challenge-plan/working-then-compress-context-then-report 与 memoryMaintainer/pluginMaintainer
   的最后执行阶段：涉及早前会话内容时先 `context_search` 再 `context_read`
   掌握/复现背景；main.communication 另在会话冗长收尾前先 `context_compress suggest`
   预览（manual 优先、auto 兜底）。
@@ -146,9 +149,11 @@
   识别真实弱点、不制造批评；主 Persona/working 要求批判性评估子代理报告与
   批评、不盲从，worker Persona 要求先批评委派、识别真弱点、不盲从。阶段定义与
   `KAZ_ROLE_PROMPTS` 同步更新，避免文档/代码漂移。
-- 36.8 worker 不提前终止：worker `challenge-plan` 只可推进到 `working`；
-  challenge-plan 是批评/澄清阶段，不是执行阶段，完整 working 文件工具面
-  （edit/write/pwsh/read）在 `working` 才授予；worker 不得在到达 working 前报告
+- 36.8 worker 不提前终止：worker `challenge-plan` 只可推进到
+  `working-then-compress-context-then-report`；
+  challenge-plan 是批评/澄清阶段，不是执行阶段，完整
+  `working-then-compress-context-then-report` 文件工具面
+  （edit/write/pwsh/read）在该执行阶段才授予；worker 不得在到达该执行阶段前报告
   工具不足，也不再有从首阶段直接跳 communication 的捷径。
 - 36.8 mandatory memory-maintenance gate：主 `working` 只可推进到
   `write-plan`（改约）或 `memory-maintenance`；`working → communication` 与

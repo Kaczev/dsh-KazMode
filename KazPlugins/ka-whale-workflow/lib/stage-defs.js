@@ -204,7 +204,7 @@ a small change to the same file should continue the child that already knows tha
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan", "compass_context_before_communication"],
       task:
-        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. Each child works inside save-update/delete-memory; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via memory_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a memory planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
+        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. Each child works inside save-update-then-compress-context-then-report/delete-memory-then-compress-context-then-report; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via memory_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a memory planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
 
 If no memoryMaintainer planItem exists, check whether the completed work has produced any insights, lessons learned, or reusable patterns worth saving. If so, advance to write-plan to add a memoryMaintainer planItem, then return to this stage.
 
@@ -227,7 +227,7 @@ Before advancing to communication, call "compass_context_before_communication" t
       ],
       canAdvance: ["write-plan", "communication", "compass_context_before_communication"],
       task:
-        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. Each child works inside create/update/retire-plugin; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via plugin_maintainer_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a plugin planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
+        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. Each child works inside create-plugin-then-compress-context-then-report/update-plugin-then-compress-context-then-report/retire-plugin-then-compress-context-then-report; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via plugin_maintainer_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a plugin planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
 
 If no pluginMaintainer planItem exists, check whether the completed work reveals repetitive patterns or manual steps that could be automated with a private plugin. If so, advance to write-plan to add a pluginMaintainer planItem, then return to this stage.
 
@@ -288,6 +288,7 @@ Do not write task plans here and do not call ka_sub_whale. Ask the parent main a
         "work_sub_whale_report",
       ],
       canAdvance: ["challenge-plan"],
+      terminal: true,
       task:
         `Execute the delegated work with care and completeness. We deliver work that is functional, readable, and properly tested — not just “done”, but done well.
 
@@ -319,7 +320,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "context_read",
         "memory_sub_whale_report",
       ],
-      canAdvance: ["save-update-then-compress-context-then-report", "delete-then-compress-context-then-report"],
+      canAdvance: ["save-update-then-compress-context-then-report", "delete-memory-then-compress-context-then-report"],
       task: "Plan the best memory change.",
     },
     "save-update-then-compress-context-then-report": {
@@ -334,11 +335,12 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "context_compress",
         "memory_sub_whale_report",
       ],
-      canAdvance: ["plan-memory", "delete-then-compress-context-then-report"],
+      canAdvance: ["plan-memory", "delete-memory-then-compress-context-then-report"],
+      terminal: true,
       task:
         "Save/update memories with evidence. Keep new entries as CANDIDATE. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
     },
-    "delete-then-compress-context-then-report": {
+    "delete-memory-then-compress-context-then-report": {
       allowedTools: [
         "memory_forget",
         "memory_search",
@@ -349,6 +351,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "memory_sub_whale_report",
       ],
       canAdvance: ["plan-memory", "save-update-then-compress-context-then-report"],
+      terminal: true,
       task:
         "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
     },
@@ -389,6 +392,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "plugin_maintainer_sub_whale_report",
       ],
       canAdvance: ["plan-plugin"],
+      terminal: true,
       task:
         "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
@@ -411,6 +415,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "plugin_maintainer_sub_whale_report",
       ],
       canAdvance: ["plan-plugin"],
+      terminal: true,
       task:
         "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
@@ -429,6 +434,7 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "plugin_maintainer_sub_whale_report",
       ],
       canAdvance: ["plan-plugin"],
+      terminal: true,
       task:
         "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
@@ -485,6 +491,18 @@ export function canAdvance(role, stage, nextStage) {
   return def !== null && def.canAdvance.includes(nextStage);
 }
 
+/** 判断 role/stage 是否为该 role 的 terminal（final:true 合法）执行阶段。 */
+export function isFinalReportStage(role, stage) {
+  return stageDefinitionFor(role, stage)?.terminal === true;
+}
+
+/** 返回某 role 的 terminal 执行 stage id（声明顺序，由 terminal:true 单一派生）。 */
+export function terminalStageIdsForRole(role) {
+  return stageIdsForRole(role).filter(
+    (stage) => stageDefinitionFor(role, stage)?.terminal === true,
+  );
+}
+
 /** 是否把附加路径注入该主阶段（按 v0.9 表格）。 */
 export function stageNeedsTaskPlanPath(stage) {
   return (
@@ -495,9 +513,9 @@ export function stageNeedsTaskPlanPath(stage) {
   );
 }
 
-/** 是否把 lifecyclePath 注入该阶段（v0.9 plugin 创建/更新/退休阶段）。 */
+/** 是否把 lifecyclePath 注入该阶段（v0.9 plugin 创建/更新/退休执行阶段）。 */
 export function stageNeedsLifecyclePath(stage) {
-  return ["create-plugin", "update-plugin", "retire-plugin"].includes(stage);
+  return PLUGIN_MAINTAINER_STAGE_IDS.includes(stage) && stage !== "plan-plugin";
 }
 
 /** v0.9 角色 Persona（§9.2–9.5；由 kaz-shared 的 KAZ_ROLE_PROMPTS 单一收口派生，

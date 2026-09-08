@@ -1,7 +1,7 @@
 // ka-whale-workflow v0.9 B3 探针：受控委派投影 + 候选注册表 + role surface。
 // 运行：node KazPlugins/ka-whale-workflow/probe-b3.mjs
 import plugin, { createStageStore } from "./lib/index.js";
-import { stageDefinitionFor } from "./lib/stage-defs.js";
+import { stageDefinitionFor, isFinalReportStage, terminalStageIdsForRole } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation } from "./lib/task-plan-store.js";
 import {
   V09_SUBAGENT_ROLE_IDS,
@@ -87,21 +87,30 @@ check("各角色 Stable Base 含 context_compress/context_read/context_search", 
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
   const finalStages = {
-    worker: ["working"],
-    memoryMaintainer: ["save-update", "delete-memory"],
-    pluginMaintainer: ["create-plugin", "update-plugin", "retire-plugin"],
+    worker: ["working-then-compress-context-then-report"],
+    memoryMaintainer: ["save-update-then-compress-context-then-report", "delete-memory-then-compress-context-then-report"],
+    pluginMaintainer: ["create-plugin-then-compress-context-then-report", "update-plugin-then-compress-context-then-report", "retire-plugin-then-compress-context-then-report"],
   };
   check(
-    "v0.10a stage-defs 各 role 最后执行阶段 allowedTools = context_compress + 各自 report 且 canAdvance=[]",
+    "v0.10a stage-defs 各 role 最后执行阶段 allowedTools = context_compress + 各自 report 且 terminal:true",
     Object.entries(finalStages).every(([role, stages]) =>
       stages.every((stage) => {
         const def = stageDefinitionFor(role, stage);
         return def !== null &&
           def.allowedTools.includes("context_compress") &&
           def.allowedTools.includes(roleReports[role]) &&
-          JSON.stringify(def.canAdvance) === "[]";
+          def.terminal === true;
       }),
     ),
+  );
+  check(
+    "terminal 不变量：worker/memoryMaintainer/pluginMaintainer 恰为其执行阶段，planning stage 不是 terminal",
+    JSON.stringify(terminalStageIdsForRole("worker")) === JSON.stringify(["working-then-compress-context-then-report"]) &&
+      JSON.stringify(terminalStageIdsForRole("memoryMaintainer")) === JSON.stringify(["save-update-then-compress-context-then-report", "delete-memory-then-compress-context-then-report"]) &&
+      JSON.stringify(terminalStageIdsForRole("pluginMaintainer")) === JSON.stringify(["create-plugin-then-compress-context-then-report", "update-plugin-then-compress-context-then-report", "retire-plugin-then-compress-context-then-report"]) &&
+      !isFinalReportStage("worker", "challenge-plan") &&
+      !isFinalReportStage("memoryMaintainer", "plan-memory") &&
+      !isFinalReportStage("pluginMaintainer", "plan-plugin"),
   );
   check(
     "双层语义：stage-defs 子代理初始 planning allowedTools 含 context_search/context_read、不含 context_compress/write/edit/pwsh（Minimal 不再由 stage 收口）",
@@ -293,13 +302,13 @@ planStore.persistFinalPayload({
     planItemId: "m-a1",
     persona: "memoryMaintainer",
     parentId: "s-b3-main",
-    stage: "save-update",
+    stage: "save-update-then-compress-context-then-report",
     assignedTools: [],
     finalTools: MEM_BASE_SURFACE,
     awaitingParent: true,
     terminalFinal: true,
   });
-  preStore.set("mem-child-a", "save-update");
+  preStore.set("mem-child-a", "save-update-then-compress-context-then-report");
   preStore.setSubagentRole("mem-child-busy", {
     planItemId: "m-a1",
     persona: "memoryMaintainer",
@@ -372,8 +381,8 @@ childCatalog.set("mem-child-busy", {
   const childId = capturedStarts[0]?.spec?.childId;
   const childAgent = { id: childId, session: { id: childId, events: [] } };
   const reportDef = registeredTools.get("work_sub_whale_report");
-  const reportResult = await reportDef.execute({ nextStage: "working" }, { agent: childAgent, signal });
-  check("*_sub_whale_report 不再调用 reportFrom（单一 subagent-settled 通道）", reportResult?.stage === "working" && reportResult?.messageId === undefined && capturedReports.length === 0 && !Object.prototype.hasOwnProperty.call(reportDef.parameters ?? {}, "output"));
+  const reportResult = await reportDef.execute({ nextStage: "working-then-compress-context-then-report" }, { agent: childAgent, signal });
+  check("*_sub_whale_report 不再调用 reportFrom（单一 subagent-settled 通道）", reportResult?.stage === "working-then-compress-context-then-report" && reportResult?.messageId === undefined && capturedReports.length === 0 && !Object.prototype.hasOwnProperty.call(reportDef.parameters ?? {}, "output"));
   check("report 成功后返回硬等门 notice", typeof reportResult?.notice === "string" && reportResult.notice.includes("Stage advanced; now output your full report as your final message") && reportResult.notice.includes("parent receives it as subagent-settled") && reportResult.notice.includes("do not call further tools"));
   const storedAfterReport = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.[childId];
   check("report 成功后角色记录 awaitingParent=true", storedAfterReport?.awaitingParent === true);
@@ -413,7 +422,7 @@ childCatalog.set("mem-child-busy", {
   const sameSurface = await kaSubWhale.execute({ planItemId: "m-a2" }, { agent, signal });
   const afterReuse = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.["mem-child-a"];
   check(
-    "memoryMaintainer 同 surface 第二项复用同一 terminalFinal save-update child",
+    "memoryMaintainer 同 surface 第二项复用同一 terminalFinal save-update-then-compress-context-then-report child",
     sameSurface.ok === true &&
       sameSurface.code === "subagent-reused" &&
       sameSurface.reused === true &&
