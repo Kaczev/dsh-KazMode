@@ -1151,6 +1151,15 @@ export async function apply(ctx, config = {}) {
     // 告诉 round-display 显示插件本轮发送了什么（best-effort；B6 只允许记忆快照类别）。
     // 展示副本可能超长，因此只给 round-display 截断副本；注入消息本体保持完整不截断。
     reportRoundDisplay(agent, displayCopyOf(recallTextOf(recall)), "memory-snapshot");
+    // 7.4 P0 cost meter：只上报注入长度，不读/写正文（kaWhaleWorkflow 缺失时静默跳过）。
+    try {
+      const workflow = ctx.get("kaWhaleWorkflow");
+      if (workflow !== null && workflow !== undefined && typeof workflow.costMeter?.recordInjectedChars === "function") {
+        workflow.costMeter.recordInjectedChars(agent, recallTextOf(recall).length);
+      }
+    } catch (error) {
+      ctx.logger?.debug?.(`[ka-whale-memory] cost-meter auto-load 上报失败：${error instanceof Error ? error.message : String(error)}`);
+    }
     return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, recall] : decision.messages };
   });
 

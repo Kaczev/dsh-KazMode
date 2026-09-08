@@ -126,10 +126,19 @@ const sKaz = agentOf("s-kaz");
 const sKazNomem = agentOf("s-kaz-nomem");
 const sPlainNomem = agentOf("s-plain-nomem");
 
+// 7.4 P0 cost meter must not add any model-visible tool: exact canonical membership.
+const KAZ_STABLE_MAIN_SURFACE = [
+  "ask_user_question", "context_compress", "context_read", "context_search",
+  "edit", "glob", "grep", "interrupt_agent", "ka_sub_whale", "list_agents",
+  "memory_detail", "memory_list", "memory_search", "plan_read", "pwsh", "read",
+  "send_message", "todo_write", "web_search", "whale_report", "write",
+];
+
 // ① Kaz fixed surface: no optional/task-tool machinery.
 {
   const surface = kazMode.surfaceOf(sKaz);
   check("Kaz surface = 21 fixed tools", surface !== null && surface.size === 21 && surface.has("context_compress") && surface.has("context_read") && surface.has("context_search") && surface.has("plan_read") && surface.has("ask_user_question"));
+  check("7.4 P0 cost meter adds no model-visible tool (21 membership unchanged)", surface !== null && surface.size === KAZ_STABLE_MAIN_SURFACE.length && KAZ_STABLE_MAIN_SURFACE.every((name) => surface.has(name)));
   check("Kaz surface contains v0.9 controls and whale_report", surface.has("read") && surface.has("ka_sub_whale") && surface.has("list_agents") && surface.has("send_message") && surface.has("interrupt_agent") && surface.has("whale_report") && !surface.has("get_goal") && !surface.has("update_goal"));
   check("Kaz surface has no enable_tool / old subagent / create_goal / external optional", !surface.has("enable_tool") && !surface.has("subagent") && !surface.has("create_goal") && !surface.has("read_image") && !surface.has("job_list"));
   check("Kaz surface contains memory reads but not writes", surface.has("memory_search") && surface.has("memory_list") && surface.has("memory_detail") && !surface.has("memory_save") && !surface.has("memory_forget"));

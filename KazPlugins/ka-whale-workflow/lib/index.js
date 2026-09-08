@@ -101,6 +101,10 @@ import {
   readWorkLogEntries,
   appendWorkLogEntry,
 } from "./task-plan-store.js";
+import {
+  defaultCostMeterDirectory,
+  createCostMeterWriter,
+} from "./cost-meter.js";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
@@ -1065,6 +1069,21 @@ export default {
         : KAZ_TASK_PLAN_STORE_PATH,
     );
 
+    /** 7.4 P0 cost meter（config.costMeterDirectory 可覆盖，探针用临时目录）。
+     *  热路径只做内存累加；落盘去抖，失败只 warn。
+     *  未显式配置时：探针/测试提供 config.stageStore 临时文件 → meter 放同目录
+     *  cost-meter/；生产默认仍按 §7.2 用 DSH_HOME/storages/…。 */
+    const costMeterDirectory =
+      typeof config.costMeterDirectory === "string" && config.costMeterDirectory.trim().length > 0
+        ? config.costMeterDirectory.trim()
+        : typeof config.stageStore === "string" && config.stageStore.trim().length > 0
+          ? join(dirname(config.stageStore.trim()), "cost-meter")
+          : defaultCostMeterDirectory();
+    const costMeter = createCostMeterWriter({
+      directory: costMeterDirectory,
+      logger: ctx.logger,
+    });
+
     // -----------------------------------------------------------------------
     // Project-root / per-run task plan resolution（k10-project-store）。
     // 与 ka-whale-memory 同源：优先显式 projectRoot，其次主 agent 会话
@@ -1134,6 +1153,25 @@ export default {
       return activeWorkflowRunForAgent(agent);
     }
 
+    /** cost-meter key：与 task-plan 存储同源的 session/run 解析。
+     *  child 没有自己的 workflowRun → runId=0（与基线 child workflowRunId=0 一致）。 */
+    function costMeterKeyFor(agent) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) return null;
+      const run = activeWorkflowRunForAgent(agent);
+      return { sessionId, runId: run === null ? 0 : run.runId };
+    }
+    function recordCostMeterAdd(agent, patch) {
+      const key = costMeterKeyFor(agent);
+      if (key === null) return false;
+      return costMeter.recordAdd(key.sessionId, key.runId, patch);
+    }
+    function recordCostMeterTurn(agent, turn) {
+      const key = costMeterKeyFor(agent);
+      if (key === null) return false;
+      return costMeter.recordMax(key.sessionId, key.runId, { turns: turn });
+    }
+
     /**
      * k10-work-log：把 terminal full report 追加到 parent active run work-log。
      * v0.10a：primary 信号是 roleRecord.terminalFinal===true；legacy 兼容旧
@@ -1184,6 +1222,7 @@ export default {
         });
         if (appendResult.ok === true) {
           loggedChildIds.add(childId);
+          recordCostMeterAdd(parentAgent, { reportChars: messageTextOf(message).length });
           return true;
         }
         return false;
@@ -2830,6 +2869,18 @@ Before we answer, call memory_search or context_search exactly once. After that 
             }
           : { mode: "legacy", file: context.file };
       },
+      /** 7.4 P0 cost meter（只读 side-channel；其它插件用 recordInjectedChars 上报注入长度）。 */
+      costMeter: {
+        recordInjectedChars(agent, length) {
+          if (agent === null || typeof agent !== "object") return false;
+          const chars = Number(length);
+          if (!Number.isFinite(chars) || chars <= 0) return false;
+          return recordCostMeterAdd(agent, { injectedChars: Math.floor(chars) });
+        },
+        flush: () => costMeter.flush(),
+        read: (sessionId, runId) => costMeter.read(sessionId, runId),
+        fileFor: (sessionId, runId) => costMeter.fileFor(sessionId, runId),
+      },
       lifecycleReferencePath,
       /** v0.9 B3：受控子代理角色记录 / 最终工具面（kaz-mode 组装时读取）。 */
       subagentRoleOf: (agent) => {
@@ -3143,6 +3194,21 @@ Before we answer, call memory_search or context_search exactly once. After that 
       if (agent !== null && agent !== undefined && typeof agent === "object") {
         const live = liveFor(agent);
         const controlledRole = controlledSubagentRoleOfAgent(agent);
+        // 7.4 P0 cost meter：agent/pre-step 一次 = 一次模型 request。
+        // turns 从 round-display 同源（真实用户消息轮）镜像为最大值。
+        if (live.enabled === true) {
+          recordCostMeterAdd(agent, { modelRequests: 1 });
+          const meterMessages = Array.isArray(payload?.messages) ? payload.messages : [];
+          if (meterMessages.some((message) => isUserMessage(message))) {
+            const userTurn =
+              typeof payload?.turn === "number"
+                ? payload.turn
+                : currentTurnOf(agent);
+            if (Number.isFinite(userTurn) && userTurn > 0) {
+              recordCostMeterTurn(agent, userTurn);
+            }
+          }
+        }
         // 受控 v0.9 子代理：先清父主 send_message 硬等门（claimed 已处理时此处幂等），
         // 再确保 role 专属首阶段已初始化，不走主模型新任务路由。
         if (controlledRole !== null && live.enabled === true) {
@@ -3294,6 +3360,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
             messages.push(message);
             appended = true;
             reportRoundDisplay(agent, startupHintText, "首轮 startup hint");
+            recordCostMeterAdd(agent, { injectedChars: startupHintText.length });
           } catch (error) {
             ctx.logger.warn(
               `[ka-whale-workflow] 构造首轮 startup hint 注入消息失败：${error instanceof Error ? error.message : String(error)}`,
@@ -3340,6 +3407,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
                 appended = true;
                 stageStore.clearPendingStageInjection(sessionIdNow);
                 reportRoundDisplay(agent, text, `阶段 ${pendingStage}`);
+                recordCostMeterAdd(agent, { injectedChars: text.length });
               } catch (error) {
                 ctx.logger.warn(
                   `[ka-whale-workflow] 构造 ${controlledRoleNow} 阶段注入消息失败：${error instanceof Error ? error.message : String(error)}`,
@@ -3401,6 +3469,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
                 appended = true;
                 stageStore.clearPendingStageInjection(sessionIdNow);
                 reportRoundDisplay(agent, text, `阶段 ${pendingStage}`);
+                recordCostMeterAdd(agent, { injectedChars: text.length });
               } catch (error) {
                 ctx.logger.warn(
                   `[ka-whale-workflow] 构造阶段注入消息失败：${error instanceof Error ? error.message : String(error)}`,
@@ -3421,7 +3490,12 @@ Before we answer, call memory_search or context_search exactly once. After that 
 
     ctx.effect(() => () => {
       uninstallTools();
-      // 插件卸载前 flush lifecycle 内存脏数据（进程退出/热重载都尽量不丢埋点）。
+      // 插件卸载前 flush 生命周期 + cost-meter 内存脏数据（进程退出/热重载都尽量不丢埋点）。
+      try {
+        costMeter.flush();
+      } catch {
+        // cost-meter 自身已 warn；卸载清理绝不阻塞。
+      }
       if (lifecycleMemory.dirty) persistLifecycleNow();
     });
   },
