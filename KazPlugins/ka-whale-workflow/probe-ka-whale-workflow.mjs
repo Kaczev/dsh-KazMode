@@ -31,7 +31,6 @@ import {
   STAGE_CONTEXT_NOTES,
   canAdvance,
   stageIdsForRole,
-  SUBAGENT_TERMINAL_STAGE,
 } from "./lib/stage-defs.js";
 import { createTaskPlanStore, resolvePlanItemForDelegation, TASK_PLAN_STORE_VERSION, PLAN_PERSONAS, validateFinalPayloadItems, validateFinalPlanPayload, taskPlansDirectoryFor, runPlanFileFor, currentRunPointerFileFor, readRunPlanItems, readCurrentRunPointer, persistFinalPlanRun } from "./lib/task-plan-store.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
@@ -86,18 +85,20 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
     planItemId: "p-mem",
     persona: "memoryMaintainer",
     parentId: "s-whale",
-    stage: SUBAGENT_TERMINAL_STAGE,
+    stage: "save-update",
     assignedTools: [],
     finalTools: ["memory_search", "memory_sub_whale_report"],
     awaitingParent: true,
+    terminalFinal: true,
   });
-  store.set("mem-child-reuse", SUBAGENT_TERMINAL_STAGE);
+  store.set("mem-child-reuse", "save-update");
   let parsed = JSON.parse(readFileSync(STORE_FILE, "utf8").replace(/^\uFEFF/, ""));
   check(
-    "subagentRoleParents 持久化 parent→role→child 且角色记录含 parentId/stage",
+    "subagentRoleParents 持久化 parent→role→child 且角色记录含 parentId/stage/terminalFinal",
     parsed.subagentRoleParents?.["s-whale"]?.["memoryMaintainer"]?.includes("mem-child-reuse") === true &&
       parsed.subagentRoles?.["mem-child-reuse"]?.parentId === "s-whale" &&
-      parsed.subagentRoles?.["mem-child-reuse"]?.stage === SUBAGENT_TERMINAL_STAGE,
+      parsed.subagentRoles?.["mem-child-reuse"]?.stage === "save-update" &&
+      parsed.subagentRoles?.["mem-child-reuse"]?.terminalFinal === true,
   );
   const reusable = store.getReusableSubagentChildren("s-whale", "memoryMaintainer");
   check(
@@ -129,7 +130,7 @@ check("阶段切换不再写会话事件", events.filter((e) => e.type === "ka-w
 
 check("36.5 终态新消息进入 assess-complexity", nextStageOnUserMessage("done", 2) === "assess-complexity" && nextStageOnUserMessage("communication", 3) === "assess-complexity" && nextStageOnUserMessage("end", 3) === "assess-complexity" && nextStageOnUserMessage("idle", 1) === "assess-complexity");
 check("36.5/37.5 活动阶段新消息保留当前阶段", nextStageOnUserMessage("working", 2) === "working" && nextStageOnUserMessage("challenge-plan", 3) === "challenge-plan" && nextStageOnUserMessage("decide-tools-before-writing-plan", 2) === "decide-tools-before-writing-plan" && nextStageOnUserMessage("write-plan", 2) === "write-plan" && nextStageOnUserMessage("memory-maintenance", 2) === "memory-maintenance");
-check("nextStageOnUserMessage 把受控子代理 merged 终态视为 terminal", nextStageOnUserMessage(SUBAGENT_TERMINAL_STAGE, 2) === "assess-complexity");
+check("nextStageOnUserMessage 把旧 merged 终态字符串视为 legacy terminal（不崩）", nextStageOnUserMessage("compress_context_then_communication", 2) === "assess-complexity");
 check("stale goal-active/working-resumed 旧值回到 assess-complexity", nextStageOnUserMessage("goal-active", 2, { goalActive: true }) === "assess-complexity" && nextStageOnUserMessage("goal-active", 2) === "assess-complexity" && nextStageOnUserMessage("working-resumed", 2) === "assess-complexity");
 
 check("真实用户消息判定", isUserMessage({ content: [], source: { kind: "user" } }) === true && isUserMessage({ content: [] }) === true);
@@ -197,10 +198,23 @@ check("双层语义：主 assess allowedTools = memory/context/whale_report（Mi
     memoryMaintainer: "memory_sub_whale_report",
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
+  const finalStages = {
+    worker: ["working"],
+    memoryMaintainer: ["save-update", "delete-memory"],
+    pluginMaintainer: ["create-plugin", "update-plugin", "retire-plugin"],
+  };
   check(
-    "main communication allowedTools = whale_report+plan_read；受控子代理 merged 终态 = context_compress + 各自 report",
+    "main communication allowedTools = whale_report+plan_read；各 role 最后执行阶段 = context_compress + 各自 report 且 canAdvance=[]",
     JSON.stringify(stageDefinitionFor("main", "communication")?.allowedTools) === JSON.stringify(["whale_report", "plan_read"]) &&
-      ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => JSON.stringify(stageDefinitionFor(role, SUBAGENT_TERMINAL_STAGE)?.allowedTools) === JSON.stringify(["context_compress", reportTools[role]])),
+      Object.entries(finalStages).every(([role, stages]) =>
+        stages.every((stage) => {
+          const def = stageDefinitionFor(role, stage);
+          return def !== null &&
+            def.allowedTools.includes("context_compress") &&
+            def.allowedTools.includes(reportTools[role]) &&
+            JSON.stringify(def.canAdvance) === "[]";
+        }),
+      ),
   );
 }
 check("37.5 新图：write-plan 可到 working/maintenance/communication", ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
@@ -239,7 +253,7 @@ check("36.8 working 不可直接 communication/plugin-maintenance", workingDef?.
   );
 }
 check("decide-goal 无主 stage 定义且不可从 write-plan 推进", stageDefinitionFor(MAIN_ROLE, "decide-goal") === null && canAdvance(MAIN_ROLE, "write-plan", "decide-goal") === false);
-check("子代理 role stage 定义齐全且尾部唯一", stageIdsForRole("worker").length === 3 && stageIdsForRole("memoryMaintainer").length === 4 && stageIdsForRole("pluginMaintainer").length === 5 && ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => stageIdsForRole(role).at(-1) === SUBAGENT_TERMINAL_STAGE));
+check("子代理 role stage 定义无独立 terminal 阶段", stageIdsForRole("worker").length === 2 && stageIdsForRole("memoryMaintainer").length === 3 && stageIdsForRole("pluginMaintainer").length === 4 && ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => !stageIdsForRole(role).includes("compress_context_then_communication")));
 const writePlanText = stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/tmp/task-plan.json" });
 check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlanText.includes("taskPlanPath: C:/tmp/task-plan.json"));
 {
@@ -248,9 +262,12 @@ check("write-plan 注入携带 Allowed/Can advance/Task/taskPlanPath", writePlan
     ["main", "challenge-plan"],
     ["main", "communication"],
     ["worker", "challenge-plan"],
-    ["worker", SUBAGENT_TERMINAL_STAGE],
-    ["memoryMaintainer", SUBAGENT_TERMINAL_STAGE],
-    ["pluginMaintainer", SUBAGENT_TERMINAL_STAGE],
+    ["worker", "working"],
+    ["memoryMaintainer", "save-update"],
+    ["memoryMaintainer", "delete-memory"],
+    ["pluginMaintainer", "create-plugin"],
+    ["pluginMaintainer", "update-plugin"],
+    ["pluginMaintainer", "retire-plugin"],
   ];
   check(
     "Context 注记：STAGE_CONTEXT_NOTES 覆盖目标角色/stage",
@@ -282,10 +299,10 @@ check(
   const waitOk = waitStages.every((stage) => {
     const text = stageInjectionText(MAIN_ROLE, stage);
     return (
-      text.includes("intermediate") &&
+      text.includes("final: true") &&
       text.includes("send_message") &&
       text.includes("subagent-settled message") &&
-      text.includes("terminal full report")
+      text.includes("TERMINAL full report")
     );
   });
   check("working/memory-maintenance/plugin-maintenance 阶段注入含等待/回复恢复语义", waitOk);

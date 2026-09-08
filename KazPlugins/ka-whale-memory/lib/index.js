@@ -661,12 +661,14 @@ export async function apply(ctx, config = {}) {
     // Kaz 5.0 记忆快照单通道：autoLoad 折叠进任务开始快照，预算 ≤8 条。
     // autoLoad 由用户逐条控制，因此每条都注入完整 content（原样、不截断）
     // 与完整 paths 列表；has_paths 布尔标记不再需要（路径已实际展开）。
+    // 每条快照只含 context + paths（不再输出 id / summary 行）：content
+    // 缺失/空时回退到 summary/name 作为 context 内容，但不作为 summary 行打印。
     const SNAPSHOT_BUDGET = 8;
     const snapshot = activeRecords.slice(0, SNAPSHOT_BUDGET);
     const parts = [
       "[ka-whale-memory Auto-Load]",
       ">",
-      `We know (memory snapshot, id + summary + context + paths, ${snapshot.length}/${SNAPSHOT_BUDGET}):`,
+      `We know (memory snapshot, context + paths, ${snapshot.length}/${SNAPSHOT_BUDGET}):`,
     ];
     snapshot.forEach((record, index) => {
       const summary =
@@ -678,10 +680,7 @@ export async function apply(ctx, config = {}) {
       const rawContent = typeof record.content === "string" ? record.content : "";
       // content 缺失/空时回退到 summary；非空 content 一律原样注入（verbatim）。
       const content = rawContent.trim().length > 0 ? rawContent : summary;
-      const id = String(record.id ?? "");
       parts.push(`---- memory ${index + 1}/${snapshot.length} ----`);
-      parts.push(`id: ${id}`);
-      parts.push(`summary: ${summary.replace(/\r?\n/g, " ")}`);
       parts.push("context:");
       parts.push(content);
       const paths = Array.isArray(record.paths) ? record.paths : [];

@@ -14,7 +14,6 @@ import {
   MAIN_STAGE_IDS,
   FIRST_ROUND_STARTUP_FORM,
   FIRST_ROUND_STARTUP_TEXT,
-  SUBAGENT_TERMINAL_STAGE,
   WORKER_STAGE_IDS,
   MEMORY_MAINTAINER_STAGE_IDS,
   PLUGIN_MAINTAINER_STAGE_IDS,
@@ -286,7 +285,7 @@ childCatalog.set("child-memory-other-surface", {
 
 // 纯函数层
 check("主 stage ids 9 个且使用完整 stage 名", JSON.stringify(MAIN_STAGE_IDS) === JSON.stringify(["assess-complexity","challenge-plan","decide-tools-before-writing-plan","write-plan","working","memory-maintenance","plugin-maintenance","compass_context_before_communication","communication"]));
-check("worker/memory/plugin stage ids 统一收尾到 compress_context_then_communication（不含旧 compass/communication）", WORKER_STAGE_IDS.includes("working") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_MAINTAINER_STAGE_IDS.includes("create-plugin") && [WORKER_STAGE_IDS, MEMORY_MAINTAINER_STAGE_IDS, PLUGIN_MAINTAINER_STAGE_IDS].every((ids) => ids.includes(SUBAGENT_TERMINAL_STAGE) && !ids.includes("communication") && !ids.includes("compass_context_before_communication")));
+check("worker/memory/plugin stage ids 无 compress_context_then_communication（含旧 compass/communication 也不存在）", WORKER_STAGE_IDS.includes("working") && MEMORY_MAINTAINER_STAGE_IDS.includes("save-update") && PLUGIN_MAINTAINER_STAGE_IDS.includes("retire-plugin") && PLUGIN_MAINTAINER_STAGE_IDS.includes("create-plugin") && [WORKER_STAGE_IDS, MEMORY_MAINTAINER_STAGE_IDS, PLUGIN_MAINTAINER_STAGE_IDS].every((ids) => !ids.includes("compress_context_then_communication") && !ids.includes("communication") && !ids.includes("compass_context_before_communication")));
 check("decide-goal/goal-active/working-resumed 均不在 MAIN_STAGE_IDS 且无 Goal 常量导出", !MAIN_STAGE_IDS.includes("decide-goal") && !MAIN_STAGE_IDS.includes("goal-active") && !MAIN_STAGE_IDS.includes("working-resumed") && MAIN_STAGE_IDS.length === 9 && !MAIN_STAGE_IDS.includes("plugin-preflight"));
 {
   const roleReportTools = {
@@ -302,13 +301,23 @@ check("decide-goal/goal-active/working-resumed 均不在 MAIN_STAGE_IDS 且无 G
     memoryMaintainer: "plan-memory",
     pluginMaintainer: "plan-plugin",
   };
+  const finalStages = {
+    worker: ["working"],
+    memoryMaintainer: ["save-update", "delete-memory"],
+    pluginMaintainer: ["create-plugin", "update-plugin", "retire-plugin"],
+  };
   check(
-    "main communication allowedTools = whale_report+plan_read；受控子代理 merged 终态 = context_compress + 各自 report",
+    "main communication allowedTools = whale_report+plan_read；各 role 最后执行阶段 = context_compress + 各自 report 且 canAdvance=[]",
     JSON.stringify(stageDefinitionFor("main", "communication")?.allowedTools) === JSON.stringify(["whale_report", "plan_read"]) &&
-      ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => {
-        const allowed = stageDefinitionFor(role, SUBAGENT_TERMINAL_STAGE)?.allowedTools ?? [];
-        return JSON.stringify(allowed) === JSON.stringify(["context_compress", roleReportTools[role]]);
-      }),
+      Object.entries(finalStages).every(([role, stages]) =>
+        stages.every((stage) => {
+          const def = stageDefinitionFor(role, stage);
+          return def !== null &&
+            def.allowedTools.includes("context_compress") &&
+            def.allowedTools.includes(roleReportTools[role]) &&
+            JSON.stringify(def.canAdvance) === "[]";
+        }),
+      ),
   );
   check(
     "初始 stage（main assess / role planning stages）含 memory/context/report，不含 context_compress（Minimal 不再由 stage 收口）",
@@ -331,18 +340,18 @@ check("decide-goal/goal-active/working-resumed 均不在 MAIN_STAGE_IDS 且无 G
     }),
   );
   check(
-    "受控子代理执行尾部 canAdvance 只到 compress_context_then_communication，且该终态 canAdvance=[]",
-    canAdvance("worker", "working", SUBAGENT_TERMINAL_STAGE) &&
-      canAdvance("memoryMaintainer", "save-update", SUBAGENT_TERMINAL_STAGE) &&
-      canAdvance("memoryMaintainer", "delete-memory", SUBAGENT_TERMINAL_STAGE) &&
-      canAdvance("pluginMaintainer", "create-plugin", SUBAGENT_TERMINAL_STAGE) &&
-      canAdvance("pluginMaintainer", "update-plugin", SUBAGENT_TERMINAL_STAGE) &&
-      canAdvance("pluginMaintainer", "retire-plugin", SUBAGENT_TERMINAL_STAGE) &&
-      ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => JSON.stringify(stageDefinitionFor(role, SUBAGENT_TERMINAL_STAGE)?.canAdvance) === "[]"),
+    "最后执行阶段 canAdvance=[]（terminal full report 由 final:true 表达，不再有单独 stage）",
+    Object.entries(finalStages).every(([role, stages]) =>
+      stages.every((stage) => JSON.stringify(stageDefinitionFor(role, stage)?.canAdvance) === "[]"),
+    ),
   );
   check(
-    "受控子代理不再有 subagent communication / compass_context_before_communication 定义",
-    ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) => stageDefinitionFor(role, "communication") === null && stageDefinitionFor(role, "compass_context_before_communication") === null),
+    "受控子代理不再有 compress_context_then_communication / subagent communication / compass 定义",
+    ["worker", "memoryMaintainer", "pluginMaintainer"].every((role) =>
+      stageDefinitionFor(role, "compress_context_then_communication") === null &&
+      stageDefinitionFor(role, "communication") === null &&
+      stageDefinitionFor(role, "compass_context_before_communication") === null,
+    ),
   );
 }
 check("37.5 新图：decide-tools-before-writing-plan 只到 write-plan，write-plan 可到 working/maintenance/communication", JSON.stringify(stageDefinitionFor(MAIN_ROLE, "decide-tools-before-writing-plan")?.canAdvance) === JSON.stringify(["write-plan"]) && ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"].every((stage) => canAdvance(MAIN_ROLE, "write-plan", stage)));
@@ -352,7 +361,7 @@ check("goal-active/working-resumed 特殊文本导出已不存在", !Object.keys
 check("write-plan 注入格式含 taskPlanPath", stageInjectionText(MAIN_ROLE, "write-plan", { taskPlanPath: "C:/plan.json" }).includes("taskPlanPath: C:/plan.json"));
 check("create-plugin 注入格式含 lifecyclePath", stageInjectionText("pluginMaintainer", "create-plugin", { lifecyclePath: "C:/lifecycle.md" }).includes("lifecyclePath: C:/lifecycle.md"));
 check("Context 注记：STAGE_CONTEXT_NOTES 冻结且覆盖目标角色/stage", STAGE_CONTEXT_NOTES !== undefined && Object.isFrozen(STAGE_CONTEXT_NOTES) && ["main", "worker", "memoryMaintainer", "pluginMaintainer"].every((role) => Object.isFrozen(STAGE_CONTEXT_NOTES[role])));
-check("Context 注记：有注记 stage 在 Task 后输出，无注记 stage 不输出", stageInjectionText("main", "assess-complexity").includes("\nContext: ") && stageInjectionText("main", "challenge-plan").includes("\nContext: ") && stageInjectionText("worker", "challenge-plan").includes("\nContext: ") && stageInjectionText("main", "communication").includes("\nContext: ") && stageInjectionText("worker", SUBAGENT_TERMINAL_STAGE).includes("\nContext: ") && stageInjectionText("memoryMaintainer", SUBAGENT_TERMINAL_STAGE).includes("\nContext: ") && stageInjectionText("pluginMaintainer", SUBAGENT_TERMINAL_STAGE).includes("\nContext: ") && !stageInjectionText(MAIN_ROLE, "working").includes("Context:"));
+check("Context 注记：有注记 stage 在 Task 后输出，无注记 stage 不输出", stageInjectionText("main", "assess-complexity").includes("\nContext: ") && stageInjectionText("main", "challenge-plan").includes("\nContext: ") && stageInjectionText("worker", "challenge-plan").includes("\nContext: ") && stageInjectionText("main", "communication").includes("\nContext: ") && stageInjectionText("worker", "working").includes("\nContext: ") && stageInjectionText("memoryMaintainer", "save-update").includes("\nContext: ") && stageInjectionText("memoryMaintainer", "delete-memory").includes("\nContext: ") && stageInjectionText("pluginMaintainer", "create-plugin").includes("\nContext: ") && stageInjectionText("pluginMaintainer", "update-plugin").includes("\nContext: ") && stageInjectionText("pluginMaintainer", "retire-plugin").includes("\nContext: ") && !stageInjectionText(MAIN_ROLE, "working").includes("Context:"));
 check("Minimal 提示由 stageInjectionText 可选 minimalTools 参数承载：有值输出、缺省不输出", stageInjectionText("main", "assess-complexity", { minimalTools: ["memory_search", "context_search"] }).includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock.") && !stageInjectionText("main", "assess-complexity").includes("Minimal (first round only):"));
 check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity", "working") === false);
 {
@@ -372,8 +381,8 @@ check("advance 校验拒绝非法边", canAdvance(MAIN_ROLE, "assess-complexity"
   check("write-plan/working/memory/plugin 主阶段不再引用 pluginCreator/plugin-preflight", ["write-plan", "working", "memory-maintenance", "plugin-maintenance"].every((stage) => !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("pluginCreator") && !stageDefinitionFor(MAIN_ROLE, stage)?.task.includes("plugin-preflight")));
   check("memory-maintenance 可回 write-plan", canAdvance(MAIN_ROLE, "memory-maintenance", "write-plan") === true && canAdvance(MAIN_ROLE, "plugin-maintenance", "write-plan") === true);
   check("working 注入携带 taskPlanPath", workingText.includes("taskPlanPath: C:/plan.json"));
-  check("working task 含 intermediate report → 父回复 → terminal full report 语义", typeof workingDef?.task === "string" && workingDef.task.includes("intermediate *_sub_whale_report message") && workingDef.task.includes("reply once with send_message") && workingDef.task.includes("single subagent-settled message") && workingDef.task.includes("reply with send_message to resume it") && workingDef.task.includes("terminal full report"));
-  check("主 working/memory-maintenance/plugin-maintenance 任务含复用口径与 intermediate/terminal 双报告预期", stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message to continue that child") && stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes("memoryMaintainer sub-agent can be reused multiple times") && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes("Whether to reuse is determined by the main agent") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes('intermediate report when its work is finished') && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes('intermediate report when its work is finished'));
+  check("working task 含 mid-work pause → final:true TERMINAL full report 语义", typeof workingDef?.task === "string" && workingDef.task.includes("pause mid-work") && workingDef.task.includes("final: true") && workingDef.task.includes("single subagent-settled message") && workingDef.task.includes("reply with send_message to resume it") && workingDef.task.includes("TERMINAL full report"));
+  check("主 working/memory-maintenance/plugin-maintenance 任务含复用口径与 final:true 预期", stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message to continue that child") && stageDefinitionFor(MAIN_ROLE, "working")?.task.includes("send_message") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes("memoryMaintainer sub-agent can be reused multiple times") && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes("Whether to reuse is determined by the main agent") && stageDefinitionFor(MAIN_ROLE, "memory-maintenance")?.task.includes('memory_sub_whale_report({ final: true })') && stageDefinitionFor(MAIN_ROLE, "plugin-maintenance")?.task.includes('plugin_maintainer_sub_whale_report({ final: true })'));
 }
 
 // Task plan draft/finalized 骨架（planStore 在 plugin.apply 前预写，plugin store 可见）
@@ -531,16 +540,14 @@ check(
   memoryInMemory.ok === true && memoryInMemory.code === "subagent-created",
 );
 {
-  // 让刚 spawn 的 child 走完整新尾部：plan-memory → save-update →
-  // compress_context_then_communication（intermediate）→ 父回复清门 →
-  // 注入 merged stage 并消费 pending → terminal no-nextStage report。
+  // 让刚 spawn 的 child 走 v0.10a 尾部：plan-memory → save-update(nextStage) →
+  // 在 save-update 内 final:true terminal full report（stage 不变，terminalFinal=true）。
   const firstMemoryChildId = memoryInMemory.subagentId;
   const childAgent = {
     id: firstMemoryChildId,
     session: { id: firstMemoryChildId, events: [] },
     options: { subagentDepth: 1 },
   };
-  // 新受控子代理先完成首次工具调用（真实路径：session/event 置 minimalDone 并进入 plan-memory）。
   childAgent.session.events.push({ type: "tool/call", data: { name: "memory_search" } });
   agentRegistry.set(firstMemoryChildId, childAgent);
   const sessionEventV09 = listeners.get("session/event")?.[0];
@@ -552,38 +559,21 @@ check(
     { nextStage: "save-update" },
     { agent: childAgent, signal: new AbortController().signal },
   );
-  const mergedIntermediateResult = await memoryReport.execute(
-    { nextStage: SUBAGENT_TERMINAL_STAGE },
+  const terminalResult = await memoryReport.execute(
+    { final: true },
     { agent: childAgent, signal: new AbortController().signal },
   );
+  const storedTerminal = JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.[firstMemoryChildId];
   check(
-    "新 spawn memoryMaintainer child 经 plan-memory→save-update→compress_context_then_communication 中间态",
+    "新 spawn memoryMaintainer child 经 plan-memory→save-update 后 final:true 保持 save-update 并置 terminalFinal",
     planToActionResult?.stage === "save-update" &&
       planToActionResult?.advanced === true &&
-      mergedIntermediateResult?.stage === SUBAGENT_TERMINAL_STAGE &&
-      mergedIntermediateResult?.advanced === true,
+      terminalResult?.final === true &&
+      terminalResult?.terminalFinal === true &&
+      terminalResult?.stage === "save-update" &&
+      storedTerminal?.terminalFinal === true &&
+      storedTerminal?.awaitingParent === true,
   );
-  const parentRelayMemoryV09 = {
-    content: [{ type: "text", text: "continue memory final report" }],
-    source: { kind: "coordinator", form: "relay", senderSessionId: "s-v09" },
-  };
-  await claimed({ agent: childAgent, message: parentRelayMemoryV09, turn: 3 });
-  const preStepFn = listeners.get("agent/pre-step")?.[0];
-  const mergedDecision = await preStepFn({ agent: childAgent, turn: 3, messages: [] }, async () => ({ kind: "enter", messages: [] }));
-  const mergedText = (mergedDecision?.messages ?? [])
-    .map((message) => (message?.content ?? []).map((part) => part?.text ?? "").join("\n"))
-    .join("\n");
-  check(
-    "merged 中间态父回复只清 awaitingParent、保留 stage，且下一 pre-step 注入 merged 正文",
-    mergedText.includes(`[ka-whale-workflow ${SUBAGENT_TERMINAL_STAGE}]`) &&
-      JSON.parse(readFileSync(STORE_FILE, "utf8")).sessions?.[firstMemoryChildId] === SUBAGENT_TERMINAL_STAGE &&
-      JSON.parse(readFileSync(STORE_FILE, "utf8")).pendingStageInjection?.[firstMemoryChildId] === undefined,
-  );
-  const terminalResult = await memoryReport.execute(
-    {},
-    { agent: childAgent, signal: new AbortController().signal },
-  );
-  check("terminal no-nextStage report at merged stage sets awaitingParent and stays in merged stage", terminalResult?.advanced === false && terminalResult?.stage === SUBAGENT_TERMINAL_STAGE && JSON.parse(readFileSync(STORE_FILE, "utf8")).subagentRoles?.[firstMemoryChildId]?.awaitingParent === true);
   const startsBeforeReuse = startedSubagentRequests.length;
   const followsBeforeReuse = capturedFollowups.length;
   const secondMemory = await kaSubWhale.execute({ planItemId: "p-memory-2" }, { agent });
@@ -591,7 +581,7 @@ check(
     .map((part) => part?.text ?? "")
     .join("\n");
   check(
-    "memoryMaintainer 同 surface 第二项复用同一 terminal compress_context_then_communication child（followup 投递 planItemId+task）",
+    "memoryMaintainer 同 surface 第二项复用同一 terminalFinal save-update child（followup 投递 planItemId+task）",
     secondMemory.ok === true &&
       secondMemory.code === "subagent-reused" &&
       secondMemory.reused === true &&

@@ -30,38 +30,25 @@ export const MAIN_STAGE_IDS = Object.freeze([
   "communication",
 ]);
 
-/** v0.9 受控子代理统一尾部终态（worker/memoryMaintainer/pluginMaintainer）。
- *  执行完成 → intermediate *_sub_whale_report({nextStage: this}) → 父主一次
- *  send_message → 可选 context_compress → 无 nextStage 的 terminal full report。 */
-export const SUBAGENT_TERMINAL_STAGE = "compress_context_then_communication";
-
-/** 判断 stage 是否受控子代理的统一尾部终态（角色无关，主模型不用该 stage）。 */
-export function isSubagentTerminalStage(stage) {
-  return stage === SUBAGENT_TERMINAL_STAGE;
-}
-
-/** worker 普通子代理 stage id（§4）。 */
+/** worker 普通子代理 stage id（v0.10a：无独立 terminal stage）。 */
 export const WORKER_STAGE_IDS = Object.freeze([
   "challenge-plan",
   "working",
-  SUBAGENT_TERMINAL_STAGE,
 ]);
 
-/** memoryMaintainer 子代理 stage id（§5）。 */
+/** memoryMaintainer 子代理 stage id（v0.10a：无独立 terminal stage）。 */
 export const MEMORY_MAINTAINER_STAGE_IDS = Object.freeze([
   "plan-memory",
   "save-update",
   "delete-memory",
-  SUBAGENT_TERMINAL_STAGE,
 ]);
 
-/** pluginMaintainer 子代理 stage id（§6）。 */
+/** pluginMaintainer 子代理 stage id（v0.10a：无独立 terminal stage）。 */
 export const PLUGIN_MAINTAINER_STAGE_IDS = Object.freeze([
   "plan-plugin",
   "create-plugin",
   "update-plugin",
   "retire-plugin",
-  SUBAGENT_TERMINAL_STAGE,
 ]);
 
 /** 所有 v0.9 stage id（不含 idle/done/end 等状态壳）。 */
@@ -191,7 +178,7 @@ Communication rules:
       task:
         `Execute persona=main plan items on the main line; delegate each persona=worker plan item individually via ka_sub_whale. Do not delegate memory/plugin items here; they are reserved for memory-maintenance/plugin-maintenance.
 
-After ka_sub_whale, end the turn. When the child finishes execution it sends an intermediate *_sub_whale_report message ("work finished / preparing report"); reply once with send_message so it can tidy context and produce its terminal full report. The child's terminal full report then arrives as a single subagent-settled message after its final *_sub_whale_report; when it arrives, reply with send_message to resume it or begin the next round. The child must have a response to proceed. Let the child run its own workflow at its own pace; we do not rush it. We wait for the report, verify it, and decide the next step.
+After ka_sub_whale, end the turn. The child works inside its execution stage; it may pause mid-work with a *_sub_whale_report that has neither final:true nor nextStage (reply with send_message to resume). When finished, it evaluates optional context_compress and sends its TERMINAL full report via *_sub_whale_report({ final: true }); that report arrives as a single subagent-settled message, after which you reply with send_message to resume it or begin the next round. The child must have a response to proceed. Let the child run its own workflow at its own pace; we do not rush it. We wait for the report, verify it, and decide the next step.
 
 Amend plans only through write-plan. Use plan_read to inspect the active run plan and its work-log; prefer it over raw read of JSON. When delegating a planItem whose dependsOn references earlier completed items, include the actual workLogFile path from plan_read in the delegation/follow-up message; parallel subagents do not see each other's raw logs. When complete, advance to memory-maintenance before communication. Before calling ka_sub_whale:
 1. Call list_agents.
@@ -217,7 +204,7 @@ a small change to the same file should continue the child that already knows tha
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan", "compass_context_before_communication"],
       task:
-        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. Each child sends an intermediate report when its work is finished ("work finished / preparing report"); reply once with send_message so it can tidy context, then its terminal full report arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a memory planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
+        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. Each child works inside save-update/delete-memory; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via memory_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a memory planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
 
 If no memoryMaintainer planItem exists, check whether the completed work has produced any insights, lessons learned, or reusable patterns worth saving. If so, advance to write-plan to add a memoryMaintainer planItem, then return to this stage.
 
@@ -240,7 +227,7 @@ Before advancing to communication, call "compass_context_before_communication" t
       ],
       canAdvance: ["write-plan", "communication", "compass_context_before_communication"],
       task:
-        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. Each child sends an intermediate report when its work is finished ("work finished / preparing report"); reply once with send_message so it can tidy context, then its terminal full report arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a plugin planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
+        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. Each child works inside create/update/retire-plugin; it may pause mid-work (report without final/nextStage), and when finished it evaluates optional context_compress and sends its TERMINAL full report via plugin_maintainer_sub_whale_report({ final: true }), which arrives as one subagent-settled message. Use plan_read to review remaining plan items and the run work-log; taskPlanPath is injected for reference but prefer plan_read over raw read. When a plugin planItem depends on earlier completed items, include the actual workLogFile path in the delegation/follow-up message; parallel subagents do not see each other's raw logs.
 
 If no pluginMaintainer planItem exists, check whether the completed work reveals repetitive patterns or manual steps that could be automated with a private plugin. If so, advance to write-plan to add a pluginMaintainer planItem, then return to this stage.
 
@@ -294,12 +281,13 @@ Do not write task plans here and do not call ka_sub_whale. Ask the parent main a
         "read",
         "context_search",
         "context_read",
+        "context_compress",
         "todo_write",
         "web_search",
         "write",
         "work_sub_whale_report",
       ],
-      canAdvance: [SUBAGENT_TERMINAL_STAGE],
+      canAdvance: [],
       task:
         `Execute the delegated work with care and completeness. We deliver work that is functional, readable, and properly tested — not just “done”, but done well.
 
@@ -308,19 +296,9 @@ During execution:
 - We do not write memories or plugins. These are handled by the parent and the corresponding specialized subagents.
 - We keep our work self-contained within the delegated scope. We do not expand the scope without parent approval.
 
-Before finishing:
-- Review our own work: does it meet the objective? Are all steps completed? Are there any edge cases we missed?
-- If something is incomplete or uncertain, state it clearly in the report. Do not hide issues.
-
-When work is finished, call work_sub_whale_report({nextStage:'compress_context_then_communication'}) with an INTERMEDIATE message stating work is finished / preparing report. Do NOT write the full final report yet. The tool sets awaitingParent; end the turn and wait for the parent reply (received as subagent-settled).`,
-    },
-    [SUBAGENT_TERMINAL_STAGE]: {
-      allowedTools: ["context_compress", "work_sub_whale_report"],
-      canAdvance: [],
-      task:
-        `Work is finished and the final report is next. Review whether context_compress is warranted (long session / old middle content): if so, preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback. Then call work_sub_whale_report (nextStage omitted) and write the FULL final report as the final message:
-
-Report structure:
+When work is finished, first review our own work: does it meet the objective? Are all steps completed? Are there any edge cases missed?
+THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate whether context_compress is warranted when the session is long or old middle content exists — preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback.
+Then call work_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report as the final message, then end the turn:
 - What was done (summary of actions taken)
 - How it was done (key decisions, tools used, approach taken)
 - What was produced (files, changes, outputs)
@@ -353,11 +331,12 @@ Report structure:
         "memory_list",
         "context_search",
         "context_read",
+        "context_compress",
         "memory_sub_whale_report",
       ],
-      canAdvance: [SUBAGENT_TERMINAL_STAGE],
+      canAdvance: [],
       task:
-        "Save/update memories with evidence. Keep new entries as CANDIDATE. When work is finished, call memory_sub_whale_report({nextStage:'compress_context_then_communication'}) with an INTERMEDIATE message stating work is finished / preparing report. Do NOT write the final full report yet. End the turn and wait for the parent reply.",
+        "Save/update memories with evidence. Keep new entries as CANDIDATE. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
     },
     "delete-memory": {
       allowedTools: [
@@ -369,15 +348,9 @@ Report structure:
         "context_compress",
         "memory_sub_whale_report",
       ],
-      canAdvance: [SUBAGENT_TERMINAL_STAGE],
-      task:
-        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. When work is finished, call memory_sub_whale_report({nextStage:'compress_context_then_communication'}) with an INTERMEDIATE message stating work is finished / preparing report. Do NOT write the final full report yet. End the turn and wait for the parent reply.",
-    },
-    [SUBAGENT_TERMINAL_STAGE]: {
-      allowedTools: ["context_compress", "memory_sub_whale_report"],
       canAdvance: [],
       task:
-        "Work is finished and the final report is next. Review whether context_compress is warranted (long session / old middle content): if so, preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback. Then call memory_sub_whale_report (nextStage omitted) and write the FULL final report as the final message: report ids, evidence, and audit.",
+        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
     },
   },
   pluginMaintainer: {
@@ -404,6 +377,7 @@ Report structure:
         "read",
         "context_search",
         "context_read",
+        "context_compress",
         "memory_search",
         "memory_detail",
         "memory_list",
@@ -414,9 +388,9 @@ Report structure:
         "todo_write",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: [SUBAGENT_TERMINAL_STAGE],
+      canAdvance: [],
       task:
-        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. When work is finished, call plugin_maintainer_sub_whale_report({nextStage:'compress_context_then_communication'}) with an INTERMEDIATE message stating work is finished / preparing report. Do NOT write the final full report yet. End the turn and wait for the parent reply.",
+        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
     "update-plugin": {
       allowedTools: [
@@ -425,6 +399,7 @@ Report structure:
         "read",
         "context_search",
         "context_read",
+        "context_compress",
         "memory_search",
         "memory_detail",
         "memory_list",
@@ -435,15 +410,16 @@ Report structure:
         "todo_write",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: [SUBAGENT_TERMINAL_STAGE],
+      canAdvance: [],
       task:
-        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. When work is finished, call plugin_maintainer_sub_whale_report({nextStage:'compress_context_then_communication'}) with an INTERMEDIATE message stating work is finished / preparing report. Do NOT write the final full report yet. End the turn and wait for the parent reply.",
+        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
     "retire-plugin": {
       allowedTools: [
         "read",
         "context_search",
         "context_read",
+        "context_compress",
         "memory_search",
         "memory_detail",
         "memory_list",
@@ -452,15 +428,9 @@ Report structure:
         "pwsh",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: [SUBAGENT_TERMINAL_STAGE],
-      task:
-        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. When work is finished, call plugin_maintainer_sub_whale_report({nextStage:'compress_context_then_communication'}) with an INTERMEDIATE message stating work is finished / preparing report. Do NOT write the final full report yet. End the turn and wait for the parent reply.",
-    },
-    [SUBAGENT_TERMINAL_STAGE]: {
-      allowedTools: ["context_compress", "plugin_maintainer_sub_whale_report"],
       canAdvance: [],
       task:
-        "Work is finished and the final report is next. Review whether context_compress is warranted (long session / old middle content): if so, preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback. Then call plugin_maintainer_sub_whale_report (nextStage omitted) and write the FULL final report as the final message: report changed files, probe results, and rollback paths.",
+        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
   },
 };
@@ -562,16 +532,22 @@ export const STAGE_CONTEXT_NOTES = Object.freeze({
   worker: Object.freeze({
     "challenge-plan":
       "Before critiquing, if the delegation involves earlier session content, first use context_search then context_read to grasp the background.",
-    [SUBAGENT_TERMINAL_STAGE]:
-      "Before reporting, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read.",
+    working:
+      "Before the final report, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read.",
   }),
   memoryMaintainer: Object.freeze({
-    [SUBAGENT_TERMINAL_STAGE]:
-      "Before reporting, review old context first when the report depends on earlier session content: use context_search then context_read.",
+    "save-update":
+      "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
+    "delete-memory":
+      "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
   }),
   pluginMaintainer: Object.freeze({
-    [SUBAGENT_TERMINAL_STAGE]:
-      "Before reporting, review old context first when the report depends on earlier session content: use context_search then context_read.",
+    "create-plugin":
+      "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
+    "update-plugin":
+      "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
+    "retire-plugin":
+      "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
   }),
 });
 

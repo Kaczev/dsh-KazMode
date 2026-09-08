@@ -808,12 +808,12 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   check("⑫ 首次：memory_search 可用时注入自动载入消息", hasRecall(d1) === true);
   const recallJson = JSON.stringify(d1);
   check(
-    "⑫ 快照注入 id+summary+完整 context（≤8），header 带预算且无 has_paths",
-    recallJson.includes("id: auto-1") &&
-      recallJson.includes("summary: Auto Mem") &&
-      recallJson.includes("# Auto Mem") &&
+    "⑫ 快照只含 context+paths（无 id/summary 行），header 带预算且无 has_paths",
+    recallJson.includes("# Auto Mem") &&
       recallJson.includes("Auto content") &&
-      recallJson.includes("memory snapshot, id + summary + context + paths, 1/8") &&
+      recallJson.includes("memory snapshot, context + paths, 1/8") &&
+      !recallJson.includes("id: auto-1") &&
+      !recallJson.includes("summary: Auto Mem") &&
       !recallJson.includes("has_paths"),
   );
   check("⑫ 标记文件已写入且含 agent id", existsSync(storePath) && readFileSync(storePath, "utf8").includes("session-test-A"));
@@ -1026,8 +1026,12 @@ check("⑪ 其它段不受影响", filtered.sections.some((s) => s.name === "per
   const mainDecision = await runAutoStep(mainAgent);
   const autoText = JSON.stringify(mainDecision?.messages ?? []);
   check(
-    "⑯ 快照 header 更新为 id + summary + context + paths 且带预算",
-    autoText.includes("memory snapshot, id + summary + context + paths, 2/8"),
+    "⑯ 快照 header 更新为 context + paths 且带预算（无 id/summary 行）",
+    autoText.includes("memory snapshot, context + paths, 2/8") &&
+      !autoText.includes("id: auto-paths") &&
+      !autoText.includes("id: auto-plain") &&
+      !autoText.includes("summary: Paths auto summary") &&
+      !autoText.includes("summary: Plain auto summary"),
   );
   check(
     "⑯ 自动载入注入完整 content（多条记录、多行正文不截断）",

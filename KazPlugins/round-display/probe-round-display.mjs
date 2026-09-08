@@ -571,7 +571,7 @@ function makeSettings() {
   Date.now = () => nowTick++;
   try {
     // 白名单兼容识别（不带 category）：
-    rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-memory", title: "guidance", content: "[ka-whale-memory Auto-Load]\n>\n- id: 1 | summary: s\n<" });
+    rd.report({ agent: AGENT_LEGACY, plugin: "ka-whale-memory", title: "guidance", content: "[ka-whale-memory Auto-Load]\n>\nWe know (memory snapshot, context + paths, 1/1):\n---- memory 1/1 ----\ncontext:\nctx\npaths:\n- path: /tmp/sample | purpose: sample\n<" });
     rd.report({ agent: AGENT_LEGACY, plugin: "round-minimal", title: "本轮工具变化", content: "工具面变化\n恢复全量（首次工具调用后）\n- 当前工具（19）…" });
     rd.report({ agent: AGENT_LEGACY, plugin: "round-minimal", title: "本轮工具变化", content: "工具面变化\n工具面变化\n- 当前工具（1）：memory_search\n- 移除（19）：…\n+ 新增（1）：memory_search" });
     rd.report({ agent: AGENT_LEGACY, plugin: "kaz-system-prompt", title: "system prompt", content: "real prompt" });

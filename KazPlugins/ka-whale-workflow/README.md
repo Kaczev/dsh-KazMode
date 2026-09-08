@@ -1,4 +1,4 @@
-# ka-whale-workflow
+﻿# ka-whale-workflow
 
 鲸鱼工作流组件（v0.9/v0.10，31 世 + 32 世 B3/B3.5 + 35 世 B5 清理 + 36 世 B6 部分收尾 + 36.5–37.5 纠正范围 + 38 世热重载 + 39 世 v0.10 纠正：persona 固定枚举 / finalPlanPayload 原子校验 / 子代理尾部合并 / per-project per-run task-plan + plan_read / work-log / memory auto-load 文档同步；Goal 模式已移除）。
 
@@ -25,8 +25,7 @@
   memoryMaintainer=`plan-memory`，pluginMaintainer=`plan-plugin`），allowedTools 按
   lib/stage-defs.js 中的 planning 面放行（read/grep/glob/memory/context + 各自
   report 工具等），不依赖首轮 Minimal 列表，也不放 `context_compress`（compress
-  属于主 compass_context_before_communication / Stable 面；受控子代理在合并 terminal
-  `compress_context_then_communication` 才使用）。主 `assess-complexity`
+  属于主 compass_context_before_communication / Stable 面；受控子代理只在最后执行阶段才使用 context_compress）。主 `assess-complexity`
   不放 `ask_user_question`（澄清需求先推进 `challenge-plan`）。
 - 首轮 Minimal 与主/子代理对齐：真正的首轮 Minimal 由 kaz-mode `firstRoundTools` /
   `V09_SUBAGENT_ROLE_MINIMAL_TOOLS` 在“首次工具调用前”独立收口：
@@ -55,9 +54,10 @@
   会让父主 send_message 恢复时丢失受控角色与 pending 注入）；真正已移除子代理的
   脏记录由 memoryMaintainer 复用对账经 `listChildren` 清理。
 - 阶段终态：主 `communication` allowedTools = `whale_report` + `plan_read`；
-  受控子代理不再有 subagent `communication`/`compass_context_before_communication`
-  定义，统一 terminal `compress_context_then_communication`
-  （`context_compress` + 各自 report 工具）。
+  受控子代理没有独立 terminal stage；worker=working、memoryMaintainer=
+  save-update/delete-memory、pluginMaintainer=create/update/retire-plugin 的
+  最后执行阶段已含 `context_compress` + 各自 report，`canAdvance=[]`。
+  `*_sub_whale_report({ final: true })` 在最后执行阶段发出 terminal full report。
 - B6 收口：`KAZ_ROLE_PROMPTS`（v0.9 §9.1–9.5）作为全量 Persona 唯一源存放在
   `kaz-shared`，本组件 `V09_ROLE_PERSONAS` 由它派生；旧的一次性
   `MAIN_FLOW_TEXT` / `SUBAGENT_FLOW_TEXT` 导出已删除。当前主 Persona 应用：`kaz-system-prompt` 每个
@@ -80,22 +80,22 @@
 - 阶段级 Context 注记：`STAGE_CONTEXT_NOTES`（lib/stage-defs.js）为部分 stage
   定义 Context 提醒；`stageInjectionText` 在有注记的 stage 的 `Task:` 行后输出
   `Context: <text>`，无注记不输出。覆盖 main 的 assess-complexity/challenge-plan/
-  communication、worker 的 challenge-plan/compress_context_then_communication 与
-  memoryMaintainer/pluginMaintainer 的 compress_context_then_communication：涉及
-  早前会话内容时先 `context_search` 再 `context_read` 掌握/复现背景；main.communication
-  另在会话冗长收尾前先 `context_compress suggest` 预览（manual 优先、auto 兜底）。
+  communication、worker 的 challenge-plan/working 与 memoryMaintainer/pluginMaintainer
+  的最后执行阶段：涉及早前会话内容时先 `context_search` 再 `context_read`
+  掌握/复现背景；main.communication 另在会话冗长收尾前先 `context_compress suggest`
+  预览（manual 优先、auto 兜底）。
 - `compass_context_before_communication`（主模型阶段保留）：仅
   `context_compress` + `whale_report` + `plan_read`，只能去 communication
   （可从 main write-plan/memory-maintenance/plugin-maintenance 进入）。
-  受控子代理不再使用该阶段；其压缩+终报合并到
-  `compress_context_then_communication`。
+  受控子代理不再使用该阶段；其可选 context_compress + 终报都发生在各自最后
+  执行阶段（通过 `final:true`）。
 - B2.5 重启语义（main-role）：Minimal 只在整段 session 第一次 tool/call 前发生；
   后续 workflow-run 重新进入主 `assess-complexity` 但不重复 Minimal；
   主 `assess-complexity -> communication (no-tool-call)` 是合法路径。
 - 36.5 用户消息路由：真实用户消息在非终态活动阶段保留当前阶段，不重置成
-  `assess-complexity`；只有 `idle`/`done`/`end`/`communication`/
-  `compress_context_then_communication` 或历史 `goal-active`/`working-resumed`
-  旧值才重置。
+  `assess-complexity`；只有 `idle`/`done`/`end`/`communication` 或历史
+  `goal-active`/`working-resumed` 旧值才重置。旧 in-flight
+  `compress_context_then_communication` 仅按 legacy 字符串兼容读取，不再写入。
 - 子代理回传不触发新一轮：DSH `subagent-report` / `subagent-settled` 等内部消息
   不是真实用户消息，`isUserMessage` 返回 false，不会把主模型 working 重置成
   `assess-complexity`。
@@ -130,10 +130,11 @@
   原语；主 Persona、working/memory-maintenance/plugin-maintenance 注入与
   `ka_sub_whale` description/output 都明确该口径。
 - 主子代理相处模式（单一 subagent-settled 通道）：`*_sub_whale_report` 是子代理
-  唯一的硬停/汇报闸门——调用它（可选 `nextStage` 推进）后置 `awaitingParent` 并
-  硬停；随后子代理把完整报告作为**最终消息**写出并结束回合，父主以单条
-  `subagent-settled` 收到。父主审查后用一次 `send_message` 恢复子代理（子代理处于
-  terminal `compress_context_then_communication` 时，该回复开启该角色新的一轮：
+  唯一的硬停/汇报闸门——调用它后置 `awaitingParent` 并硬停。`nextStage` 仅用于
+  planning → execution 推进；无 final 无 nextStage 是 mid-work pause；`final:true`
+  从最后执行阶段发出 TERMINAL full report，额外置 `terminalFinal=true`。父主以单条
+  `subagent-settled` 收到。父主审查后用一次 `send_message` 恢复子代理（子代理
+  `terminalFinal=true` 时，该回复开启该角色新的一轮：
   worker=`challenge-plan`、memoryMaintainer=`plan-memory`、pluginMaintainer=`plan-plugin`）。
   父主不得假设子代理在 report 工具调用后仍继续运行。
 - 子代理多轮复用：同一 memoryMaintainer 子代理可被多轮复用（`ka_sub_whale` 对同
@@ -164,22 +165,19 @@
   不再注入两类标题。
 - 新工具注册：`ka_sub_whale` 实际受控委派层 + 三个 `*_sub_whale_report`
   （单一 subagent-settled 通道：每个工具按角色不同流程推进 stage，可选 `nextStage`
-  用于推进，省略 `nextStage` 只置硬等门；工具不再接收 `output`、不调用 DSH
+   用于 planning→execution 推进，`final:true` 从最后执行阶段发出 terminal full
+   report，无 final 无 nextStage 是 mid-work pause；工具不再接收 `output`、不调用 DSH
   `reportFrom`，完整报告由子代理最终消息携带）；
   `list_agents / send_message / interrupt_agent` 由 DSH subagent-control 提供，
   ka-whale-workflow/kaz-shared 负责 Stable Main Surface 放行。
-- 子代理 report 硬等门：`*_sub_whale_report` 无论是否带 `nextStage` 都把
-  subagentRoles 记录的 `awaitingParent` 置 true，工具结果追加
-  `Stage advanced; now output your full report as your final message and end the
-  turn; parent receives it as subagent-settled; do not call further tools.` 文案；
-  受控子代理 `awaitingParent=true` 期间 tools/pre-execute 拒绝其继续调用任何工具
-  （含再次 report），返回结构化 `subagent-report-wait-deny`；父主模型 `send_message`
-  （DSH source `kind=coordinator`/`form=relay`）到达时清门——当前 stage 为
-  terminal `compress_context_then_communication` 且 pending 已被消费（terminal full
-  report 已发出）时重置为该角色初始阶段（worker=`challenge-plan`、
-  memoryMaintainer=`plan-memory`、pluginMaintainer=`plan-plugin`）开始新的一轮；
-  merged 中间态（pending 仍等于该 stage）或其它非终态仅清 `awaitingParent`、stage
-  保持不变继续当前轮。
+- 子代理 report 硬等门：`*_sub_whale_report` 任意调用都会把 subagentRoles 记录的
+  `awaitingParent` 置 true；`final:true` 另把 `terminalFinal` 置 true。受控子代理
+  `awaitingParent=true` 期间 tools/pre-execute 拒绝其继续调用任何工具（含再次 report），
+  返回结构化 `subagent-report-wait-deny`；父主模型 `send_message`
+  （DSH source `kind=coordinator`/`form=relay`）到达时清门——`terminalFinal=true`
+  时重置为该角色初始阶段（worker=`challenge-plan`、memoryMaintainer=`plan-memory`、
+  pluginMaintainer=`plan-plugin`）并清除 terminalFinal 开始新的一轮；mid-work pause
+  或 nextStage advance 仅清 `awaitingParent`、stage 保持不变继续当前轮。
 - `KAZ_TASK_PLAN_STORE_PATH` / `KAZ_PRIVATE_PLUGIN_LIFECYCLE_PATH` /
   `KAZ_PRIVATE_PLUGIN_CANDIDATE_PATH` 由 `kaz-shared` 定义；
   `PLUGIN_LIFECYCLE.md` 放本组件目录并受 Git 跟踪。

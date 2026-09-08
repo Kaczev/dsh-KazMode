@@ -68,7 +68,6 @@ import {
   MAIN_STAGE_IDS,
   FIRST_ROUND_STARTUP_FORM,
   FIRST_ROUND_STARTUP_TEXT,
-  SUBAGENT_TERMINAL_STAGE,
   V09_SUBAGENT_ROLES,
   V09_STAGE_IDS,
   V09_ROLE_PERSONAS,
@@ -522,6 +521,9 @@ export function normalizeSubagentRoleRecord(raw) {
     finalTools: normalizeToolList(raw.finalTools),
     // schema-compatible：旧记录没有该字段时按 false 读取；写入时总是归一化为布尔。
     awaitingParent: raw.awaitingParent === true,
+    // v0.10a：terminalFinal=true 表示 child 已发 final:true terminal full report，
+    // 父主 reply 后重置新轮；旧记录/旧阶段无此字段按 false。
+    terminalFinal: raw.terminalFinal === true,
     // 7.0/2026-09：受控子代理首次 tool/call 后置 true 并持久化，避免 resume 后
     // kaz-mode 只依赖会话 tool/call 事件而把已解锁子代理重新判成 Minimal。
     minimalDone: raw.minimalDone === true,
@@ -530,11 +532,17 @@ export function normalizeSubagentRoleRecord(raw) {
   };
 }
 
+/** 旧版 subagent 合并尾部 stage：已从 stage-defs 删除，但 stage store 历史文件
+ *  可能仍含该值，reload 时按 legacy 接受并兼容清门/复用（不写新状态）。 */
+const LEGACY_SUBAGENT_TERMINAL_STAGE = "compress_context_then_communication";
+
 /** 存储可接受的所有 stage 值：v0.9 + 状态壳。
  *  旧 goal-active / working-resumed / reconstruction / classification / goal-recovery
- *  已不再可写；历史文件中的这些值在读取时按未知值丢弃（等价回 idle）。 */
+ *  已不再可写；历史文件中的这些值在读取时按未知值丢弃（等价回 idle）。
+ *  LEGACY_SUBAGENT_TERMINAL_STAGE 仅作旧 in-flight 兼容读取。 */
 const KNOWN_SESSION_STAGES = new Set([
   ...V09_STAGE_IDS,
+  LEGACY_SUBAGENT_TERMINAL_STAGE,
   "idle",
   "done",
   "end",
@@ -975,8 +983,8 @@ export function hasInjectedInTurn(agent, form, turn) {
 /** 新一轮真实用户消息（第 2、3、4……轮，模型不在运行）的路由。
  *  36.5 语义（Goal 模式已移除）：
  *  - 真实用户消息出现在非终态活动阶段时保留当前阶段，不重置为 assess-complexity；
- *  - 只有 idle/done/end/communication/compress_context_then_communication 等终态
- *    或未开始状态才进入 assess-complexity
+ *  - 只有 idle/done/end/communication/（旧）compress_context_then_communication 等
+ *    终态或未开始状态才进入 assess-complexity
  *    （Minimal 不再重复，由 kaz-mode/ka-whale-workflow 按“会话第一次 tool/call”判定）；
  *  - 历史持久化的 goal-active/working-resumed 值只是旧数据：无 Goal 生命周期可恢复，
  *    一律按 assess-complexity 处理（不回退、不保留、无 Goal 特定文案）。
@@ -991,7 +999,7 @@ export function nextStageOnUserMessage(current, _turn, _context = {}) {
     current === "done" ||
     current === "end" ||
     current === "communication" ||
-    current === SUBAGENT_TERMINAL_STAGE
+    current === "compress_context_then_communication" // legacy in-flight only
   ) {
     return "assess-complexity";
   }
@@ -1125,11 +1133,10 @@ export default {
     }
 
     /**
-     * k10-work-log：把一条 terminal child full report 追加到 parent 的 active run
-     * work-log。只记录“终态 full report”（compress_context_then_communication 且
-     * pending 已消费，或旧 communication 兼容）；intermediate/preparing 不进 log。
-     * best-effort：legacy/no-run/任何 I/O 失败都不抛错。
-     * 返回 true/false。
+     * k10-work-log：把 terminal full report 追加到 parent active run work-log。
+     * v0.10a：primary 信号是 roleRecord.terminalFinal===true；legacy 兼容旧
+     * compress_context_then_communication（pending 已消费）/communication 阶段。
+     * best-effort：legacy/no-run/任何 I/O 失败都不抛错。返回 true/false。
      */
     function appendChildWorkLog({ parentAgent, childId, childRecord, message, loggedChildIds }) {
       try {
@@ -1145,10 +1152,11 @@ export default {
             ? roleRecord.stage
             : stageStore.get(childId) || "";
         const pending = stageStore.getPendingStageInjection(childId);
-        const terminalFullReport =
-          childStage === SUBAGENT_TERMINAL_STAGE && pending !== childStage;
-        const legacyTerminal = childStage === "communication";
-        if (!terminalFullReport && !legacyTerminal) return false;
+        const terminalFinalFlag = roleRecord.terminalFinal === true;
+        const legacyTerminal =
+          childStage === "communication" ||
+          (childStage === "compress_context_then_communication" && pending !== childStage);
+        if (!terminalFinalFlag && !legacyTerminal) return false;
         const summary = subagentReportSummaryOf(message);
         if (summary.length === 0) return false;
         const parentSessionId =
@@ -1376,11 +1384,11 @@ Before we answer, call memory_search or context_search exactly once. After that 
     }
 
     /** 父主模型 send_message（coordinator/relay）到达受控子代理时清门：
-     *  - 真终态（旧 communication 兼容；或 compress_context_then_communication 的
-     *    pending 已被消费、terminal full report 已发出）：stage 重置为该角色初始阶段；
-     *  - 合并尾部中间态：compress_context_then_communication 且 pendingStage 仍等于
-     *    该 stage（刚由 intermediate *_sub_whale_report 进入、尚未注入 stage 正文/
-     *    尚未写 terminal report）：只清 awaitingParent，stage 保持，等待子代理压缩并终报。
+     *  - terminalFinal=true（child 已发 final:true terminal full report）：重置为
+     *    该角色初始阶段并清除 terminalFinal（新的一轮）；
+     *  - 旧 in-flight legacy（旧 communication / compress_context_then_communication
+     *    pending 已消费）也按终态重置，保证 reload 不崩；
+     *  - 其它 mid-work pause / nextStage advance：只清 awaitingParent，stage 保持。
      *  只有 awaitingParent=true 且确实是父主 relay 时才动作。 */
     function clearAwaitingParentOnParentReply(agent, message) {
       if (!isParentMainSendMessage(message)) return false;
@@ -1391,9 +1399,10 @@ Before we answer, call memory_search or context_search exactly once. After that 
       const role = record.persona;
       const current = stageOfAgent(agent);
       const pendingStage = stageStore.getPendingStageInjection(sessionId);
-      const mergedIntermediate =
-        current === SUBAGENT_TERMINAL_STAGE && pendingStage === current;
-      const terminalReply = current === "communication" || (current === SUBAGENT_TERMINAL_STAGE && !mergedIntermediate);
+      const legacyOldFinal =
+        current === "communication" ||
+        (current === "compress_context_then_communication" && pendingStage !== current);
+      const terminalReply = record.terminalFinal === true || legacyOldFinal;
       if (terminalReply) {
         const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role] ?? current;
         if (setStageAgent(agent, initial)) {
@@ -1402,6 +1411,10 @@ Before we answer, call memory_search or context_search exactly once. After that 
             `父主模型 send_message 到达：${role} 从 ${current} 重置到 ${initial}（新的一轮）。`,
             "阶段切换",
           );
+        }
+        const refreshed = stageStore.getSubagentRole(sessionId);
+        if (refreshed !== null) {
+          stageStore.setSubagentRole(sessionId, { ...refreshed, terminalFinal: false });
         }
       } else {
         reportRoundDisplay(
@@ -2022,8 +2035,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
     }
 
     /** memoryMaintainer 强制复用：同 parent + 同 role、finalSurface 集合一致、且
-     *  已发出 terminal full report 的 compress_context_then_communication（或旧
-     *  communication 兼容）/ ready 非忙碌 child 才通过 followup 投递下一轮。
+     *  terminalFinal=true（final:true full report 已发出；旧 communication 兼容）/
+     *  ready 非忙碌 child 才通过 followup 投递下一轮。
      *  返回 null 表示没有可复用/复用服务不可用，调用方继续正常 spawn。 */
     async function tryReuseMemoryMaintainer({ parentId, agent, item, assignedTools, finalSurface, subagents, exec }) {
       if (
@@ -2074,17 +2087,14 @@ Before we answer, call memory_search or context_search exactly once. After that 
           agents !== undefined && agents !== null && typeof agents.get === "function"
             ? agents.get(childId)
             : undefined;
-        // 真终态可复用：
-        //  - 旧 communication 兼容；
-        //  - 新 compress_context_then_communication 只在 pending 已被消费
-        //    （terminal full report 已发出）时可复用；pending 仍等于该 stage 时
-        //    是 intermediate 等待父主回复，必须视为 busy。
+        // v0.10a 真终态可复用：terminalFinal=true 的 child（final:true full report
+        // 已发出）或旧 communication / 旧 compress_context_then_communication（pending
+        // 已消费）都是 free；mid-work pause 或 awaitingParent 未终报视为 busy。
         const pendingStage = stageStore.getPendingStageInjection(childId);
-        const mergedIntermediate =
-          stageNow === SUBAGENT_TERMINAL_STAGE && pendingStage === stageNow;
-        const terminalFinal =
+        const legacyOldFinal =
           stageNow === "communication" ||
-          (stageNow === SUBAGENT_TERMINAL_STAGE && !mergedIntermediate);
+          (stageNow === "compress_context_then_communication" && pendingStage !== stageNow);
+        const terminalFinal = record.terminalFinal === true || legacyOldFinal;
         const isBusy =
           !terminalFinal &&
           (record.awaitingParent === true || liveAgent !== undefined || entry.activity === "running");
@@ -2462,19 +2472,22 @@ Before we answer, call memory_search or context_search exactly once. After that 
         description:
           `Advance/report through the v0.9 ${role} subagent workflow (${roleFlow}). ` +
           `This tool is available only inside the matching v0.9 subagent role. ` +
-          `Pass nextStage to advance this role's ka-whale-workflow stage (must be in the current stage's ` +
-          `Can advance to list); if nextStage is omitted, only awaitingParent is set and the stage stays unchanged. ` +
-          `When nextStage is 'compress_context_then_communication' from an execution stage, this is an INTERMEDIATE report: ` +
-          `output only an intermediate "work finished / preparing report" message, not final results. ` +
-          `When nextStage is omitted at the terminal stage, output the FULL final report as your final message and end the turn; ` +
-          `parent receives it as subagent-settled. Do not call further tools. ` +
+          `Pass nextStage to advance this role's ka-whale-workflow stage (planning → execution; must be in the current stage's ` +
+          `Can advance to list). Pass final:true only from the role's last execution stage to send the TERMINAL full report; ` +
+          `it must NOT be combined with nextStage. Omit both final and nextStage for a mid-work pause (awaitingParent only). ` +
           `A successful call is a hard stop: the child sets awaitingParent and waits for the parent main model's ` +
-          `reply via send_message, which resumes it. If the child is at terminal ${SUBAGENT_TERMINAL_STAGE} ` +
-          `after its terminal full report, that parent reply starts a fresh delegation at ${roleFlow.split(" → ")[0]}.`,
+          `reply via send_message, which resumes it; the parent receives it as subagent-settled. ` +
+          `A final:true call additionally sets terminalFinal=true; after the parent reply, ` +
+          `the child starts a fresh delegation at ${roleFlow.split(" → ")[0]}.`,
         parameters: {
           nextStage: {
             type: "string",
-            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before this report message; execution-stage calls use 'compress_context_then_communication' as the intermediate tail transition.`,
+            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before this report message. Cannot be combined with final:true.`,
+          },
+          final: {
+            type: "boolean",
+            description:
+              "Optional terminal flag. final:true is valid only from the last execution stage of this role (working / save-update / delete-memory / create-plugin / update-plugin / retire-plugin) and must not be combined with nextStage. It sets terminalFinal=true and signals the FULL final report.",
           },
         },
         output: {
@@ -2485,6 +2498,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
               role: { type: "string" },
               stage: { type: "string" },
               advanced: { type: "boolean" },
+              final: { type: "boolean" },
+              terminalFinal: { type: "boolean" },
               notice: { type: "string" },
             },
           },
@@ -2507,11 +2522,33 @@ Before we answer, call memory_search or context_search exactly once. After that 
           // 这里也确保角色记录已解锁（后续 resume 不再回 Minimal）。
           markSubagentMinimalDone(agent);
           ensureControlledSubagentStarted(agent);
+          const isFinal = args?.final === true;
           const nextStage = typeof args?.nextStage === "string" ? args.nextStage.trim() : "";
           const current = stageOfAgent(agent);
+          const def = stageDefinitionFor(role, current);
           let advanced = false;
-          if (nextStage.length > 0) {
-            const def = stageDefinitionFor(role, current);
+          if (isFinal && nextStage.length > 0) {
+            const error = new Error(
+              `final-with-next-stage: ${reportTool} final:true cannot be combined with nextStage for role "${role}". ` +
+                `Use final:true alone for the terminal full report, or nextStage for stage advance.`,
+            );
+            error.code = "final-with-next-stage";
+            return Promise.reject(error);
+          }
+          if (isFinal) {
+            const isExecutionTail =
+              def !== null &&
+              def.canAdvance.length === 0 &&
+              def.allowedTools.includes(reportTool);
+            if (!isExecutionTail) {
+              const error = new Error(
+                `final-report-stage-invalid: ${reportTool} final:true is valid only from the last execution stage of role "${role}", not from current="${current}".`,
+              );
+              error.code = "final-report-stage-invalid";
+              return Promise.reject(error);
+            }
+          }
+          if (!isFinal && nextStage.length > 0) {
             if (def === null || !def.canAdvance.includes(nextStage)) {
               const allowed = def === null ? "(unknown stage)" : def.canAdvance.join(", ");
               return Promise.reject(
@@ -2526,18 +2563,27 @@ Before we answer, call memory_search or context_search exactly once. After that 
               reportRoundDisplay(agent, `${reportTool}: ${role} ${current} → ${nextStage}`, "阶段切换");
             }
           }
-          // 单一 subagent-settled 通道：工具不发送报告正文；子代理随后把完整报告
+          const terminalFinal = isFinal;
+          // 单一 subagent-settled 通道：工具不发送报告正文；子代理随后把报告
           // 作为最终消息写出，父主以 subagent-settled 收到。此处只置硬等门。
-          // 同一轮若子代理再尝试任何工具（含再次 report），tools/pre-execute
-          // 会以 SUB_WHALE_REPORT_WAIT_DENY_CODE 拒绝。
           const childId = sessionIdOf(agent);
           if (typeof childId === "string" && childId.length > 0) {
+            const record = stageStore.getSubagentRole(childId);
+            if (record !== null) {
+              stageStore.setSubagentRole(childId, {
+                ...record,
+                terminalFinal,
+                stage: nextStage.length > 0 ? nextStage : current,
+              });
+            }
             stageStore.setSubagentRoleAwaitingParent(childId, true);
           }
           return {
             role,
             stage: nextStage.length > 0 ? nextStage : current,
             advanced,
+            final: isFinal,
+            terminalFinal,
             notice: SUB_WHALE_REPORT_WAIT_NOTICE,
           };
         },
@@ -2937,8 +2983,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
       if (typeof sessionId !== "string" || sessionId.length === 0) return;
       const current = stageOfAgent(agent);
       // 第 2、3、4……轮（turn>=2，模型不在运行）：非终态活动阶段保留当前阶段；
-      // 只有 idle/done/end/communication/compress_context_then_communication 或历史
-      // goal-active/working-resumed 旧值才重新进入 assess-complexity（36.5；Goal 已移除）。
+      // 只有 idle/done/end/communication/（旧）compress_context_then_communication 或
+      // 历史 goal-active/working-resumed 旧值才重新进入 assess-complexity（36.5；Goal 已移除）。
       if (typeof turn === "number" && turn >= 2) {
         const next = nextStageOnUserMessage(current, turn);
         if (setStageAgent(agent, next)) {

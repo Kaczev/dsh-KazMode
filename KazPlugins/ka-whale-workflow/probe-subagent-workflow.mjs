@@ -15,7 +15,7 @@ import plugin, {
   V09_SUBAGENT_ROLE_INITIAL_STAGES,
   PLAN_READ_TOOL,
 } from "./lib/index.js";
-import { stageDefinitionFor, stageInjectionText, STAGE_CONTEXT_NOTES, SUBAGENT_TERMINAL_STAGE } from "./lib/stage-defs.js";
+import { stageDefinitionFor, stageInjectionText, STAGE_CONTEXT_NOTES } from "./lib/stage-defs.js";
 import { runPlanFileFor, currentRunPointerFileFor, readRunPlanItems, persistFinalPlanRun, workLogFileFor } from "./lib/task-plan-store.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -140,11 +140,21 @@ function withToolCall(agent) {
     memoryMaintainer: "memory_sub_whale_report",
     pluginMaintainer: "plugin_maintainer_sub_whale_report",
   };
+  const finalStages = {
+    worker: ["working"],
+    memoryMaintainer: ["save-update", "delete-memory"],
+    pluginMaintainer: ["create-plugin", "update-plugin", "retire-plugin"],
+  };
   check(
-    "受控子代理 merged 终态 allowedTools = context_compress + 各自 report（新尾部）",
-    roles.every((role) =>
-      JSON.stringify(stageDefinitionFor(role, SUBAGENT_TERMINAL_STAGE)?.allowedTools) ===
-      JSON.stringify(["context_compress", roleReportTools[role]]),
+    "受控子代理最后执行阶段 allowedTools = context_compress + 各自 report（v0.10a，无独立终态 stage）",
+    Object.entries(finalStages).every(([role, stages]) =>
+      stages.every((stage) => {
+        const def = stageDefinitionFor(role, stage);
+        return def !== null &&
+          def.allowedTools.includes("context_compress") &&
+          def.allowedTools.includes(roleReportTools[role]) &&
+          JSON.stringify(def.canAdvance) === "[]";
+      }),
     ),
   );
   check(
@@ -209,17 +219,18 @@ const h1 = makeBase({ includeSubagents: false, stageStoreFile: STORE_FILE, planF
   // can assert lifecyclePath is injected through the runtime pre-step path.
   store.set("child-plugin-maintainer-create", "create-plugin");
   store.setPendingStageInjection("child-plugin-maintainer-create", "create-plugin");
-  // memoryMaintainer 强制复用：parent→role→child 注册的 merged 终态 child（随后验证 dispose 清理）。
+  // memoryMaintainer 强制复用：parent→role→child 注册的 terminalFinal child（随后验证 dispose 清理）。
   store.setSubagentRole("child-dispose-reuse", {
     planItemId: "p-mem-reuse",
     persona: "memoryMaintainer",
     parentId: "parent-main",
-    stage: SUBAGENT_TERMINAL_STAGE,
+    stage: "save-update",
     assignedTools: [],
     finalTools: ["memory_search", "context_search"],
     awaitingParent: true,
+    terminalFinal: true,
   });
-  store.set("child-dispose-reuse", SUBAGENT_TERMINAL_STAGE);
+  store.set("child-dispose-reuse", "save-update");
 }
 await plugin.apply(h1.base, {
   stageStore: STORE_FILE,
@@ -262,14 +273,14 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   check("worker 不注入旧通用 subagent-flow 文本", !postToolText.includes("[ka-whale-workflow subagent flow]"));
   check("worker 注入后 pending 已清除", pendingFromFile(STORE_FILE, "child-worker") === null);
   check(
-    "Context 注记：worker/maintenance 目标 stage 注入注记，无注记 stage 不输出",
+    "Context 注记：worker/maintenance 最后执行阶段注入注记，无注记 stage 不输出",
     STAGE_CONTEXT_NOTES?.worker?.["challenge-plan"] !== undefined &&
       stageInjectionText("worker", "challenge-plan").includes("Context: ") &&
-      stageInjectionText("worker", SUBAGENT_TERMINAL_STAGE).includes("Context: ") &&
-      stageInjectionText("memoryMaintainer", SUBAGENT_TERMINAL_STAGE).includes("Context: ") &&
-      stageInjectionText("pluginMaintainer", SUBAGENT_TERMINAL_STAGE).includes("Context: ") &&
+      stageInjectionText("worker", "working").includes("Context: ") &&
+      stageInjectionText("memoryMaintainer", "save-update").includes("Context: ") &&
+      stageInjectionText("pluginMaintainer", "create-plugin").includes("Context: ") &&
       !stageInjectionText("memoryMaintainer", "plan-memory").includes("Context:") &&
-      !stageInjectionText("pluginMaintainer", "create-plugin").includes("Context:"),
+      !stageInjectionText("pluginMaintainer", "plan-plugin").includes("Context:"),
   );
   const deny = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
   const allow = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
@@ -299,19 +310,19 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
     badError = error;
   }
   check("非法 nextStage 被拒绝且 stage 不变", badError !== null && String(badError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
-  let earlyTailError = null;
+  let earlyFinalError = null;
   try {
     await workReport.execute(
-      { nextStage: SUBAGENT_TERMINAL_STAGE },
+      { final: true },
       { agent, signal: new AbortController().signal },
     );
   } catch (error) {
-    earlyTailError = error;
+    earlyFinalError = error;
   }
-  check("worker challenge-plan 不可直接推进 compress_context_then_communication", earlyTailError !== null && String(earlyTailError.message).includes("cannot advance") && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  check("worker challenge-plan final:true 被 final-report-stage-invalid 拒绝且 stage 不变", earlyFinalError !== null && earlyFinalError.code === "final-report-stage-invalid" && stageFromFile(STORE_FILE, "child-worker") === "challenge-plan");
 
   // 硬等门：report 成功后 awaitingParent=true；等待期任何工具（含再次 report）被拒；
-  // 父主 send_message 到达非终态仅清门；到达 merged 终态 terminal report 后重置新轮。
+  // 父主 send_message 到达非终态仅清门；final:true 后 terminalFinal=true 才重置新轮。
   const parentRelay = {
     content: [{ type: "text", text: "continue" }],
     source: { kind: "coordinator", form: "relay", senderSessionId: "main-parent-session" },
@@ -351,29 +362,45 @@ check("plugin_creator_sub_whale_report 未注册", h1.registeredTools.has("plugi
   );
   const reportAllowedAfterClear = await preExecute({ name: "work_sub_whale_report", agent }, async () => ({ kind: "allow" }));
   check("清门后允许继续调用 report（继续当前轮）", reportAllowedAfterClear?.kind === "allow");
-  const toMerged = await workReport.execute(
-    { nextStage: SUBAGENT_TERMINAL_STAGE },
-    { agent, signal: new AbortController().signal },
-  );
-  check("report+nextStage working → compress_context_then_communication 中间态且 awaitingParent=true", toMerged?.stage === SUBAGENT_TERMINAL_STAGE && toMerged?.advanced === true && stageFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true && pendingFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE);
-  const mergedWaitingStep = await preStep({ agent, turn: 3, messages: [] }, nextEnter);
-  check("merged 中间态等待期不注入 merged 正文、pending 保留", !messageText(mergedWaitingStep?.messages ?? []).includes(`[ka-whale-workflow ${SUBAGENT_TERMINAL_STAGE}]`) && pendingFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE);
-  await claimed({ agent, message: parentRelay, turn: 3 });
-  check("父主 send_message 到达 merged 中间态：仅清 awaitingParent、保持 merged stage（不重置新轮）", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && stageFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE && pendingFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE);
-  const mergedRelayedStep = await preStep({ agent, turn: 3, messages: [] }, nextEnter);
-  const mergedRelayedText = messageText(mergedRelayedStep?.messages ?? []);
-  check(
-    "merged 中间态父回复后的下一 pre-step 注入 merged 正文并清 pending",
-    mergedRelayedText.includes(`[ka-whale-workflow ${SUBAGENT_TERMINAL_STAGE}]`) &&
-      pendingFromFile(STORE_FILE, "child-worker") === null,
-  );
-  const terminalResult = await workReport.execute(
+  // mid-work pause：无 final、无 nextStage → 仅 awaitingParent；父回复后 stage 仍 working。
+  const pauseResult = await workReport.execute(
     {},
     { agent, signal: new AbortController().signal },
   );
-  check("terminal no-nextStage report 在 merged stage 置 awaitingParent 且 stage 不变", terminalResult?.stage === SUBAGENT_TERMINAL_STAGE && terminalResult?.advanced === false && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true && stageFromFile(STORE_FILE, "child-worker") === SUBAGENT_TERMINAL_STAGE && pendingFromFile(STORE_FILE, "child-worker") === null);
+  check(
+    "no-nextStage pause in working keeps stage working, awaitingParent=true, terminalFinal=false",
+    pauseResult?.final === false &&
+      pauseResult?.terminalFinal === false &&
+      pauseResult?.stage === "working" &&
+      roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true &&
+      roleRecordFromFile(STORE_FILE, "child-worker")?.terminalFinal === false,
+  );
+  await claimed({ agent, message: parentRelay, turn: 3 });
+  check("父主 send_message 到达 mid-work pause：仅清 awaitingParent、保持 working", roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && stageFromFile(STORE_FILE, "child-worker") === "working" && roleRecordFromFile(STORE_FILE, "child-worker")?.terminalFinal === false);
+  let finalWithNextError = null;
+  try {
+    await workReport.execute(
+      { final: true, nextStage: "working" },
+      { agent, signal: new AbortController().signal },
+    );
+  } catch (error) {
+    finalWithNextError = error;
+  }
+  check("final:true combined with nextStage returns final-with-next-stage", finalWithNextError !== null && finalWithNextError.code === "final-with-next-stage" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false);
+  const finalResult = await workReport.execute(
+    { final: true },
+    { agent, signal: new AbortController().signal },
+  );
+  check(
+    "final:true from working sets terminalFinal=true and awaitingParent=true without stage change",
+    finalResult?.final === true &&
+      finalResult?.terminalFinal === true &&
+      finalResult?.stage === "working" &&
+      roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === true &&
+      roleRecordFromFile(STORE_FILE, "child-worker")?.terminalFinal === true,
+  );
   await claimed({ agent, message: parentRelay, turn: 4 });
-  check("父主 send_message 到达 merged terminal full report：重置 worker 初始 challenge-plan 并清门", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && pendingFromFile(STORE_FILE, "child-worker") === "challenge-plan");
+  check("父主 send_message 到达 terminalFinal：重置 worker 初始 challenge-plan 并清门/清 terminalFinal", stageFromFile(STORE_FILE, "child-worker") === "challenge-plan" && roleRecordFromFile(STORE_FILE, "child-worker")?.awaitingParent === false && roleRecordFromFile(STORE_FILE, "child-worker")?.terminalFinal === false && pendingFromFile(STORE_FILE, "child-worker") === "challenge-plan");
   const newRoundDecision = await preStep({ agent, turn: 4, messages: [] }, nextEnter);
   const newRoundText = messageText(newRoundDecision?.messages ?? []);
   check("终态父消息后的新轮注入初始 stage 文本", newRoundText.includes("[ka-whale-workflow challenge-plan]") && newRoundText.includes("work_sub_whale_report"));
@@ -506,22 +533,24 @@ const GEN_PLAN = join(GEN_DIR, "plan.json");
     planItemId: "p-current",
     persona: "worker",
     parentId: "main-run-session",
-    stage: SUBAGENT_TERMINAL_STAGE,
+    stage: "working",
     assignedTools: [],
     finalTools: [],
     awaitingParent: true,
+    terminalFinal: true,
   });
-  seedStore.set("child-log", SUBAGENT_TERMINAL_STAGE);
+  seedStore.set("child-log", "working");
   seedStore.setSubagentRole("child-log-2", {
     planItemId: "p-added",
     persona: "memoryMaintainer",
     parentId: "main-run-session",
-    stage: SUBAGENT_TERMINAL_STAGE,
+    stage: "save-update",
     assignedTools: [],
     finalTools: [],
     awaitingParent: true,
+    terminalFinal: true,
   });
-  seedStore.set("child-log-2", SUBAGENT_TERMINAL_STAGE);
+  seedStore.set("child-log-2", "save-update");
   const h3 = makeBase({
     includeSubagents: false,
     stageStoreFile: RUN_STORE,
