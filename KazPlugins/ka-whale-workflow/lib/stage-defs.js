@@ -33,22 +33,22 @@ export const MAIN_STAGE_IDS = Object.freeze([
 /** worker 普通子代理 stage id（v0.10a：无独立 terminal stage）。 */
 export const WORKER_STAGE_IDS = Object.freeze([
   "challenge-plan",
-  "working",
+  "working-then-compress-context-then-report",
 ]);
 
 /** memoryMaintainer 子代理 stage id（v0.10a：无独立 terminal stage）。 */
 export const MEMORY_MAINTAINER_STAGE_IDS = Object.freeze([
   "plan-memory",
-  "save-update",
-  "delete-memory",
+  "save-update-then-compress-context-then-report",
+  "delete-memory-then-compress-context-then-report",
 ]);
 
 /** pluginMaintainer 子代理 stage id（v0.10a：无独立 terminal stage）。 */
 export const PLUGIN_MAINTAINER_STAGE_IDS = Object.freeze([
   "plan-plugin",
-  "create-plugin",
-  "update-plugin",
-  "retire-plugin",
+  "create-plugin-then-compress-context-then-report",
+  "update-plugin-then-compress-context-then-report",
+  "retire-plugin-then-compress-context-then-report",
 ]);
 
 /** 所有 v0.9 stage id（不含 idle/done/end 等状态壳）。 */
@@ -261,7 +261,7 @@ After pluginMaintainer tasks are complete, advance to communication. Before adva
         "web_search",
         "work_sub_whale_report",
       ],
-      canAdvance: ["working"],
+      canAdvance: ["working-then-compress-context-then-report"],
       task:
         `Critique the assigned task first; identify real weaknesses and missed opportunities; do not manufacture criticism. Then, propose concrete enhancements that would make the result more polished, practical, and balanced — avoid extremes of over-engineering or under-delivering, and keep the solution appropriate to the task's complexity.
 
@@ -269,7 +269,7 @@ When proposing improvements, be specific. Instead of vague suggestions, spell ou
 
 Do not write task plans here and do not call ka_sub_whale. Ask the parent main agent for clarification when the task intent is unclear.`,
     },
-    working: {
+    "working-then-compress-context-then-report": {
       allowedTools: [
         "edit",
         "glob",
@@ -287,7 +287,7 @@ Do not write task plans here and do not call ka_sub_whale. Ask the parent main a
         "write",
         "work_sub_whale_report",
       ],
-      canAdvance: [],
+      canAdvance: ["challenge-plan"],
       task:
         `Execute the delegated work with care and completeness. We deliver work that is functional, readable, and properly tested — not just “done”, but done well.
 
@@ -297,7 +297,7 @@ During execution:
 - We keep our work self-contained within the delegated scope. We do not expand the scope without parent approval.
 
 When work is finished, first review our own work: does it meet the objective? Are all steps completed? Are there any edge cases missed?
-THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate whether context_compress is warranted when the session is long or old middle content exists — preview with context_compress suggest, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback.
+THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, then fold when the candidate is large enough. Manual compression is primary; auto compression is only a fallback.
 Then call work_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report as the final message, then end the turn:
 - What was done (summary of actions taken)
 - How it was done (key decisions, tools used, approach taken)
@@ -319,10 +319,10 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "context_read",
         "memory_sub_whale_report",
       ],
-      canAdvance: ["save-update", "delete-memory"],
+      canAdvance: ["save-update-then-compress-context-then-report", "delete-then-compress-context-then-report"],
       task: "Plan the best memory change.",
     },
-    "save-update": {
+    "save-update-then-compress-context-then-report": {
       allowedTools: [
         "memory_save",
         "memory_update",
@@ -334,11 +334,11 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "context_compress",
         "memory_sub_whale_report",
       ],
-      canAdvance: [],
+      canAdvance: ["plan-memory", "delete-then-compress-context-then-report"],
       task:
-        "Save/update memories with evidence. Keep new entries as CANDIDATE. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
+        "Save/update memories with evidence. Keep new entries as CANDIDATE. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
     },
-    "delete-memory": {
+    "delete-then-compress-context-then-report": {
       allowedTools: [
         "memory_forget",
         "memory_search",
@@ -348,9 +348,9 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "context_compress",
         "memory_sub_whale_report",
       ],
-      canAdvance: [],
+      canAdvance: ["plan-memory", "save-update-then-compress-context-then-report"],
       task:
-        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
+        "Delete only items explicitly listed in the delegation brief. memory_forget performs internal backup/audit before deletion; do not claim backup without an auditable record. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call memory_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (ids, evidence, audit) as the final message, then end the turn.",
     },
   },
   pluginMaintainer: {
@@ -367,10 +367,10 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "web_search",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: ["create-plugin", "update-plugin", "retire-plugin"],
+      canAdvance: ["create-plugin-then-compress-context-then-report", "update-plugin-then-compress-context-then-report", "retire-plugin-then-compress-context-then-report"],
       task: "Plan the plugin create/update/retire action.",
     },
-    "create-plugin": {
+    "create-plugin-then-compress-context-then-report": {
       allowedTools: [
         "write",
         "edit",
@@ -388,11 +388,11 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "todo_write",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: [],
+      canAdvance: ["plan-plugin"],
       task:
-        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
+        "Create a new private plugin under KazPrivatePlugins. Follow CANDIDATE → implementation → probe → registration → versioning; sync candidate registry. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
-    "update-plugin": {
+    "update-plugin-then-compress-context-then-report": {
       allowedTools: [
         "write",
         "edit",
@@ -410,11 +410,11 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "todo_write",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: [],
+      canAdvance: ["plan-plugin"],
       task:
-        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
+        "Update/version the existing private plugin with probe discipline: record change/CANDIDATE, edit under KazPrivatePlugins/<plugin>/, run probes + node --check, version/register, sync candidate registry; hot reload only if probes passed. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
-    "retire-plugin": {
+    "retire-plugin-then-compress-context-then-report": {
       allowedTools: [
         "read",
         "context_search",
@@ -428,9 +428,9 @@ Then call work_sub_whale_report({ final: true }) with NO nextStage and write the
         "pwsh",
         "plugin_maintainer_sub_whale_report",
       ],
-      canAdvance: [],
+      canAdvance: ["plan-plugin"],
       task:
-        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: evaluate context_compress when the session is long or old middle content exists — preview suggest, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
+        "Retire/delete only plugins explicitly listed in the delegation brief: backup/audit, remove only KazPrivatePlugins/<plugin>/ in brief, sync candidate registry; no public/official deletions. When work is finished, review own work; THEN **OPTIONAL BUT IMPORTANT (IMPORTANT)**: preview with context_compress suggest first before reporting, fold when large; manual primary, auto fallback. Then call plugin_maintainer_sub_whale_report({ final: true }) with NO nextStage and write the FULL final report (changed files, probe results, rollback paths) as the final message, then end the turn.",
     },
   },
 };
@@ -532,21 +532,21 @@ export const STAGE_CONTEXT_NOTES = Object.freeze({
   worker: Object.freeze({
     "challenge-plan":
       "Before critiquing, if the delegation involves earlier session content, first use context_search then context_read to grasp the background.",
-    working:
+    "working-then-compress-context-then-report":
       "Before the final report, if exact earlier content may have been summarized and needs reproducing, first use context_search then context_read.",
   }),
   memoryMaintainer: Object.freeze({
-    "save-update":
+    "save-update-then-compress-context-then-report":
       "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
-    "delete-memory":
+    "delete-memory-then-compress-context-then-report":
       "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
   }),
   pluginMaintainer: Object.freeze({
-    "create-plugin":
+    "create-plugin-then-compress-context-then-report":
       "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
-    "update-plugin":
+    "update-plugin-then-compress-context-then-report":
       "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
-    "retire-plugin":
+    "retire-plugin-then-compress-context-then-report":
       "Before the final report, review old context first when the report depends on earlier session content: use context_search then context_read.",
   }),
 });
