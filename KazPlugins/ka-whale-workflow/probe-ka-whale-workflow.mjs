@@ -320,7 +320,7 @@ check(
   check("working/memory-maintenance/plugin-maintenance 阶段注入含多轮复用口径", stageInjectionText(MAIN_ROLE, "working").includes("send_message to continue that child") && stageInjectionText(MAIN_ROLE, "memory-maintenance").includes("memoryMaintainer sub-agent can be reused multiple times") && stageInjectionText(MAIN_ROLE, "plugin-maintenance").includes("Whether to reuse is determined by the main agent"));
 }
 
-check("TASK_PLAN_STORE_VERSION 升至 v2 且 PLAN_PERSONAS 固定为四值", TASK_PLAN_STORE_VERSION === 2 && JSON.stringify([...PLAN_PERSONAS]) === JSON.stringify(["main", "worker", "memoryMaintainer", "pluginMaintainer"]));
+check("TASK_PLAN_STORE_VERSION 升至 v3 且 PLAN_PERSONAS 固定为四值", TASK_PLAN_STORE_VERSION === 3 && JSON.stringify([...PLAN_PERSONAS]) === JSON.stringify(["main", "worker", "memoryMaintainer", "pluginMaintainer"]));
 
 {
   const PLAN_FILE = join(TMP, "ka-whale-workflow-task-plan.json");
@@ -473,13 +473,13 @@ check("TASK_PLAN_STORE_VERSION 升至 v2 且 PLAN_PERSONAS 固定为四值", TAS
   });
   const parsedV1 = JSON.parse(readFileSync(V1_FILE, "utf8"));
   check(
-    "v1 task-plan file loads compatibly and is re-emitted as schema v2",
+    "v1 task-plan file loads compatibly and is re-emitted as schema v3",
     oldBefore?.status === "draft" &&
       oldBefore?.summary === "" &&
       JSON.stringify(oldBefore?.dependsOn) === "[]" &&
       JSON.stringify(oldBefore?.targets) === "[]" &&
       JSON.stringify(oldBefore?.verification) === "[]" &&
-      parsedV1?.version === 2 &&
+      parsedV1?.version === 3 &&
       parsedV1?.plans?.old?.status === "finalized",
   );
 }

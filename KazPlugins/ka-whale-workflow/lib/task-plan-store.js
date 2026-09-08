@@ -10,22 +10,32 @@
 //   decide-tools 不得写入 draft；memory/plugin-maintenance 只读/经 write-plan 改约。
 //   persona=main 表示主线执行；ka_sub_whale 只接受 finalized planItemId 且只放行
 //   三个 v0.9 子代理角色，persona=main 由主线执行并拒绝委派。
-// Schema v2：
+// Schema v3：
 //   plan item 增加可选结构化字段 summary（string）、dependsOn/targets/verification
-//   （string[]）。finalPlanPayload 必须先整体通过校验才落盘；任何 item 无效时
-//   该 payload 完全不写入（原子）。
+//   （string[]）；item 级增加 tier/tierReason/tierSignals；run 文件顶层可选
+//   intentMap/evidenceChecklist（run 记录在 stage-store workflowRuns 为 CANONICAL，
+//   这里只是 M/L final payload 的文件镜像/审计层，stage-store 缺失时才读取）。
+// finalPlanPayload 必须先整体通过校验才落盘；任何 item 无效时该 payload 完全不写入（原子）。
 // ===========================================================================
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import {
+  normalizeEvidenceChecklist,
+  normalizeIntentMap,
+  runPromptDefectPass,
+  validateIntentMapInput,
+} from "./intent-map.js";
+import { normalizeTier, normalizeTierSignals } from "./tier.js";
 
 /**
  * Task plan 存储 schema 版本。
  * v2：新增可选结构化字段 summary/dependsOn/targets/verification，并把
  * finalPlanPayload 收严为全量校验 + 原子落盘（无效 payload 完全不写入）。
- * v1 文件仍可加载：旧 item 仅缺 v2 可选字段，必填字段形状不变。
+ * v3：可选 run 级 intentMap/evidenceChecklist + item 级 tier/tierReason/tierSignals；
+ * v1/v2 文件仍可加载，缺字段按 legacy 处理且不重写历史文件。
  */
-export const TASK_PLAN_STORE_VERSION = 2;
+export const TASK_PLAN_STORE_VERSION = 3;
 
 /** 允许的 plan item 状态。 */
 export const PLAN_ITEM_STATUSES = Object.freeze(["draft", "finalized"]);
@@ -109,6 +119,39 @@ export function validateFinalPlanPayload(payload) {
           planItemId: null,
           code: "empty-plan-items",
           reason: "finalPlanPayload.items must be a non-empty array.",
+        },
+      ],
+    };
+  }
+  if (payload.intentMap !== undefined && payload.intentMap !== null) {
+    const intentCheck = validateIntentMapInput(payload.intentMap);
+    if (intentCheck.ok !== true) {
+      return {
+        ok: false,
+        code: "plan-item-invalid",
+        rejected: [
+          {
+            planItemId: null,
+            code: intentCheck.code,
+            reason: intentCheck.reason,
+          },
+        ],
+      };
+    }
+  }
+  if (
+    payload.evidenceChecklist !== undefined &&
+    payload.evidenceChecklist !== null &&
+    !Array.isArray(payload.evidenceChecklist)
+  ) {
+    return {
+      ok: false,
+      code: "plan-item-invalid",
+      rejected: [
+        {
+          planItemId: null,
+          code: "evidence-checklist-invalid",
+          reason: "finalPlanPayload.evidenceChecklist must be an array when present.",
         },
       ],
     };
@@ -198,6 +241,39 @@ export function validateFinalPayloadItems(items) {
         reason: `${itemLabel} is missing required field task (or task is empty after trim).`,
       });
     }
+
+    const itemTier = normalizeTier(raw.tier);
+    if (raw.tier !== undefined && raw.tier !== null && itemTier === null) {
+      rejected.push({
+        planItemId: typeof rawId === "string" ? rawId : null,
+        code: "tier-invalid",
+        reason: `${itemLabel} has tier that must be one of S/M/L (or omitted).`,
+      });
+    }
+    if (
+      itemTier !== null &&
+      raw.tierReason !== undefined &&
+      raw.tierReason !== null &&
+      typeof raw.tierReason !== "string"
+    ) {
+      rejected.push({
+        planItemId: typeof rawId === "string" ? rawId : null,
+        code: "tier-invalid",
+        reason: `${itemLabel} has tierReason that must be a string when tier is present.`,
+      });
+    }
+    if (
+      itemTier !== null &&
+      raw.tierSignals !== undefined &&
+      raw.tierSignals !== null &&
+      (!Array.isArray(raw.tierSignals) || raw.tierSignals.some((entry) => typeof entry !== "string"))
+    ) {
+      rejected.push({
+        planItemId: typeof rawId === "string" ? rawId : null,
+        code: "tier-invalid",
+        reason: `${itemLabel} has tierSignals that must be an array of strings when tier is present.`,
+      });
+    }
   });
   return {
     ok: rejected.length === 0,
@@ -216,7 +292,7 @@ export function normalizePlanItem(raw) {
   if (!PLAN_PERSONAS.includes(persona)) return null;
   const status =
     raw.status === "finalized" || raw.status === "draft" ? raw.status : "draft";
-  return {
+  const item = {
     planItemId,
     status,
     persona,
@@ -230,6 +306,14 @@ export function normalizePlanItem(raw) {
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
     finalizedAt: typeof raw.finalizedAt === "string" ? raw.finalizedAt : "",
   };
+  const tier = normalizeTier(raw.tier);
+  if (tier !== null) {
+    item.tier = tier;
+    item.tierReason =
+      typeof raw.tierReason === "string" ? raw.tierReason.trim() : "";
+    item.tierSignals = normalizeTierSignals(raw.tierSignals);
+  }
+  return item;
 }
 
 /**
@@ -238,6 +322,7 @@ export function normalizePlanItem(raw) {
  */
 export function createTaskPlanStore(file) {
   const plans = {};
+  const runMeta = { intentMap: null, evidenceChecklist: [] };
   try {
     if (file !== undefined && file !== null && existsSync(file)) {
       let raw = readFileSync(file, "utf8");
@@ -251,20 +336,41 @@ export function createTaskPlanStore(file) {
           if (item !== null && item.planItemId === id) plans[id] = item;
         }
       }
+      // v3 顶层 run 镜像字段：stage-store workflowRuns 是 canonical；这里只在
+      // stage-store 缺失时作为文件 fallback，绝不重写 v1/v2 历史文件。
+      if (parsed !== null && typeof parsed === "object") {
+        const fileIntent = normalizeIntentMap(parsed.intentMap);
+        if (fileIntent !== null) runMeta.intentMap = fileIntent;
+        if (parsed.evidenceChecklist !== undefined && parsed.evidenceChecklist !== null) {
+          runMeta.evidenceChecklist = normalizeEvidenceChecklist(parsed.evidenceChecklist);
+        }
+      }
     }
   } catch {
     // 损坏时从空开始，不影响主流程
   }
 
-  function persist(source = plans) {
+  function filePayload(source, meta) {
+    const payload = {
+      version: TASK_PLAN_STORE_VERSION,
+      plans: source,
+      ...(meta?.intentMap !== null && meta?.intentMap !== undefined
+        ? { intentMap: meta.intentMap }
+        : {}),
+      ...(meta?.evidenceChecklist !== undefined &&
+      meta?.evidenceChecklist !== null &&
+      meta.evidenceChecklist.length > 0
+        ? { evidenceChecklist: meta.evidenceChecklist }
+        : {}),
+    };
+    return JSON.stringify(payload, null, 2) + String.fromCharCode(10);
+  }
+
+  function persist(source = plans, meta = runMeta) {
     if (typeof file !== "string" || file.length === 0) return true;
     try {
       mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(
-        file,
-        JSON.stringify({ version: TASK_PLAN_STORE_VERSION, plans: source }, null, 2) + String.fromCharCode(10),
-        "utf8",
-      );
+      writeFileSync(file, filePayload(source, meta), "utf8");
       return true;
     } catch {
       return false;
@@ -275,6 +381,15 @@ export function createTaskPlanStore(file) {
 
   return {
     file,
+    /** run 文件顶层 v3 镜像 meta（stage-store 缺失时 plan_read fallback 用）。 */
+    runMeta() {
+      return JSON.parse(
+        JSON.stringify({
+          intentMap: runMeta.intentMap,
+          evidenceChecklist: runMeta.evidenceChecklist,
+        }),
+      );
+    },
     get(planItemId) {
       if (typeof planItemId !== "string" || planItemId.length === 0) return null;
       const item = plans[planItemId];
@@ -367,11 +482,21 @@ export function createTaskPlanStore(file) {
         accepted.push(item);
       }
       const nextPlans = { ...plans, ...staged };
-      if (persist(nextPlans) !== true) {
+      const nextMeta = JSON.parse(JSON.stringify(runMeta));
+      if (payload.intentMap !== undefined && payload.intentMap !== null) {
+        // §8.4 prompt-defect pass 与 whale_report 同源：只在命中信号时动作。
+        const passed = runPromptDefectPass(payload.intentMap);
+        if (passed.value !== null) nextMeta.intentMap = passed.value;
+      }
+      if (payload.evidenceChecklist !== undefined && payload.evidenceChecklist !== null) {
+        nextMeta.evidenceChecklist = normalizeEvidenceChecklist(payload.evidenceChecklist);
+      }
+      if (persist(nextPlans, nextMeta) !== true) {
         return { ok: false, code: "plan-persist-failed", items: accepted.map((item) => ({ ...item })) };
       }
-      // 持久化成功后才提交内存快照；plans 未在失败路径被改动。
+      // 持久化成功后才提交内存快照；plans/meta 未在失败路径被改动。
       Object.assign(plans, staged);
+      Object.assign(runMeta, nextMeta);
       return { ok: true, items: accepted.map((item) => ({ ...item })) };
     },
     remove(planItemId) {
@@ -431,6 +556,18 @@ export function readRunPlanItems(planFile) {
     return store.list();
   } catch {
     return [];
+  }
+}
+
+/** 读取 run 文件顶层 v3 镜像 meta；缺失/损坏返回空 meta（不抛错）。 */
+export function readRunPlanRunMeta(planFile) {
+  const empty = { intentMap: null, evidenceChecklist: [] };
+  if (typeof planFile !== "string" || planFile.length === 0 || !existsSync(planFile)) return empty;
+  try {
+    const store = createTaskPlanStore(planFile);
+    return store.runMeta();
+  } catch {
+    return empty;
   }
 }
 

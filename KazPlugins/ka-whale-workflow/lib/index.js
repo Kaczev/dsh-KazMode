@@ -95,6 +95,7 @@ import {
   runPlanFileFor,
   currentRunPointerFileFor,
   readRunPlanItems,
+  readRunPlanRunMeta,
   readCurrentRunPointer,
   writeCurrentRunPointer,
   persistFinalPlanRun,
@@ -117,6 +118,12 @@ import {
   tierBudgetExceeded,
   PROVISIONAL_S_TIER_BUDGET,
 } from "./tier.js";
+import {
+  normalizeEvidenceChecklist,
+  normalizeIntentMap,
+  runPromptDefectPass,
+  validateIntentMapInput,
+} from "./intent-map.js";
 
 /** 设置命名空间：~/.dsh/settings.yaml 中的 ka-whale-workflow: 段。 */
 const NAMESPACE = settingsNamespace("ka-whale-workflow");
@@ -576,7 +583,8 @@ const KNOWN_SESSION_STAGES = new Set([
  *        sessions: { "<sessionId>": "<v0.9 stage>" },
  *        contractState: { "<sessionId>": {...} },
  *        workflowRuns: { "<sessionId>": { runId, enteredStages,
- *          tier?, tierReason?, tierSignals?, upgradeHistory? } },
+ *          tier?, tierReason?, tierSignals?, upgradeHistory?,
+ *          intentMap?, evidenceChecklist? } },
  *        pendingStageInjection: { "<sessionId>": "<stage>" },
  *        subagentRoles: { "<childSessionId>": { planItemId, persona, parentId,
  *          stage, assignedTools, finalTools, awaitingParent, createdAt, updatedAt } },
@@ -641,6 +649,12 @@ export function createStageStore(file) {
             if (signals.length > 0) runRecord.tierSignals = signals;
             const history = normalizeUpgradeHistory(rawRun.upgradeHistory);
             if (history.length > 0) runRecord.upgradeHistory = history;
+          }
+          const runIntent = normalizeIntentMap(rawRun.intentMap);
+          if (runIntent !== null) runRecord.intentMap = runIntent;
+          if (rawRun.evidenceChecklist !== undefined && rawRun.evidenceChecklist !== null) {
+            const checklist = normalizeEvidenceChecklist(rawRun.evidenceChecklist);
+            if (checklist.length > 0) runRecord.evidenceChecklist = checklist;
           }
           workflowRuns[id] = runRecord;
         }
@@ -843,6 +857,42 @@ export function createStageStore(file) {
         upgradeHistory: normalizeUpgradeHistory(run.upgradeHistory),
       };
     },
+    /** 当前 run 的 7.4 Intent Map run 记录（canonical）；无记录返回空 meta。 */
+    getWorkflowRunIntent(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { intentMap: null, evidenceChecklist: [] };
+      }
+      const run = runStateOf(sessionId);
+      return {
+        intentMap: run.intentMap === undefined ? null : JSON.parse(JSON.stringify(run.intentMap)),
+        evidenceChecklist:
+          run.evidenceChecklist === undefined
+            ? []
+            : JSON.parse(JSON.stringify(run.evidenceChecklist)),
+      };
+    },
+    /** 写入当前 run 的 Intent Map run 记录；结构非法返回 { ok:false, code }。 */
+    setWorkflowRunIntent(sessionId, value) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "tier-session-invalid" };
+      }
+      const rawIntent = value?.intentMap;
+      if (rawIntent !== undefined && rawIntent !== null) {
+        const check = validateIntentMapInput(rawIntent);
+        if (check.ok !== true) return { ok: false, code: check.code, reason: check.reason };
+        const normalized = normalizeIntentMap(rawIntent);
+        if (normalized === null) {
+          return { ok: false, code: "intent-map-invalid", reason: "intentMap did not normalize." };
+        }
+        runStateOf(sessionId).intentMap = normalized;
+      }
+      if (value?.evidenceChecklist !== undefined && value?.evidenceChecklist !== null) {
+        runStateOf(sessionId).evidenceChecklist = normalizeEvidenceChecklist(
+          value.evidenceChecklist,
+        );
+      }
+      return persist() ? { ok: true } : { ok: false, code: "intent-persist-failed" };
+    },
     /** 写入初始 tier 记录（同 run 内禁止降级；仅当尚无 tier 或等价保持时成功）。 */
     setWorkflowRunTier(sessionId, value) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
@@ -907,6 +957,8 @@ export function createStageStore(file) {
       delete state.tierReason;
       delete state.tierSignals;
       delete state.upgradeHistory;
+      delete state.intentMap;
+      delete state.evidenceChecklist;
       return persist();
     },
     addWorkflowRunStage(sessionId, stage) {
@@ -2212,7 +2264,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         finalPlanPayload: {
           type: "json",
           description:
-            "Used in write-plan: { status: 'finalized', items: [{ planItemId, persona, task, summary?, dependsOn?, targets?, verification?, assignedTools? }] } to create/finalize the complete task plan. persona must be exactly one of main/worker/memoryMaintainer/pluginMaintainer; allowed item fields are planItemId/persona/task/summary/dependsOn/targets/verification/assignedTools. Invalid payloads (wrong persona, missing required fields, malformed container) are rejected with a structured plan-item-invalid error and nothing is persisted.",
+            "Used in write-plan: { status: 'finalized', items: [...], intentMap?, evidenceChecklist? } to create/finalize the complete task plan. persona must be exactly one of main/worker/memoryMaintainer/pluginMaintainer; allowed item fields are planItemId/persona/task/summary/dependsOn/targets/verification/assignedTools/tier/tierReason/tierSignals. Invalid payloads are rejected with a structured plan-item-invalid error and nothing is persisted.",
         },
         tier: {
           type: "string",
@@ -2226,6 +2278,11 @@ Before we answer, call memory_search or context_search exactly once. After that 
           type: "array",
           items: { type: "string" },
           description: "7.4 optional checkable signals; requires tier.",
+        },
+        intentMap: {
+          type: "json",
+          description:
+            "7.4 P2 optional Intent Map object (assess-complexity only): goal/trueGoal/inferredFrom/defects/assumptions/confidence/requiresUserConfirmation/discriminatingSignal/acceptanceSignals.",
         },
       },
       output: {
@@ -2264,11 +2321,16 @@ Before we answer, call memory_search or context_search exactly once. After that 
           return Promise.reject(new Error(reason));
         }
 
-        // 7.4 P1 tier classification carrier（assess-complexity only；flag off 时忽略）。
+        // 7.4 P1/P2 classification carrier（assess-complexity only；flag off 时 tier 忽略）。
         const tierArgPresent =
           typeof args?.tier === "string" && args.tier.trim().length > 0;
+        const rawIntentMap = args?.intentMap;
+        const hasIntentMap =
+          rawIntentMap !== null && rawIntentMap !== undefined;
+        let intentRequiresConfirmation = false;
+        let declaredTier = null;
         if (tierArgPresent) {
-          const declaredTier = normalizeTier(args.tier.trim());
+          declaredTier = normalizeTier(args.tier.trim());
           if (declaredTier === null) {
             const error = new Error(
               `tier-invalid: whale_report tier must be one of S/M/L (got "${String(args.tier)}").`,
@@ -2283,6 +2345,44 @@ Before we answer, call memory_search or context_search exactly once. After that 
             error.code = "tier-invalid";
             return Promise.reject(error);
           }
+        }
+        if (hasIntentMap) {
+          if (current !== "assess-complexity") {
+            const error = new Error(
+              `intent-map-invalid: whale_report intentMap can only be recorded in assess-complexity (current="${current}").`,
+            );
+            error.code = "intent-map-invalid";
+            return Promise.reject(error);
+          }
+          const intentCheck = validateIntentMapInput(rawIntentMap);
+          if (intentCheck.ok !== true) {
+            const error = new Error(
+              `intent-map-invalid: ${intentCheck.reason}`,
+            );
+            error.code = intentCheck.code;
+            return Promise.reject(error);
+          }
+          // §8.4 prompt-defect pass：只对 defects 中命中的已知信号动作，绝不无条件改。
+          const passed = runPromptDefectPass(rawIntentMap);
+          if (passed.value === null) {
+            const error = new Error("intent-map-invalid: intentMap did not normalize.");
+            error.code = "intent-map-invalid";
+            return Promise.reject(error);
+          }
+          ensureActiveWorkflowRunForAgent(agent);
+          const intentResult = stageStore.setWorkflowRunIntent(sessionIdOf(agent), {
+            intentMap: passed.value,
+          });
+          if (intentResult.ok !== true) {
+            const error = new Error(
+              `intent-map-invalid: whale_report could not persist intentMap: ${intentResult.code}.`,
+            );
+            error.code = "intent-map-invalid";
+            return Promise.reject(error);
+          }
+          intentRequiresConfirmation = passed.value.requiresUserConfirmation === true;
+        }
+        if (tierArgPresent && declaredTier !== null) {
           if (tierFastLaneEnabledFor(agent)) {
             const initialResult = persistInitialWorkflowRunTier(agent, {
               tier: declaredTier,
@@ -2304,6 +2404,19 @@ Before we answer, call memory_search or context_search exactly once. After that 
             // 因此同调用的 S-only nextStage 会在升 M 后被拒绝。
             autoUpgradeBudgetExceeded(agent);
           }
+        }
+        // P2 low-confidence/requires-confirmation intentMap：S run 必须走 P1 自动升级
+        // 路径（同一 helper 计数一次 + 写 upgradeHistory），再评估 canAdvance。
+        if (
+          intentRequiresConfirmation &&
+          workflowRunTierOf(agent) === "S"
+        ) {
+          autoUpgradeMainRunTier(agent, {
+            to: "M",
+            trigger: "requires-user-confirmation",
+            reason:
+              "Intent Map requiresUserConfirmation=true (discriminatingSignal missing/undecidable or §8.4 hit)",
+          });
         }
 
         // v0.9 task plan persistence stage guard:
@@ -2382,6 +2495,23 @@ Before we answer, call memory_search or context_search exactly once. After that 
                     payload,
                   })
                 : taskPlanStore.persistFinalPayload(payload);
+            if (persisted.ok === true) {
+              // 双写一致性：v3 文件镜像已落盘；若 stage-store canonical 还缺 meta，
+              // 用同 payload 的归一化值补写 stage store（stage-store 永远优先）。
+              const syncMeta = {};
+              if (payload.intentMap !== undefined && payload.intentMap !== null) {
+                const passed = runPromptDefectPass(payload.intentMap);
+                if (passed.value !== null) syncMeta.intentMap = passed.value;
+              }
+              if (payload.evidenceChecklist !== undefined && payload.evidenceChecklist !== null) {
+                syncMeta.evidenceChecklist = normalizeEvidenceChecklist(
+                  payload.evidenceChecklist,
+                );
+              }
+              if (Object.keys(syncMeta).length > 0) {
+                stageStore.setWorkflowRunIntent(sessionId, syncMeta);
+              }
+            }
           } else {
             persisted = taskPlanStore.persistFinalPayload(payload);
           }
@@ -3042,7 +3172,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     const planReadDef = defineTool({
       name: PLAN_READ_TOOL,
       description:
-        "Read the active workflow-run task plan for the main agent. Returns the current run summary plus full plan items (planItemId, persona, status, summary, task, dependsOn, targets, verification, assignedTools, timestamps), the active run file path, and the run work-log (workLogFile + entries from completed terminal subagent reports). Prefer this over reading raw task-plan JSON via read. Optional runId (numeric) reads that run of the same session; unknown runId is rejected. In legacy single-file mode this tool reads the legacy store.",
+        "Read the active workflow-run task plan for the main agent. Returns the current run summary plus full plan items (planItemId, persona, status, summary, task, dependsOn, targets, verification, assignedTools, tier/tierReason/tierSignals, timestamps), the run-level intentMap/evidenceChecklist (stage-store run record canonical; v3 file fallback), the active run file path, and the run work-log (workLogFile + entries from completed terminal subagent reports). Prefer this over reading raw task-plan JSON via read. Optional runId (numeric) reads that run of the same session; unknown runId is rejected. In legacy single-file mode this tool reads the legacy store.",
       parameters: {
         runId: {
           type: "string",
@@ -3064,6 +3194,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             workLog: { type: "array", items: { type: "json" } },
             notice: { type: "string" },
             items: { type: "array", items: { type: "json" } },
+            intentMap: { type: "json" },
+            evidenceChecklist: { type: "array", items: { type: "json" } },
             code: { type: "string" },
             reason: { type: "string" },
           },
@@ -3107,6 +3239,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             workLogFile: "",
             workLog: [],
             items: context.store.list(),
+            intentMap: null,
+            evidenceChecklist: [],
           });
         }
         const activeRunId = context.runId;
@@ -3131,10 +3265,25 @@ Before we answer, call memory_search or context_search exactly once. After that 
             workLogFile: "",
             workLog: [],
             items: [],
+            intentMap: null,
+            evidenceChecklist: [],
             notice: "no active workflow run has been started yet.",
           });
         }
         const planFile = runPlanFileFor(context.projectRoot, sessionId, targetRunId);
+        // 7.4 P2：run 级 meta canonical = stage-store workflowRuns（仅当前 run 有）；
+        // 历史 run 或 stage 缺字段时回退到 v3 plan 文件顶层（stage-store 永远优先）。
+        const stageRunIntent = stageStore.getWorkflowRunIntent(sessionId);
+        const fileRunMeta = readRunPlanRunMeta(planFile);
+        const useStageMeta = targetRunId === activeRunId;
+        const intentMap =
+          useStageMeta && stageRunIntent.intentMap !== null
+            ? stageRunIntent.intentMap
+            : fileRunMeta.intentMap;
+        const evidenceChecklist =
+          useStageMeta && stageRunIntent.evidenceChecklist.length > 0
+            ? stageRunIntent.evidenceChecklist
+            : fileRunMeta.evidenceChecklist;
         const workLogFile = workLogFileFor(context.projectRoot, sessionId, targetRunId);
         const workLog = readWorkLogEntries(context.projectRoot, sessionId, targetRunId);
         const requestedExplicit = requestedRaw.length > 0;
@@ -3155,6 +3304,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             workLogFile,
             workLog,
             items: [],
+            intentMap,
+            evidenceChecklist,
             notice: "no finalized plan for current run yet.",
           });
         }
@@ -3168,6 +3319,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
           workLogFile,
           workLog,
           items,
+          intentMap,
+          evidenceChecklist,
           ...(items.length === 0 ? { notice: "run file exists but contains no plan items." } : {}),
         });
       },
