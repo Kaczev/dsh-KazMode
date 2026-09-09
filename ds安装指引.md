@@ -245,7 +245,7 @@ dsh.cmd --profile web --dump-config
 > - 新对话的思考内出现 "We need" / "Let's"，不再出现 "Let me"；
 > - 首次工具调用前工具面是极简状态（`memory_search` + `context_search`）；
 > - 首次工具调用后恢复 Stable Main Surface（代码级固定面）；
-> - Kaz 面板出现各被管理插件的开关行。
+> - Kaz 面板出现 output-beep / deepseek-default-model / round-display 的开关行。
 > - Kaz 模式下 ka-whale-workflow 默认启用 S/M/L 快速分级（tierFastLane）；交付证据门（evidenceGate）默认关闭，需要时在 run 开头让模型用 whale_report 开启。
 
 ---
