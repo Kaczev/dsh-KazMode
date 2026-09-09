@@ -81,7 +81,7 @@ const DEFINITIONS = {
       ],
       canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
       task:
-        `Judge complexity AND unpack intent. Form a compact Intent Map before deciding: wanted outcome, domain priors, wording-vs-goal conflicts, and how success is verified (rendered output / code review / user feel). Simple direct answers may advance to communication; creative/visual/implementation-heavy requests advance to challenge-plan. Do not advance merely to satisfy process — advance when a real decision needs scrutiny.`,
+        `Judge complexity AND unpack intent. Form a compact Intent Map before deciding: wanted outcome, domain priors, wording-vs-goal conflicts, and how success is verified (rendered output / code review / user feel). Simple direct answers may advance to communication; creative/visual/implementation-heavy requests advance to challenge-plan. Do not advance merely to satisfy process — advance when a real decision needs scrutiny. You may set this run's delivery gate alone via whale_report({ evidenceGate: true|false }); default off, set only here, immutable for the run.`,
     },
     "challenge-plan": {
       allowedTools: [

@@ -331,6 +331,28 @@ const sKazSubCtlStage = agentOf("s-kaz-sub-ctl-stage");
   check("①.10 clearProject 清除全部项目覆盖", clearAll !== null && clearAll.ok === true && clearAll.value.project === null);
 }
 
+// ①.12 7.4 出厂默认：Kaz ka-whale-workflow tierFastLane=true / evidenceGate=false；非 Kaz 两者都 false。
+{
+  const rpc = rpcHandlers.get("/kaz-mode");
+  const state = await rpc("getState", { sessionId: "s-kaz" });
+  const kazWf = state?.value?.factory?.kaz?.["ka-whale-workflow"];
+  const nonKazWf = state?.value?.factory?.nonKaz?.["ka-whale-workflow"];
+  check(
+    "①.12 7.4 factory：Kaz ka-whale-workflow tierFastLane=true / evidenceGate=false",
+    state !== null && state.ok === true && kazWf?.tierFastLane === true && kazWf?.evidenceGate === false,
+  );
+  check(
+    "①.12 7.4 factory：非 Kaz ka-whale-workflow tierFastLane=false / evidenceGate=false",
+    nonKazWf?.tierFastLane === false && nonKazWf?.evidenceGate === false,
+  );
+  check(
+    "①.12 7.4 factory：Kaz 其它插件默认不被误改（round-display/output-beep 关，ka-whale-memory 开）",
+    state?.value?.factory?.kaz?.["round-display"]?.enabled === false &&
+      state?.value?.factory?.kaz?.["output-beep"]?.enabled === false &&
+      state?.value?.factory?.kaz?.["ka-whale-memory"]?.enabled === true,
+  );
+}
+
 check("① kazEnabled(kaz 会话)=true", kazMode.kazEnabled(sKaz) === true);
 check("① kazEnabled(非 kaz 会话)=false", kazMode.kazEnabled(sPlain) === false);
 check("① pluginEnabled(s-kaz, ka-whale-memory)=true", kazMode.pluginEnabled(sKaz, "ka-whale-memory") === true);

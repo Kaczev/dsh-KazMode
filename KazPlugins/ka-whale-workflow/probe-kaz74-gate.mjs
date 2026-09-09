@@ -39,6 +39,13 @@ const STORE_EMPTY = join(TMP, "empty.json");
 const STORE_UNMET = join(TMP, "unmet.json");
 const STORE_PASS = join(TMP, "pass.json");
 const STORE_CHILD = join(TMP, "child.json");
+const STORE_OVR = join(TMP, "ovr.json");
+const STORE_OVR_FALSE = join(TMP, "ovr-false.json");
+const STORE_OVR_COMBINED = join(TMP, "ovr-combined.json");
+const STORE_WRONG_STAGE = join(TMP, "wrong-stage.json");
+const STORE_ROLE = join(TMP, "role.json");
+const STORE_NEWRUN = join(TMP, "newrun.json");
+const STORE_NOKAZ = join(TMP, "nokaz.json");
 mkdirSync(RUN_DIR, { recursive: true });
 
 const VALID_ENTRY = {
@@ -206,7 +213,7 @@ const PASS_ENTRY = {
 // ---------------------------------------------------------------------------
 // ④ Live flag off parity + flag-on delivery gate at communication.
 // ---------------------------------------------------------------------------
-function makeBase({ evidenceGate, includeSubagents = false }) {
+function makeBase({ evidenceGate, includeSubagents = false, noKazMode = false }) {
   const listeners = new Map();
   const registeredTools = new Map();
   const provided = {};
@@ -245,7 +252,7 @@ function makeBase({ evidenceGate, includeSubagents = false }) {
       if (name in provided) return provided[name];
       if (name === "settings") return settings;
       if (name === "tools") return toolsMock;
-      if (name === "kazMode") return mockKazMode;
+      if (name === "kazMode") return noKazMode ? undefined : mockKazMode;
       if (name === "agents") return { get: (id) => agentRegistry.get(id) };
       if (name === "roundDisplay") return { report: (payload) => roundReports.push(payload) };
       if (name === "subagents") return { listChildren: async () => [], followup: async () => "msg", startContinuable: async () => ({}) };
@@ -257,11 +264,11 @@ function makeBase({ evidenceGate, includeSubagents = false }) {
   return { listeners, registeredTools, provided, roundReports, base };
 }
 
-async function installHarness(storeFile, evidenceGate) {
+async function installHarness(storeFile, evidenceGate, { stage = "plugin-maintenance", noKazMode = false } = {}) {
   const seed = createStageStore(storeFile);
-  seed.set("main", "plugin-maintenance");
+  seed.set("main", stage);
   seed.beginWorkflowRun("main");
-  const { base, registeredTools } = makeBase({ evidenceGate });
+  const { base, registeredTools } = makeBase({ evidenceGate, noKazMode });
   await plugin.apply(base, {
     stageStore: storeFile,
     projectRoot: RUN_DIR,
@@ -352,6 +359,201 @@ async function installHarness(storeFile, evidenceGate) {
       passStore.get("main") === "communication" &&
       storedChecklist?.[0]?.mainRerun?.matches === true &&
       storedChecklist?.[0]?.mainRerun?.command.includes("process.exit(0)"),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ④b 7.4 run-level evidenceGate override (D2/D3/D4/D5): standalone set,
+//     immutability, override beats config both ways, stage/role gate, new-run clear.
+// ---------------------------------------------------------------------------
+{
+  // D4: standalone set at assess-complexity persists true without advancing.
+  const h = await installHarness(STORE_OVR, false, { stage: "assess-complexity" });
+  const whale = h.registeredTools.get("whale_report");
+  const signal = new AbortController().signal;
+  const setResult = await whale.execute({ evidenceGate: true }, { agent: h.agent, signal });
+  const afterSet = createStageStore(STORE_OVR);
+  const record = afterSet.getWorkflowRunEvidenceGate("main");
+  check(
+    "override: standalone set at assess-complexity persists true/model without advancing",
+    setResult?.ok === true &&
+      setResult?.stage === "assess-complexity" &&
+      setResult?.advanced === false &&
+      setResult?.evidenceGate === true &&
+      afterSet.get("main") === "assess-complexity" &&
+      record.evidenceGateOverride === true &&
+      record.evidenceGateSource === "model",
+  );
+  // D3: same value accepted no-op.
+  const sameResult = await whale.execute({ evidenceGate: true }, { agent: h.agent, signal });
+  check(
+    "override: same value accepted no-op (still true, still assess-complexity)",
+    sameResult?.ok === true &&
+      sameResult?.advanced === false &&
+      sameResult?.evidenceGate === true &&
+      createStageStore(STORE_OVR).get("main") === "assess-complexity",
+  );
+  // D3: different value rejected immutable, state untouched.
+  let immutableError = null;
+  try {
+    await whale.execute({ evidenceGate: false }, { agent: h.agent, signal });
+  } catch (error) {
+    immutableError = error;
+  }
+  check(
+    "override: different value later rejected evidence-gate-immutable and state unchanged",
+    immutableError?.code === "evidence-gate-immutable" &&
+      createStageStore(STORE_OVR).getWorkflowRunEvidenceGate("main").evidenceGateOverride === true &&
+      createStageStore(STORE_OVR).get("main") === "assess-complexity",
+  );
+  // D3: override true beats config false at the live communication gate.
+  let gateError = null;
+  try {
+    await whale.execute({ nextStage: "communication" }, { agent: h.agent, signal });
+  } catch (error) {
+    gateError = error;
+  }
+  check(
+    "override true beats config false: empty checklist denied evidence-no-evidence",
+    gateError?.code === "evidence-no-evidence" &&
+      createStageStore(STORE_OVR).get("main") === "assess-complexity",
+  );
+}
+
+{
+  // D3: override false beats config true.
+  const h = await installHarness(STORE_OVR_FALSE, true, { stage: "assess-complexity" });
+  const whale = h.registeredTools.get("whale_report");
+  const signal = new AbortController().signal;
+  const setFalse = await whale.execute({ evidenceGate: false }, { agent: h.agent, signal });
+  check(
+    "override false persists against config true",
+    setFalse?.ok === true &&
+      setFalse?.evidenceGate === false &&
+      createStageStore(STORE_OVR_FALSE).getWorkflowRunEvidenceGate("main").evidenceGateOverride === false,
+  );
+  const advanced = await whale.execute({ nextStage: "communication" }, { agent: h.agent, signal });
+  check(
+    "override false beats config true: empty checklist advances to communication",
+    advanced?.ok === true &&
+      advanced?.stage === "communication" &&
+      createStageStore(STORE_OVR_FALSE).get("main") === "communication",
+  );
+}
+
+{
+  // D4: evidenceGate together with nextStage in one call.
+  const h = await installHarness(STORE_OVR_COMBINED, false, { stage: "assess-complexity" });
+  const whale = h.registeredTools.get("whale_report");
+  const signal = new AbortController().signal;
+  const combined = await whale.execute(
+    { evidenceGate: true, nextStage: "challenge-plan" },
+    { agent: h.agent, signal },
+  );
+  check(
+    "override: evidenceGate + nextStage in one call sets gate and advances",
+    combined?.ok === true &&
+      combined?.advanced === true &&
+      combined?.stage === "challenge-plan" &&
+      combined?.evidenceGate === true &&
+      createStageStore(STORE_OVR_COMBINED).get("main") === "challenge-plan" &&
+      createStageStore(STORE_OVR_COMBINED).getWorkflowRunEvidenceGate("main").evidenceGateOverride === true,
+  );
+}
+
+{
+  // D2: wrong main stage rejected before the stage machine, no state change.
+  const h = await installHarness(STORE_WRONG_STAGE, false, { stage: "working" });
+  const whale = h.registeredTools.get("whale_report");
+  let stageError = null;
+  try {
+    await whale.execute({ evidenceGate: true }, { agent: h.agent, signal: new AbortController().signal });
+  } catch (error) {
+    stageError = error;
+  }
+  check(
+    "override: working stage rejected evidence-gate-stage-invalid, stage and run unchanged",
+    stageError?.code === "evidence-gate-stage-invalid" &&
+      createStageStore(STORE_WRONG_STAGE).get("main") === "working" &&
+      createStageStore(STORE_WRONG_STAGE).getWorkflowRunEvidenceGate("main").evidenceGateOverride === null,
+  );
+}
+
+{
+  // D2: controlled subagent role rejected with evidence-gate-stage-invalid;
+  // a subagent call WITHOUT evidenceGate keeps today's workflow-stage-deny.
+  const seed = createStageStore(STORE_ROLE);
+  seed.set("child-gate", "working-then-compress-context-then-report");
+  seed.setSubagentRole("child-gate", {
+    planItemId: "p1",
+    persona: "worker",
+    parentId: "main",
+    stage: "working-then-compress-context-then-report",
+    assignedTools: [],
+    finalTools: [],
+  });
+  const h = await installHarness(STORE_ROLE, false, { stage: "assess-complexity" });
+  const whale = h.registeredTools.get("whale_report");
+  const childAgent = {
+    id: "child-gate",
+    session: { id: "child-gate", header: { cwd: RUN_DIR }, events: [] },
+    options: { subagentDepth: 1 },
+  };
+  let roleError = null;
+  try {
+    await whale.execute({ evidenceGate: true }, { agent: childAgent, signal: new AbortController().signal });
+  } catch (error) {
+    roleError = error;
+  }
+  check(
+    "override: controlled subagent rejected evidence-gate-stage-invalid",
+    roleError?.code === "evidence-gate-stage-invalid",
+  );
+  let noArgError = null;
+  try {
+    await whale.execute({ nextStage: "challenge-plan" }, { agent: childAgent, signal: new AbortController().signal });
+  } catch (error) {
+    noArgError = error;
+  }
+  check(
+    "override: subagent without evidenceGate keeps workflow-stage-deny",
+    noArgError !== null && String(noArgError.message).includes("workflow-stage-deny"),
+  );
+}
+
+{
+  // D5: a new run clears the override.
+  const h = await installHarness(STORE_NEWRUN, false, { stage: "assess-complexity" });
+  const whale = h.registeredTools.get("whale_report");
+  const signal = new AbortController().signal;
+  await whale.execute({ evidenceGate: true }, { agent: h.agent, signal });
+  const before = createStageStore(STORE_NEWRUN).getWorkflowRunEvidenceGate("main");
+  createStageStore(STORE_NEWRUN).beginWorkflowRun("main");
+  const after = createStageStore(STORE_NEWRUN).getWorkflowRunEvidenceGate("main");
+  check(
+    "override: beginWorkflowRun clears evidenceGateOverride/source",
+    before.evidenceGateOverride === true &&
+      before.evidenceGateSource === "model" &&
+      after.evidenceGateOverride === null &&
+      after.evidenceGateSource === null,
+  );
+}
+
+{
+  // normalizeConfig fix: with NO kazMode service, settings evidenceGate=true must
+  // still reach the live gate (before the fix normalizeConfig dropped the field).
+  const h = await installHarness(STORE_NOKAZ, true, { stage: "plugin-maintenance", noKazMode: true });
+  const whale = h.registeredTools.get("whale_report");
+  let noKazError = null;
+  try {
+    await whale.execute({ nextStage: "communication" }, { agent: h.agent, signal: new AbortController().signal });
+  } catch (error) {
+    noKazError = error;
+  }
+  check(
+    "normalizeConfig: no-kazMode settings evidenceGate=true enforces gate (evidence-no-evidence)",
+    noKazError?.code === "evidence-no-evidence" &&
+      createStageStore(STORE_NOKAZ).get("main") === "plugin-maintenance",
   );
 }
 

@@ -298,6 +298,12 @@ const mainAgentOf = () => agentOf("main");
     to: "S",
     trigger: "manual-downgrade",
   });
+  // 7.4 evidenceGate run override：同值 no-op、异值 immutable、非布尔 invalid。
+  const gateSet = store.setWorkflowRunEvidenceGate("main", true);
+  const gateSame = store.setWorkflowRunEvidenceGate("main", true);
+  const gateDiff = store.setWorkflowRunEvidenceGate("main", false);
+  const gateInvalid = store.setWorkflowRunEvidenceGate("main", "yes");
+  const gateAfterSet = store.getWorkflowRunEvidenceGate("main");
   const reloaded = createStageStore(TIER_STORE);
   const reloadedTier = reloaded.getWorkflowRunTier("main");
   check(
@@ -312,12 +318,29 @@ const mainAgentOf = () => agentOf("main");
       reloadedTier?.upgradeHistory?.length === 1 &&
       reloadedTier.upgradeHistory[0].trigger === "requires-user-confirmation",
   );
+  check(
+    "stage-store evidenceGate override round-trips after reload; same value no-op; different immutable; non-boolean invalid",
+    gateSet?.ok === true &&
+      gateSet?.changed === true &&
+      gateSame?.ok === true &&
+      gateSame?.changed === false &&
+      gateDiff?.ok === false &&
+      gateDiff?.code === "evidence-gate-immutable" &&
+      gateInvalid?.ok === false &&
+      gateInvalid?.code === "evidence-gate-invalid" &&
+      gateAfterSet.evidenceGateOverride === true &&
+      gateAfterSet.evidenceGateSource === "model" &&
+      reloaded.getWorkflowRunEvidenceGate("main").evidenceGateOverride === true &&
+      reloaded.getWorkflowRunEvidenceGate("main").evidenceGateSource === "model",
+  );
   const storeAfterBegin = createStageStore(TIER_STORE);
   storeAfterBegin.set("main", "assess-complexity");
   storeAfterBegin.beginWorkflowRun("main");
   check(
-    "new workflow run clears previous tier/history",
-    storeAfterBegin.getWorkflowRunTier("main") === null,
+    "new workflow run clears previous tier/history and evidenceGate override",
+    storeAfterBegin.getWorkflowRunTier("main") === null &&
+      storeAfterBegin.getWorkflowRunEvidenceGate("main").evidenceGateOverride === null &&
+      storeAfterBegin.getWorkflowRunEvidenceGate("main").evidenceGateSource === null,
   );
   check(
     "normalizers drop malformed signals/history entries",

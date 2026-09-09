@@ -81,7 +81,7 @@
 
 ## 三、配置（Kaz 面板）
 
-- **功能按插件分离**：Kaz 面板可单独开启 / 关闭每个插件。不喜欢某个插件？在 Kaz 面板直接关掉；还能把当前状态“设为 Kaz / 非 Kaz 模式的默认设置”，非常灵活。
+- **功能按插件分离**：Kaz 面板可单独开启 / 关闭面板中的每个组件（`output-beep` / `deepseek-default-model` / `round-display`）；`kaz-agent-preset-display` 作为常驻补丁单独展示，不可切换。不喜欢某个组件？在 Kaz 面板直接关掉；还能把当前状态“设为 Kaz / 非 Kaz 模式的默认设置”，非常灵活。
 - **配置按项目隔离**：同一项目的所有对话共享一套插件开关与参数；Kaz / 非 Kaz 模式各有默认状态，在 **Kaz 面板**里调整，互不干扰。
 - **固定工具面**：Kaz 主工具面由代码级 Stable Main Surface / workflow 面固定；工具控制面板只读展示，并只允许把外置 / 私有插件作为候选添加（不直接进主面）。
 - **面板「本地版本」**：读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段，发版逻辑见「八、文件与版本说明」。
@@ -90,13 +90,23 @@
 
 三个常用面板的入口位置（截图来自 dsh web 浏览器界面）：
 
-**记忆面板与 Kaz 面板**：记忆面板是 ka-whale-memory 的待确认记忆 / 记忆管理界面（人工确认 `memory_save` 等保存的内容）；Kaz 面板集中管理被管理插件的开关，并可把当前状态设为 Kaz / 非 Kaz 模式的默认。
+**记忆面板与 Kaz 面板**：记忆面板是 ka-whale-memory 的待确认记忆 / 记忆管理界面（人工确认 `memory_save` 等保存的内容）；Kaz 面板集中管理面板组件（`output-beep` / `deepseek-default-model` / `round-display`）的开关，并可把当前状态设为 Kaz / 非 Kaz 模式的默认；`kaz-agent-preset-display` 作为常驻补丁展示。
 
 ![记忆面板和Kaz面板在哪打开](一些指引/记忆面板和Kaz面板在哪打开.png)
 
 **工具面板（工具控制面板）**：只读展示 Kaz 固定工具面（Stable Main / workflow 面），并维护外置 / 私有插件候选，按项目隔离。
 
 ![工具面板在哪打开](一些指引/工具面板在哪打开.png)
+
+### 3.2 7.4 可观测与开关
+
+**Cost meter（7.4 按 run 可观测）**：`ka-whale-workflow` 为每个 `sessionId + runId` 写一个聚合文件：`$DSH_HOME/storages/ka-whale-workflow/cost-meter/<sessionId>-<runId>.json`（未设 `DSH_HOME` 时用 `~/.dsh`）。文件记录 `modelRequests`、`turns`、`injectedChars`、`reportChars` 等聚合计数（v2 的 `turns` 是 run-local，另保留 `turnsCumulative`/`turnBaseline`），不存任何正文。
+
+**`tierFastLane`（7.4 S/M/L 分级快车道）**：Kaz 模式默认开启；非 Kaz 下工作流本身不启用。开启后 main 可在 assess 阶段给 run 标 S/M/L，并启用对应预算 / 自动升级逻辑（实现见 `KazPlugins/ka-whale-workflow/lib/index.js`）。
+
+**`evidenceGate`（交付证据门）**：默认关闭；主模型在 run 开头（assess-complexity）用 `whale_report({ evidenceGate: true|false })` 按 run 决定，run 内不可改；生效优先级为 run 覆盖 > 配置值（实现见 `KazPlugins/ka-whale-workflow/lib/index.js`）。
+
+**配置回落**：`$DSH_HOME/storages/kaz-defaults.json`（模式默认）+ `<项目>/.dsh/storages/kaz-project-states.json`（项目覆盖）。当前 Kaz 面板没有 `ka-whale-workflow` 行，因此没有面板开关。
 
 ---
 
@@ -212,7 +222,7 @@ DeepSeek 收到提示词后直接读对应指引文件，不要读本 README：
 
 ### 8.2 发版提醒（给未来的我和 agent）
 
-Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段（当前仓库为 **6.0.3**）。
+Kaz 面板的“本地版本”读的是 `KazPlugins/kaz-mode/package.json` 里的 `version` 字段（当前仓库为 **7.4.0**，该值必须始终等于该字段）。
 
 **发新版本时，务必同步修改 `KazPlugins/kaz-mode/package.json` 里的 `version`，否则面板会用旧版本号和 GitHub tag 比较，产生错误的新版本提醒。**
 

@@ -112,6 +112,8 @@ const FACTORY_NON_KAZ_DEFAULTS = {
   "ka-whale-workflow": {
     enabled: false,
     includeSubagents: false,
+    tierFastLane: false,
+    evidenceGate: false,
     skillPrivateRoot: "",
     skillAutoLifecycleEnabled: true,
     skillLifecycleUnusedDays: 60,
@@ -135,6 +137,10 @@ for (const [id, cfg] of Object.entries(FACTORY_NON_KAZ_DEFAULTS)) {
   }
   else if (id === "output-beep") {
     FACTORY_KAZ_DEFAULTS[id].enabled = false;
+  }
+  else if (id === "ka-whale-workflow") {
+    // 7.4：Kaz 模式出厂默认开启 tier fast lane；evidence/delivery gate 保持关闭。
+    FACTORY_KAZ_DEFAULTS[id].tierFastLane = true;
   }
 }
 

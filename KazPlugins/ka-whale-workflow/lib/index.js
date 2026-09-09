@@ -296,6 +296,7 @@ function normalizeConfig(raw) {
     skillLifecycleAuditIntervalHours: intDefault(value.skillLifecycleAuditIntervalHours, 24),
     skillLifecycleMaxAutoActions: 1, // 硬性护栏：每周期最多 1 个自动动作
     tierFastLane: value.tierFastLane === true,
+    evidenceGate: value.evidenceGate === true,
   };
 }
 
@@ -673,6 +674,13 @@ export function createStageStore(file) {
             const checklist = normalizeEvidenceChecklist(rawRun.evidenceChecklist);
             if (checklist.length > 0) runRecord.evidenceChecklist = checklist;
           }
+          if (rawRun.evidenceGateOverride === true || rawRun.evidenceGateOverride === false) {
+            runRecord.evidenceGateOverride = rawRun.evidenceGateOverride;
+            runRecord.evidenceGateSource =
+              typeof rawRun.evidenceGateSource === "string" && rawRun.evidenceGateSource.length > 0
+                ? rawRun.evidenceGateSource
+                : "model";
+          }
           workflowRuns[id] = runRecord;
         }
       }
@@ -874,6 +882,28 @@ export function createStageStore(file) {
         upgradeHistory: normalizeUpgradeHistory(run.upgradeHistory),
       };
     },
+    /** 当前 run 的 7.4 evidence/delivery gate 模型覆盖；未设置返回 null。 */
+    getWorkflowRunEvidenceGate(sessionId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { evidenceGateOverride: null, evidenceGateSource: null };
+      }
+      const run = runStateOf(sessionId);
+      const override =
+        run.evidenceGateOverride === true
+          ? true
+          : run.evidenceGateOverride === false
+            ? false
+            : null;
+      return {
+        evidenceGateOverride: override,
+        evidenceGateSource:
+          override === null
+            ? null
+            : typeof run.evidenceGateSource === "string" && run.evidenceGateSource.length > 0
+              ? run.evidenceGateSource
+              : "model",
+      };
+    },
     /** 当前 run 的 7.4 Intent Map run 记录（canonical）；无记录返回空 meta。 */
     getWorkflowRunIntent(sessionId) {
       if (typeof sessionId !== "string" || sessionId.length === 0) {
@@ -932,6 +962,40 @@ export function createStageStore(file) {
       else delete state.upgradeHistory;
       return persist();
     },
+    /** 写入当前 run 的 evidence/delivery gate 模型覆盖；仅布尔；同值 no-op、异值拒绝（run 内不可变）。 */
+    setWorkflowRunEvidenceGate(sessionId, value) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "evidence-gate-session-invalid" };
+      }
+      if (typeof value !== "boolean") {
+        return { ok: false, code: "evidence-gate-invalid" };
+      }
+      const state = runStateOf(sessionId);
+      const existing =
+        state.evidenceGateOverride === true
+          ? true
+          : state.evidenceGateOverride === false
+            ? false
+            : null;
+      if (existing !== null && existing !== value) {
+        return { ok: false, code: "evidence-gate-immutable" };
+      }
+      if (existing === value) {
+        return { ok: true, changed: false, evidenceGateOverride: value };
+      }
+      const hadOverride = Object.prototype.hasOwnProperty.call(state, "evidenceGateOverride");
+      const previousOverride = state.evidenceGateOverride;
+      const hadSource = Object.prototype.hasOwnProperty.call(state, "evidenceGateSource");
+      const previousSource = state.evidenceGateSource;
+      state.evidenceGateOverride = value;
+      state.evidenceGateSource = "model";
+      if (persist()) return { ok: true, changed: true, evidenceGateOverride: value };
+      if (hadOverride) state.evidenceGateOverride = previousOverride;
+      else delete state.evidenceGateOverride;
+      if (hadSource) state.evidenceGateSource = previousSource;
+      else delete state.evidenceGateSource;
+      return { ok: false, code: "evidence-gate-persist-failed" };
+    },
     /** run 内升级（S→M/L）；写 upgradeHistory，只升不降。 */
     upgradeWorkflowRunTier(sessionId, { to, trigger, reason, at } = {}) {
       if (typeof sessionId !== "string" || sessionId.length === 0) {
@@ -976,6 +1040,8 @@ export function createStageStore(file) {
       delete state.upgradeHistory;
       delete state.intentMap;
       delete state.evidenceChecklist;
+      delete state.evidenceGateOverride;
+      delete state.evidenceGateSource;
       return persist();
     },
     addWorkflowRunStage(sessionId, stage) {
@@ -1375,8 +1441,14 @@ export default {
     function tierFastLaneEnabledFor(agent) {
       return liveFor(agent)?.tierFastLane === true;
     }
-    /** 7.4 P3：evidence/delivery gate 开关（off = 不阻断、不执行 main 复跑）。 */
+    /** 7.4 P3：evidence/delivery gate 开关（off = 不阻断、不执行 main 复跑）。
+     *  run 级模型覆盖优先（不受 config flag / tierFastLane 影响）；未设置时回落 live config。 */
     function evidenceGateEnabledFor(agent) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId === "string" && sessionId.length > 0) {
+        const record = stageStore.getWorkflowRunEvidenceGate(sessionId);
+        if (record.evidenceGateOverride !== null) return record.evidenceGateOverride;
+      }
       return liveFor(agent)?.evidenceGate === true;
     }
     /** 当前 run 显式 tier 记录；无 run / 无 tier / flag off 返回 null。 */
@@ -1418,6 +1490,17 @@ export default {
         tierSignals: normalizeTierSignals(value?.tierSignals),
       });
       return done ? { ok: true, tier } : { ok: false, code: "tier-persist-failed" };
+    }
+
+    /** 把 whale_report 携带的 per-run evidence gate 决策写入当前 run；只允许 main + assess-complexity。
+     *  不可变性由 stageStore.setWorkflowRunEvidenceGate 收口（同值 no-op、异值 evidence-gate-immutable）。 */
+    function persistWorkflowRunEvidenceGate(agent, value) {
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "evidence-gate-session-invalid" };
+      }
+      ensureActiveWorkflowRunForAgent(agent);
+      return stageStore.setWorkflowRunEvidenceGate(sessionId, value);
     }
 
     /** 7.4 P1b：唯一内部 S→M 自动升级入口。
@@ -2437,7 +2520,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 bookkeeping and advance legal next stages; plans only in write-plan via finalPlanPayload. Detail: README.md §Tool contract detail.",
+        "Report v0.9 bookkeeping and advance legal next stages; plans only in write-plan via finalPlanPayload. Pass evidenceGate alone at assess-complexity to set this run's delivery gate without advancing, or together with nextStage. Detail: README.md §Tool contract detail.",
       parameters: {
         mode: {
           type: "string",
@@ -2472,6 +2555,11 @@ Before we answer, call memory_search or context_search exactly once. After that 
           items: { type: "string" },
           description: "7.4 optional checkable signals; requires tier.",
         },
+        evidenceGate: {
+          type: "boolean",
+          description:
+            "7.4 optional per-run delivery-gate decision (assess-complexity only; main agent only; immutable for the run). May be passed alone at assess-complexity to set it without advancing, or together with nextStage.",
+        },
         intentMap: {
           type: "json",
           description:
@@ -2497,6 +2585,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             ok: { type: "boolean", required: true },
             stage: { type: "string", required: true },
             restarted: { type: "boolean", required: true },
+            advanced: { type: "boolean" },
+            evidenceGate: { type: "boolean" },
             warning: { type: "string" },
           },
         },
@@ -2515,6 +2605,20 @@ Before we answer, call memory_search or context_search exactly once. After that 
                 `Advance with a legal nextStage through the normal v0.9 workflow (current="${current}").`,
             ),
           );
+        }
+        // 7.4 D2：evidenceGate 只能在 main + assess-complexity 设置；检查先于非主阶段守卫，
+        // 让子代理/错误阶段拿到结构化 evidence-gate-stage-invalid（不带该参数仍走 workflow-stage-deny）。
+        const evidenceGateArgPresent = typeof args?.evidenceGate === "boolean";
+        if (evidenceGateArgPresent) {
+          const isSubagent = controlledSubagentRoleOfAgent(agent) !== null;
+          if (isSubagent || current !== "assess-complexity") {
+            const error = new Error(
+              `evidence-gate-stage-invalid: whale_report evidenceGate can only be set by the main agent at assess-complexity ` +
+                `(role=${isSubagent ? "subagent" : "main"}, current="${current}").`,
+            );
+            error.code = "evidence-gate-stage-invalid";
+            return Promise.reject(error);
+          }
         }
         if (!isMainWorkflowStage(current)) {
           const def = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
@@ -2607,6 +2711,22 @@ Before we answer, call memory_search or context_search exactly once. After that 
             // 预算反作弊：初始 S 刚落盘就按当前 meter 检查一次，超预算立即升 M，
             // 因此同调用的 S-only nextStage 会在升 M 后被拒绝。
             autoUpgradeBudgetExceeded(agent);
+          }
+        }
+        // 7.4 D3/D4：run 级 evidence gate 决策落盘（不可变；同值 no-op；被拒不动状态）。
+        if (evidenceGateArgPresent) {
+          const gateResult = persistWorkflowRunEvidenceGate(agent, args.evidenceGate);
+          if (gateResult.ok !== true) {
+            const error = new Error(
+              gateResult.code === "evidence-gate-immutable"
+                ? "evidence-gate-immutable: whale_report evidenceGate is already set for this run and is immutable."
+                : `evidence-gate-invalid: whale_report could not record evidenceGate: ${gateResult.code}.`,
+            );
+            error.code =
+              gateResult.code === "evidence-gate-immutable"
+                ? "evidence-gate-immutable"
+                : "evidence-gate-invalid";
+            return Promise.reject(error);
           }
         }
         // P2 low-confidence/requires-confirmation intentMap：S run 必须走 P1 自动升级
@@ -2766,6 +2886,16 @@ Before we answer, call memory_search or context_search exactly once. After that 
           typeof args?.nextStage === "string" && args.nextStage.trim().length > 0
             ? args.nextStage.trim()
             : null;
+        // 7.4 D4：assess-complexity 下可单独设置 evidenceGate（纯 run 设置，不推进 stage）。
+        if (evidenceGateArgPresent && requested === null) {
+          return Promise.resolve({
+            ok: true,
+            stage: current,
+            restarted: false,
+            advanced: false,
+            evidenceGate: evidenceGateEnabledFor(agent),
+          });
+        }
         const target = requested !== null ? requested : defaultNext;
 
         const tierCtx = workflowRunTierRecordFor(agent);
@@ -2810,7 +2940,13 @@ Before we answer, call memory_search or context_search exactly once. After that 
           `whale_report：${current} → ${target}`,
           "鲸鱼工作流",
         );
-        return Promise.resolve({ ok: true, stage: target === "end" ? "done" : target, restarted: false });
+        return Promise.resolve({
+          ok: true,
+          stage: target === "end" ? "done" : target,
+          restarted: false,
+          advanced: true,
+          evidenceGate: evidenceGateEnabledFor(agent),
+        });
       },
       presentCall: () => ({ card: "generic", title: "鲸鱼工作流汇报", kind: "other" }),
     });
