@@ -77,15 +77,19 @@ const DEFINITIONS = {
         "memory_list",
         "context_search",
         "context_read",
+        "read",
+        "glob",
+        "grep",
+        "pwsh",
         "whale_report",
       ],
       canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
       task:
-        `Judge complexity AND unpack intent. Form a compact Intent Map before deciding: wanted outcome, domain priors, wording-vs-goal conflicts, and how success is verified (rendered output / code review / user feel). Simple direct answers may advance to communication; creative/visual/implementation-heavy requests advance to challenge-plan. Do not advance merely to satisfy process — advance when a real decision needs scrutiny. You may set this run's delivery gate alone via whale_report({ evidenceGate: true|false }); default off, set only here, immutable for the run.
+        `Judge complexity AND unpack intent: form a compact Intent Map (outcome, wording-vs-goal conflicts, success check). Simple answers may go to communication; heavy/creative work goes to challenge-plan; advance only when a real decision needs scrutiny. Set the run's delivery gate via whale_report({ evidenceGate: true|false }); default off, set only here, immutable.
 
-Run tier (7.4): classify S/M/L here; default M, never default S. S needs ALL four: exactly 1 changed file; no risk word (security / permission / privacy / secret / migration / deletion / concurrency / public API / schema); an existing probe covers it; that probe passes now. Undecidable -> M. S is main-only: delegation, plan item, or requiresUserConfirmation=true -> M. Record via whale_report({ tier, tierReason, tierSignals }) only here; tierSignals = checkable facts, never "simple". For S: whale_report({ tier: "S", intentMap, nextStage: "working" }). Run tierCeiling = max(item tiers); this is the initial ceiling.
+Classify S/M/L here; default M, never default S. S needs ALL four, verified by: (1) git status --porcelain shows exactly 1 changed file attributable to this task; unrelated dirty files listed, not disqualifying; (2) no risk word in the target file/diff (security/permission/privacy/secret/migration/deletion/concurrency/public API/schema); (3) an existing probe covers it — find it with the grep tool over KazPlugins/**/probe-*.mjs (or rg -l); (4) that probe passes now (node <probe>). Undecidable -> M. S is main-only: delegation, plan item, or requiresUserConfirmation -> M. Record via whale_report({ tier, tierReason, tierSignals }); tierSignals formats: git-status:1, probe:<path>, probe-run:PASS. For S: whale_report({ tier: "S", intentMap, nextStage: "working" }). tierCeiling = max(item tiers) = initial ceiling.
 
-Delivery gate decision (overrides unset fallback; immutable; set only here): S -> evidenceGate:false explicitly; M -> true when externally verifiable (probe / command / rendered artifact), else false; L -> true by default.`,
+Read-only: never edit or git-write; only git status --porcelain, git diff --stat, rg/Select-String, node <probe>. Delivery gate (immutable, here only): S -> evidenceGate:false explicitly; M -> true when externally verifiable, else false; L -> true by default.`,
     },
     "challenge-plan": {
       allowedTools: [
@@ -113,7 +117,7 @@ Delivery gate decision (overrides unset fallback; immutable; set only here): S -
     "write-plan": {
       allowedTools: ["whale_report", "plan_read", "read", "grep", "glob", "web_search", "memory_detail", "memory_search", "memory_list",  "context_search", "context_read"],
       canAdvance: ["working", "memory-maintenance", "plugin-maintenance", "compass_context_before_communication", "communication"],
-      task:`Finalize plan via whale_report(finalPlanPayload); use plan_read. One planItem per coherent task; do not pack all work into one. persona: main, worker, memoryMaintainer, pluginMaintainer; required planItemId/persona/task; optional summary (one-line purpose), dependsOn (planItemIds this item depends on), targets (files/dirs/domains), verification (concrete checks), assignedTools. Invalid payloads are rejected with structured plan-item-invalid error; nothing is persisted and no item is silently dropped. Delegation/memory/reviewer/visual rules: README §7.4.`,
+      task:`Finalize plan via whale_report(finalPlanPayload); use plan_read. One planItem per coherent task; do not pack all work into one. persona: main, worker, memoryMaintainer, pluginMaintainer; required planItemId/persona/task; optional summary (one-line purpose), dependsOn (planItemIds this item depends on), targets (files/dirs/domains), verification (concrete checks), assignedTools. Invalid payloads are rejected with structured plan-item-invalid error; nothing is persisted and no item is silently dropped. Delegation/memory/reviewer/visual rules: README.`,
     },
     working: {
       allowedTools: [...KAZ_V09_MAIN_TOOLS],
@@ -137,7 +141,7 @@ Delivery gate decision (overrides unset fallback; immutable; set only here): S -
       ],
       canAdvance: ["plugin-maintenance", "communication", "write-plan", "compass_context_before_communication"],
       task:
-        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. A child may pause mid-work (report without final/nextStage) and sends its TERMINAL full report via memory_sub_whale_report({ final: true }) as one subagent-settled message. Review with plan_read; plan changes go through write-plan. The same memoryMaintainer sub-agent can be reused multiple times; each round starts at plan-memory. Before communication, call compass_context_before_communication. Memory/plugin on-demand rules: read KazPlugins/ka-whale-workflow/README.md §7.4.`,
+        `Delegate memoryMaintainer plan items via ka_sub_whale, one at a time. A child may pause mid-work (report without final/nextStage) and sends its TERMINAL full report via memory_sub_whale_report({ final: true }) as one subagent-settled message. Review with plan_read; plan changes go through write-plan. The same memoryMaintainer sub-agent can be reused multiple times; each round starts at plan-memory. Before communication, call compass_context_before_communication. Memory/plugin on-demand rules: read KazPlugins/ka-whale-workflow/README.md.`,
     },
     "plugin-maintenance": {
       allowedTools: [
@@ -152,7 +156,7 @@ Delivery gate decision (overrides unset fallback; immutable; set only here): S -
       ],
       canAdvance: ["write-plan", "communication", "compass_context_before_communication"],
       task:
-        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. A child may pause mid-work (report without final/nextStage) and sends its TERMINAL full report via plugin_maintainer_sub_whale_report({ final: true }) as one subagent-settled message. Review with plan_read; plan changes go through write-plan. Whether to reuse is determined by the main agent: send_message to the same surface + idle child, otherwise ka_sub_whale. Before communication, call compass_context_before_communication. Full lifecycle rules: read KazPlugins/ka-whale-workflow/README.md §7.4.`,
+        `Delegate pluginMaintainer plan items via ka_sub_whale, one at a time. A child may pause mid-work (report without final/nextStage) and sends its TERMINAL full report via plugin_maintainer_sub_whale_report({ final: true }) as one subagent-settled message. Review with plan_read; plan changes go through write-plan. Whether to reuse is determined by the main agent: send_message to the same surface + idle child, otherwise ka_sub_whale. Before communication, call compass_context_before_communication. Full lifecycle rules: read KazPlugins/ka-whale-workflow/README.md.`,
     },
     "compass_context_before_communication": {
       allowedTools: ["context_compress", "whale_report", "plan_read"],

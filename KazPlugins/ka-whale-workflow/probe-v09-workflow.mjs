@@ -428,8 +428,14 @@ check("新一轮消息进入 assess-complexity", stageNow === "assess-complexity
       assessText.includes("Minimal (first round only): [memory_search, context_search] until your first tool call; then the Allowed tools above unlock."),
   );
 }
-const deny = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
-check("assess 中调用 read 返回 workflow-stage-deny", deny.kind === "deny" && String(deny.reason).startsWith("workflow-stage-deny:"));
+const allowRead = await preExecute({ name: "read", agent }, async () => ({ kind: "allow" }));
+const allowGlob = await preExecute({ name: "glob", agent }, async () => ({ kind: "allow" }));
+const allowGrep = await preExecute({ name: "grep", agent }, async () => ({ kind: "allow" }));
+const allowPwsh = await preExecute({ name: "pwsh", agent }, async () => ({ kind: "allow" }));
+check("assess 软闸门放行 read/glob/grep/pwsh（只读侦查工具）", allowRead?.kind === "allow" && allowGlob?.kind === "allow" && allowGrep?.kind === "allow" && allowPwsh?.kind === "allow");
+const denyEdit = await preExecute({ name: "edit", agent }, async () => ({ kind: "allow" }));
+const denyWrite = await preExecute({ name: "write", agent }, async () => ({ kind: "allow" }));
+check("assess 中调用 edit/write 仍返回 workflow-stage-deny", denyEdit.kind === "deny" && String(denyEdit.reason).startsWith("workflow-stage-deny:") && denyWrite.kind === "deny" && String(denyWrite.reason).startsWith("workflow-stage-deny:"));
 const allowMem = await preExecute({ name: "memory_search", agent }, async () => ({ kind: "allow" }));
 check("assess 中调用 memory_search 放行", allowMem.kind === "allow");
 const allowCtxAssess = await preExecute({ name: "context_search", agent }, async () => ({ kind: "allow" }));

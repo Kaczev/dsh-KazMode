@@ -2568,7 +2568,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
     const whaleReportDef = defineTool({
       name: WHALE_REPORT_TOOL,
       description:
-        "Report v0.9 bookkeeping and advance legal next stages; plans only in write-plan via finalPlanPayload. Pass evidenceGate alone at assess-complexity to set this run's delivery gate without advancing, or together with nextStage. Detail: README.md §Tool contract detail.",
+        "Report bookkeeping and advance legal next stages; plans only in write-plan via finalPlanPayload. Pass evidenceGate alone at assess-complexity to set this run's delivery gate without advancing, or together with nextStage. Detail: README.md §Tool contract detail.",
       parameters: {
         mode: {
           type: "string",
@@ -2592,37 +2592,37 @@ Before we answer, call memory_search or context_search exactly once. After that 
         },
         tier: {
           type: "string",
-          description: "7.4 optional run tier: S/M/L (assess-complexity only).",
+          description: "Optional run tier: S/M/L (assess-complexity only).",
         },
         tierReason: {
           type: "string",
-          description: "7.4 optional classification evidence; requires tier.",
+          description: "Optional classification evidence; requires tier.",
         },
         tierSignals: {
           type: "array",
           items: { type: "string" },
-          description: "7.4 optional checkable signals; requires tier.",
+          description: "Optional checkable signals; requires tier.",
         },
         evidenceGate: {
           type: "boolean",
           description:
-            "7.4 optional per-run delivery-gate decision (assess-complexity only; main agent only; immutable for the run). May be passed alone at assess-complexity to set it without advancing, or together with nextStage.",
+            "Optional per-run delivery-gate decision (assess-complexity only; main agent only; immutable for the run). May be passed alone at assess-complexity to set it without advancing, or together with nextStage.",
         },
         intentMap: {
           type: "json",
           description:
-            "7.4 P2 optional Intent Map object (assess-complexity only): goal/trueGoal/inferredFrom/defects/assumptions/confidence/requiresUserConfirmation/discriminatingSignal/acceptanceSignals.",
+            "Optional Intent Map object (assess-complexity only): goal/trueGoal/inferredFrom/defects/assumptions/confidence/requiresUserConfirmation/discriminatingSignal/acceptanceSignals.",
         },
         evidenceChecklist: {
           type: "array",
           items: { type: "json" },
           description:
-            "7.4 P3 optional run evidenceChecklist update (§3.2 entries; main stages).",
+            "Optional run evidenceChecklist update (§3.2 entries; main stages).",
         },
         notVerified: {
           type: "array",
           items: { type: "string" },
-          description: `7.4 P3 optional notVerified list (each ≤${NOT_VERIFIED_MAX_CHARS} chars; never gate-blocking).`,
+          description: `Optional notVerified list (each ≤${NOT_VERIFIED_MAX_CHARS} chars; never gate-blocking).`,
         },
       },
       output: {
@@ -2650,7 +2650,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           return Promise.reject(
             new Error(
               `workflow-stage-deny: whale_report mode='goal' is not accepted because Goal mode has been removed. ` +
-                `Advance with a legal nextStage through the normal v0.9 workflow (current="${current}").`,
+                `Advance with a legal nextStage through the normal workflow (current="${current}").`,
             ),
           );
         }
@@ -2671,7 +2671,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         if (!isMainWorkflowStage(current)) {
           const def = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
           const reason =
-            `workflow-stage-deny: whale_report cannot advance from outside the v0.9 main stage machine ` +
+            `workflow-stage-deny: whale_report cannot advance from outside the main stage machine ` +
             `(current="${current}"). Current allowed tools: ${def.allowedTools.join(", ")}. ` +
             `Suggested: start a new task through assess-complexity.`;
           return Promise.reject(new Error(reason));
@@ -3292,7 +3292,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           return Promise.resolve({
             ok: false,
             code: "unknown-v09-role",
-            reason: `ka_sub_whale rejected plan item "${item.planItemId}": persona "${item.persona}" is not in the v0.9 role set.`,
+            reason: `ka_sub_whale rejected plan item "${item.planItemId}": persona "${item.persona}" is not in the role set.`,
           });
         }
         // 36.8 + 37.5 stage-persona mapping enforcement:
@@ -3482,7 +3482,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
       const reportDef = defineTool({
         name: reportTool,
         description:
-          `Advance/report through the v0.9 ${role} subagent workflow (${roleFlow}); available only inside the matching role. ` +
+          `Advance/report through the ${role} subagent workflow (${roleFlow}); available only inside the matching role. ` +
           `Pass nextStage for planning → execution (must be in Can advance to); omit both final and nextStage for a mid-work pause; ` +
           `pass final:true only from the role's last execution stage and do NOT combine it with nextStage. ` +
           `A successful call is a hard stop: the child sets awaitingParent and waits for the parent main model's reply via send_message, ` +
@@ -3491,7 +3491,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         parameters: {
           nextStage: {
             type: "string",
-            description: `Legal next v0.9 stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before this report message. Cannot be combined with final:true.`,
+            description: `Legal next stage for ${role} (e.g. one of: ${roleFlow}). Advances the workflow before this report message. Cannot be combined with final:true.`,
           },
           final: {
             type: "boolean",
@@ -3500,7 +3500,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           notVerified: {
             type: "array",
             items: { type: "string" },
-            description: `7.4 P3 optional notVerified list (each ≤${NOT_VERIFIED_MAX_CHARS} chars; never gate-blocking).`,
+            description: `Optional notVerified list (each ≤${NOT_VERIFIED_MAX_CHARS} chars; never gate-blocking).`,
           },
         },
         output: {
@@ -3528,7 +3528,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           const controlledRole = controlledSubagentRoleOfAgent(agent);
           if (controlledRole !== role) {
             return Promise.reject(
-              new Error(`${reportTool} can only be called by a controlled v0.9 "${role}" subagent`),
+              new Error(`${reportTool} can only be called by a controlled "${role}" subagent`),
             );
           }
           // report 本身是一次真实工具调用：即使 session/event 未置 minimalDone，

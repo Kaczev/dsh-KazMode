@@ -148,7 +148,7 @@ check("v0.9 stage 常量导出（9 主阶段全名；三角色）", MAIN_ROLE ==
 const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
 const workingDef = stageDefinitionFor(MAIN_ROLE, "working");
 check("主 stage 定义与 v0.9 一致", assessDef?.allowedTools.includes("whale_report") && workingDef?.canAdvance.includes("write-plan"));
-check("双层语义：主 assess allowedTools = memory/context/whale_report（Minimal 不再由 stage 收口；ask_user_question 留 challenge-plan；不放 context_compress/read）", JSON.stringify(assessDef?.allowedTools) === JSON.stringify(["memory_search", "memory_detail", "memory_list", "context_search", "context_read", "whale_report"]) && !assessDef?.allowedTools.includes("read") && !assessDef?.allowedTools.includes("ask_user_question") && !assessDef?.allowedTools.includes("context_compress"));
+check("双层语义：主 assess allowedTools = memory/context/read/glob/grep/pwsh/whale_report 精确 10 项（Minimal 不再由 stage 收口；ask_user_question 留 challenge-plan；不放 edit/write/context_compress）", JSON.stringify(assessDef?.allowedTools) === JSON.stringify(["memory_search", "memory_detail", "memory_list", "context_search", "context_read", "read", "glob", "grep", "pwsh", "whale_report"]) && ["read", "glob", "grep", "pwsh"].every((tool) => assessDef?.allowedTools.includes(tool)) && ["edit", "write", "ask_user_question", "context_compress"].every((tool) => !assessDef?.allowedTools.includes(tool)));
 {
   const mainNonMinimal = ["challenge-plan", "decide-tools-before-writing-plan", "write-plan", "working", "memory-maintenance", "plugin-maintenance"];
   check(

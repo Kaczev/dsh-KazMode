@@ -50,8 +50,9 @@ check(
 );
 
 check(
-  "§5.1 memory on demand full rules live in README and write-plan points to §7.4",
-  task.includes("memory/reviewer/visual rules: README §7.4") &&
+  "§5.1 memory on demand full rules live in README and write-plan points to README",
+  task.includes("memory/reviewer/visual rules: README.") &&
+    !task.includes("README §7.4") &&
     README.includes("First memory_search") &&
     README.includes("memory_update still goes through CANDIDATE/review") &&
     README.includes("rederivation cost > storage cost") &&
@@ -59,8 +60,9 @@ check(
 );
 
 check(
-  "§4 reviewer ceiling full rules live in README and write-plan points to §7.4",
-  task.includes("memory/reviewer/visual rules: README §7.4") &&
+  "§4 reviewer ceiling full rules live in README and write-plan points to README",
+  task.includes("memory/reviewer/visual rules: README.") &&
+    !task.includes("README §7.4") &&
     README.includes("Reviewer: never routine; risk-triggered only") &&
     README.includes("at most one independent reviewer per run, single pass, bound to a trigger id"),
 );
