@@ -27,7 +27,7 @@ import {
   validateEvidenceChecklistInput,
   validateIntentMapInput,
 } from "./intent-map.js";
-import { normalizeTier, normalizeTierSignals } from "./tier.js";
+import { canUpgradeTier, normalizeTier, normalizeTierSignals } from "./tier.js";
 
 /**
  * Task plan 存储 schema 版本。
@@ -436,7 +436,7 @@ export function createTaskPlanStore(file) {
      * 已存在 item 更新为 finalized；不存在但 payload 合法则直接创建 finalized。
      * 返回 { ok, items } 或 { ok:false, code, rejected?/items? }。
      */
-    persistFinalPayload(payload) {
+    persistFinalPayload(payload, options = {}) {
       const shapeCheck = validateFinalPlanPayload(payload);
       if (shapeCheck.ok !== true) {
         return { ok: false, code: "plan-item-invalid", rejected: shapeCheck.rejected };
@@ -444,6 +444,30 @@ export function createTaskPlanStore(file) {
       const itemCheck = validateFinalPayloadItems(payload.items);
       if (itemCheck.ok !== true) {
         return { ok: false, code: "plan-item-invalid", rejected: itemCheck.rejected };
+      }
+      // 7.4 P2 tierCeiling：run 级降级守卫/高水位只在调用方 opt-in 时启用
+      // （tierFastLane on）；flag off 时本函数行为与 7.3.5 逐字节一致。
+      const enforceTierDowngrade = options?.enforceTierDowngrade === true;
+      if (enforceTierDowngrade) {
+        const seen = new Set();
+        for (const raw of payload.items) {
+          const id = typeof raw?.planItemId === "string" ? raw.planItemId.trim() : "";
+          if (id.length === 0) continue;
+          if (seen.has(id)) {
+            return {
+              ok: false,
+              code: "plan-item-invalid",
+              rejected: [
+                {
+                  planItemId: id,
+                  code: "duplicate-plan-item-id",
+                  reason: `plan item "${id}" appears more than once in finalPlanPayload.items; item tier is ambiguous.`,
+                },
+              ],
+            };
+          }
+          seen.add(id);
+        }
       }
       const timestamp = now();
       const staged = {};
@@ -471,6 +495,18 @@ export function createTaskPlanStore(file) {
           };
         }
         const existing = plans[normalized.planItemId];
+        // 7.4 P2 D3：已有 item 的新 payload 省略 tier 时保留旧 tier 三元组。
+        if (
+          enforceTierDowngrade &&
+          normalizeTier(raw.tier) === null &&
+          existing !== undefined &&
+          normalizeTier(existing.tier) !== null
+        ) {
+          normalized.tier = existing.tier;
+          normalized.tierReason =
+            typeof existing.tierReason === "string" ? existing.tierReason : "";
+          normalized.tierSignals = normalizeTierSignals(existing.tierSignals);
+        }
         const item = {
           ...normalized,
           status: "finalized",
@@ -480,6 +516,33 @@ export function createTaskPlanStore(file) {
         };
         staged[item.planItemId] = item;
         accepted.push(item);
+      }
+      // 7.4 P2 D1/D2：降级拒绝 + 合并生效集合的最高 item tier（缺 tier = M）。
+      let maxItemTier = null;
+      if (enforceTierDowngrade) {
+        for (const item of accepted) {
+          const existing = plans[item.planItemId];
+          if (existing === undefined) continue;
+          const oldTier = normalizeTier(existing.tier) ?? "M";
+          const newTier = normalizeTier(item.tier) ?? oldTier;
+          if (canUpgradeTier(newTier, oldTier)) {
+            return {
+              ok: false,
+              code: "plan-item-invalid",
+              rejected: [
+                {
+                  planItemId: item.planItemId,
+                  code: "tier-downgrade",
+                  reason: `plan item "${item.planItemId}" tier ${oldTier} -> ${newTier} is a downgrade; payload rejected before persistence.`,
+                },
+              ],
+            };
+          }
+        }
+        for (const item of Object.values({ ...plans, ...staged })) {
+          const tier = normalizeTier(item?.tier) ?? "M";
+          if (maxItemTier === null || canUpgradeTier(maxItemTier, tier)) maxItemTier = tier;
+        }
       }
       const nextPlans = { ...plans, ...staged };
       const nextMeta = JSON.parse(JSON.stringify(runMeta));
@@ -497,7 +560,11 @@ export function createTaskPlanStore(file) {
       // 持久化成功后才提交内存快照；plans/meta 未在失败路径被改动。
       Object.assign(plans, staged);
       Object.assign(runMeta, nextMeta);
-      return { ok: true, items: accepted.map((item) => ({ ...item })) };
+      return {
+        ok: true,
+        items: accepted.map((item) => ({ ...item })),
+        ...(enforceTierDowngrade ? { maxItemTier } : {}),
+      };
     },
     remove(planItemId) {
       if (typeof planItemId !== "string" || planItemId.length === 0) return false;
@@ -633,10 +700,10 @@ export function writeCurrentRunPointer(projectRoot, { sessionId, runId, updatedA
  * 返回 { ok:true, items, planFile, currentPointerFile }
  *   或 { ok:false, code, rejected?/items?, planFile }。
  */
-export function persistFinalPlanRun({ projectRoot, sessionId, runId, payload }) {
+export function persistFinalPlanRun({ projectRoot, sessionId, runId, payload, options }) {
   const planFile = runPlanFileFor(projectRoot, sessionId, runId);
   const store = createTaskPlanStore(planFile);
-  const result = store.persistFinalPayload(payload);
+  const result = store.persistFinalPayload(payload, options);
   if (result.ok !== true) {
     return { ...result, planFile };
   }
@@ -663,6 +730,7 @@ export function persistFinalPlanRun({ projectRoot, sessionId, runId, payload }) 
     planFile,
     currentPointerFile: currentRunPointerFileFor(projectRoot),
     updatedAt,
+    ...(result.maxItemTier !== undefined ? { maxItemTier: result.maxItemTier } : {}),
   };
 }
 

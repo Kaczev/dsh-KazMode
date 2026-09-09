@@ -660,6 +660,10 @@ export function createStageStore(file) {
           const tier = normalizeTier(rawRun.tier);
           if (tier !== null) {
             runRecord.tier = tier;
+            // 7.4 P2：tierCeiling 高水位；旧文件缺省回填 = tier，且永不低于 tier。
+            const rawCeiling = normalizeTier(rawRun.tierCeiling);
+            runRecord.tierCeiling =
+              rawCeiling !== null && canUpgradeTier(tier, rawCeiling) ? rawCeiling : tier;
             if (typeof rawRun.tierReason === "string" && rawRun.tierReason.trim().length > 0) {
               runRecord.tierReason = rawRun.tierReason.trim();
             }
@@ -875,8 +879,10 @@ export function createStageStore(file) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return null;
       const run = runStateOf(sessionId);
       if (run.tier === undefined || normalizeTier(run.tier) === null) return null;
+      const ceiling = normalizeTier(run.tierCeiling);
       return {
         tier: run.tier,
+        tierCeiling: ceiling !== null && canUpgradeTier(run.tier, ceiling) ? ceiling : run.tier,
         tierReason: typeof run.tierReason === "string" ? run.tierReason : "",
         tierSignals: normalizeTierSignals(run.tierSignals),
         upgradeHistory: normalizeUpgradeHistory(run.upgradeHistory),
@@ -950,6 +956,13 @@ export function createStageStore(file) {
         if (!canUpgradeTier(state.tier, tier)) return false;
       }
       state.tier = tier;
+      // 7.4 P2：tierCeiling = 只升不降高水位，恒 >= tier。
+      const currentCeiling = normalizeTier(state.tierCeiling);
+      const incomingCeiling = normalizeTier(value?.tierCeiling);
+      let ceiling = tier;
+      if (currentCeiling !== null && canUpgradeTier(ceiling, currentCeiling)) ceiling = currentCeiling;
+      if (incomingCeiling !== null && canUpgradeTier(ceiling, incomingCeiling)) ceiling = incomingCeiling;
+      state.tierCeiling = ceiling;
       state.tierReason =
         typeof value?.tierReason === "string" && value.tierReason.trim().length > 0
           ? value.tierReason.trim()
@@ -1037,6 +1050,7 @@ export function createStageStore(file) {
       delete state.tier;
       delete state.tierReason;
       delete state.tierSignals;
+      delete state.tierCeiling;
       delete state.upgradeHistory;
       delete state.intentMap;
       delete state.evidenceChecklist;
@@ -1501,6 +1515,40 @@ export default {
       }
       ensureActiveWorkflowRunForAgent(agent);
       return stageStore.setWorkflowRunEvidenceGate(sessionId, value);
+    }
+
+    /** 7.4 P2：finalPlanPayload 落盘成功后把 run tier/ceiling 抬到 maxItemTier。
+     *  只升不降；无当前 tier 时直接落 tier=max（不写 upgradeHistory）；
+     *  否则复用唯一自动升级入口（trigger=plan-finalization）。 */
+    function applyPlanFinalizationTierCeiling(agent, maxItemTier) {
+      if (!tierFastLaneEnabledFor(agent)) return null;
+      const target = normalizeTier(maxItemTier);
+      if (target === null) return null;
+      const sessionId = sessionIdOf(agent);
+      if (typeof sessionId !== "string" || sessionId.length === 0) {
+        return { ok: false, code: "tier-session-invalid" };
+      }
+      const current = workflowRunTierRecordFor(agent);
+      if (current === null) {
+        ensureActiveWorkflowRunForAgent(agent);
+        const done = stageStore.setWorkflowRunTier(sessionId, {
+          tier: target,
+          tierCeiling: target,
+          tierReason: `plan finalization: max item tier ${target}`,
+          tierSignals: [],
+        });
+        return done
+          ? { ok: true, tier: target, tierCeiling: target, upgraded: false }
+          : { ok: false, code: "tier-persist-failed" };
+      }
+      if (!canUpgradeTier(current.tier, target)) {
+        return { ok: true, tier: current.tier, tierCeiling: current.tierCeiling, upgraded: false };
+      }
+      return autoUpgradeMainRunTier(agent, {
+        to: target,
+        trigger: "plan-finalization",
+        reason: `write-plan finalization: max item tier ${target} exceeds run tier ${current.tier}`,
+      });
     }
 
     /** 7.4 P1b：唯一内部 S→M 自动升级入口。
@@ -2827,6 +2875,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
           if (itemCheck.ok !== true) {
             return Promise.reject(rejectPayload(itemCheck.rejected));
           }
+          // 7.4 P2：run 级 tierCeiling/降级守卫与 tier 一样 gate 于 tierFastLane。
+          const tierGuard = tierFastLaneEnabledFor(agent);
           const context = taskPlanContextForAgent(agent);
           let persisted;
           if (context.mode === "run") {
@@ -2839,8 +2889,11 @@ Before we answer, call memory_search or context_search exactly once. After that 
                     sessionId,
                     runId: activeRun.runId,
                     payload,
+                    options: { enforceTierDowngrade: tierGuard },
                   })
-                : taskPlanStore.persistFinalPayload(payload);
+                : taskPlanStore.persistFinalPayload(payload, {
+                    enforceTierDowngrade: tierGuard,
+                  });
             if (persisted.ok === true) {
               // 双写一致性：v3 文件镜像已落盘；若 stage-store canonical 还缺 meta，
               // 用同 payload 的归一化值补写 stage store（stage-store 永远优先）。
@@ -2859,13 +2912,19 @@ Before we answer, call memory_search or context_search exactly once. After that 
               }
             }
           } else {
-            persisted = taskPlanStore.persistFinalPayload(payload);
+            persisted = taskPlanStore.persistFinalPayload(payload, {
+              enforceTierDowngrade: tierGuard,
+            });
           }
           if (persisted.ok !== true) {
             if (persisted.code === "plan-persist-failed") {
               return Promise.reject(new Error("whale_report failed to persist finalized task plan; task plan store write failed."));
             }
             return Promise.reject(rejectPayload(persisted.rejected ?? []));
+          }
+          // 7.4 P2：落盘成功后才抬 run tier/ceiling（best-effort，不假装原子）。
+          if (tierGuard && typeof persisted.maxItemTier === "string") {
+            applyPlanFinalizationTierCeiling(agent, persisted.maxItemTier);
           }
         }
 
@@ -3577,6 +3636,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             items: { type: "array", items: { type: "json" } },
             intentMap: { type: "json" },
             evidenceChecklist: { type: "array", items: { type: "json" } },
+            tier: { type: "json" },
+            tierCeiling: { type: "json" },
             code: { type: "string" },
             reason: { type: "string" },
           },
@@ -3622,6 +3683,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             items: context.store.list(),
             intentMap: null,
             evidenceChecklist: [],
+            tier: null,
+            tierCeiling: null,
           });
         }
         const activeRunId = context.runId;
@@ -3648,6 +3711,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             items: [],
             intentMap: null,
             evidenceChecklist: [],
+            tier: null,
+            tierCeiling: null,
             notice: "no active workflow run has been started yet.",
           });
         }
@@ -3657,6 +3722,9 @@ Before we answer, call memory_search or context_search exactly once. After that 
         const stageRunIntent = stageStore.getWorkflowRunIntent(sessionId);
         const fileRunMeta = readRunPlanRunMeta(planFile);
         const useStageMeta = targetRunId === activeRunId;
+        const stageRunTier = useStageMeta ? stageStore.getWorkflowRunTier(sessionId) : null;
+        const runTier = stageRunTier !== null ? stageRunTier.tier : null;
+        const runTierCeiling = stageRunTier !== null ? stageRunTier.tierCeiling : null;
         const intentMap =
           useStageMeta && stageRunIntent.intentMap !== null
             ? stageRunIntent.intentMap
@@ -3687,6 +3755,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
             items: [],
             intentMap,
             evidenceChecklist,
+            tier: runTier,
+            tierCeiling: runTierCeiling,
             notice: "no finalized plan for current run yet.",
           });
         }
@@ -3702,6 +3772,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
           items,
           intentMap,
           evidenceChecklist,
+          tier: runTier,
+          tierCeiling: runTierCeiling,
           ...(items.length === 0 ? { notice: "run file exists but contains no plan items." } : {}),
         });
       },

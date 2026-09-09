@@ -88,9 +88,48 @@ check(
     stageDefinitionFor(MAIN_ROLE, "communication")?.canAdvance.join(",") === "assess-complexity",
 );
 
+// Kaczev 批准（7.4 P3 option A）：main/assess-complexity 例外放宽到 ≤1500 chars——
+// design §2.5 要求 S/M/L 分类 + delivery-gate 规则常驻该 stage 正文；其余 17 条仍 ≤600。
+const assessDef = stageDefinitionFor(MAIN_ROLE, "assess-complexity");
+const ASSESS_TASK_CAP = 1500;
+const STAGE_TASK_CAP = 600;
 check(
-  "P5 R4: all 18 stage tasks ≤ 600 chars",
-  allStageDefs.length === 18 && allStageDefs.every((d) => typeof d.task === "string" && d.task.length <= 600),
+  "P5 R4: 18 stage tasks; 17 ≤ 600 chars; main/assess-complexity ≤ 1500 (approved exception)",
+  allStageDefs.length === 18 &&
+    allStageDefs.every((d) => {
+      if (typeof d.task !== "string") return false;
+      return d === assessDef ? d.task.length <= ASSESS_TASK_CAP : d.task.length <= STAGE_TASK_CAP;
+    }) &&
+    assessDef !== null &&
+    assessDef.task.length <= ASSESS_TASK_CAP,
+);
+
+// 7.4 P3 (2a)：assess-complexity 正文必须常驻 S/M/L 分类与 delivery-gate 契约。
+// 断言使用工作树真实子串（非规格措辞）：例如实际是 "default M, never default S"（空格）。
+const assessTask = assessDef?.task ?? "";
+check(
+  "P3 2a: assess task states the four machine-decidable S conditions",
+  ["exactly 1 changed file", "no risk word", "an existing probe covers it", "that probe passes now"].every(
+    (fragment) => assessTask.includes(fragment),
+  ),
+);
+check(
+  "P3 2a: assess task states default M / never default S + tierReason/tierSignals",
+  assessTask.includes("default M, never default S") &&
+    assessTask.includes("tierReason") &&
+    assessTask.includes("tierSignals"),
+);
+check(
+  "P3 2a: assess task has the S call form tier:\"S\" + nextStage:\"working\" and tierCeiling",
+  assessTask.includes('tier: "S"') &&
+    assessTask.includes('nextStage: "working"') &&
+    assessTask.includes("tierCeiling"),
+);
+check(
+  "P3 2a: assess task has the delivery-gate rule (S false explicit / M externally verifiable / L true default)",
+  assessTask.includes("S -> evidenceGate:false explicitly") &&
+    assessTask.includes("M -> true when externally verifiable") &&
+    assessTask.includes("L -> true by default"),
 );
 
 check(

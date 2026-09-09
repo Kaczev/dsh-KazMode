@@ -72,6 +72,24 @@ check("① 黄金锚：KAZ_PROMPT_PHRASES.footer 字面量", KAZ_PROMPT_PHRASES.
 check("① 黄金锚：KAZ_PROMPT_PHRASES.keepGray 字面量", KAZ_PROMPT_PHRASES.keepGray === "Keep gray reasoning concise — short English sentences.");
 check("① 黄金锚：KAZ_PROMPT_PHRASES.mainRoleGuidance 字面量", KAZ_PROMPT_PHRASES.mainRoleGuidance === "We drive the ka-whale-workflow run and verify delegated reports.");
 check("① Persona 7.4 预算：每角色 ≤1200，合计 ≤4800", Object.values(KAZ_ROLE_PROMPTS.subagent).every((text) => text.length <= 1200) && KAZ_ROLE_PROMPTS.main.length <= 1200 && KAZ_ROLE_PROMPTS.main.length + Object.values(KAZ_ROLE_PROMPTS.subagent).reduce((s, t) => s + t.length, 0) <= 4800);
+// 7.4 P3 (2b)：main persona 必须含精确分类句；并显式断言实测预算数字。
+check("① Persona main 含 7.4 分类句（精确匹配）", KAZ_ROLE_PROMPTS.main.includes("Classify S/M/L at assess-complexity; default M."));
+const personaLens74 = {
+  main: KAZ_ROLE_PROMPTS.main.length,
+  ...Object.fromEntries(
+    Object.entries(KAZ_ROLE_PROMPTS.subagent).map(([role, text]) => [role, text.length]),
+  ),
+};
+const personaTotal74 = Object.values(personaLens74).reduce((sum, n) => sum + n, 0);
+console.log(`PERSONA-LENGTHS ${JSON.stringify(personaLens74)} TOTAL=${personaTotal74}`);
+check(
+  "① Persona 7.4 预算实测数字：每角色 ≤1200，合计 ≤4800",
+  personaLens74.main <= 1200 &&
+    personaLens74.worker <= 1200 &&
+    personaLens74.memoryMaintainer <= 1200 &&
+    personaLens74.pluginMaintainer <= 1200 &&
+    personaTotal74 <= 4800,
+);
 check("① Persona 不含旧大段机制块", !KAZ_ROLE_PROMPTS.main.includes("Follow the ka-whale-workflow in order") && !KAZ_ROLE_PROMPTS.main.includes("Start or resume Goal via whale_report") && !KAZ_ROLE_PROMPTS.main.includes("During working, execute persona=main plan items") && !Object.values(KAZ_ROLE_PROMPTS.subagent).some((text) => text.includes("The full working file-tool set") || text.includes("After calling your *_sub_whale_report, STOP")));
 check("① KAZ_ROLE_PROMPTS 无旧 toolCreator/retriever/pluginCreator 角色且三角色齐备", KAZ_ROLE_PROMPTS.subagent?.toolCreator === undefined && KAZ_ROLE_PROMPTS.subagent?.retriever === undefined && KAZ_ROLE_PROMPTS.subagent?.pluginCreator === undefined && KAZ_ROLE_PROMPTS.subagent?.worker !== undefined && KAZ_ROLE_PROMPTS.subagent?.memoryMaintainer !== undefined && KAZ_ROLE_PROMPTS.subagent?.pluginMaintainer !== undefined && Object.keys(KAZ_ROLE_PROMPTS.subagent).length === 3 && Object.values(KAZ_ROLE_PROMPTS.subagent).every((text) => typeof text === "string"));
 check("① resolveFirstRoundTools kaz-memory 开", JSON.stringify(resolveFirstRoundTools({ kazMemoryEnabled: true })) === JSON.stringify(["memory_search", "context_search"]));

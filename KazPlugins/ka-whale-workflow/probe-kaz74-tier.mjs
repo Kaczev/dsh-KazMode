@@ -25,7 +25,8 @@ import {
   tierBudgetExceeded,
   PROVISIONAL_S_TIER_BUDGET,
 } from "./lib/tier.js";
-import { persistFinalPlanRun } from "./lib/task-plan-store.js";
+import { persistFinalPlanRun, runPlanFileFor, readRunPlanItems } from "./lib/task-plan-store.js";
+import { validateJsonSchemaValue } from "@deepseek-ai/dsh-tools";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -794,6 +795,302 @@ const mainAgentOf = () => agentOf("main");
       toCommunication?.stage === "communication" &&
       history?.length === 0 &&
       afterDisk.sessionTierDefaultOf(sessionId) === null,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑧ P3 2c/2d: run-level tierCeiling contract (permanent regression).
+//   - initial classification ceiling=tier; finalize [S,M] raises tier+ceiling to
+//     M via plan-finalization with exactly one S misjudgment; reload + new run;
+//   - flag off -> complete no-op for run tier/tierCeiling/history and the
+//     downgrade guard is off;
+//   - duplicate / omitted tier / downgrade / monotonic at store level;
+//   - self-heal on load; plan_read exposes tier+tierCeiling (active-run branch
+//     validated by the real dsh-tools schema; probe-subagent-workflow.mjs:846-878
+//     covers the full branch matrix and stays green).
+// ---------------------------------------------------------------------------
+{
+  const sessionId = "ceiling-main";
+  const CEIL_STORE = join(TMP, "ceiling.json");
+  const seed = createStageStore(CEIL_STORE);
+  seed.set(sessionId, "write-plan");
+  seed.beginWorkflowRun(sessionId);
+  seed.setWorkflowRunTier(sessionId, {
+    tier: "S",
+    tierReason: "single file; existing probe passes",
+    tierSignals: ["single-file", "probe-pass"],
+  });
+  const initialCeiling = createStageStore(CEIL_STORE).getWorkflowRunTier(sessionId);
+  check(
+    "P3 2c: initial classification sets tierCeiling = tier",
+    initialCeiling?.tier === "S" && initialCeiling?.tierCeiling === "S",
+  );
+
+  const { base, registeredTools } = makeBase({ tierFastLane: true });
+  await plugin.apply(base, {
+    stageStore: CEIL_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: true,
+    costMeterDirectory: join(TMP, "meter-ceiling"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const ceilingWhale = registeredTools.get("whale_report");
+  const ceilingPlanRead = registeredTools.get("plan_read");
+  const ceilingAgent = agentOf(sessionId);
+  const ceilingSignal = () => new AbortController().signal;
+
+  const finalizedSM = await ceilingWhale.execute(
+    {
+      finalPlanPayload: {
+        status: "finalized",
+        items: [
+          { planItemId: "p-s", persona: "worker", task: "S item", tier: "S", assignedTools: [] },
+          { planItemId: "p-m", persona: "worker", task: "M item", tier: "M", assignedTools: [] },
+        ],
+      },
+    },
+    { agent: ceilingAgent, signal: ceilingSignal() },
+  );
+  const afterSM = createStageStore(CEIL_STORE).getWorkflowRunTier(sessionId);
+  const smMisjudgments = createStageStore(CEIL_STORE).getSessionTierMisjudgmentHistory(sessionId);
+  check(
+    "P3 2c: finalize [S,M] raises tier+ceiling to M with plan-finalization history and one S misjudgment",
+    finalizedSM?.ok === true &&
+      afterSM?.tier === "M" &&
+      afterSM?.tierCeiling === "M" &&
+      afterSM?.upgradeHistory?.length === 1 &&
+      afterSM.upgradeHistory[0].trigger === "plan-finalization" &&
+      afterSM.upgradeHistory[0].from === "S" &&
+      afterSM.upgradeHistory[0].to === "M" &&
+      JSON.stringify(smMisjudgments) === JSON.stringify(["S"]),
+  );
+
+  const prActive = await ceilingPlanRead.execute({}, { agent: ceilingAgent, signal: ceilingSignal() });
+  const prSchemaViolations = validateJsonSchemaValue(ceilingPlanRead.output.schema, prActive, "value");
+  check(
+    "P3 2c: plan_read exposes tier+tierCeiling (active-run branch validates through the real schema)",
+    prActive?.ok === true &&
+      prActive.tier === "M" &&
+      prActive.tierCeiling === "M" &&
+      prSchemaViolations.length === 0,
+  );
+
+  const backToWritePlan = await ceilingWhale.execute(
+    { nextStage: "write-plan" },
+    { agent: ceilingAgent, signal: ceilingSignal() },
+  );
+  const finalizedSOnly = await ceilingWhale.execute(
+    {
+      finalPlanPayload: {
+        status: "finalized",
+        items: [{ planItemId: "p-s2", persona: "worker", task: "later S", tier: "S", assignedTools: [] }],
+      },
+    },
+    { agent: ceilingAgent, signal: ceilingSignal() },
+  );
+  const afterMono = createStageStore(CEIL_STORE).getWorkflowRunTier(sessionId);
+  check(
+    "P3 2c: monotonic — a later S item cannot lower tier/tierCeiling below M",
+    backToWritePlan?.ok === true &&
+      finalizedSOnly?.ok === true &&
+      afterMono?.tier === "M" &&
+      afterMono?.tierCeiling === "M" &&
+      afterMono?.upgradeHistory?.length === 1,
+  );
+
+  const cleared = createStageStore(CEIL_STORE);
+  cleared.beginWorkflowRun(sessionId);
+  const clearedRaw = runRecordFromFile(CEIL_STORE, sessionId);
+  check(
+    "P3 2c: beginWorkflowRun clears tier and tierCeiling on the new run",
+    cleared.getWorkflowRunTier(sessionId) === null &&
+      clearedRaw !== null &&
+      !Object.hasOwn(clearedRaw, "tierCeiling"),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑧b P3 2c/2d: flag-off no-op + no-current-tier finalization + store-level guards.
+// ---------------------------------------------------------------------------
+{
+  const sessionId = "ceiling-off";
+  const OFF_STORE = join(TMP, "ceiling-off.json");
+  const offSeed = createStageStore(OFF_STORE);
+  offSeed.set(sessionId, "write-plan");
+  offSeed.beginWorkflowRun(sessionId);
+  persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId,
+    runId: 1,
+    payload: {
+      status: "finalized",
+      items: [{ planItemId: "p1", persona: "worker", task: "one", tier: "M", assignedTools: [] }],
+    },
+  });
+  const { base, registeredTools } = makeBase({ tierFastLane: false });
+  await plugin.apply(base, {
+    stageStore: OFF_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: false,
+    costMeterDirectory: join(TMP, "meter-ceiling-off"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const offWhale = registeredTools.get("whale_report");
+  const offPlanRead = registeredTools.get("plan_read");
+  const offAgent = agentOf(sessionId);
+  const offSignal = () => new AbortController().signal;
+  const offFinalized = await offWhale.execute(
+    {
+      finalPlanPayload: {
+        status: "finalized",
+        items: [
+          { planItemId: "p1", persona: "worker", task: "one", tier: "S", assignedTools: [] },
+          { planItemId: "p2", persona: "worker", task: "two", tier: "L", assignedTools: [] },
+        ],
+      },
+    },
+    { agent: offAgent, signal: offSignal() },
+  );
+  const offRaw = runRecordFromFile(OFF_STORE, sessionId);
+  const offPlan = await offPlanRead.execute({}, { agent: offAgent, signal: offSignal() });
+  const offP1 = (offPlan?.items ?? []).find((item) => item.planItemId === "p1");
+  check(
+    "P3 2c/2d: flag off -> finalize is a complete no-op for run tier/tierCeiling/history and the downgrade guard is off",
+    offFinalized?.ok === true &&
+      offRaw !== null &&
+      !Object.hasOwn(offRaw, "tier") &&
+      !Object.hasOwn(offRaw, "tierCeiling") &&
+      !Object.hasOwn(offRaw, "upgradeHistory") &&
+      offP1?.tier === "S",
+  );
+}
+
+{
+  const sessionId = "ceiling-none";
+  const NONE_STORE = join(TMP, "ceiling-none.json");
+  const noneSeed = createStageStore(NONE_STORE);
+  noneSeed.set(sessionId, "write-plan");
+  noneSeed.beginWorkflowRun(sessionId);
+  const { base, registeredTools } = makeBase({ tierFastLane: true });
+  await plugin.apply(base, {
+    stageStore: NONE_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: true,
+    costMeterDirectory: join(TMP, "meter-ceiling-none"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const noneWhale = registeredTools.get("whale_report");
+  const noneAgent = agentOf(sessionId);
+  const noneSignal = () => new AbortController().signal;
+  const noneFinalized = await noneWhale.execute(
+    {
+      finalPlanPayload: {
+        status: "finalized",
+        items: [{ planItemId: "p1", persona: "worker", task: "one", tier: "M", assignedTools: [] }],
+      },
+    },
+    { agent: noneAgent, signal: noneSignal() },
+  );
+  const noneRecord = createStageStore(NONE_STORE).getWorkflowRunTier(sessionId);
+  check(
+    "P3 2d: finalization with no current tier sets tier=ceiling=max with no upgradeHistory",
+    noneFinalized?.ok === true &&
+      noneRecord?.tier === "M" &&
+      noneRecord?.tierCeiling === "M" &&
+      (noneRecord?.upgradeHistory?.length ?? 0) === 0,
+  );
+}
+
+{
+  const sessionId = "ceiling-store";
+  const planFile = runPlanFileFor(RUN_DIR, sessionId, 1);
+  const first = persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId,
+    runId: 1,
+    payload: {
+      status: "finalized",
+      items: [{ planItemId: "p1", persona: "worker", task: "one", tier: "M", assignedTools: [] }],
+    },
+    options: { enforceTierDowngrade: true },
+  });
+  const duplicate = persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId,
+    runId: 1,
+    payload: {
+      status: "finalized",
+      items: [
+        { planItemId: "p1", persona: "worker", task: "one", tier: "M", assignedTools: [] },
+        { planItemId: "p1", persona: "worker", task: "dup", tier: "M", assignedTools: [] },
+      ],
+    },
+    options: { enforceTierDowngrade: true },
+  });
+  const downgrade = persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId,
+    runId: 1,
+    payload: {
+      status: "finalized",
+      items: [{ planItemId: "p1", persona: "worker", task: "one", tier: "S", assignedTools: [] }],
+    },
+    options: { enforceTierDowngrade: true },
+  });
+  const omitted = persistFinalPlanRun({
+    projectRoot: RUN_DIR,
+    sessionId,
+    runId: 1,
+    payload: {
+      status: "finalized",
+      items: [{ planItemId: "p1", persona: "worker", task: "one-updated", assignedTools: [] }],
+    },
+    options: { enforceTierDowngrade: true },
+  });
+  const itemsAfterOmit = readRunPlanItems(planFile);
+  const p1AfterOmit = itemsAfterOmit.find((item) => item.planItemId === "p1");
+  check(
+    "P3 2c: duplicate planItemId rejected with duplicate-plan-item-id and nothing persisted",
+    first?.ok === true &&
+      duplicate?.ok === false &&
+      duplicate?.rejected?.[0]?.code === "duplicate-plan-item-id" &&
+      readRunPlanItems(planFile).length === 1,
+  );
+  check(
+    "P3 2c: downgrade rejected with tier-downgrade and nothing persisted",
+    downgrade?.ok === false &&
+      downgrade?.rejected?.[0]?.code === "tier-downgrade" &&
+      readRunPlanItems(planFile).find((item) => item.planItemId === "p1")?.tier === "M",
+  );
+  check(
+    "P3 2c: omitted tier on an existing item preserves the old tier",
+    omitted?.ok === true && p1AfterOmit?.tier === "M" && p1AfterOmit?.task === "one-updated",
+  );
+}
+
+{
+  const HEAL_STORE = join(TMP, "ceiling-heal.json");
+  writeFileSync(
+    HEAL_STORE,
+    JSON.stringify({
+      version: 6,
+      sessions: {},
+      workflowRuns: {
+        "heal-a": { runId: 1, enteredStages: [], tier: "M" },
+        "heal-b": { runId: 1, enteredStages: [], tier: "L", tierCeiling: "S" },
+      },
+    }),
+    "utf8",
+  );
+  const heal = createStageStore(HEAL_STORE);
+  const healA = heal.getWorkflowRunTier("heal-a");
+  const healB = heal.getWorkflowRunTier("heal-b");
+  check(
+    "P3 2c: self-heal — tier M with no ceiling -> M; tier L with ceiling S -> L",
+    healA?.tier === "M" &&
+      healA?.tierCeiling === "M" &&
+      healB?.tier === "L" &&
+      healB?.tierCeiling === "L",
   );
 }
 

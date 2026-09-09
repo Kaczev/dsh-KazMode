@@ -81,7 +81,11 @@ const DEFINITIONS = {
       ],
       canAdvance: ["challenge-plan", "communication", "compass_context_before_communication"],
       task:
-        `Judge complexity AND unpack intent. Form a compact Intent Map before deciding: wanted outcome, domain priors, wording-vs-goal conflicts, and how success is verified (rendered output / code review / user feel). Simple direct answers may advance to communication; creative/visual/implementation-heavy requests advance to challenge-plan. Do not advance merely to satisfy process — advance when a real decision needs scrutiny. You may set this run's delivery gate alone via whale_report({ evidenceGate: true|false }); default off, set only here, immutable for the run.`,
+        `Judge complexity AND unpack intent. Form a compact Intent Map before deciding: wanted outcome, domain priors, wording-vs-goal conflicts, and how success is verified (rendered output / code review / user feel). Simple direct answers may advance to communication; creative/visual/implementation-heavy requests advance to challenge-plan. Do not advance merely to satisfy process — advance when a real decision needs scrutiny. You may set this run's delivery gate alone via whale_report({ evidenceGate: true|false }); default off, set only here, immutable for the run.
+
+Run tier (7.4): classify S/M/L here; default M, never default S. S needs ALL four: exactly 1 changed file; no risk word (security / permission / privacy / secret / migration / deletion / concurrency / public API / schema); an existing probe covers it; that probe passes now. Undecidable -> M. S is main-only: delegation, plan item, or requiresUserConfirmation=true -> M. Record via whale_report({ tier, tierReason, tierSignals }) only here; tierSignals = checkable facts, never "simple". For S: whale_report({ tier: "S", intentMap, nextStage: "working" }). Run tierCeiling = max(item tiers); this is the initial ceiling.
+
+Delivery gate decision (overrides unset fallback; immutable; set only here): S -> evidenceGate:false explicitly; M -> true when externally verifiable (probe / command / rendered artifact), else false; L -> true by default.`,
     },
     "challenge-plan": {
       allowedTools: [

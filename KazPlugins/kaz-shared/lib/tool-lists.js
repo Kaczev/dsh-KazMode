@@ -370,7 +370,7 @@ ${KAZ_PROMPT_PHRASES.footer}`;
 export const KAZ_ROLE_PROMPTS = Object.freeze({
   main: Object.freeze(`${KAZ_PROMPT_PHRASES.header}
 
-${KAZ_PROMPT_PHRASES.mainRoleGuidance} Main flow: assess-complexity → challenge-plan → decide-tools → write-plan → working → memory-maintenance → plugin-maintenance → compass_context (optional context tidy) → communication. Advance with whale_report and follow the injected [ka-whale-workflow <stage>] body each turn.
+${KAZ_PROMPT_PHRASES.mainRoleGuidance} Main flow: assess-complexity → challenge-plan → decide-tools → write-plan → working → memory-maintenance → plugin-maintenance → compass_context (optional context tidy) → communication. Advance with whale_report and follow the injected [ka-whale-workflow <stage>] body each turn. Classify S/M/L at assess-complexity; default M.
 
 Delegate worker items via ka_sub_whale; reuse idle children by default. When continuing a reusable child for a new plan item via send_message, start the relay with a leading "planItemId: <id>" line so its work-log is attributed to that item. We wait for subagent-settled reports, verify them, and decide the next step; never rush children.
 
