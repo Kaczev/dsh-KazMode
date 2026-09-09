@@ -120,25 +120,15 @@ function realPromptOf(sections) {
   return parts.join("\n\n")
 }
 
-/**
- * 普通/未知子代理的兜底 prompt（旧行为兼容；仅在该类子代理带着默认/短 persona
- * 时使用。Kaz 主会话与受控 v0.9 子代理都走 KAZ_ROLE_PROMPTS，不经过这里）。
- */
-const SUBAGENT_FALLBACK_PROMPT = `You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.
-
-Keep gray reasoning concise — use short, clear **ENGLISH**(IMPORTANT) sentences. If stuck or circling, report to the user and stop the work immediately.
-
-The final white response should be crisp and to the point, and only appear after reasoning and working.`
-
 /** kaz/agent.cordis.yml 的 persona 行原始短文本（未受 kaz-system-prompt 覆盖前）。 */
 const PRESET_PERSONA_TEXT = 'You are a helpful software engineer assistant.'
 
 /** 是否为默认/基础 persona 文本（preset 短兜底或未知子代理完整 base）。
  *  子代理只有 request.persona 带来的显式 role persona 才需要保留。 */
-function isDefaultPersonaText(text) {
+function isDefaultPersonaText(text, fallback) {
   return (
     text === PRESET_PERSONA_TEXT ||
-    text === SUBAGENT_FALLBACK_PROMPT ||
+    text === fallback ||
     text.trim() === PRESET_PERSONA_TEXT.trim()
   )
 }
@@ -166,8 +156,8 @@ function isSubagentAgent(agent) {
 
 /** 是否为子代理显式 role Persona 文本（非默认即保留；包含
  *  KAZ_ROLE_PROMPTS.subagent.* 四条）。 */
-function isSubagentRolePersonaText(text) {
-  return typeof text === 'string' && !isDefaultPersonaText(text)
+function isSubagentRolePersonaText(text, fallback) {
+  return typeof text === 'string' && !isDefaultPersonaText(text, fallback)
 }
 
 /** persona 段名（与 kaz preset 的 persona 行一致）。 */
@@ -197,6 +187,10 @@ export function apply(ctx, config = {}) {
     if (typeof MAIN_PROMPT !== 'string' || MAIN_PROMPT.length === 0) {
       throw new Error('[kaz-system-prompt] KAZ_ROLE_PROMPTS.main missing from kaz-shared')
     }
+    const SUBAGENT_FALLBACK_PROMPT = kazShared?.KAZ_SUBAGENT_FALLBACK_PROMPT
+    if (typeof SUBAGENT_FALLBACK_PROMPT !== 'string' || SUBAGENT_FALLBACK_PROMPT.length === 0) {
+      throw new Error('[kaz-system-prompt] KAZ_SUBAGENT_FALLBACK_PROMPT missing from kaz-shared')
+    }
 
     // v0.8 Step B1：收敛为 persona 单段；其余提示段一律过滤（含历史
     // ka-whale-workflow:* system 段）。persona 绝对最前。Kaz 主会话
@@ -212,7 +206,7 @@ export function apply(ctx, config = {}) {
       // deployment:persona 携带，是显式 role 文本，原样保留；只替换默认/base
       // persona（主会话替换为完整 main；普通未知子代理保留旧 fallback 语义）。
       const preserveSubagentRolePersona =
-        isSubagentAgent(agent) && isSubagentRolePersonaText(section.text)
+        isSubagentAgent(agent) && isSubagentRolePersonaText(section.text, SUBAGENT_FALLBACK_PROMPT)
       if (typeof section.text === 'string' && !preserveSubagentRolePersona) {
         section.text = isSubagentAgent(agent) ? SUBAGENT_FALLBACK_PROMPT : MAIN_PROMPT
       }

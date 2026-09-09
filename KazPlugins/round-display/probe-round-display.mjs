@@ -21,7 +21,7 @@ import kazModePlugin from "file:///C:/Users/Kaczev/.dsh/profiles/web/KazPlugins/
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { KAZ_ROLE_PROMPTS } from "../kaz-shared/lib/tool-lists.js";
+import { KAZ_ROLE_PROMPTS, KAZ_PROMPT_PHRASES, KAZ_SUBAGENT_FALLBACK_PROMPT } from "../kaz-shared/lib/tool-lists.js";
 
 /** v0.9 §9.1 main Persona 是主会话真实系统的唯一期望文本。 */
 const MAIN_PROMPT = KAZ_ROLE_PROMPTS.main;
@@ -207,13 +207,13 @@ function makeSettings() {
     const reports = kspReports.slice(before);
     const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
     const assembledSystem = systemReport?.content ?? "";
-    const headerPhrase = "You are a helpful software engineer assistant. **ALWAYS REASON AS 'WE'**. Maintain a calm, declarative tone.";
+    const headerPhrase = KAZ_PROMPT_PHRASES.header;
     const headerCount = assembledSystem.split(headerPhrase).length - 1;
-    const footerPhrase = "The final white response should be crisp and to the point, and only appear after reasoning and working.";
+    const footerPhrase = KAZ_PROMPT_PHRASES.footer;
     const footerCount = assembledSystem.split(footerPhrase).length - 1;
-    const keepGrayPhrase = "Keep gray reasoning concise — short English sentences.";
+    const keepGrayPhrase = KAZ_PROMPT_PHRASES.keepGray;
     const keepGrayCount = assembledSystem.split(keepGrayPhrase).length - 1;
-    const roleGuidancePhrase = "We drive the ka-whale-workflow run and verify delegated reports.";
+    const roleGuidancePhrase = KAZ_PROMPT_PHRASES.mainRoleGuidance;
     const roleGuidanceCount = assembledSystem.split(roleGuidancePhrase).length - 1;
     check(
       "①.b3 真实 main system 逐字等于 KAZ_ROLE_PROMPTS.main",
@@ -269,6 +269,37 @@ function makeSettings() {
     check(
       "①.b4 四个受控子代理真实 system 逐字等于 KAZ_ROLE_PROMPTS.subagent.<role>",
       allSystemEqual,
+    );
+  }
+
+  // ①.b5 default/preset subagent persona is replaced with the shared fallback;
+  // assembled system must carry the shared header/footer so drift is caught.
+  {
+    const assemble = mock.listeners.get("system-prompt/assemble")[0];
+    const defaultSubAgent = {
+      id: "s-kaz-sub-default",
+      options: { subagentDepth: 1 },
+      session: {
+        events: [{ type: "subagent/descriptor", data: {} }],
+        header: { origin: "subagent", parentSession: "s-kaz", agentPreset: "kaz" },
+      },
+    };
+    const assembly = {
+      sections: [{ name: "deployment:persona", text: "You are a helpful software engineer assistant." }],
+      contexts: [],
+      variables: {},
+    };
+    const before = kspReports.length;
+    await assemble(assembly, { agent: defaultSubAgent }, async () => assembly);
+    const reports = kspReports.slice(before);
+    const systemReport = reports.find((r) => r.plugin === "kaz-system-prompt");
+    const content = systemReport?.content ?? "";
+    check(
+      "①.b5 默认短 persona 子代理真实 system = KAZ_SUBAGENT_FALLBACK_PROMPT（含 header/footer）",
+      assembly.sections[0].text === KAZ_SUBAGENT_FALLBACK_PROMPT &&
+        content === KAZ_SUBAGENT_FALLBACK_PROMPT &&
+        content.includes(KAZ_PROMPT_PHRASES.header) &&
+        content.includes(KAZ_PROMPT_PHRASES.footer),
     );
   }
 
