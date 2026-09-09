@@ -8,7 +8,12 @@
 //      且长度 ≤ 1500（打印实际长度）。
 // 防空跑：扫描前先断言六个 prompt-bearing 工具已注册；正则先做正/负样本自检。
 // 运行：node KazPlugins/ka-whale-workflow/probe-prompt-hygiene.mjs
-import plugin, { createStageStore, V09_SUBAGENT_ROLE_INITIAL_STAGES } from "./lib/index.js";
+import plugin, {
+  createStageStore,
+  V09_SUBAGENT_ROLE_INITIAL_STAGES,
+  SUB_WHALE_REPORT_WAIT_NOTICE,
+  SUB_WHALE_REPORT_WAIT_DENY_CODE,
+} from "./lib/index.js";
 import {
   MAIN_ROLE,
   MAIN_STAGE_IDS,
@@ -20,7 +25,7 @@ import {
   stageInjectionText,
 } from "./lib/stage-defs.js";
 import { KAZ_ROLE_PROMPTS, KAZ_SUBAGENT_FALLBACK_PROMPT } from "kaz-shared";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -245,6 +250,159 @@ check(
   tokenHits.length === 0,
 );
 if (tokenHits.length > 0) console.log("  version-token hits:", tokenHits.join(" | "));
+
+// --- 静态扫描 lib/*.js 字符串字面量：new Error 文案 / reason 文案 / schema 文案 ---
+// 注释与正则字面量必须跳过（index.js 注释里有 "<v0.9 stage>"），因此自带 tokenizer，
+// 并用固定 fixtures 自检：行注释、块注释、模板字面量、字符串内转义引号、正则字面量。
+function regexCanStart(prev) {
+  return prev === "" || "(,=:[!&|?{};+-*%^~<>".includes(prev);
+}
+
+function extractStringLiterals(source) {
+  const out = [];
+  let i = 0;
+  const n = source.length;
+  let prev = "";
+  while (i < n) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (ch === "/" && next === "/") {
+      i += 2;
+      while (i < n && source[i] !== "\n") i += 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) i += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      let j = i + 1;
+      let text = "";
+      while (j < n) {
+        const c = source[j];
+        if (c === "\\") {
+          text += source[j + 1] ?? "";
+          j += 2;
+          continue;
+        }
+        if (c === quote) break;
+        if (c === "\n") break;
+        text += c;
+        j += 1;
+      }
+      out.push(text);
+      i = j + 1;
+      prev = quote;
+      continue;
+    }
+    if (ch === "`") {
+      let j = i + 1;
+      let text = "";
+      while (j < n) {
+        const c = source[j];
+        if (c === "\\") {
+          text += source[j + 1] ?? "";
+          j += 2;
+          continue;
+        }
+        if (c === "`") break;
+        text += c;
+        j += 1;
+      }
+      out.push(text);
+      i = j + 1;
+      prev = "`";
+      continue;
+    }
+    if (ch === "/" && regexCanStart(prev)) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < n) {
+        const c = source[j];
+        if (c === "\\") {
+          j += 2;
+          continue;
+        }
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) break;
+        else if (c === "\n") break;
+        j += 1;
+      }
+      i = j + 1;
+      prev = "/";
+      continue;
+    }
+    if (!/\s/.test(ch)) prev = ch;
+    i += 1;
+  }
+  return out;
+}
+
+{
+  const fixtureSource = [
+    "// line comment v0.9 must be ignored",
+    "/* block comment v0.9 must be ignored */",
+    'const a = "x v0.9 y";',
+    "const b = 'esc \\' quote';",
+    'const c = `tpl ${a} v0.9`;',
+    'const re = /[^/]+v0\\.9/;',
+  ].join("\n");
+  const fixtureLiterals = extractStringLiterals(fixtureSource);
+  check(
+    "literal tokenizer fixtures: comments + regex skipped; strings/templates/escapes captured",
+    fixtureLiterals.length === 3 &&
+      fixtureLiterals.includes("x v0.9 y") &&
+      fixtureLiterals.includes("esc ' quote") &&
+      fixtureLiterals.some((text) => text.includes("tpl ${a} v0.9")) &&
+      !fixtureLiterals.some((text) => text.includes("must be ignored")),
+  );
+}
+
+const libDirUrl = new URL("./lib/", import.meta.url);
+const libFiles = readdirSync(libDirUrl)
+  .filter((name) => name.endsWith(".js"))
+  .sort();
+const libLiteralTexts = [];
+for (const name of libFiles) {
+  const source = readFileSync(new URL(name, libDirUrl), "utf8");
+  extractStringLiterals(source).forEach((text, index) => {
+    libLiteralTexts.push([`lib/${name}#${index}`, text]);
+  });
+}
+const LIB_LITERAL_FLOOR = 1500;
+check(
+  `lib/*.js string literals collected (${libLiteralTexts.length} across ${libFiles.length} files; floor ${LIB_LITERAL_FLOOR})`,
+  libLiteralTexts.length >= LIB_LITERAL_FLOOR,
+);
+
+const libKnownTexts = [
+  "evidence-command-shell-mismatch",
+  "whale_report requires a calling agent",
+  "Stage advanced; now output your full report as your final message",
+];
+check(
+  "static scan captures p1 shell-mismatch reason, a new Error text, and the report wait notice",
+  libKnownTexts.every((needle) => libLiteralTexts.some(([, text]) => text.includes(needle))),
+);
+
+const runtimeNoticeTexts = [
+  ["SUB_WHALE_REPORT_WAIT_NOTICE", SUB_WHALE_REPORT_WAIT_NOTICE],
+  ["SUB_WHALE_REPORT_WAIT_DENY_CODE", SUB_WHALE_REPORT_WAIT_DENY_CODE],
+];
+const libTokenHits = [];
+for (const [label, text] of [...libLiteralTexts, ...runtimeNoticeTexts]) {
+  const tokens = versionTokensIn(text);
+  if (tokens.length > 0) libTokenHits.push(`${label}: ${tokens.join(", ")}`);
+}
+check(
+  `error/notice hygiene: 0 version tokens across ${libLiteralTexts.length} lib literals + ${runtimeNoticeTexts.length} notice constants`,
+  libTokenHits.length === 0,
+);
+if (libTokenHits.length > 0) console.log("  lib version-token hits:", libTokenHits.join(" | "));
 
 // --- assess allowedTools 精确集合 ---
 const EXPECTED_ASSESS_TOOLS = [

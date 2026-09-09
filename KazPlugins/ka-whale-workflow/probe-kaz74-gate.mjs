@@ -12,19 +12,24 @@ import {
   validateEvidenceChecklistInput,
 } from "./lib/intent-map.js";
 import {
+  buildEvidenceShellRequest,
   evaluateEvidenceGate,
   normalizeNotVerifiedList,
   runMainRerunOnce,
+  resolveEvidenceShellPath,
+  isWindowsPowerShell51,
+  usesPipelineChainOperator,
   NOT_VERIFIED_MAX_CHARS,
+  MAIN_RERUN_TAIL_CHAR_LIMIT,
 } from "./lib/evidence-gate.js";
 import {
   appendWorkLogEntry,
   readWorkLogEntries,
   workLogFileFor,
 } from "./lib/task-plan-store.js";
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 let failures = 0;
 const check = (label, ok) => {
@@ -157,7 +162,7 @@ const PASS_ENTRY = {
   const timeoutRun = await runMainRerunOnce({
     command: `node -e "require('node:fs').appendFileSync('${timeoutFile.replace(/\\/g, "/")}', 'x'); setTimeout(()=>{}, 5000)"`,
     expected: "",
-    timeoutMs: 100,
+    timeoutMs: 1000,
   });
   const countAfterTimeout = existsSync(timeoutFile) ? readFileSync(timeoutFile, "utf8").length : 0;
   check(
@@ -168,6 +173,193 @@ const PASS_ENTRY = {
       timeoutRun.matches === false &&
       timeoutRun.code === "evidence-timeout" &&
       countAfterTimeout === 1,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ②.b shell parity: Windows PowerShell 5.1 rejects && / ||; evidence reruns
+// must detect this before spawning and keep the injected ctx.shell result.
+// ---------------------------------------------------------------------------
+{
+  const pwsh7Path = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+  check(
+    "shell parity: isWindowsPowerShell51 distinguishes powershell.exe from pwsh.exe",
+    isWindowsPowerShell51("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe") === true &&
+      isWindowsPowerShell51(pwsh7Path) === false &&
+      isWindowsPowerShell51("") === false,
+  );
+  check(
+    "shell parity: usesPipelineChainOperator catches && / || outside quoted regions",
+    usesPipelineChainOperator("a && b") === true &&
+      usesPipelineChainOperator("a || b") === true &&
+      usesPipelineChainOperator("echo 'a && b'") === false &&
+      usesPipelineChainOperator('echo "a || b"') === false &&
+      usesPipelineChainOperator("echo hi") === false,
+  );
+
+  const pwshDir = join(TMP, "fake-pwsh");
+  mkdirSync(pwshDir, { recursive: true });
+  const fakePwsh = join(pwshDir, "pwsh.exe");
+  writeFileSync(fakePwsh, "");
+  const ps51Root = join(TMP, "fake-winps51");
+  const ps51Path = join(ps51Root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  mkdirSync(dirname(ps51Path), { recursive: true });
+  writeFileSync(ps51Path, "");
+  const withPwshEnv = {
+    ProgramFiles: join(TMP, "missing-program-files"),
+    PATH: pwshDir,
+    SystemRoot: ps51Root,
+  };
+  const withoutPwshEnv = {
+    ProgramFiles: join(TMP, "missing-program-files"),
+    PATH: "",
+    SystemRoot: ps51Root,
+  };
+  check(
+    "shell parity: win32 resolver picks existing PATH pwsh.exe before Windows PowerShell fallback",
+    resolveEvidenceShellPath({ env: withPwshEnv, platform: "win32" }) === fakePwsh,
+  );
+  const fallback = resolveEvidenceShellPath({ env: withoutPwshEnv, platform: "win32" });
+  check(
+    "shell parity: without pwsh the win32 resolver falls back to Windows PowerShell",
+    fallback === ps51Path && isWindowsPowerShell51(fallback),
+  );
+
+  const fullRequest = buildEvidenceShellRequest({
+    command: "echo hi",
+    workdir: "C:\\work",
+    timeoutMs: 5000,
+    dshEnv: { DSH_SESSION_ID: "s-1" },
+    sandboxPolicy: { mode: "read-only" },
+  });
+  check(
+    "shell parity: buildEvidenceShellRequest keeps command/workdir/timeoutMs/dshEnv/sandboxPolicy when provided",
+    JSON.stringify(Object.keys(fullRequest).sort()) ===
+      JSON.stringify(["command", "dshEnv", "sandboxPolicy", "timeoutMs", "workdir"].sort()) &&
+      fullRequest.command === "echo hi" &&
+      fullRequest.workdir === "C:\\work" &&
+      fullRequest.timeoutMs === 5000 &&
+      fullRequest.dshEnv.DSH_SESSION_ID === "s-1" &&
+      fullRequest.sandboxPolicy.mode === "read-only",
+  );
+  const minimalRequest = buildEvidenceShellRequest({ command: "echo hi" });
+  check(
+    "shell parity: buildEvidenceShellRequest omits absent dshEnv/sandboxPolicy/workdir/timeoutMs",
+    JSON.stringify(Object.keys(minimalRequest).sort()) === JSON.stringify(["command"]) &&
+      minimalRequest.dshEnv === undefined &&
+      minimalRequest.sandboxPolicy === undefined,
+  );
+  const indexSource = readFileSync(new URL("./lib/index.js", import.meta.url), "utf8");
+  check(
+    "shell parity: index adapter source forwards ctx shellEnv/sandboxPolicy via buildEvidenceShellRequest",
+    indexSource.includes('ctx.get("shellEnv")') &&
+      indexSource.includes('ctx.get("sandboxPolicy")') &&
+      indexSource.includes("buildEvidenceShellRequest({"),
+  );
+
+  const mismatch = await runMainRerunOnce({
+    command: "echo one && echo two",
+    expected: "two",
+    shellPath: ps51Path,
+    platform: "win32",
+    timeoutMs: 1000,
+  });
+  check(
+    "shell parity: PS powershell.exe + && returns evidence-command-shell-mismatch before spawn",
+    mismatch.ok === false &&
+      mismatch.code === "evidence-command-shell-mismatch" &&
+      mismatch.matches === false &&
+      typeof mismatch.reason === "string" &&
+      mismatch.reason.includes("';' separators"),
+  );
+
+  const pwshPathOk = await runMainRerunOnce({
+    command: "node -e \"process.exit(0)\" && node -e \"process.exit(0)\"",
+    expected: "",
+    shellPath: fakePwsh,
+    platform: "win32",
+    runShell: async () => ({
+      exitCode: 0,
+      stdout: { text: "" },
+      stderr: { text: "" },
+      timedOut: false,
+    }),
+    timeoutMs: 1000,
+  });
+  check(
+    "shell parity: injected pwsh path with && does not pre-flight mismatch",
+    pwshPathOk.matches === true && pwshPathOk.code === undefined,
+  );
+
+  const merged = await runMainRerunOnce({
+    command: "placeholder",
+    expected: "NEEDLE-MERGED",
+    shellPath: fakePwsh,
+    platform: "win32",
+    runShell: async () => ({
+      exitCode: 0,
+      stdout: { text: "alpha\nNEEDLE-MERGED" },
+      stderr: { text: "beta" },
+      timedOut: false,
+    }),
+    timeoutMs: 1000,
+  });
+  check(
+    "shell parity: injected runShell merges stdout+stderr into actualTail and matches expected",
+    merged.ok === true &&
+      merged.matches === true &&
+      merged.actualTail.includes("NEEDLE-MERGED") &&
+      merged.actualTail.includes("beta") &&
+      merged.actualTail.length <= MAIN_RERUN_TAIL_CHAR_LIMIT,
+  );
+
+  const parseBackstop = await runMainRerunOnce({
+    command: "node -e \"x\" && node -e \"y\"",
+    expected: "",
+    shellPath: fakePwsh,
+    platform: "win32",
+    runShell: async () => ({
+      exitCode: 1,
+      stdout: { text: "" },
+      stderr: { text: "ParserError: not a valid statement separator" },
+      timedOut: false,
+    }),
+    timeoutMs: 1000,
+  });
+  check(
+    "shell parity: ParserError backstop maps to evidence-command-shell-mismatch",
+    parseBackstop.ok === false && parseBackstop.code === "evidence-command-shell-mismatch",
+  );
+
+  const nonChainParse = await runMainRerunOnce({
+    command: "node -e \"x\"",
+    expected: "",
+    shellPath: fakePwsh,
+    platform: "win32",
+    runShell: async () => ({
+      exitCode: 1,
+      stdout: { text: "" },
+      stderr: { text: "ParserError: (1:1) unexpected token" },
+      timedOut: false,
+    }),
+    timeoutMs: 1000,
+  });
+  check(
+    "shell parity: non-chain ParserError stays evidence-command-failed with parse tail visible",
+    nonChainParse.ok === false &&
+      nonChainParse.code === "evidence-command-failed" &&
+      nonChainParse.actualTail.includes("ParserError") &&
+      typeof nonChainParse.reason === "string",
+  );
+
+  const defaultRunner = await runMainRerunOnce({
+    command: 'node -e "process.exit(0)"; node -e "console.log(\'NEEDLE-OK\')"',
+    expected: "NEEDLE-OK",
+    timeoutMs: 5000,
+  });
+  check(
+    "shell parity: real default runner executes ;-chained evidence and matches expected",
+    defaultRunner.matches === true,
   );
 }
 
@@ -359,6 +551,37 @@ async function installHarness(storeFile, evidenceGate, { stage = "plugin-mainten
       passStore.get("main") === "communication" &&
       storedChecklist?.[0]?.mainRerun?.matches === true &&
       storedChecklist?.[0]?.mainRerun?.command.includes("process.exit(0)"),
+  );
+}
+
+{
+  // B1: a failing main rerun must surface the tail (and runner metadata) in the
+  // model-visible rejection, not only on the internal gate result.
+  const STORE_DENY = join(TMP, "deny-tail.json");
+  const denyHarness = await installHarness(STORE_DENY, true);
+  const whaleDeny = denyHarness.registeredTools.get("whale_report");
+  const denyCommand = "node -e \"console.error('DENY-NEEDLE'); process.exit(3)\"";
+  const denyEntry = { ...VALID_ENTRY, id: "e-deny", command: denyCommand, expected: "DENY-NEEDLE" };
+  let denyError = null;
+  try {
+    await whaleDeny.execute(
+      { evidenceChecklist: [denyEntry], nextStage: "communication" },
+      { agent: denyHarness.agent, signal: new AbortController().signal },
+    );
+  } catch (error) {
+    denyError = error;
+  }
+  check(
+    "deny transparency: failing main rerun surfaces actualTail marker + content in the model-visible message",
+    denyError?.code === "evidence-main-rerun-failed" &&
+      typeof denyError?.message === "string" &&
+      denyError.message.includes("actualTail:") &&
+      denyError.message.includes("DENY-NEEDLE") &&
+      typeof denyError?.actualTail === "string" &&
+      denyError.actualTail.includes("DENY-NEEDLE") &&
+      denyError?.command === denyCommand &&
+      typeof denyError?.exitCode === "number" &&
+      typeof denyError?.runnerCode === "string",
   );
 }
 

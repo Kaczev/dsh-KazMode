@@ -239,6 +239,13 @@ Read this section with `read KazPlugins/ka-whale-workflow/README.md` only when t
 - `ka_sub_whale`: pass only a finalized planItemId; persona/task/assignedTools are bound from the plan; draft/missing/persona=main/unknown/tier-S delegations are rejected; after a successful start, end the turn and await the child's report/finished message (no pwsh sleep / no list_agents polling; list_agents/send_message are not wait primitives).
 - `plan_read`: main-only; reads current run summary, plan items, run files, work-log, run-level intentMap/evidenceChecklist; optional numeric runId reads a historical run; unknown runId → `plan-read-not-found`; legacy single-file mode reads the legacy store. Prefer over raw JSON reads.
 
+### Evidence/intent input contracts
+
+- `evidenceChecklist` entry (all required): `id`, `command`, `expected`, `actualTail`, `at` are non-empty strings; `kind` ∈ probe / test / build-lint / command / rendered / diff / audit; `status` ∈ met / unmet / waived. Optional `mainRerun` (or null) = `{ command: non-empty string, actualTail: string, matches: boolean }`. Unknown entry keys are ignored.
+- `intentMap` (all fields optional, unknown keys rejected): `goal`, `trueGoal`, `discriminatingSignal` strings; `inferredFrom`, `assumptions`, `acceptanceSignals` arrays of strings; `defects` array of `{ type: non-empty string, quote?, action? }` (known types: missing-acceptance / ambiguous-scope / contradictory / counter-intuitive / aesthetic-messy / incomplete — informational, not enforced); `confidence` ∈ high / medium / low; `requiresUserConfirmation` boolean; `normalized` array. A missing/blank `discriminatingSignal` is not a structure error: it forces `confidence: low` + `requiresUserConfirmation: true`.
+- Invalid payloads return **all** violations in one response (`issues: [{ path, problem, allowed? }]`) plus the machine-readable `schema`; codes stay `evidence-checklist-invalid` / `intent-map-invalid`. Valid payloads are unchanged.
+- Shell note: evidence commands run in the same shell as the `pwsh` tool; on Windows PowerShell 5.1 use `;` not `&&`; evidence reruns inherit the session sandbox (`dshEnv` / `sandboxPolicy`).
+
 ## 未做（留给后续世代）
 
 - B4 面板只读化由 34 世完成（见 `KazPlugins/kaz-mode/README.md`）。

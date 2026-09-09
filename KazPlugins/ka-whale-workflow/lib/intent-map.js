@@ -39,19 +39,68 @@ export const EVIDENCE_KINDS = Object.freeze([
 /** §3.2 evidence status 枚举。 */
 export const EVIDENCE_STATUSES = Object.freeze(["met", "unmet", "waived"]);
 
-/** Intent Map 顶层字段白名单（§8.1）。 */
-const INTENT_MAP_KEYS = new Set([
-  "goal",
-  "trueGoal",
-  "inferredFrom",
-  "defects",
-  "assumptions",
-  "confidence",
-  "requiresUserConfirmation",
-  "discriminatingSignal",
-  "acceptanceSignals",
-  "normalized",
-]);
+/** 机器可读 evidenceChecklist 契约（单一事实源：校验 / 工具提示 / 错误 schema 共用）。 */
+export const EVIDENCE_CHECKLIST_SCHEMA = Object.freeze({
+  code: "evidence-checklist-invalid",
+  root: "array of evidence entries",
+  entry: Object.freeze({
+    required: Object.freeze({
+      id: "non-empty string",
+      command: "non-empty string",
+      expected: "non-empty string",
+      actualTail: "non-empty string",
+      at: "non-empty string",
+      kind: Object.freeze({ enum: EVIDENCE_KINDS }),
+      status: Object.freeze({ enum: EVIDENCE_STATUSES }),
+    }),
+    optional: Object.freeze({
+      mainRerun: Object.freeze({
+        nullable: true,
+        required: Object.freeze({
+          command: "non-empty string",
+          actualTail: "string",
+          matches: "boolean",
+        }),
+      }),
+    }),
+    unknownEntryKeys: "ignored",
+  }),
+});
+
+/** 机器可读 intentMap 契约（单一事实源：校验 / 工具提示 / 错误 schema 共用）。 */
+export const INTENT_MAP_SCHEMA = Object.freeze({
+  code: "intent-map-invalid",
+  root: "object",
+  unknownKeys: "rejected",
+  properties: Object.freeze({
+    goal: "optional string",
+    trueGoal: "optional string",
+    inferredFrom: "optional array of strings",
+    defects: "optional array of { type: non-empty string, quote?: string, action?: string }",
+    assumptions: "optional array of strings",
+    confidence: Object.freeze({ optional: true, enum: INTENT_MAP_CONFIDENCES }),
+    requiresUserConfirmation: "optional boolean",
+    discriminatingSignal:
+      "optional string; missing/blank -> confidence low + requiresUserConfirmation true",
+    acceptanceSignals: "optional array of strings",
+    normalized: "optional array",
+  }),
+  knownDefectTypes: INTENT_DEFECT_TYPES,
+});
+
+/** whale_report.evidenceChecklist 参数的单行提示（由 schema 常量派生）。 */
+export const EVIDENCE_CHECKLIST_TOOL_HINT =
+  `{${Object.keys(EVIDENCE_CHECKLIST_SCHEMA.entry.required).join(", ")}}; ` +
+  `kind ${EVIDENCE_KINDS.join("/")}; status ${EVIDENCE_STATUSES.join("/")}; ` +
+  `mainRerun? {${Object.keys(EVIDENCE_CHECKLIST_SCHEMA.entry.optional.mainRerun.required).join(", ")}}; ` +
+  `invalid payloads return all issues + schema`;
+
+/** whale_report.intentMap 参数的单行提示（字段名由 schema 常量派生）。 */
+export const INTENT_MAP_TOOL_HINT =
+  `Optional Intent Map object (assess-complexity only): ${Object.keys(INTENT_MAP_SCHEMA.properties).join("/")}`;
+
+/** Intent Map 顶层字段白名单（§8.1；由 INTENT_MAP_SCHEMA 派生，单一事实源）。 */
+const INTENT_MAP_KEYS = new Set(Object.keys(INTENT_MAP_SCHEMA.properties));
 
 /** 归一化 string[]：只保留非空 string，去重、保序。 */
 function normalizeStringList(value) {
@@ -122,67 +171,112 @@ export function normalizeEvidenceChecklist(value) {
   return out;
 }
 
-/** 校验用户提交的 evidenceChecklist（§3.2 机器可校验形状）。 */
+/**
+ * 收集式校验失败结果：reason 与旧实现首条违规的单行文案完全一致，
+ * issues 按源码检查顺序给出全部违规，schema 为机器可读契约。
+ */
+function validationFailure(code, issues, summary) {
+  return {
+    ok: false,
+    code,
+    reason:
+      typeof summary === "string" && summary.length > 0
+        ? summary
+        : `${issues[0].path} ${issues[0].problem}`,
+    issueCount: issues.length,
+    issues,
+    schema: code === "intent-map-invalid" ? INTENT_MAP_SCHEMA : EVIDENCE_CHECKLIST_SCHEMA,
+  };
+}
+
+/** 校验用户提交的 evidenceChecklist（§3.2 机器可校验形状；一次返回全部违规）。 */
 export function validateEvidenceChecklistInput(value) {
-  const invalid = (reason) => ({ ok: false, code: "evidence-checklist-invalid", reason });
-  if (!Array.isArray(value)) return invalid("evidenceChecklist must be an array when present.");
+  const issues = [];
+  const add = (path, problem, allowed) => {
+    issues.push(
+      allowed === undefined ? { path, problem } : { path, problem, allowed: [...allowed] },
+    );
+  };
+  if (!Array.isArray(value)) {
+    add("evidenceChecklist", "must be an array when present.");
+    return validationFailure("evidence-checklist-invalid", issues);
+  }
   const requiredText = ["id", "command", "expected", "actualTail", "at"];
   for (let index = 0; index < value.length; index += 1) {
     const entry = value[index];
     const label = `evidenceChecklist[${index}]`;
     if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      return invalid(`${label} must be an object.`);
+      add(label, "must be an object.");
+      continue;
     }
     for (const key of requiredText) {
       if (typeof entry[key] !== "string" || entry[key].trim().length === 0) {
-        return invalid(`${label}.${key} must be a non-empty string.`);
+        add(`${label}.${key}`, "must be a non-empty string.");
       }
     }
     if (!EVIDENCE_KINDS.includes(entry.kind)) {
-      return invalid(`${label}.kind must be one of ${EVIDENCE_KINDS.join("/")}.`);
+      add(`${label}.kind`, `must be one of ${EVIDENCE_KINDS.join("/")}.`, EVIDENCE_KINDS);
     }
     if (!EVIDENCE_STATUSES.includes(entry.status)) {
-      return invalid(`${label}.status must be one of ${EVIDENCE_STATUSES.join("/")}.`);
+      add(`${label}.status`, `must be one of ${EVIDENCE_STATUSES.join("/")}.`, EVIDENCE_STATUSES);
     }
     if (entry.mainRerun !== undefined && entry.mainRerun !== null) {
       const rerun = entry.mainRerun;
       const rerunLabel = `${label}.mainRerun`;
       if (rerun === null || typeof rerun !== "object" || Array.isArray(rerun)) {
-        return invalid(`${rerunLabel} must be null or an object.`);
+        add(rerunLabel, "must be null or an object.");
+      } else {
+        if (typeof rerun.command !== "string" || rerun.command.trim().length === 0) {
+          add(`${rerunLabel}.command`, "must be a non-empty string.");
+        }
+        if (typeof rerun.actualTail !== "string") {
+          add(`${rerunLabel}.actualTail`, "must be a string.");
+        }
+        if (typeof rerun.matches !== "boolean") {
+          add(`${rerunLabel}.matches`, "must be a boolean.");
+        }
       }
-      if (typeof rerun.command !== "string" || rerun.command.trim().length === 0) {
-        return invalid(`${rerunLabel}.command must be a non-empty string.`);
-      }
-      if (typeof rerun.actualTail !== "string") return invalid(`${rerunLabel}.actualTail must be a string.`);
-      if (typeof rerun.matches !== "boolean") return invalid(`${rerunLabel}.matches must be a boolean.`);
     }
   }
+  if (issues.length > 0) return validationFailure("evidence-checklist-invalid", issues);
   return { ok: true };
 }
 
 /**
- * 校验用户提供的 intentMap（结构层）。missing discriminatingSignal 不算结构错；
- * 返回 { ok:false, code:"intent-map-invalid", reason } 或 { ok:true }。
+ * 校验用户提供的 intentMap（结构层；一次返回全部违规）。missing discriminatingSignal
+ * 不算结构错；返回 { ok:false, code:"intent-map-invalid", reason, issueCount, issues, schema }
+ * 或 { ok:true }。
  */
 export function validateIntentMapInput(raw) {
+  const issues = [];
+  let firstSummary = "";
+  const add = (path, problem, options = {}) => {
+    if (issues.length === 0) {
+      firstSummary =
+        typeof options.summary === "string" && options.summary.length > 0
+          ? options.summary
+          : `${path} ${problem}`;
+    }
+    issues.push(
+      options.allowed === undefined
+        ? { path, problem }
+        : { path, problem, allowed: [...options.allowed] },
+    );
+  };
   if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) {
-    return { ok: false, code: "intent-map-invalid", reason: "intentMap must be an object." };
+    add("intentMap", "must be an object.");
+    return validationFailure("intent-map-invalid", issues, firstSummary);
   }
   const unknownKeys = Object.keys(raw).filter((key) => !INTENT_MAP_KEYS.has(key));
   if (unknownKeys.length > 0) {
-    return {
-      ok: false,
-      code: "intent-map-invalid",
-      reason: `intentMap has unsupported keys: ${unknownKeys.join(", ")}.`,
-    };
+    const summary = `intentMap has unsupported keys: ${unknownKeys.join(", ")}.`;
+    for (const key of unknownKeys) {
+      add(`intentMap.${key}`, "is not a supported key.", { summary });
+    }
   }
   for (const key of ["goal", "trueGoal", "discriminatingSignal"]) {
     if (raw[key] !== undefined && raw[key] !== null && typeof raw[key] !== "string") {
-      return {
-        ok: false,
-        code: "intent-map-invalid",
-        reason: `intentMap.${key} must be a string when present.`,
-      };
+      add(`intentMap.${key}`, "must be a string when present.");
     }
   }
   for (const key of ["inferredFrom", "assumptions", "acceptanceSignals"]) {
@@ -191,20 +285,14 @@ export function validateIntentMapInput(raw) {
       raw[key] !== null &&
       (!Array.isArray(raw[key]) || raw[key].some((entry) => typeof entry !== "string"))
     ) {
-      return {
-        ok: false,
-        code: "intent-map-invalid",
-        reason: `intentMap.${key} must be an array of strings when present.`,
-      };
+      add(`intentMap.${key}`, "must be an array of strings when present.");
     }
   }
   if (raw.confidence !== undefined && raw.confidence !== null) {
     if (typeof raw.confidence !== "string" || !INTENT_MAP_CONFIDENCES.includes(raw.confidence)) {
-      return {
-        ok: false,
-        code: "intent-map-invalid",
-        reason: `intentMap.confidence must be one of ${INTENT_MAP_CONFIDENCES.join("/")}.`,
-      };
+      add("intentMap.confidence", `must be one of ${INTENT_MAP_CONFIDENCES.join("/")}.`, {
+        allowed: INTENT_MAP_CONFIDENCES,
+      });
     }
   }
   if (
@@ -212,40 +300,69 @@ export function validateIntentMapInput(raw) {
     raw.requiresUserConfirmation !== null &&
     typeof raw.requiresUserConfirmation !== "boolean"
   ) {
-    return {
-      ok: false,
-      code: "intent-map-invalid",
-      reason: "intentMap.requiresUserConfirmation must be a boolean when present.",
-    };
+    add("intentMap.requiresUserConfirmation", "must be a boolean when present.");
   }
   if (raw.defects !== undefined && raw.defects !== null) {
     if (!Array.isArray(raw.defects)) {
-      return { ok: false, code: "intent-map-invalid", reason: "intentMap.defects must be an array when present." };
-    }
-    for (const entry of raw.defects) {
-      if (
-        entry === null ||
-        typeof entry !== "object" ||
-        Array.isArray(entry) ||
-        typeof entry.type !== "string" ||
-        entry.type.trim().length === 0
-      ) {
-        return {
-          ok: false,
-          code: "intent-map-invalid",
-          reason: "intentMap.defects entries must be objects with a non-empty string type.",
-        };
+      add("intentMap.defects", "must be an array when present.");
+    } else {
+      for (let index = 0; index < raw.defects.length; index += 1) {
+        const entry = raw.defects[index];
+        if (
+          entry === null ||
+          typeof entry !== "object" ||
+          Array.isArray(entry) ||
+          typeof entry.type !== "string" ||
+          entry.type.trim().length === 0
+        ) {
+          add(`intentMap.defects[${index}]`, "must be an object with a non-empty string type.", {
+            summary: "intentMap.defects entries must be objects with a non-empty string type.",
+          });
+        }
       }
     }
   }
   if (raw.normalized !== undefined && raw.normalized !== null && !Array.isArray(raw.normalized)) {
-    return {
-      ok: false,
-      code: "intent-map-invalid",
-      reason: "intentMap.normalized must be an array when present.",
-    };
+    add("intentMap.normalized", "must be an array when present.");
   }
+  if (issues.length > 0) return validationFailure("intent-map-invalid", issues, firstSummary);
   return { ok: true };
+}
+
+/** 把校验失败结果格式化成模型可见的单条消息：首行单行摘要，随后全部 issues 与 schema。 */
+export function formatValidationFailure(result) {
+  const code =
+    result !== null &&
+    typeof result === "object" &&
+    typeof result.code === "string" &&
+    result.code.length > 0
+      ? result.code
+      : "invalid-input";
+  const reason =
+    result !== null && typeof result === "object" && typeof result.reason === "string"
+      ? result.reason
+      : "invalid input.";
+  const lines = [`${code}: ${reason}`];
+  const issues = result !== null && typeof result === "object" && Array.isArray(result.issues)
+    ? result.issues
+    : [];
+  if (issues.length > 0) {
+    lines.push("issues:");
+    for (const issue of issues) {
+      const path = typeof issue?.path === "string" ? issue.path : "?";
+      const problem = typeof issue?.problem === "string" ? issue.problem : "invalid.";
+      const allowed =
+        Array.isArray(issue?.allowed) && issue.allowed.length > 0
+          ? ` [allowed: ${issue.allowed.join("/")}]`
+          : "";
+      lines.push(`- ${path}: ${problem}${allowed}`);
+    }
+  }
+  if (result !== null && typeof result === "object" && result.schema !== undefined) {
+    lines.push("schema:");
+    lines.push(JSON.stringify(result.schema));
+  }
+  return lines.join("\n");
 }
 
 /**

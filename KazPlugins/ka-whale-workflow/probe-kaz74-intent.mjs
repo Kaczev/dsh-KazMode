@@ -11,6 +11,8 @@
 import plugin, { createStageStore } from "./lib/index.js";
 import { MAIN_ROLE, stageInjectionText } from "./lib/stage-defs.js";
 import {
+  formatValidationFailure,
+  validateEvidenceChecklistInput,
   validateIntentMapInput,
   normalizeIntentMap,
   runPromptDefectPass,
@@ -462,6 +464,181 @@ const signal = () => new AbortController().signal;
     !workingText.includes("true goal value must not be injected") &&
       !workingText.includes("literal goal value") &&
       !workingText.includes("trueGoal"),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑤ Machine-checked input contracts: ALL violations in one response.
+// ---------------------------------------------------------------------------
+{
+  const validEvidence = [
+    {
+      id: "e1",
+      kind: "probe",
+      command: "node p.mjs",
+      expected: "OK",
+      actualTail: "OK",
+      at: "2026-01-01T00:00:00.000Z",
+      status: "met",
+      mainRerun: { command: "node p.mjs", actualTail: "OK", matches: true },
+    },
+  ];
+  const okEvidence = validateEvidenceChecklistInput(validEvidence);
+  const badEntry = {
+    id: "",
+    command: 5,
+    expected: "",
+    actualTail: "",
+    at: "",
+    kind: "nope",
+    status: "bad",
+    mainRerun: { command: "", actualTail: 1, matches: "yes" },
+  };
+  const badEvidence = validateEvidenceChecklistInput([badEntry]);
+  const badIssues = Array.isArray(badEvidence.issues) ? badEvidence.issues : [];
+  check(
+    "evidenceChecklist with >=3 violations returns every issue in one response (path+problem each)",
+    okEvidence.ok === true &&
+      badEvidence.ok === false &&
+      badEvidence.code === "evidence-checklist-invalid" &&
+      badIssues.length >= 3 &&
+      badEvidence.issueCount === badIssues.length &&
+      badIssues.every(
+        (issue) =>
+          typeof issue.path === "string" &&
+          issue.path.length > 0 &&
+          typeof issue.problem === "string" &&
+          issue.problem.length > 0,
+      ) &&
+      typeof badEvidence.schema === "object" &&
+      badEvidence.schema !== null,
+  );
+  check(
+    "single-violation reason text is unchanged (legacy compatibility)",
+    validateEvidenceChecklistInput([{ ...validEvidence[0], kind: "nope" }]).reason ===
+      "evidenceChecklist[0].kind must be one of probe/test/build-lint/command/rendered/diff/audit." &&
+      validateIntentMapInput({ goal: "g", surprise: 1 }).reason ===
+        "intentMap has unsupported keys: surprise." &&
+      validateIntentMapInput({ defects: [{ type: "" }] }).reason ===
+        "intentMap.defects entries must be objects with a non-empty string type.",
+  );
+  const badIntent = validateIntentMapInput({
+    goal: 1,
+    confidence: "ultra",
+    requiresUserConfirmation: "yes",
+    defects: [{ type: "" }],
+    surprise: 1,
+  });
+  check(
+    "intentMap with >=3 violations returns every issue in one response (path+problem each)",
+    badIntent.ok === false &&
+      badIntent.code === "intent-map-invalid" &&
+      Array.isArray(badIntent.issues) &&
+      badIntent.issues.length >= 3 &&
+      badIntent.issueCount === badIntent.issues.length &&
+      badIntent.issues.every(
+        (issue) =>
+          typeof issue.path === "string" &&
+          issue.path.length > 0 &&
+          typeof issue.problem === "string" &&
+          issue.problem.length > 0,
+      ) &&
+      typeof badIntent.schema === "object" &&
+      badIntent.schema !== null,
+  );
+  const formatted = formatValidationFailure(badEvidence);
+  check(
+    "formatValidationFailure emits code+summary, every issue, and the machine-readable schema",
+    formatted.startsWith("evidence-checklist-invalid: ") &&
+      badIssues.every((issue) => formatted.includes(`${issue.path}: ${issue.problem}`)) &&
+      formatted.includes("issues:") &&
+      formatted.includes("schema:") &&
+      formatted.includes('"code":"evidence-checklist-invalid"'),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ⑥ Live whale_report: one rejection carries all issues + schema (both entry paths).
+// ---------------------------------------------------------------------------
+{
+  const contractAgent = mainAgentOf();
+  const expectedPaths = [
+    "evidenceChecklist[0].id",
+    "evidenceChecklist[0].kind",
+    "evidenceChecklist[0].status",
+  ];
+  const liveBadEntry = {
+    id: "",
+    command: "",
+    expected: "",
+    actualTail: "",
+    at: "",
+    kind: "nope",
+    status: "bad",
+  };
+
+  const LIVE_CONTRACT_STORE = join(TMP, "live-contract.json");
+  const seedContract = createStageStore(LIVE_CONTRACT_STORE);
+  seedContract.set("main", "assess-complexity");
+  seedContract.beginWorkflowRun("main");
+  const hc = makeBase({ tierFastLane: false });
+  await plugin.apply(hc.base, {
+    stageStore: LIVE_CONTRACT_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: false,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const whaleContract = hc.registeredTools.get("whale_report");
+  let topLevelError = null;
+  try {
+    await whaleContract.execute(
+      { evidenceChecklist: [liveBadEntry] },
+      { agent: contractAgent, signal: signal() },
+    );
+  } catch (error) {
+    topLevelError = error;
+  }
+  check(
+    "live whale_report evidenceChecklist rejection carries every issue path + schema in one message",
+    topLevelError?.code === "evidence-checklist-invalid" &&
+      expectedPaths.every((path) => topLevelError?.message?.includes(path)) &&
+      topLevelError?.message?.includes("issues:") &&
+      topLevelError?.message?.includes("schema:") &&
+      stageFromFile(LIVE_CONTRACT_STORE, "main") === "assess-complexity",
+  );
+
+  const LIVE_WRITE_STORE = join(TMP, "live-write-contract.json");
+  const seedWrite = createStageStore(LIVE_WRITE_STORE);
+  seedWrite.set("main", "write-plan");
+  seedWrite.beginWorkflowRun("main");
+  const hw = makeBase({ tierFastLane: false });
+  await plugin.apply(hw.base, {
+    stageStore: LIVE_WRITE_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: false,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const whaleWrite = hw.registeredTools.get("whale_report");
+  let writeError = null;
+  try {
+    await whaleWrite.execute(
+      {
+        finalPlanPayload: {
+          status: "finalized",
+          evidenceChecklist: [liveBadEntry],
+          items: [{ planItemId: "p1", persona: "worker", task: "t" }],
+        },
+      },
+      { agent: contractAgent, signal: signal() },
+    );
+  } catch (error) {
+    writeError = error;
+  }
+  check(
+    "write-plan plan-item-invalid reasons carry every issue path + schema",
+    writeError?.code === "plan-item-invalid" &&
+      expectedPaths.every((path) => writeError?.message?.includes(path)) &&
+      writeError?.message?.includes("schema:"),
   );
 }
 

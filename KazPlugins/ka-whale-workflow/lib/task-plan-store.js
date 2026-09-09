@@ -21,6 +21,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
+  formatValidationFailure,
   normalizeEvidenceChecklist,
   normalizeIntentMap,
   runPromptDefectPass,
@@ -134,7 +135,7 @@ export function validateFinalPlanPayload(payload) {
           {
             planItemId: null,
             code: intentCheck.code,
-            reason: intentCheck.reason,
+            reason: formatValidationFailure(intentCheck),
           },
         ],
       };
@@ -150,7 +151,7 @@ export function validateFinalPlanPayload(payload) {
           {
             planItemId: null,
             code: evidenceCheck.code,
-            reason: evidenceCheck.reason,
+            reason: formatValidationFailure(evidenceCheck),
           },
         ],
       };

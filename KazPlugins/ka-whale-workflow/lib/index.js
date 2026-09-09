@@ -119,6 +119,9 @@ import {
   PROVISIONAL_S_TIER_BUDGET,
 } from "./tier.js";
 import {
+  EVIDENCE_CHECKLIST_TOOL_HINT,
+  INTENT_MAP_TOOL_HINT,
+  formatValidationFailure,
   normalizeEvidenceChecklist,
   normalizeIntentMap,
   runPromptDefectPass,
@@ -126,6 +129,7 @@ import {
   validateIntentMapInput,
 } from "./intent-map.js";
 import {
+  buildEvidenceShellRequest,
   evaluateEvidenceGate,
   normalizeNotVerifiedList,
   runMainRerunOnce,
@@ -1719,11 +1723,59 @@ export default {
       }
       const chosen = candidates[0];
       const cwd = cwdOfAgent(agent);
+      // Lazy per-call acquisition: the shell service is only requested when the
+      // live gate actually reruns, so apply-time absence is harmless.
+      const shellService =
+        typeof ctx?.get === "function" ? ctx.get("shell") : undefined;
+      const shellEnvService =
+        typeof ctx?.get === "function" ? ctx.get("shellEnv") : undefined;
+      const sandboxPolicyService =
+        typeof ctx?.get === "function" ? ctx.get("sandboxPolicy") : undefined;
+      let runShell;
+      if (
+        shellService !== undefined &&
+        shellService !== null &&
+        typeof shellService.resolve === "function" &&
+        typeof shellService.run === "function"
+      ) {
+        runShell = async (request) => {
+          const dshEnv =
+            typeof shellEnvService?.collect === "function"
+              ? shellEnvService.collect({ agent })
+              : undefined;
+          const sandboxPolicy =
+            typeof sandboxPolicyService?.resolve === "function"
+              ? sandboxPolicyService.resolve(
+                  agent?.session === undefined || agent.session === null
+                    ? {}
+                    : { session: agent.session },
+                )
+              : undefined;
+          const spec = shellService.resolve(
+            buildEvidenceShellRequest({
+              command: request.command,
+              workdir: request.workdir,
+              timeoutMs: request.timeoutMs,
+              ...(dshEnv === undefined ? {} : { dshEnv }),
+              ...(sandboxPolicy === undefined ? {} : { sandboxPolicy }),
+            }),
+          );
+          const result = await shellService.run(spec);
+          return {
+            exitCode:
+              typeof result?.exitCode === "number" ? result.exitCode : null,
+            stdout: { text: result?.stdout?.text ?? "" },
+            stderr: { text: result?.stderr?.text ?? "" },
+            timedOut: result?.timedOut === true,
+          };
+        };
+      }
       const rerun = await runMainRerunOnce({
         command: chosen.command,
         expected: chosen.expected,
         cwd,
         timeoutMs: MAIN_RERUN_TIMEOUT_MS,
+        ...(runShell === undefined ? {} : { runShell }),
       });
       const updated = normalizeEvidenceChecklist(
         checklist.map((entry) => {
@@ -1743,11 +1795,20 @@ export default {
       if (rerun.matches === true) {
         return { ok: true, reason: `main reran evidence "${chosen.command}" and matches=true.` };
       }
+      const timedOut = rerun.code === "evidence-timeout";
       return {
         ok: false,
-        code: rerun.code === "evidence-timeout" ? "evidence-timeout" : "evidence-main-rerun-failed",
-        reason: `main rerun of "${chosen.command}" did not match (${rerun.code ?? "failed"}); no automatic retry.`,
-        runnerCode: rerun.code,
+        code: timedOut ? "evidence-timeout" : "evidence-main-rerun-failed",
+        reason:
+          rerun.reason && typeof rerun.reason === "string"
+            ? rerun.reason
+            : timedOut
+              ? "main evidence rerun timed out; no automatic retry."
+              : "main evidence rerun did not match; no automatic retry.",
+        actualTail: typeof rerun.actualTail === "string" ? rerun.actualTail : "",
+        command: chosen.command,
+        exitCode: typeof rerun.exitCode === "number" ? rerun.exitCode : null,
+        runnerCode: rerun.code ?? null,
       };
     }
 
@@ -2610,14 +2671,12 @@ Before we answer, call memory_search or context_search exactly once. After that 
         },
         intentMap: {
           type: "json",
-          description:
-            "Optional Intent Map object (assess-complexity only): goal/trueGoal/inferredFrom/defects/assumptions/confidence/requiresUserConfirmation/discriminatingSignal/acceptanceSignals.",
+          description: INTENT_MAP_TOOL_HINT,
         },
         evidenceChecklist: {
           type: "array",
           items: { type: "json" },
-          description:
-            "Optional run evidenceChecklist update (§3.2 entries; main stages).",
+          description: EVIDENCE_CHECKLIST_TOOL_HINT,
         },
         notVerified: {
           type: "array",
@@ -2712,9 +2771,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           }
           const intentCheck = validateIntentMapInput(rawIntentMap);
           if (intentCheck.ok !== true) {
-            const error = new Error(
-              `intent-map-invalid: ${intentCheck.reason}`,
-            );
+            const error = new Error(formatValidationFailure(intentCheck));
             error.code = intentCheck.code;
             return Promise.reject(error);
           }
@@ -2803,7 +2860,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         if (hasEvidenceChecklist && !(current === "write-plan" && finalPayloadCarriesEvidence)) {
           const evidenceCheck = validateEvidenceChecklistInput(args.evidenceChecklist);
           if (evidenceCheck.ok !== true) {
-            const error = new Error(`evidence-checklist-invalid: ${evidenceCheck.reason}`);
+            const error = new Error(formatValidationFailure(evidenceCheck));
             error.code = evidenceCheck.code;
             return Promise.reject(error);
           }
@@ -2978,9 +3035,16 @@ Before we answer, call memory_search or context_search exactly once. After that 
             const gateResult = await enforceEvidenceGateOnCommunication(agent);
             if (gateResult.ok !== true) {
               const error = new Error(
-                `delivery-gate-deny: whale_report cannot advance to communication because ${gateResult.reason}`,
+                `delivery-gate-deny: whale_report cannot advance to communication because ${gateResult.reason}` +
+                  (typeof gateResult.actualTail === "string" && gateResult.actualTail.length > 0
+                    ? `\nactualTail:\n${gateResult.actualTail}`
+                    : ""),
               );
               error.code = gateResult.code;
+              if (gateResult.actualTail !== undefined) error.actualTail = gateResult.actualTail;
+              if (gateResult.command !== undefined) error.command = gateResult.command;
+              if (gateResult.exitCode !== undefined) error.exitCode = gateResult.exitCode;
+              if (gateResult.runnerCode !== undefined) error.runnerCode = gateResult.runnerCode;
               return Promise.reject(error);
             }
             appendMainCommunicationWorkLog(agent, normalizeNotVerifiedList(args?.notVerified));
