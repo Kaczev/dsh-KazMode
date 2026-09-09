@@ -1,8 +1,10 @@
-// ka-whale-workflow —— 7.4 P0 cost meter（纯 ESM，只存聚合计数，不存正文）
+// ka-whale-workflow —— 7.4 P0/P8 cost meter（纯 ESM，只存聚合计数，不存正文）
 // ===========================================================================
 // 存储（§7.2/§7.3）：
 //   DSH_HOME/storages/ka-whale-workflow/cost-meter/<sessionId>-<runId>.json
 //   - schema version 随文件走；旧文件缺字段按 0 计；
+//   - v2：turns 为 run-local；turnsCumulative 保留会话累计轮；
+//     turnBaseline 随 meter 文件自描述（runId=0 无 run，turns 恒 0）；
 //   - 按 run 聚合、追加式合并写；失败只 warn，不影响主流程；
 //   - aggregate-only：只存 sessionId/runId/计数/长度/派生值，绝不存
 //     content / prompt / memory / report 正文。
@@ -13,8 +15,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
-/** cost-meter 文件 schema version（v1：P0 五类计数器 + 派生字段）。 */
-export const COST_METER_SCHEMA_VERSION = 1;
+/** cost-meter 文件 schema version（v2：turns=run-local + turnsCumulative + turnBaseline）。 */
+export const COST_METER_SCHEMA_VERSION = 2;
 
 /** 默认 cost-meter 根目录：DSH_HOME/storages/ka-whale-workflow/cost-meter。 */
 export function defaultCostMeterDirectory() {
@@ -45,7 +47,7 @@ function safeRunId(value, fallback = 0) {
   return Number.isSafeInteger(runId) && runId > 0 ? runId : fallback;
 }
 
-/** 空 meter 记录（所有字段显式零值）。 */
+/** 空 meter 记录（所有字段显式零值；turnBaseline 0 = 尚未注入基线时也会被归一化）。 */
 export function emptyCostMeter(sessionId = "", runId = 0) {
   return {
     version: COST_METER_SCHEMA_VERSION,
@@ -53,6 +55,8 @@ export function emptyCostMeter(sessionId = "", runId = 0) {
     runId: safeRunId(runId),
     modelRequests: 0,
     turns: 0,
+    turnsCumulative: 0,
+    turnBaseline: 0,
     injectedChars: 0,
     reportChars: 0,
     gatePassRate: 0,
@@ -64,6 +68,7 @@ export function emptyCostMeter(sessionId = "", runId = 0) {
  * 归一化任意旧/新 meter 原始对象：
  * - schema version 缺失/非法时按当前版本读取；
  * - 缺失字段一律按 0 计（§7.2）；
+ * - v1 兼容：turns 原样读取；turnsCumulative/turnBaseline 缺失 → 0；
  * - 未知字段（含任何正文/内容键）不保留。
  */
 export function normalizeCostMeter(raw, sessionId = "", runId = 0) {
@@ -85,6 +90,8 @@ export function normalizeCostMeter(raw, sessionId = "", runId = 0) {
     runId: safeRunId(source.runId, runId),
     modelRequests: nonNegativeNumber(source.modelRequests, true),
     turns: nonNegativeNumber(source.turns, true),
+    turnsCumulative: nonNegativeNumber(source.turnsCumulative, true),
+    turnBaseline: nonNegativeNumber(source.turnBaseline, true),
     injectedChars: nonNegativeNumber(source.injectedChars, true),
     reportChars: nonNegativeNumber(source.reportChars, true),
     gatePassRate: nonNegativeNumber(source.gatePassRate),
@@ -95,8 +102,8 @@ export function normalizeCostMeter(raw, sessionId = "", runId = 0) {
 /**
  * 派生字段（compute only，P0 不参与任何 gate）：
  * - gatePassRate = gatePasses / gateTotal（P3 前无分母 → 0）；
- * - costPerDeliveredItem = (modelRequests + injectedChars + reportChars)
- *   / deliveredItems（P0 无交付计数 → 0）。
+ * - costPerDeliveredItem = (modelRequests + injectedChars + reportChars + turns)
+ *   / deliveredItems（P0 无交付计数 → 0；turns 用 run-local，不用 turnsCumulative）。
  * 返回归一化新对象，不修改入参。
  */
 export function deriveCostMeter(meter, context = {}) {
@@ -105,11 +112,12 @@ export function deriveCostMeter(meter, context = {}) {
   const gatePasses = nonNegativeNumber(context?.gatePasses ?? normalized.gatePasses ?? 0);
   const deliveredItems = nonNegativeNumber(context?.deliveredItems ?? normalized.deliveredItems ?? 0);
   const gatePassRate = gateTotal > 0 ? Math.min(1, gatePasses / gateTotal) : 0;
-  const costPerDeliveredItem =
-    deliveredItems > 0
-      ? (normalized.modelRequests + normalized.injectedChars + normalized.reportChars) /
-        deliveredItems
-      : 0;
+  const workInput =
+    normalized.modelRequests +
+    normalized.injectedChars +
+    normalized.reportChars +
+    normalized.turns;
+  const costPerDeliveredItem = deliveredItems > 0 ? workInput / deliveredItems : 0;
   return {
     ...normalized,
     gatePassRate,
@@ -129,28 +137,33 @@ export function readCostMeterFile(file) {
   }
 }
 
-/** 把聚合记录写入文件（best-effort；失败抛给调用方按 warn 处理）。 */
+/** 把聚合记录写入文件（best-effort；失败抛给调用方按 warn 处理）。
+ *  turnBaseline 只在已显式初始化（__turnBaselineExplicit）或 >0 时写出：
+ *  runId>0 尚未有用户轮的文件不写 0，避免把“未注入基线”误读成“基线=0”。 */
 export function writeCostMeterFile(file, meter) {
   try {
     mkdirSync(dirname(file), { recursive: true });
     const derived = deriveCostMeter(meter);
+    const explicitBaseline =
+      meter !== null && typeof meter === "object" && meter.__turnBaselineExplicit === true;
+    const includeTurnBaseline =
+      derived.turnBaseline > 0 || explicitBaseline || derived.runId <= 0;
+    const output = {
+      version: derived.version,
+      sessionId: derived.sessionId,
+      runId: derived.runId,
+      modelRequests: derived.modelRequests,
+      turns: derived.turns,
+      turnsCumulative: derived.turnsCumulative,
+      injectedChars: derived.injectedChars,
+      reportChars: derived.reportChars,
+      gatePassRate: derived.gatePassRate,
+      costPerDeliveredItem: derived.costPerDeliveredItem,
+    };
+    if (includeTurnBaseline) output.turnBaseline = derived.turnBaseline;
     writeFileSync(
       file,
-      JSON.stringify(
-        {
-          version: derived.version,
-          sessionId: derived.sessionId,
-          runId: derived.runId,
-          modelRequests: derived.modelRequests,
-          turns: derived.turns,
-          injectedChars: derived.injectedChars,
-          reportChars: derived.reportChars,
-          gatePassRate: derived.gatePassRate,
-          costPerDeliveredItem: derived.costPerDeliveredItem,
-        },
-        null,
-        2,
-      ) + String.fromCharCode(10),
+      JSON.stringify(output, null, 2) + String.fromCharCode(10),
       "utf8",
     );
     return true;
@@ -162,7 +175,9 @@ export function writeCostMeterFile(file, meter) {
 /**
  * 进程内 cost meter writer。
  * - recordAdd：计数增量（模型 request、注入 chars、report chars）；
- * - recordMax：取最大值（turns 镜像——每个用户轮只在 meter 里存一次最大值）；
+ * - recordSet：绝对赋值（run-local turns 用；runId=0 的 turns 恒 0）；
+ * - recordMax：取最大值（turnsCumulative 镜像——每个用户轮只存最大累计）；
+ * - setTurnBaseline / hasTurnBaseline：runId>0 的 run-local 基线（自描述于文件）；
  * - flush：立即落全部脏 key；writer 卸载前由插件 effect 调用。
  * 所有磁盘错误由 writer 捕获并交给 logger.warn；绝不向调用方抛。
  */
@@ -194,6 +209,12 @@ export function createCostMeterWriter({ directory, logger, debounceMs = 250 } = 
       const file = costMeterFileFor(dir, sessionId, runId);
       const raw = readCostMeterFile(file);
       record = normalizeCostMeter(raw, sessionId, runId);
+      // 内部存在标记（不落盘）：raw 显式带 turnBaseline（含 0）才算基线已初始化。
+      record.__turnBaselineExplicit =
+        raw !== null &&
+        typeof raw === "object" &&
+        !Array.isArray(raw) &&
+        Object.prototype.hasOwnProperty.call(raw, "turnBaseline");
       meters.set(key, record);
     }
     return { key, record };
@@ -247,7 +268,34 @@ export function createCostMeterWriter({ directory, logger, debounceMs = 250 } = 
       schedule(key);
       return true;
     },
-    /** 取最大值合并（turns 用）。 */
+    /** 绝对赋值合并（run-local turns / runId=0 turns 用；不用于派生字段）。 */
+    recordSet(sessionId, runId, patch) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const { key, record } = ensureRecord(sessionId, runId);
+      for (const [field, value] of Object.entries(patch ?? {})) {
+        if (!(field in record)) continue;
+        if (field === "gatePassRate" || field === "costPerDeliveredItem") continue;
+        record[field] = Math.floor(nonNegativeNumber(value));
+      }
+      schedule(key);
+      return true;
+    },
+    /** run-local 基线已显式初始化？（0 是合法首轮基线，必须靠文件字段存在与否区分。） */
+    hasTurnBaseline(sessionId, runId) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const { record } = ensureRecord(sessionId, runId);
+      return record.__turnBaselineExplicit === true;
+    },
+    /** 设置 run-local 基线（runId>0；首次用户轮 N → max(0, N-1)），随文件自描述。 */
+    setTurnBaseline(sessionId, runId, value) {
+      if (typeof sessionId !== "string" || sessionId.length === 0) return false;
+      const { key, record } = ensureRecord(sessionId, runId);
+      record.turnBaseline = Math.floor(nonNegativeNumber(value));
+      record.__turnBaselineExplicit = true;
+      schedule(key);
+      return true;
+    },
+    /** 取最大值合并（turnsCumulative 用）。 */
     recordMax(sessionId, runId, patch) {
       if (typeof sessionId !== "string" || sessionId.length === 0) return false;
       const { key, record } = ensureRecord(sessionId, runId);

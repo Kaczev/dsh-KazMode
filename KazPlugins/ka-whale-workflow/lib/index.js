@@ -1628,15 +1628,69 @@ export default {
       const run = activeWorkflowRunForAgent(agent);
       return { sessionId, runId: run === null ? 0 : run.runId };
     }
+    /** 非负整数轮次；非法/缺失返回 0。 */
+    function normalizedUserTurn(value) {
+      const number = Number(value);
+      return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+    }
+    /** run 开始（进入 assess-complexity / 首个用户轮）时注入 run-local 基线。
+     *  runId>0 的用户轮 N → baseline=max(0, N-1)；首轮 N=1 → 0。
+     *  基线自描述地存进 v2 meter 文件（不在 stage-store run record 上）。 */
+    function seedCostMeterRunBaselineForAgent(agent, turnHint) {
+      const key = costMeterKeyFor(agent);
+      if (key === null || key.runId <= 0) return false;
+      if (costMeter.hasTurnBaseline(key.sessionId, key.runId)) return true;
+      const cumulativeTurn = normalizedUserTurn(
+        turnHint !== undefined && turnHint !== null
+          ? turnHint
+          : currentTurnOf(agent),
+      );
+      if (cumulativeTurn <= 0) return false;
+      return costMeter.setTurnBaseline(key.sessionId, key.runId, Math.max(0, cumulativeTurn - 1));
+    }
     function recordCostMeterAdd(agent, patch) {
       const key = costMeterKeyFor(agent);
       if (key === null) return false;
       return costMeter.recordAdd(key.sessionId, key.runId, patch);
     }
+    /**
+     * P8 语义：meter.turns 是 run-local 轮次，turnsCumulative 保留会话累计。
+     * - runId>0：首次见用户轮时若无基线，做保守 legacy 播种
+     *   baseline = min(max(0, turn-1), 既有 v1/v2 cumulative 值)；
+     *   然后写 turns = max(0, turn - baseline)。
+     * - runId=0（child / no-run）：v2 写 turns=0、turnsCumulative=累计轮，
+     *   文档语义“no run → no run-local turn count; cumulative retained”。
+     *   v1 runId=0 文件读盘时 turns 保持 as-is；新写入后 turns 归 0。
+     */
     function recordCostMeterTurn(agent, turn) {
       const key = costMeterKeyFor(agent);
       if (key === null) return false;
-      return costMeter.recordMax(key.sessionId, key.runId, { turns: turn });
+      const cumulativeTurn = normalizedUserTurn(turn);
+      if (cumulativeTurn <= 0) return false;
+      if (key.runId <= 0) {
+        costMeter.recordSet(key.sessionId, key.runId, { turns: 0 });
+        return costMeter.recordMax(key.sessionId, key.runId, { turnsCumulative: cumulativeTurn });
+      }
+      let baseline = null;
+      if (costMeter.hasTurnBaseline(key.sessionId, key.runId)) {
+        baseline = costMeter.read(key.sessionId, key.runId).turnBaseline;
+      } else {
+        const existing = costMeter.read(key.sessionId, key.runId);
+        // v1 没有 turnsCumulative：旧 turns 字段按 as-is 兼容，作为 legacy cumulative 上限。
+        const existingCumulative =
+          existing.version >= 2 ? existing.turnsCumulative : existing.turns;
+        const currentMinusOne = Math.max(0, cumulativeTurn - 1);
+        // 保守播种：只重建到既有 cumulative 偏移允许的范围，绝不把未知旧量当 0。
+        const seeded = existingCumulative > 0
+          ? Math.min(currentMinusOne, existingCumulative)
+          : currentMinusOne;
+        costMeter.setTurnBaseline(key.sessionId, key.runId, seeded);
+        baseline = seeded;
+      }
+      const localTurns = Math.max(0, cumulativeTurn - baseline);
+      costMeter.recordSet(key.sessionId, key.runId, { turns: localTurns });
+      costMeter.recordMax(key.sessionId, key.runId, { turnsCumulative: cumulativeTurn });
+      return true;
     }
 
     /**
@@ -1790,8 +1844,10 @@ export default {
     }
     /** 推进鲸鱼工作流阶段（写 JSON 存储；不再 append 会话事件）。
      *  v0.9：进入 assess-complexity = 新 workflow-run 开始，清除旧契约状态，
-     *  并记录该 run 的已进入 stage（pending injection 一次）。 */
-    function setStageAgent(agent, stage) {
+     *  并记录该 run 的已进入 stage（pending injection 一次）。
+     *  @param {number} [turnHint] 可选：调用方已知的用户轮（inbox/claimed 等），
+     *  用于 run 开始即注入 meter turnBaseline（N-1），避免依赖事件扫描。 */
+    function setStageAgent(agent, stage, turnHint) {
       const changed = setStage(agent, stage, stageStore);
       if (changed !== true) return changed;
       const sessionId = sessionIdOf(agent);
@@ -1799,6 +1855,7 @@ export default {
         if (stage === "assess-complexity") {
           stageStore.removeContractState(sessionId);
           stageStore.beginWorkflowRun(sessionId);
+          seedCostMeterRunBaselineForAgent(agent, turnHint);
         }
         if (V09_STAGE_IDS.includes(stage)) {
           stageStore.setPendingStageInjection(sessionId, stage);
@@ -3795,7 +3852,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
       // 历史 goal-active/working-resumed 旧值才重新进入 assess-complexity（36.5；Goal 已移除）。
       if (typeof turn === "number" && turn >= 2) {
         const next = nextStageOnUserMessage(current, turn);
-        if (setStageAgent(agent, next)) {
+        if (setStageAgent(agent, next, turn)) {
           reportRoundDisplay(
             agent,
             next === "assess-complexity"
@@ -3812,7 +3869,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
         pendingStart.add(sessionId);
         return;
       }
-      if (setStageAgent(agent, "assess-complexity")) {
+      if (setStageAgent(agent, "assess-complexity", turn)) {
         reportRoundDisplay(agent, "进入 assess-complexity。", "阶段切换");
       }
     });
@@ -3940,7 +3997,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
           if (hasRealUserMessage) {
             if (turn >= 2) {
               const next = nextStageOnUserMessage(stage, turn);
-              if (setStageAgent(agent, next)) {
+              if (setStageAgent(agent, next, turn)) {
                 reportRoundDisplay(
                   agent,
                   next === "assess-complexity"
@@ -3950,7 +4007,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
                 );
               }
             } else if (stage === "idle" && !isMinimal(agent)) {
-              if (setStageAgent(agent, "assess-complexity")) {
+              if (setStageAgent(agent, "assess-complexity", turn)) {
                 reportRoundDisplay(
                   agent,
                   "进入 assess-complexity（pre-step 兜底）。",
@@ -3959,7 +4016,7 @@ Before we answer, call memory_search or context_search exactly once. After that 
               }
             }
           } else if (turn < 2 && stage === "idle" && !isMinimal(agent) && hasToolCall(agent)) {
-            if (setStageAgent(agent, "assess-complexity")) {
+            if (setStageAgent(agent, "assess-complexity", turn)) {
               reportRoundDisplay(
                 agent,
                 "首阶段 Minimal 已解除，进入 assess-complexity（pre-step 兜底）。",

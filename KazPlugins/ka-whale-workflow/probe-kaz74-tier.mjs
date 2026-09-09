@@ -42,6 +42,7 @@ const TIER_STORE = join(TMP, "tier.json");
 const LIVE_STORE = join(TMP, "live.json");
 const MISJUDGE_STORE = join(TMP, "misjudge.json");
 const BUDGET_STORE = join(TMP, "budget.json");
+const LOCAL_TURN_STORE = join(TMP, "local-turn.json");
 const ENTRY_STORE = join(TMP, "entry.json");
 const OFF_STORE = join(TMP, "off.json");
 const RESET_STORE = join(TMP, "reset.json");
@@ -199,6 +200,17 @@ const mainAgentOf = () => agentOf("main");
       tierBudgetExceeded({ modelRequests: 2, turns: 1 }, { modelRequests: 2, turns: 9 }) === true &&
       tierBudgetExceeded({ modelRequests: 1, turns: 9 }, { modelRequests: 2, turns: 9 }) === true &&
       tierBudgetExceeded({ modelRequests: 1, turns: 8 }, { modelRequests: 2, turns: 9 }) === false,
+  );
+  check(
+    "P8 regression: large cumulative turns must not trip the run-local turn budget",
+    tierBudgetExceeded(
+      { modelRequests: 1, turns: 2, turnsCumulative: 87, turnBaseline: 85 },
+      { modelRequests: 100, turns: 12 },
+    ) === false &&
+      tierBudgetExceeded(
+        { modelRequests: 1, turns: 12, turnsCumulative: 87, turnBaseline: 75 },
+        { modelRequests: 100, turns: 12 },
+      ) === true,
   );
   const assessStatic = stageDefinitionFor(MAIN_ROLE, "assess-complexity")?.canAdvance;
   const workingStatic = stageDefinitionFor(MAIN_ROLE, "working")?.canAdvance;
@@ -541,6 +553,58 @@ const mainAgentOf = () => agentOf("main");
   check(
     "budget-exceeded upgrade is irreversible within the run",
     downgradeDenied?.ok === false && downgradeDenied?.code === "tier-downgrade-denied",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ④b P8 regression: session cumulative turns far above budget must not
+// auto-upgrade an S run while the run-local turn count is under budget.
+// ---------------------------------------------------------------------------
+{
+  const sessionId = "local-turn-main";
+  const seedStore = createStageStore(LOCAL_TURN_STORE);
+  seedStore.set(sessionId, "assess-complexity");
+  seedStore.beginWorkflowRun(sessionId);
+  const { base, listeners, registeredTools, provided } = makeBase({ tierFastLane: true });
+  await plugin.apply(base, {
+    stageStore: LOCAL_TURN_STORE,
+    projectRoot: RUN_DIR,
+    tierFastLane: true,
+    sTierBudget: { modelRequests: 100, turns: 12 },
+    costMeterDirectory: join(TMP, "meter-local-turn"),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  const whale = registeredTools.get("whale_report");
+  const workflow = provided["kaWhaleWorkflow"];
+  const agent = agentOf(sessionId);
+  const signal = () => new AbortController().signal;
+  const advanceS = await whale.execute(
+    {
+      tier: "S",
+      tierReason: "single file; probe passes",
+      tierSignals: ["single-file", "no-risk-word", "existing-probe", "probe-pass"],
+      nextStage: "working",
+    },
+    { agent, signal: signal() },
+  );
+  const preStep = listeners.get("agent/pre-step")?.[0];
+  // One real user message at cumulative turn 87: run-local turn 1, cumulative 87.
+  await preStep(
+    { agent, messages: [{ content: [{ type: "text", text: "run-local first turn" }] }], turn: 87 },
+    async () => ({ kind: "enter", messages: [] }),
+  );
+  workflow.costMeter.flush();
+  const meter = workflow.costMeter.read(sessionId, 1);
+  const afterDisk = createStageStore(LOCAL_TURN_STORE);
+  const afterTier = afterDisk.getWorkflowRunTier(sessionId);
+  check(
+    "P8 regression: cumulative turn 87 with run-local turn 1 does NOT auto-upgrade S by turn budget",
+    advanceS?.ok === true &&
+      advanceS?.stage === "working" &&
+      meter.turns === 1 &&
+      meter.turnsCumulative === 87 &&
+      afterTier?.tier === "S" &&
+      afterTier?.upgradeHistory?.length === 0,
   );
 }
 

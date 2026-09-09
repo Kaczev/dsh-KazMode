@@ -1,9 +1,11 @@
-// ka-whale-workflow 7.4 P0 cost meter 探针：
+// ka-whale-workflow 7.4 P0/P8 cost meter 探针：
 //   - meter 文件 schema/fields + aggregate-only（无正文键）；
 //   - agent/pre-step 每 request +1；
-//   - turns 从真实用户消息轮镜像（max）；
-//   - stage 注入 injectedChars；
-//   - terminal report 经 work-log 追加点计 reportChars；
+//   - P8 v2：turns=run-local、turnsCumulative=会话累计、turnBaseline 自描述；
+//   - runId=0（child/no-run）v2 语义：turns=0、turnsCumulative 保留；
+//   - v1 可读：turns as-is，turnsCumulative/turnBaseline 缺失 → 0；
+//   - costPerDeliveredItem 用 run-local turns；
+//   - stage 注入 injectedChars；terminal report 经 work-log 追加点计 reportChars；
 //   - schema version / 旧文件缺字段按 0 / 失败只 warn。
 // 运行：node KazPlugins/ka-whale-workflow/probe-kaz74-meter.mjs
 import plugin, { createStageStore } from "./lib/index.js";
@@ -12,6 +14,7 @@ import {
   defaultCostMeterDirectory,
   createCostMeterWriter,
   normalizeCostMeter,
+  deriveCostMeter,
   COST_METER_SCHEMA_VERSION,
 } from "./lib/cost-meter.js";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -153,6 +156,54 @@ check(
   );
 }
 {
+  const v1 = normalizeCostMeter(
+    {
+      version: 1,
+      sessionId: "v1-session",
+      runId: 3,
+      modelRequests: 5,
+      turns: 87,
+      injectedChars: 11,
+      reportChars: 6,
+    },
+    "v1-session",
+    3,
+  );
+  check(
+    "v1 file readable: turns kept as-is, turnsCumulative/turnBaseline missing normalize to 0",
+    v1.version === 1 &&
+      v1.sessionId === "v1-session" &&
+      v1.runId === 3 &&
+      v1.modelRequests === 5 &&
+      v1.turns === 87 &&
+      v1.injectedChars === 11 &&
+      v1.reportChars === 6 &&
+      v1.turnsCumulative === 0 &&
+      v1.turnBaseline === 0,
+  );
+}
+{
+  const derived = deriveCostMeter(
+    {
+      version: 2,
+      sessionId: "derived",
+      runId: 1,
+      modelRequests: 1,
+      turns: 2,
+      turnsCumulative: 87,
+      turnBaseline: 85,
+      injectedChars: 5,
+      reportChars: 4,
+    },
+    { deliveredItems: 1 },
+  );
+  check(
+    "costPerDeliveredItem uses run-local turns, not turnsCumulative",
+    derived.costPerDeliveredItem === 1 + 2 + 5 + 4 &&
+      derived.costPerDeliveredItem !== 1 + 87 + 5 + 4,
+  );
+}
+{
   const warns = [];
   const badWriter = createCostMeterWriter({
     directory: join(TMP, "blocked", "sub"),
@@ -187,6 +238,20 @@ check(
   check(
     "cost-meter read falls back to disk for a fresh plugin load (no in-memory record)",
     fromDisk.modelRequests === 2 && fromDisk.turns === 1,
+  );
+}
+{
+  const dir = join(TMP, "meter-no-run");
+  const writer = createCostMeterWriter({ directory: dir, debounceMs: 0, logger: null });
+  writer.recordSet("child", 0, { turns: 0 });
+  writer.recordMax("child", 0, { turnsCumulative: 87 });
+  const noRun = writer.read("child", 0);
+  check(
+    "runId=0 v2 semantics: turns=0, turnsCumulative retained (no run → no run-local count)",
+    noRun.runId === 0 &&
+      noRun.version === COST_METER_SCHEMA_VERSION &&
+      noRun.turns === 0 &&
+      noRun.turnsCumulative === 87,
   );
 }
 
@@ -274,6 +339,8 @@ check(
       raw.runId === 1 &&
       typeof raw.modelRequests === "number" &&
       typeof raw.turns === "number" &&
+      typeof raw.turnsCumulative === "number" &&
+      typeof raw.turnBaseline === "number" &&
       typeof raw.injectedChars === "number" &&
       typeof raw.reportChars === "number" &&
       typeof raw.gatePassRate === "number" &&
@@ -293,8 +360,8 @@ check(
     meter.modelRequests >= 6,
   );
   check(
-    "turns mirrored from real user message (max 7)",
-    meter.turns === 7,
+    "P8 run-local turns: cumulative user turn 7 → meter turns=1, turnsCumulative=7, baseline=6",
+    meter.turns === 1 && meter.turnsCumulative === 7 && meter.turnBaseline === 6,
   );
   check(
     "stage injection counts injectedChars (stage text length)",
@@ -309,9 +376,11 @@ check(
     meter.gatePassRate === 0 && meter.costPerDeliveredItem === 0,
   );
   check(
-    "old-file readable: missing fields normalize to zero",
+    "old-file readable: missing fields normalize to zero (including v2 cumulative/baseline)",
     normalizeCostMeter({ version: COST_METER_SCHEMA_VERSION }, "old", 0).modelRequests === 0 &&
-      normalizeCostMeter({ version: COST_METER_SCHEMA_VERSION }, "old", 0).reportChars === 0,
+      normalizeCostMeter({ version: COST_METER_SCHEMA_VERSION }, "old", 0).reportChars === 0 &&
+      normalizeCostMeter({ version: COST_METER_SCHEMA_VERSION }, "old", 0).turnsCumulative === 0 &&
+      normalizeCostMeter({ version: COST_METER_SCHEMA_VERSION }, "old", 0).turnBaseline === 0,
   );
 }
 
