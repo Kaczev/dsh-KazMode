@@ -10,7 +10,7 @@
 > 5. 全程不要向用户提问，除非出现本文件未覆盖的错误。
 > 6. 目标机器是 Windows + PowerShell。
 >
-> **适用前提**：本机已装旧版 Kaz 模式。若 `%USERPROFILE%\.dsh\profiles\web\KazPlugins` 和 `%USERPROFILE%\.dsh\.agent-presets\kaz` 都不存在 → 改用 `ds安装指引.md`，不要继续本文件。
+> **适用前提**：本机已装旧版 Kaz 模式，且 dsh 版本为 `0.1.1-rc.2`（第 0 步会硬校验；`0.1.2-alpha` 及以上尚未适配，请勿执行本文件）。若 `%USERPROFILE%\.dsh\profiles\web\KazPlugins` 和 `%USERPROFILE%\.dsh\.agent-presets\kaz` 都不存在 → 改用 `ds安装指引.md`，不要继续本文件。
 
 ---
 
@@ -27,6 +27,33 @@ Test-Path "$env:USERPROFILE\.dsh\.agent-presets\kaz"
 - 版本命令都能输出版本号 → 继续。
 - 任何一条提示"不是内部或外部命令 / not recognized" → **停止**，告诉用户："请先安装 Node.js 20+ 与 dsh，再重试本指引。"
 - 两个 `Test-Path` 至少有一个为 `True` → 确认是旧版环境，继续；都为 `False` → 改用 `ds安装指引.md`。
+
+### 版本闸门（硬性，必须先通过）
+
+> 本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`。dsh `0.1.2-alpha` 及以上是 API 重组版本，Kaz 尚未适配，装上去会导致 dsh 启动失败，必须在这里拦下。
+
+```powershell
+$supportedDsh = @("0.1.1-rc.2")
+$dshCmd = $null
+foreach ($c in @("dsh.cmd", "dsh")) {
+  if (Get-Command $c -ErrorAction SilentlyContinue) { $dshCmd = $c; break }
+}
+if ($null -eq $dshCmd) {
+  Write-Host "VERSION GATE: FAIL - dsh command not found"
+} else {
+  $dshVer = (& $dshCmd --version | Select-Object -First 1).Trim()
+  if ($supportedDsh -notcontains $dshVer) {
+    Write-Host "VERSION GATE: FAIL - dsh $dshVer is not supported (supported: $($supportedDsh -join ', '))"
+  } else {
+    Write-Host "VERSION GATE: PASS - dsh $dshVer"
+  }
+}
+```
+
+- 输出 `VERSION GATE: PASS` → 继续第 1 步。
+- 输出 `VERSION GATE: FAIL` → **立即停止**：不要执行本文件任何后续步骤，不要复制或修改任何文件。把下面这段话原样告诉用户：
+
+> 本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`，检测到你的 dsh 版本不在支持列表内。dsh `0.1.2-alpha` 及以上是 API 重组版本，Kaz 目前尚未适配，强行安装会导致 dsh 启动失败（插件树崩溃）。请先把 dsh 保持或恢复到 `0.1.1-rc.2`，或等待 Kaz 的适配版本。
 
 ## 第 1 步 确认仓库路径
 
@@ -292,4 +319,5 @@ dsh.cmd --profile web --dump-config
 | 写 YAML/JSON 报 BOM 解析错误 | 用 UTF-8 无 BOM 保存（见第 6 步的 PowerShell 写法） |
 | 报 `ReplaceFileW EIO (Win32 1175)` | Windows 偶发错误，重试同一次编辑/复制一次即可 |
 | 改完不生效 | 必须重启 dsh web + 强刷浏览器（第 11 步），文件操作本身已完成 |
+| 第 0 步版本闸门输出 `VERSION GATE: FAIL` | dsh 版本不受支持：**停止**，不要执行任何后续步骤；把第 0 步给用户的说明原样转达 |
 | 遇到本表未覆盖的错误 | 原样把错误文本报告给用户，不要自行研究 |

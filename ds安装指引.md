@@ -9,6 +9,8 @@
 > 4. 每一步做完再进下一步。命令报错就看该步的「出错处理」，不要自行研究；遇到本文件未覆盖的错误，原样报告给用户，不要自作主张。
 > 5. 全程不要向用户提问，除非出现本文件未覆盖的错误。
 > 6. 目标机器是 Windows + PowerShell。
+>
+> **版本要求**：本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`；dsh `0.1.2-alpha` 及以上尚未适配，请勿安装（第 0 步会硬校验）。
 
 ---
 
@@ -23,6 +25,33 @@ node -v; npm -v; dsh.cmd --version
 - 三条命令都能输出版本号 → 继续。
 - 任何一条提示"不是内部或外部命令 / not recognized" → **停止**，告诉用户："请先安装 Node.js 20+ 与 dsh，再重试本指引。" 不要自行安装。
 - 若目标机已存在旧版 Kaz 模式（`%USERPROFILE%\.dsh\profiles\web\KazPlugins` 或 `%USERPROFILE%\.dsh\.agent-presets\kaz`）→ 不要继续本文件，改用 `ds更新指引.md`。
+
+### 版本闸门（硬性，必须先通过）
+
+> 本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`。dsh `0.1.2-alpha` 及以上是 API 重组版本，Kaz 尚未适配，装上去会导致 dsh 启动失败，必须在这里拦下。
+
+```powershell
+$supportedDsh = @("0.1.1-rc.2")
+$dshCmd = $null
+foreach ($c in @("dsh.cmd", "dsh")) {
+  if (Get-Command $c -ErrorAction SilentlyContinue) { $dshCmd = $c; break }
+}
+if ($null -eq $dshCmd) {
+  Write-Host "VERSION GATE: FAIL - dsh command not found"
+} else {
+  $dshVer = (& $dshCmd --version | Select-Object -First 1).Trim()
+  if ($supportedDsh -notcontains $dshVer) {
+    Write-Host "VERSION GATE: FAIL - dsh $dshVer is not supported (supported: $($supportedDsh -join ', '))"
+  } else {
+    Write-Host "VERSION GATE: PASS - dsh $dshVer"
+  }
+}
+```
+
+- 输出 `VERSION GATE: PASS` → 继续第 1 步。
+- 输出 `VERSION GATE: FAIL` → **立即停止**：不要执行本文件任何后续步骤，不要复制或修改任何文件。把下面这段话原样告诉用户：
+
+> 本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`，检测到你的 dsh 版本不在支持列表内。dsh `0.1.2-alpha` 及以上是 API 重组版本，Kaz 目前尚未适配，强行安装会导致 dsh 启动失败（插件树崩溃）。请先把 dsh 保持或恢复到 `0.1.1-rc.2`，或等待 Kaz 的适配版本。
 
 ## 第 1 步 确认仓库路径
 
@@ -259,4 +288,5 @@ dsh.cmd --profile web --dump-config
 | 写 YAML/JSON 报 BOM 解析错误 | 用 UTF-8 无 BOM 保存（见第 4 步的 PowerShell 写法） |
 | 报 `ReplaceFileW EIO (Win32 1175)` | Windows 偶发错误，重试同一次编辑/复制一次即可 |
 | 改完不生效 | 必须重启 dsh web + 强刷浏览器（第 9 步），文件操作本身已完成 |
+| 第 0 步版本闸门输出 `VERSION GATE: FAIL` | dsh 版本不受支持：**停止**，不要执行任何后续步骤；把第 0 步给用户的说明原样转达 |
 | 遇到本表未覆盖的错误 | 原样把错误文本报告给用户，不要自行研究 |
