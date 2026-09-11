@@ -1,5 +1,6 @@
 // ka-whale-memory —— 记忆六工具。
 // 输入 / 处理 / 输出按《Kaz8.0设计.md》§3.1–3.6；工具面文案一律英文。
+// 输出只给 name——name 就是标识（不含 id）。
 //
 //   memory_search  BM25 相关度检索（global + local 一起排名）
 //   memory_detail  按名字打开一条记忆的正文
@@ -37,6 +38,12 @@ function clampInt(value, fallback, min, max) {
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
+/** 把一处匹配说成人话：`global context "名称"`。 */
+const describe = (entry) => `${entry.location} ${entry.kind} "${entry.name}"`;
+
+/** 把多处匹配说成人话：`global context, local paths`。 */
+const describeAll = (entries) => entries.map((entry) => `${entry.location} ${entry.kind}`).join(", ");
+
 /** 读出记忆正文：内容记忆 → context，路径记忆 → paths。 */
 async function bodyOf(entry) {
   const data = await readMemoryFile(entry.file);
@@ -51,7 +58,7 @@ async function collectDocs(kinds, locations, cwd) {
     for (const kind of kinds) {
       for (const entry of await listMemories(location, kind, cwd)) {
         const body = await bodyOf(entry);
-        if (body !== null) docs.push({ id: entry.id, name: entry.name, text: body });
+        if (body !== null) docs.push({ name: entry.name, text: body });
       }
     }
   }
@@ -72,24 +79,20 @@ const RESULT_SCHEMA = {
 
 const RESULT_RENDER = (_args, value) => renderText(value.ok ? "success" : `failure: ${value.message}`);
 
-const ENTRIES_SCHEMA = {
+/** 只输出 name 的列表结果。 */
+const NAMES_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
     items: {
       type: "array",
       required: true,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          id: { type: "string", required: true },
-          name: { type: "string", required: true },
-        },
-      },
+      items: { type: "string" },
     },
   },
 };
+
+const namesRender = (_args, value) => renderText(value.items.length > 0 ? JSON.stringify(value.items) : "no memories matched");
 
 const present = (title, rawInput) => ({ card: "generic", title, kind: "other", rawInput });
 
@@ -97,7 +100,7 @@ export function memorySearchTool() {
   return defineTool({
     name: "memory_search",
     description:
-      "Search memories by BM25 relevance over their bodies; global and local memories are ranked together. Read-only. Returns up to `limit` entries with `id` and `name`, most relevant first; open one with memory_detail.",
+      "Search memories by BM25 relevance over their bodies; global and local memories are ranked together. Read-only. Returns up to `limit` memory names, most relevant first; open one with memory_detail.",
     parameters: {
       keywords: { type: "string", required: true, description: "Keywords to search for." },
       kind: { type: "string", enum: ["context", "paths"], description: "Which kind to search; omit to search both." },
@@ -105,15 +108,15 @@ export function memorySearchTool() {
       limit: { type: "integer", description: "Maximum number of results (default 10, max 16)." },
     },
     output: {
-      schema: ENTRIES_SCHEMA,
-      render: (_args, value) => renderText(value.items.length > 0 ? JSON.stringify(value.items) : "no memories matched"),
+      schema: NAMES_SCHEMA,
+      render: namesRender,
     },
     async execute(args, exec) {
       const cwd = cwdOf(exec);
       const limit = clampInt(args.limit, 10, 1, 16);
       const docs = await collectDocs(kindsOf(args.kind), locationsOf(args.location), cwd);
       const ranked = scoreBM25(String(args.keywords ?? ""), docs);
-      return { items: ranked.slice(0, limit).map((hit) => ({ id: hit.id, name: hit.name })) };
+      return { items: ranked.slice(0, limit).map((hit) => hit.name) };
     },
     presentCall: (args) => present("Search memories", args),
   });
@@ -123,7 +126,7 @@ export function memoryDetailTool() {
   return defineTool({
     name: "memory_detail",
     description:
-      "Open a memory by name and return its body: the context of a content memory or the paths of a path memory. Read-only. When the name matches more than one memory, every match is returned with its id.",
+      "Open a memory by name and return its body: the context of a content memory or the paths of a path memory. Read-only. When the name matches more than one memory, every match is returned with its kind and store.",
     parameters: {
       name: { type: "string", required: true, description: "Exact memory name." },
     },
@@ -140,8 +143,9 @@ export function memoryDetailTool() {
               type: "object",
               additionalProperties: false,
               properties: {
-                id: { type: "string", required: true },
                 name: { type: "string", required: true },
+                kind: { type: "string", required: true },
+                location: { type: "string", required: true },
                 body: { type: "string", required: true },
               },
             },
@@ -161,7 +165,9 @@ export function memoryDetailTool() {
       if (name.length > 0) {
         for (const entry of await findByName(name, cwd)) {
           const body = await bodyOf(entry);
-          if (body !== null) matches.push({ id: entry.id, name: entry.name, body });
+          if (body !== null) {
+            matches.push({ name: entry.name, kind: entry.kind, location: entry.location, body });
+          }
         }
       }
       return { found: matches.length > 0, matches };
@@ -173,14 +179,14 @@ export function memoryDetailTool() {
 export function memoryListTool() {
   return defineTool({
     name: "memory_list",
-    description: "List memories across the selected stores, newest first, each with its id and name. Read-only.",
+    description: "List memory names across the selected stores, newest first. Read-only.",
     parameters: {
       location: { type: "string", enum: ["global", "local", "both"], description: "Which store to list: global, local, or both (default)." },
       limit: { type: "integer", description: "Maximum number of entries (default 16, max 32)." },
     },
     output: {
-      schema: ENTRIES_SCHEMA,
-      render: (_args, value) => renderText(value.items.length > 0 ? JSON.stringify(value.items) : "no memories stored"),
+      schema: NAMES_SCHEMA,
+      render: namesRender,
     },
     async execute(args, exec) {
       const cwd = cwdOf(exec);
@@ -190,7 +196,7 @@ export function memoryListTool() {
         for (const kind of KINDS) all.push(...(await listMemories(location, kind, cwd)));
       }
       all.sort((a, b) => b.mtimeMs - a.mtimeMs);
-      return { items: all.slice(0, limit).map((entry) => ({ id: entry.id, name: entry.name })) };
+      return { items: all.slice(0, limit).map((entry) => entry.name) };
     },
     presentCall: (args) => present("List memories", args),
   });
@@ -224,7 +230,7 @@ export function memorySaveTool() {
         return fail(`${location} ${kind} memory "${name}" already exists — use memory_update to replace its body`);
       }
       await writeMemory(location, kind, name, body, cwd);
-      return ok(`saved ${location}:${kind}:${name}`);
+      return ok(`saved ${location} ${kind} "${name}"`);
     },
     presentCall: (args) => present("Save memory", args),
   });
@@ -254,15 +260,15 @@ export function memoryUpdateTool() {
       if (matches.length === 0) {
         const otherKind = await findByName(name, cwd);
         if (otherKind.length > 0) {
-          return fail(`"${name}" exists as ${otherKind.map((entry) => entry.id).join(", ")} — give the matching body field`);
+          return fail(`"${name}" exists as ${describeAll(otherKind)} — give the matching body field`);
         }
         return fail(`no memory named "${name}" to update`);
       }
       if (matches.length > 1) {
-        return fail(`"${name}" is ambiguous: ${matches.map((entry) => entry.id).join(", ")}`);
+        return fail(`"${name}" is ambiguous: it exists as ${describeAll(matches)}`);
       }
       await writeMemory(matches[0].location, matches[0].kind, matches[0].name, body, cwd);
-      return ok(`updated ${matches[0].id}`);
+      return ok(`updated ${describe(matches[0])}`);
     },
     presentCall: (args) => present("Update memory", args),
   });
@@ -272,7 +278,7 @@ export function memoryForgetTool() {
   return defineTool({
     name: "memory_forget",
     description:
-      "Permanently delete a memory by name. Fails when nothing matches, and when the name is ambiguous (the matches are reported by id).",
+      "Permanently delete a memory by name. Fails when nothing matches, and when the name is ambiguous (the matches are reported with their kind and store).",
     parameters: {
       name: { type: "string", required: true, description: "Exact memory name." },
     },
@@ -284,10 +290,10 @@ export function memoryForgetTool() {
       const matches = await findByName(name, cwd);
       if (matches.length === 0) return fail(`no memory named "${name}"`);
       if (matches.length > 1) {
-        return fail(`"${name}" is ambiguous: ${matches.map((entry) => entry.id).join(", ")}`);
+        return fail(`"${name}" is ambiguous: it exists as ${describeAll(matches)}`);
       }
       await removeMemory(matches[0].file);
-      return ok(`forgot ${matches[0].id}`);
+      return ok(`forgot ${describe(matches[0])}`);
     },
     presentCall: (args) => present("Forget memory", args),
   });

@@ -54,8 +54,3 @@ export function fileNameFor(name) {
 export function memoryFile(location, kind, name, cwd) {
   return join(kindDir(location, kind, cwd), `${fileNameFor(name)}.json`);
 }
-
-/** 记忆 id：`<location>:<kind>:<name>`。 */
-export function makeId(location, kind, name) {
-  return `${location}:${kind}:${name}`;
-}

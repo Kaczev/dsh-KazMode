@@ -5,7 +5,7 @@
 
 import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
-import { KINDS, kindDir, makeId, memoryFile } from "./paths.js";
+import { KINDS, kindDir, memoryFile } from "./paths.js";
 
 /** 记忆库根目录下的所有文件（某个 location + kind）。读不到目录时返回空。 */
 export async function listMemories(location, kind, cwd) {
@@ -29,7 +29,7 @@ export async function listMemories(location, kind, cwd) {
     const data = await readMemoryFile(file);
     if (data === null) continue;
     const name = typeof data.name === "string" && data.name.length > 0 ? data.name : entry.slice(0, -5);
-    out.push({ id: makeId(location, kind, name), name, kind, location, file, mtimeMs: stat.mtimeMs });
+    out.push({ name, kind, location, file, mtimeMs: stat.mtimeMs });
   }
   return out;
 }

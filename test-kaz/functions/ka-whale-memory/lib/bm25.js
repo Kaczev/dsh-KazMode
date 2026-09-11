@@ -47,8 +47,8 @@ export function tokenize(value) {
 /**
  * 对一批文档按 BM25 打分（k1=1.2、b=0.75）。
  * @param {string} query - 查询词。
- * @param {Array<{id: string, name: string, text: string}>} docs - 文档（text 为正文）。
- * @returns {Array<{id: string, name: string, score: number}>} 分数 > 0 的结果，从高到低。
+ * @param {Array<{name: string, text: string}>} docs - 文档（text 为正文）。
+ * @returns {Array<{name: string, score: number}>} 分数 > 0 的结果，从高到低。
  */
 export function scoreBM25(query, docs) {
   const queryTokens = tokenize(query);
@@ -74,7 +74,7 @@ export function scoreBM25(query, docs) {
       const idf = Math.log(1 + (n - documentFrequency + 0.5) / (documentFrequency + 0.5));
       score += (idf * (frequency * (K1 + 1))) / (frequency + K1 * (1 - B + (B * tokens.length) / avgdl));
     }
-    if (score > 0) scored.push({ id: doc.id, name: doc.name, score });
+    if (score > 0) scored.push({ name: doc.name, score });
   });
   scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
   return scored;
