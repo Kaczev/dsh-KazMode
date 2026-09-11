@@ -1,2 +1,0 @@
-name: Kaz 模式
-description: Kaz 模式（预设化 v1）：无面板、无插件开关，首轮即完整 Stable 工具面（21 项）；保留 ka-whale-workflow 阶段机、记忆六工具（无自动注入）与 Kaz 压缩策略；persona 按角色分句（主代理 / worker / memoryMaintainer / pluginMaintainer）。
