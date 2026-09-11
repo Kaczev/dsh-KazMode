@@ -3,9 +3,12 @@
 // 两件事：
 //   1) persona 注入：主代理的系统提示 persona 取 functions/kaz-prompts 的
 //      MAIN_PERSONA（单一事实源）；子代理保留派发时给定的自己的 persona。
-//   2) 提示面收口：只保留 Kaz 自己的注入段落（现在=persona；以后的阶段注入、
-//      压缩提醒由对应功能加进 KEEP_SECTIONS）。平台默认的 base 身份句、工具
-//      指引、环境说明等段落一律丢弃——否则模型看到的就是"标准模式"的提示。
+//   2) 摘掉平台默认的 harness:identity 段（"You are an AI agent powered by
+//      DeepSeek Harness."）——它会让 Kaz 看起来像标准模式。其余平台段落
+//      （工具指引、环境说明等）保留。
+//
+// DROP_SECTIONS 是唯一的"不要出现"清单；以后 Kaz 自己的注入段（阶段、提醒）
+// 由对应功能直接注册，不需要在这里登记。
 
 export const name = "kaz-system-prompt";
 
@@ -14,8 +17,8 @@ export const inject = [];
 import { PERSONA_PREFIX_SECTION } from "@deepseek-ai/dsh-persona";
 import { MAIN_PERSONA } from "./functions/kaz-prompts/lib/roles.js";
 
-/** 允许出现在模型系统提示里的段落名（Kaz 自己的注入内容）。 */
-export const KEEP_SECTIONS = new Set([PERSONA_PREFIX_SECTION]);
+/** 不允许出现在模型系统提示里的平台段落名。 */
+export const DROP_SECTIONS = new Set(["harness:identity"]);
 
 /** 判断是否为子代理会话（子代理的 persona 由派发时给定，必须原样保留）。 */
 function isSubagentAgent(agent) {
@@ -48,25 +51,21 @@ export function apply(ctx) {
       const agent = context?.agent;
       if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.sections)) {
         const isSubagent = isSubagentAgent(agent);
-        const sections = assembly.sections;
-        let kept = sections.filter(
-          (section) => section !== null && typeof section === "object" && KEEP_SECTIONS.has(section.name),
+        let sections = assembly.sections.filter(
+          (section) => section !== null && typeof section === "object" && !DROP_SECTIONS.has(section.name),
         );
         if (!isSubagent) {
-          const persona = kept.find((section) => section.name === PERSONA_PREFIX_SECTION);
+          const persona = sections.find((section) => section.name === PERSONA_PREFIX_SECTION);
           if (persona === undefined) {
-            kept = [{ name: PERSONA_PREFIX_SECTION, order: 0, text: MAIN_PERSONA }, ...kept];
+            sections = [{ name: PERSONA_PREFIX_SECTION, order: 0, text: MAIN_PERSONA }, ...sections];
           } else {
             persona.text = MAIN_PERSONA;
           }
-        } else if (kept.length === 0) {
-          // 子代理的 persona 段缺位时不收口，避免把一个子代理的提示清空。
-          kept = sections;
         }
-        assembly.sections = kept;
+        assembly.sections = sections;
       }
     } catch (error) {
-      ctx.logger?.warn?.(`[kaz-system-prompt] persona injection failed: ${String(error)}`);
+      ctx.logger?.warn?.(`[kaz-system-prompt] prompt assembly failed: ${String(error)}`);
     }
     return next();
   });
