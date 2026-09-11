@@ -1,0 +1,162 @@
+# kaz 预设（预设化 v1，2026-09-11，dsh-test / 0.1.5-rc.1）—— Kaczev 的 Kaz 模式。
+#
+# 与旧版"插件全家桶"形态的区别：
+#   * 无 kaz-mode / 插件面板 / 开关联动 / 四文件工具面模型：在 kaz 预设里 = Kaz 模式开着。
+#   * 首轮即完整 Stable Main Surface（21 项），不再有"首轮极简 → Stable"两阶段。
+#   * 无 UI（面板 / 提示音 / 轮次显示 / 自更新入口）：本预设不挂任何客户端插件。
+#   * 无模型采样参数覆盖（temperature 等用官方默认）。
+#   * 记忆 = ka-whale-memory 六工具，autoLoad 自动注入已移除。
+#   * 挂载方式：ka-whale-workflow / ka-whale-memory / kaz-context-policy 按名挂载；
+#     persona / 提示词由本目录 kaz-system-prompt.mjs 收口到 kaz-shared KAZ_ROLE_PROMPTS.main。
+#   * 不在 Stable 面内的行保留声明但 disabled（官方方式，不加载、零成本）。
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: "We are the main agent of the ka-whale-workflow."
+    includeRuntimeContext: false
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── system prompt controller ────────────────────────────────────────────────
+- id: kaz-system-prompt
+  name: ./kaz-system-prompt.mjs
+  config:
+    kazSharedPath: C:/Users/Kaczev/.dsh-test/profiles/web/node_modules/kaz-shared/lib/tool-lists.js
+
+# ── shell / filesystem ──────────────────────────────────────────────────────
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── remaining model-facing rows（Stable Main Surface 内）────────────────────
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+
+# ── Stable 面外的工具行：保留声明、官方方式停用 ─────────────────────────────
+- id: tool-str-replace-editor
+  name: '@deepseek-ai/dsh-tool-str-replace-editor'
+  disabled: true
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+  disabled: true
+
+- id: tool-cordis
+  name: '@deepseek-ai/dsh-tool-cordis'
+  disabled: true
+
+# ── delegation（list_agents / send_message / interrupt_agent 等）────────────
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: continuable
+        toolFilter:
+          allow:
+            - read
+            - write
+            - edit
+            - glob
+            - grep
+            - pwsh
+            - todo_write
+            - memory_list
+            - memory_search
+            - memory_detail
+            - web_search
+
+    - id: tool-subagent-fork
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: continuable
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+      disabled: true
+
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      disabled: true
+      config:
+        subagentProvider: spawn
+        maxRounds: 64
+
+# ── Kaz 组件（按名挂载；包由 profile 的 file: 依赖提供）────────────────────
+# 预设内注册服务的行必须放进带 isolate 的组（否则服务被视为进程级、预设挂载被拒）。
+- id: kaz-components
+  name: cordis:group
+  group: true
+  isolate:
+    kaWhaleWorkflow: true
+    memory: true
+  config:
+    - id: ka-whale-workflow
+      name: ./functions/ka-whale-workflow/lib/index.js
+
+    - id: ka-whale-memory
+      name: ./functions/ka-whale-memory/lib/index.js
+
+# ── compaction（Kaz provider + 官方行）──────────────────────────────────────
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-kaz
+      name: ./functions/kaz-context-policy/lib/index.js
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024

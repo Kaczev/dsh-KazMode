@@ -5,3 +5,4 @@
 *.7z
 /不入库文件
 /KazPlugins/kaz-skill-*
+/test-kaz/node_modules/
