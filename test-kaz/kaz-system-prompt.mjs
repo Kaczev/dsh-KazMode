@@ -16,34 +16,10 @@ export const inject = [];
 
 import { PERSONA_PREFIX_SECTION } from "@deepseek-ai/dsh-persona";
 import { MAIN_PERSONA } from "./functions/kaz-prompts/lib/roles.js";
+import { isSubagentAgent } from "./functions/kaz-core/lib/agent-role.js";
 
 /** 不允许出现在模型系统提示里的平台段落名。 */
 export const DROP_SECTIONS = new Set(["harness:identity"]);
-
-/** 判断是否为子代理会话（子代理的 persona 由派发时给定，必须原样保留）。 */
-function isSubagentAgent(agent) {
-  try {
-    const depth = agent?.options?.subagentDepth;
-    if (typeof depth === "number" && depth > 0) return true;
-    const header = agent?.session?.header;
-    if (
-      header !== null &&
-      typeof header === "object" &&
-      (header.origin === "subagent" || typeof header.parentSession === "string")
-    ) {
-      return true;
-    }
-    const events = agent?.session?.events;
-    if (Array.isArray(events)) {
-      for (const event of events) {
-        if (event !== null && typeof event === "object" && event.type === "subagent/descriptor") return true;
-      }
-    }
-  } catch {
-    // 探测失败按主代理处理
-  }
-  return false;
-}
 
 export function apply(ctx) {
   ctx.on("system-prompt/assemble", async (assembly, context, next) => {
