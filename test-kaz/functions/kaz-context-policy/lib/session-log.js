@@ -47,9 +47,9 @@ export function entryOfEvent(event) {
   }
 }
 
-/** 整个会话日志 → 可检索记录列表（保持 seq 顺序）。 */
+/** 整个会话日志 → 可检索记录列表（保持 seq 顺序）。读公开快照 snapshotEvents()。 */
 export function entriesOfSession(session) {
-  const events = Array.isArray(session?.events) ? session.events : [];
+  const events = typeof session?.snapshotEvents === "function" ? session.snapshotEvents() : [];
   const entries = [];
   for (const event of events) {
     const entry = entryOfEvent(event);

@@ -27,7 +27,7 @@ const HITS_SCHEMA = {
   },
 };
 
-function renderHits(value) {
+function renderHits(_args, value) {
   if (value.ok !== true) return renderText(`failure: ${value.message}`);
   if (value.hits.length === 0) return renderText("no matches");
   const lines = value.hits.map((hit) => `[${hit.from} #${hit.seq} ${hit.label}] ${hit.snippet}`);
