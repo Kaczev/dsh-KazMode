@@ -4,278 +4,215 @@
 >
 > **硬性规则（先读一遍，全程遵守）**：
 > 1. 不要阅读 `README.md`，不要浏览仓库其它目录（`其它好用的工具`、`其它好用的预设`、`简易测式` 等一律不看），不要搜索网络。
-> 2. 不要创建任何 `.ps1` / `.bat` 脚本文件；直接按下面步骤执行 PowerShell 命令。
+> 2. 不要创建任何 `.ps1` / `.bat` 脚本文件。**运行仓库里已自带的 `install-kaz-preset.ps1` 是允许且必需的**——"不要创建脚本"不等于"不要运行脚本"；除本文件明确给出的命令外，不要新增任何脚本。
 > 3. 本文件内容完整，每一步都给全了命令或文件内容，**不需要参考任何其它文件核对**。
 > 4. 每一步做完再进下一步。命令报错就看该步的「出错处理」，不要自行研究；遇到本文件未覆盖的错误，原样报告给用户，不要自作主张。
 > 5. 全程不要向用户提问，除非出现本文件未覆盖的错误。
 > 6. 目标机器是 Windows + PowerShell。
 >
-> **版本要求**：本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`；dsh `0.1.2-alpha` 及以上尚未适配，请勿安装（第 0 步会硬校验）。
+> **版本要求**：Kaz 预设形态仅支持 dsh `0.1.5-rc.1`（第 0 步硬校验；不符合就停）。旧插件形态（dsh `0.1.1-rc.2`）见 **附录 A**。
 
 ---
 
-## 第 0 步 前置检查（约 10 秒）
+## 第 0 步 版本闸门（硬性，必须先通过）
+
+> 本版 Kaz 是 **DSH agent preset（预设形态）**，只支持 dsh `0.1.5-rc.1`。
+> 版本号取自**运行时包** `@deepseek-ai/dsh/package.json` 的 `version` 字段（与安装程序同一口径），**不要**用 `dsh --version` 判断。
+> 第 2 步的安装程序会按目标 home 再校验一次，那才是最终权威；这里先拦下明显不匹配的机器。
 
 ```powershell
-node -v; npm -v; dsh.cmd --version
-```
-
-> 用 `dsh.cmd` 而不是 `dsh`：某些机器上 PowerShell 执行策略会拦截 `dsh.ps1`（报 "running scripts is disabled"），`dsh.cmd` 不受影响。若 `dsh.cmd` 也提示找不到命令，再试 `dsh --version`；仍失败则按下面"停止"处理。
-
-- 三条命令都能输出版本号 → 继续。
-- 任何一条提示"不是内部或外部命令 / not recognized" → **停止**，告诉用户："请先安装 Node.js 20+ 与 dsh，再重试本指引。" 不要自行安装。
-- 若目标机已存在旧版 Kaz 模式（`%USERPROFILE%\.dsh\profiles\web\KazPlugins` 或 `%USERPROFILE%\.dsh\.agent-presets\kaz`）→ 不要继续本文件，改用 `ds更新指引.md`。
-
-### 版本闸门（硬性，必须先通过）
-
-> 本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`。dsh `0.1.2-alpha` 及以上是 API 重组版本，Kaz 尚未适配，装上去会导致 dsh 启动失败，必须在这里拦下。
-
-```powershell
-$supportedDsh = @("0.1.1-rc.2")
-$dshCmd = $null
-foreach ($c in @("dsh.cmd", "dsh")) {
-  if (Get-Command $c -ErrorAction SilentlyContinue) { $dshCmd = $c; break }
-}
-if ($null -eq $dshCmd) {
-  Write-Host "VERSION GATE: FAIL - dsh command not found"
-} else {
-  $dshVer = (& $dshCmd --version | Select-Object -First 1).Trim()
-  if ($supportedDsh -notcontains $dshVer) {
-    Write-Host "VERSION GATE: FAIL - dsh $dshVer is not supported (supported: $($supportedDsh -join ', '))"
-  } else {
-    Write-Host "VERSION GATE: PASS - dsh $dshVer"
+$supportedDsh = @("0.1.5-rc.1")
+$candidates = @(
+  (Join-Path $env:USERPROFILE ".dsh\tools\dsh-cli\node_modules\@deepseek-ai\dsh\package.json"),
+  (Join-Path $env:USERPROFILE ".dsh\profiles\web\node_modules\@deepseek-ai\dsh\package.json"),
+  (Join-Path $env:APPDATA "npm\node_modules\@deepseek-ai\dsh\package.json")
+)
+$dshVer = ""
+foreach ($c in $candidates) {
+  if (Test-Path $c) {
+    try {
+      $v = (Get-Content $c -Raw | ConvertFrom-Json).version
+      if (-not [string]::IsNullOrWhiteSpace($v)) { $dshVer = $v; break }
+    } catch { }
   }
+}
+if ($supportedDsh -notcontains $dshVer) {
+  Write-Host ("VERSION GATE: FAIL - runtime dsh '" + $dshVer + "' is not supported (supported: " + ($supportedDsh -join ', ') + "). Use -SkipVersionCheck to override.")
+} else {
+  Write-Host "VERSION GATE: PASS - dsh $dshVer"
 }
 ```
 
 - 输出 `VERSION GATE: PASS` → 继续第 1 步。
 - 输出 `VERSION GATE: FAIL` → **立即停止**：不要执行本文件任何后续步骤，不要复制或修改任何文件。把下面这段话原样告诉用户：
 
-> 本版 Kaz 模式仅支持 dsh `0.1.1-rc.2`，检测到你的 dsh 版本不在支持列表内。dsh `0.1.2-alpha` 及以上是 API 重组版本，Kaz 目前尚未适配，强行安装会导致 dsh 启动失败（插件树崩溃）。请先把 dsh 保持或恢复到 `0.1.1-rc.2`，或等待 Kaz 的适配版本。
+> 本版 Kaz 是 DSH agent preset（预设形态），仅支持 dsh `0.1.5-rc.1`，检测到本机运行时版本不在支持列表内。请先把 dsh 升级或恢复到 `0.1.5-rc.1` 再安装。若你还在用旧插件形态（dsh `0.1.1-rc.2`），先按本文件「附录 A」清理旧形态，升级 dsh 后再回到第 0 步。
+
+> 若你要安装到非默认 home（`-DshHome`），第 0 步仍按默认 `%USERPROFILE%\.dsh` 预检；目标 home 的真实闸门由第 2 步的安装程序执行。
 
 ## 第 1 步 确认仓库路径
 
-本文件位于仓库根目录。记：
-
 ```powershell
 $repo = "本文件所在目录"   # 例如 C:\Users\xxx\Documents\GitHub\dsh-KazMode
+Test-Path (Join-Path $repo "install-kaz-preset.ps1")
+Test-Path (Join-Path $repo "test-kaz\preset.yml")
 ```
 
-后续命令里的 `$repo` 都指这里。若你当前工作目录就是仓库根目录，也可直接用 `.`，但建议写完整路径，避免换目录后失效。
+- 两条都返回 `True` → 继续第 2 步。
+- 任一为 `False` → **停止**，告诉用户："仓库不完整：缺少 `install-kaz-preset.ps1` 或 `test-kaz\preset.yml`，请重新获取完整仓库。"
 
-## 第 2 步 复制插件（约 1 秒）
+## 第 2 步 运行安装程序
+
+安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `test-kaz\` 镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的两个 junction（`@deepseek-ai`、`zod` → `<home>\profiles\<profile>\node_modules`）→ 打印 `KAZ-PRESET-INSTALL OK`。
+
+**2.1 单 home（最常见：装到默认 `%USERPROFILE%\.dsh`）**
 
 ```powershell
-$pluginDst = Join-Path $env:USERPROFILE ".dsh\profiles\web\KazPlugins"
-New-Item -ItemType Directory -Force -Path $pluginDst | Out-Null
-Copy-Item -Path "$repo\KazPlugins\*" -Destination $pluginDst -Recurse -Force
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 ```
 
-要点：
-- 目录名必须严格是 `KazPlugins`（大写 K、大写 P），不要复制进 `profiles\web\plugins`。
-- 复制的是 `KazPlugins\*` 的**内容**，不要把 `KazPlugins` 文件夹本身套进去（避免出现 `KazPlugins\KazPlugins`）。
+- profile 自动探测：该 home 下**唯一**含 `node_modules` 的 profile 会自动选中；有多个时报错 `multiple profiles under ...; pass -ProfileName`，这时加 `-ProfileName`，见 2.2。
 
-出错处理：
-- 报 `ReplaceFileW EIO (Win32 1175)` → Windows 偶发文件系统错误，**重试同一条命令一次**即可，不要换工具。
-- 报"目录名无效 / 找不到路径" → 先确认 `$repo` 路径正确，再重试。
-
-## 第 3 步 复制预设（约 1 秒）
+**2.2 指定 home 或 profile**
 
 ```powershell
-$presetDst = Join-Path $env:USERPROFILE ".dsh\.agent-presets\kaz"
-New-Item -ItemType Directory -Force -Path $presetDst | Out-Null
-Copy-Item -Path "$repo\kaz\*" -Destination $presetDst -Recurse -Force
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -ProfileName web
 ```
 
-要点：
-- 目录名必须严格是小写 `kaz`，不要写成 `Kaz` / `KazMode`（preset id 只允许小写开头）。
-- `agent.cordis.yml`、`preset.yml`、`kaz-system-prompt.mjs` 必须直接位于 `.agent-presets\kaz\` 根部，不要嵌套。
-- 复制的是 `kaz\*` 的**内容**，不要套出 `kaz\kaz`。
-
-## 第 4 步 在 package.json 注册依赖
-
-打开 `%USERPROFILE%\.dsh\profiles\web\package.json`，在 `dependencies` 中**合并**下面依赖行：
-
-```json
-"deepseek-default-model": "file:KazPlugins/deepseek-default-model",
-"ka-whale-workflow": "file:KazPlugins/ka-whale-workflow",
-"kaz-agent-preset-display": "file:KazPlugins/kaz-agent-preset-display",
-"kaz-context-policy": "file:KazPlugins/kaz-context-policy",
-"ka-whale-memory": "file:KazPlugins/ka-whale-memory",
-"kaz-mode": "file:KazPlugins/kaz-mode",
-"kaz-shared": "file:KazPlugins/kaz-shared",
-"output-beep": "file:KazPlugins/output-beep",
-"plugin-filter": "file:KazPlugins/plugin-filter",
-"round-display": "file:KazPlugins/round-display",
-```
-
-规则：
-- **保留** `dependencies` 里已有的其它依赖（如 `dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等），只加不删其它项。
-- 若已存在旧的 Kaz 依赖行（例如 `kaz-diag`，或上面依赖行里的旧版本写法），用上面依赖行**替换**旧行，不要重复；旧版已删除的 `create-plan` / `round-minimal` 依赖行要**直接删除**，不要保留。
-- `kaz-shared` 是必需依赖：kaz-mode / ka-whale-memory / plugin-filter 都 import 它，漏装会导致插件加载失败；当前版本已删除 `round-minimal` 与 `create-plan`，**不要**把它们加回 package.json。
-- 上面 Kaz 相关依赖共 **10 行**（9 个插件 + `kaz-shared`）。`kaz-context-policy` 是随 kaz 预设使用的内部 compaction/context 插件：它在 `kaz/agent.cordis.yml` 的 compaction 组（`compaction-kaz`）按名称挂载，**不进入**第 6 步的 insert 块；依赖不能漏，漏装会让 preset 解析不到。
-- 文件用 UTF-8 **无 BOM** 保存。用你的 edit 工具改即可；若必须用 PowerShell 写文件，用下面的写法（不要用 `Set-Content -Encoding UTF8`，它会写 BOM 破坏 JSON 解析）：
+**2.3 预演（`-DryRun`，不写入）**
 
 ```powershell
-[System.IO.File]::WriteAllText("$env:USERPROFILE\.dsh\profiles\web\package.json", $jsonText, (New-Object System.Text.UTF8Encoding $false))
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -DryRun
 ```
 
-## 第 5 步 安装依赖（热装约 1 秒，冷装约 20 秒）
+- `-DryRun` 只校验闸门 / profile / 源路径，并打印"会做什么"（`would refresh link` / `would link`），**不备份、不复制、不建 junction**。
+- **注意**：脚本在 `-DryRun` 下**仍会打印 `KAZ-PRESET-INSTALL OK`**——那只是预演，**不代表已经写入**。判断是否真的安装成功，必须看一次**不带** `-DryRun` 的运行。
+
+**2.4 多 home 一次装完（`-AllHomes`）**
 
 ```powershell
-cd "$env:USERPROFILE\.dsh\profiles\web"
-Remove-Item Env:npm_config_allow_scripts   # npm 11 兼容坑，先清掉
-npm.cmd install --legacy-peer-deps --no-audit --no-fund --prefer-offline
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHomes
 ```
 
-> 用 `npm.cmd` 而不是 `npm`：`npm` 在 PowerShell 里是 `npm.ps1`，同样可能被执行策略拦截。
+- 扫描 `%USERPROFILE%\.dsh*` 中**含 `profiles` 目录**的 home，逐个安装，最后打印 `--- summary ---` 与逐行 `OK` / `FAIL` 汇总。
+- **预期结果**（本机示例）：
+  - `.dsh`（主环境，dsh `0.1.1-rc.2` 旧插件形态）→ `FAIL`，这是**正常**的，不是装坏了；它不支持预设形态，保持旧形态即可。
+  - `.dsh-clean`、`.dsh-test`（dsh `0.1.5-rc.1`）→ 应 `OK`。
+- 想让某个 home 跳过版本闸门（**仅调试，不要用**）：`-SkipVersionCheck`。指引要求你**不要**使用它。
 
-预期：
-- 热装（node_modules 已存在）约 1 秒；冷装约 20 秒左右，其中大部分是 `dsh-plugin-marketplace` 从 GitHub 下载 tarball，属正常，不要中断。
-- 成功标志：`node_modules` 下为每个 Kaz 插件生成指向 `KazPlugins/<插件名>` 的 junction（`cmd /c dir node_modules` 可看到 `<JUNCTION>`）。
-
-出错处理：
-- 报 scripts / npm 11 相关错误 → 上面的 `Remove-Item Env:npm_config_allow_scripts` 已处理；若仍报，再执行一次该命令后重试。
-- 网络超时 / 下载很慢（超过 60 秒）→ 执行 `npm config set registry https://registry.npmmirror.com`，然后重试同一条 `npm.cmd install` 命令。
-- 报 `npm ERR! code EPERM` / 文件占用 → 让用户关闭正在运行的 dsh web 窗口后重试，不要强行杀进程。
-
-### 第 5.1 步 若 npm 把 `@deepseek-ai` 运行时依赖剪掉了（修复）
-
-`npm.cmd install --legacy-peer-deps` 不会自动安装 peer；如果本机 `package.json`
-缺少 dsh 运行时依赖，npm 可能输出 `removed N packages` 并把
-`node_modules\@deepseek-ai` 清掉/改成悬空 junction。修复步骤：
-
-1. 把 `%APPDATA%\npm\node_modules\@deepseek-ai\dsh\package.json` 的
-   `dependencies` **合并**进 `%USERPROFILE%\.dsh\profiles\web\package.json`
-   （只加不删）。
-2. 再补这些 peer（若上面合并后仍缺）：
-   `@deepseek-ai/dsh-tools`、`@deepseek-ai/schemastery`、
-   `@deepseek-ai/dsh-invariants`、`@deepseek-ai/dsh-shell-env`、
-   `@deepseek-ai/dsh-system-prompt`、`@deepseek-ai/cordis-plugin-loader`
-   （版本取本机已安装包的 `peerDependencies` 范围）。
-3. 重新执行第 5 步的 `npm.cmd install`。
-4. 验证：
-   `Test-Path "$env:USERPROFILE\.dsh\profiles\web\node_modules\@deepseek-ai\cordis"`
-   为 `True`，且
-   `node --input-type=module -e "import('@deepseek-ai/dsh-tools').then(m=>console.log(typeof m.defineTool))"`
-   能输出 `function`。
-
-## 第 6 步 编辑 cordis.patch.yml
-
-打开 `%USERPROFILE%\.dsh\profiles\web\cordis.patch.yml`：
-
-1. **删除**文件中已有的 Kaz 相关 insert 块。按块内 `id` 判断，以下 **8** 个 id 都是 Kaz 的块，全部删掉（文件不存在则跳过本小步）：
-   - `memory`（ka-whale-memory）
-   - `plugin-filter`
-   - `kaz-agent-preset-display`
-   - `kaz-mode`
-   - `output-beep`
-   - `round-display`
-   - `deepseek-default-model`
-   - `ka-whale-workflow`
-2. 文件中**非 Kaz 的自定义块保留**，不要动。特别是 `kaz-skill-*` 私有块（如 `kaz-skill-safe-json`）属于用户私有非 Kaz 块，保留原样，**不要**删除或复制到下面示例。
-3. 把下面 **Kaz 部分完整内容**追加到文件末尾（文件不存在则新建，直接写入；不含 `kaz-skill-*` 私有块，那些块按第 2 条保留在目标机已有位置）：
-
-```yaml
-- insert:
-    - id: memory
-      name: ka-whale-memory
-
-- insert:
-    - id: plugin-filter
-      name: plugin-filter
-      config:
-        enabled: true
-        mode: remove
-        disabledTools:
-          - tool-cordis
-          - tool-subagent-report
-          - codex
-          - claude-code
-
-- insert:
-    - id: kaz-mode
-      name: kaz-mode
-      config:
-        enabled: false
-
-- insert:
-    - id: kaz-agent-preset-display
-      name: kaz-agent-preset-display
-      config:
-        enabled: true
-
-- insert:
-    - id: output-beep
-      name: output-beep
-      config:
-        enabled: true
-
-- insert:
-    - id: round-display
-      name: round-display
-      config:
-        enabled: true
-
-- insert:
-    - id: deepseek-default-model
-      name: deepseek-default-model
-      config:
-        enabled: true
-
-- insert:
-    - id: ka-whale-workflow
-      name: ka-whale-workflow
-      config:
-        enabled: true
-```
-
-注意：
-- 上面是当前 `cordis.patch.yml` 中的 **8 个 Kaz insert 块**（不含 `kaz-skill-*` 私有块）；私有块按本步第 2 条保留在目标机已有位置。
-- 若旧配置里出现 `id: kaz-context-policy` 的 insert 块，应**删除**它：`kaz-context-policy` 是内部插件，只由 `kaz/agent.cordis.yml` 的 compaction 组按名称挂载，不属于本步的 8 个 insert 块。
-- 已没有 `create-plan` 插件 / 依赖行，Kaz v0.9 也没有原生 Plan 模式；**不要**把 `create_plan`、`/plan` 或 `create-plan` 相关行加回。
-- `kaz-mode` 默认 `enabled: false` 是**正常**的，它由"选择 kaz 预设"这一动作联动开启，**不要改成 true**。
-
-出错处理：YAML 解析失败 / 报 BOM 错误 → 用 UTF-8 无 BOM 保存（同第 4 步的写法）。
-
-## 第 7 步 settings.yaml：无需修改
-
-**跳过本步骤，不要动 `%USERPROFILE%\.dsh\settings.yaml`。**
-
-- `~/.dsh/storages/kaz-defaults.json`
-- `<项目>/.dsh/storages/kaz-project-states.json`
-
-Kaz 主工具面是代码级固定的 Stable Main Surface / workflow 面；工具控制面板只读展示并按项目维护候选，旧 four-file JSON（`tool-plugin.json` 等）仅作兼容只读状态来源。settings.yaml 只保留 kaz-mode / agent-default-model / agent-presets 等少量段，都有自愈写入，不需要你编辑。
-
-若你在 settings.yaml 里看到旧版残留的 `toolWhitelist` / `minimalTools` / 被管理插件段，可以顺手删除这些字段；不删也不影响（新代码不读）。
-
-## 第 8 步 验证（不重启也能做的部分，约 1 秒）
+**2.5 指定预设源（`-Source`，一般不需要）**
 
 ```powershell
-dsh.cmd --profile web --dump-config
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Source "D:\下载\dsh-KazMode\test-kaz"
 ```
 
-> 用 `dsh.cmd` 而不是 `dsh`：某些机器上 PowerShell 执行策略会拦截 `dsh.ps1`（报 "running scripts is disabled"），`dsh.cmd` 不受影响。若 `dsh.cmd` 也提示找不到命令，把报错原样告诉用户。
+- 默认 `-Source` 就是脚本旁边的 `test-kaz`，正常安装**不要**传这个参数。
 
+**成功标志**：输出 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`，并打印 `linked: ...` 两行 junction。
 
-- 全部能看到 → 安装的文件部分完成，进入第 9 步。
-- 缺少某个 id → 检查第 4 步依赖是否漏行、第 6 步是否少了对应 insert 块，修正后重新执行第 5 步和第 8 步。
+**出错处理**：
+- 报 `VERSION GATE: FAIL` → 该 home 的 dsh 不是 `0.1.5-rc.1`：**停下**，按第 0 步的说明转告用户；不要用 `-SkipVersionCheck` 绕过。
+- 报 `multiple profiles under ...; pass -ProfileName` → 在命令里加 `-ProfileName web`（或该 home 里真正有 `node_modules` 的那个 profile 名）。
+- 报 `no profiles directory under ...` → 该 home 没有 `profiles` 目录，或 profile 里还没有 `node_modules`：这个 home 还没装好 dsh 运行时，**不要**继续装预设。
+- 报 `required runtime package missing: ...\node_modules\@deepseek-ai` → profile 的 `node_modules\@deepseek-ai` 不存在；先修好该 home 的 dsh 运行时（官方安装/修复），再重跑安装程序。
+- 报 `cannot replace non-empty real directory: ...\node_modules\@deepseek-ai`（或 `zod`）→ 该位置是**真实目录**而不是 junction：先备份它，再删除该目录，然后重跑安装程序。
+- 报 `preset robocopy failed (N)` / `backup robocopy failed (N)`（`N > 7` 才是错误）→ 目标目录被占用：让用户关闭正在运行的 dsh web，重跑同一条命令。
+- 报权限 / `EPERM` / 文件占用 → 让用户关闭 dsh web 后重试；**不要**用管理员权限强改 ACL，也不要强行杀进程。
+- 报 `WARN: optional runtime package missing: ...\node_modules\zod` → `zod` 是可选 junction，安装会继续；若之后运行报 `zod` 解析失败，再回该 profile 补装 `zod`。
 
-## 第 9 步 交给用户收尾（重要）
+> 补充：若某个 home 的 `.agent-presets\kaz` **本身就是**仓库 `test-kaz` 的 junction 目标，安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——这是正常分支，无需处理。
 
-插件代码 / cordis 组合改动**必须重启 dsh web 才会加载**；而重启会中断你当前这个会话，所以由**用户手动操作**。请把下面的话原样告诉用户：
+## 第 3 步 交给用户收尾（重要）
+
+预设改动**必须重启 dsh 才会加载**；而重启会中断你当前这个会话，所以由**用户手动操作**。请把下面的话原样告诉用户：
 
 > 安装的文件部分已完成。请手动：
 > 1. 重启 `dsh web`；
 > 2. 强刷浏览器页面（Ctrl+F5 或 Cmd+Shift+R）；
-> 3. 在新对话的预设选择器中选择 **Kaz 模式**（`kaz`）。
->
-> 重启后自查：
-> - 新对话的思考内出现 "We need" / "Let's"，不再出现 "Let me"；
-> - 首次工具调用前工具面是极简状态（`memory_search` + `context_search`）；
-> - 首次工具调用后恢复 Stable Main Surface（代码级固定面）；
-> - Kaz 面板出现 output-beep / deepseek-default-model / round-display 的开关行。
-> - Kaz 模式下 ka-whale-workflow 默认启用 S/M/L 快速分级（tierFastLane）；交付证据门（evidenceGate）默认关闭，需要时在 run 开头让模型用 whale_report 开启。
+> 3. 在**新对话**的预设选择器里选择 **Kaz 模式**（preset id `kaz`）。
+
+## 第 4 步 自查（用户重启后，让用户按现象回报）
+
+> 预设形态**没有面板、没有插件开关、没有提示音**；下面现象对不上就说明没装好或没选预设。
+
+- 新对话已选中 **Kaz 模式**（`kaz`）。
+- **工具面**：首轮即完整（不再是"首轮极简 → 再恢复"两阶段）。稳定主工具面是 kaz-shared 的 `KAZ_V09_MAIN_TOOLS`，共 **21 项**：
+  `ask_user_question` / `edit` / `glob` / `grep` / `memory_detail` / `memory_list` / `memory_search` / `pwsh` / `read` / `context_read` / `context_search` / `context_compress` / `ka_sub_whale` / `list_agents` / `send_message` / `interrupt_agent` / `todo_write` / `web_search` / `whale_report` / `plan_read` / `write`。
+- **记忆六工具**由 `ka-whale-memory` 提供：`memory_save` / `memory_update` / `memory_list` / `memory_search` / `memory_detail` / `memory_forget`（其中 `memory_search` / `memory_detail` / `memory_list` 在主面 21 项内）。
+- **上下文三件**：`context_search` / `context_read` / `context_compress` 均可用。
+- **没有** Kaz 面板、没有开关行、没有提示音、没有 round-display 轮次显示。
+- **persona 首句**是 `We are the main agent of the ka-whale-workflow.`；思考/输出用 "We" / "Let's"，不再是 "Let me"。
+
+## 卸载
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Uninstall
+```
+
+指定 home：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -Uninstall
+```
+
+- 只删除 `<home>\.agent-presets\kaz` 这一个目录；**不碰** `<home>\profiles\<profile>\node_modules`（那两个 junction 指过去的目标保留）。
+- **不还原**备份；备份留在 `<home>\tools\kaz-preset-backup-<时间戳>`，需要时手动取用，确认不需要后可手动删除（多次安装会累积）。
+- 成功输出：`KAZ-PRESET-UNINSTALL OK - <home>`。
+
+---
+
+## 附录 A：旧插件形态（dsh 0.1.1-rc.2）迁移与清理
+
+> 本附录只做**清理**，**不负责升级 dsh**。旧插件形态（≤ 7.4.x，dsh `0.1.1-rc.2`）与预设形态互斥；迁移顺序是：**先清理 → 再把 dsh 升级到 `0.1.5-rc.1` → 重启 → 回到第 0 步安装预设**。
+> 7.5.0 之前的旧步骤全文不在此保留；需要时查 7.5.0 之前的 git 历史（GitHub 上对应 tag / 旧提交里的 `ds安装指引.md`、`ds更新指引.md`）。
+
+在目标 home（下面以默认 `%USERPROFILE%\.dsh`、profile `web` 为例）里：
+
+```powershell
+$dshHome = Join-Path $env:USERPROFILE ".dsh"
+$profileDir = Join-Path $dshHome "profiles\web"
+```
+
+1. **停止**：让用户关闭正在运行的 `dsh web`。
+2. **删除旧插件目录**：
+
+```powershell
+Remove-Item (Join-Path $profileDir "KazPlugins") -Recurse -Force
+```
+
+3. **删除指向旧插件的 junction**（`rmdir` 只删链接本身，不删目标）：
+
+```powershell
+$mods = Join-Path $profileDir "node_modules"
+foreach ($n in "kaz-mode","ka-whale-memory","ka-whale-workflow","kaz-shared","kaz-context-policy","plugin-filter","output-beep","round-display","deepseek-default-model","kaz-agent-preset-display") {
+  cmd /c rmdir "$(Join-Path $mods $n)" 2>$null | Out-Null
+}
+```
+
+4. **清理 `package.json` 依赖行**：打开 `profiles\web\package.json`，删除所有 `"<名字>": "file:KazPlugins/..."` 形式的依赖行。
+   - **保留**以 `file:KazPrivatePlugins/...` 开头的用户私有依赖行（如 `"kaz-skill-safe-json": "file:KazPrivatePlugins/kaz-skill-safe-json"`），它们不是公共 Kaz 组件。
+   - **保留**其它第三方依赖（`dsh-plugin-marketplace`、`dsh-deepseek-balance`、`dsh-portable-tavern` 等）。
+   - 用 UTF-8 **无 BOM** 保存；若必须用 PowerShell 写，用下面写法（不要用 `Set-Content -Encoding UTF8`，它会写 BOM 破坏 JSON 解析）：
+
+```powershell
+[System.IO.File]::WriteAllText((Join-Path $profileDir "package.json"), $jsonText, (New-Object System.Text.UTF8Encoding $false))
+```
+
+5. **清理 `cordis.patch.yml`**：打开 `profiles\web\cordis.patch.yml`，删除以下 **8 个 Kaz insert 块**（按块内 `id` 判断）：
+
+   `memory`（ka-whale-memory）/ `plugin-filter` / `kaz-agent-preset-display` / `kaz-mode` / `output-beep` / `round-display` / `deepseek-default-model` / `ka-whale-workflow`
+
+   - 非 Kaz 的自定义块保留；特别是 `kaz-skill-*` 私有块（如 `kaz-skill-safe-json`）**不是** Kaz 框架块，**保留原样**。
+   - 若还有 `id: kaz-context-policy` 的 insert 块，也删掉（预设形态由 `agent.cordis.yml` 的 compaction 组按名挂载，不走 `cordis.patch.yml`）。
+   - YAML 用 UTF-8 无 BOM 保存。
+
+6. **（可选）清理旧存储残留**：
+
+```powershell
+Remove-Item (Join-Path $dshHome "storages\kaz-session-states.json") -Force -ErrorAction SilentlyContinue
+```
+
+7. **把 dsh 升级到 `0.1.5-rc.1`**，重启 `dsh web`，然后从本文件**第 0 步**开始安装预设。
 
 ---
 
@@ -283,10 +220,18 @@ dsh.cmd --profile web --dump-config
 
 | 现象 | 处理 |
 | --- | --- |
-| `npm install` 报 scripts 相关错误 | 命令里已含 `Remove-Item Env:npm_config_allow_scripts`；仍报就再执行一次再重试 |
-| 下载很慢 / 网络超时 | `npm config set registry https://registry.npmmirror.com` 后重试 install |
-| 写 YAML/JSON 报 BOM 解析错误 | 用 UTF-8 无 BOM 保存（见第 4 步的 PowerShell 写法） |
-| 报 `ReplaceFileW EIO (Win32 1175)` | Windows 偶发错误，重试同一次编辑/复制一次即可 |
-| 改完不生效 | 必须重启 dsh web + 强刷浏览器（第 9 步），文件操作本身已完成 |
-| 第 0 步版本闸门输出 `VERSION GATE: FAIL` | dsh 版本不受支持：**停止**，不要执行任何后续步骤；把第 0 步给用户的说明原样转达 |
+| 第 0 步 `VERSION GATE: FAIL` | runtime dsh 不是 `0.1.5-rc.1`：**停止**，把第 0 步给用户的说明原样转达；旧形态先走附录 A |
+| 第 2 步又报 `VERSION GATE: FAIL` | 目标 home 的运行时不受支持（如 `.dsh` 是 `0.1.1-rc.2`）：属预期，改用支持 `0.1.5-rc.1` 的 home；**不要**用 `-SkipVersionCheck` |
+| `-AllHomes` 里 `.dsh` 报 `FAIL` | 正常：主环境仍是旧插件形态；`.dsh-test` / `.dsh-clean` 应为 `OK` |
+| `multiple profiles under ...; pass -ProfileName` | 该 home 有多个 profile：命令里加 `-ProfileName web` |
+| `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续装 |
+| `required runtime package missing: ...\@deepseek-ai` | 该 profile 的 `node_modules\@deepseek-ai` 不存在：先修好 dsh 运行时再重跑 |
+| `cannot replace non-empty real directory` | `node_modules\@deepseek-ai`（或 `zod`）是真实目录不是 junction：备份后删除该目录再重跑 |
+| `WARN: optional runtime package missing: ...\zod` | 可选 junction 缺失，安装继续；若运行报 zod 解析失败再补装 |
+| robocopy 报错（退出码 > 7）/ 目标目录多出的文件被删 | `/MIR` 是镜像语义：会删掉 `.agent-presets\kaz` 里多出的文件（`node_modules` 除外）；备份在 `tools\kaz-preset-backup-*`，不要往预设目录放自定义文件 |
+| 目标目录被占用 / `EPERM` | 让用户关闭 `dsh web` 后重跑；不要管理员强改 ACL，不要强杀进程 |
+| 看到 `KAZ-PRESET-INSTALL OK` 但好像没生效 | 若那次带了 `-DryRun`，OK 只是预演；去掉 `-DryRun` 重跑一次 |
+| 卸载后还想回到旧插件形态 | `-Uninstall` 只删预设目录；旧形态请用 7.5.0 之前的 git 历史按旧指引重装 |
+| 报 `ReplaceFileW EIO (Win32 1175)` | Windows 偶发文件系统错误，重试同一条命令/编辑一次 |
+| 写 JSON/YAML 报 BOM 解析错误 | 用 UTF-8 无 BOM 保存（见附录 A 第 4 步的写法） |
 | 遇到本表未覆盖的错误 | 原样把错误文本报告给用户，不要自行研究 |

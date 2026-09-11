@@ -24,8 +24,6 @@
 # ── system prompt controller ────────────────────────────────────────────────
 - id: kaz-system-prompt
   name: ./kaz-system-prompt.mjs
-  config:
-    kazSharedPath: C:/Users/Kaczev/.dsh-test/profiles/web/node_modules/kaz-shared/lib/tool-lists.js
 
 # ── shell / filesystem ──────────────────────────────────────────────────────
 - id: tool-pwsh
