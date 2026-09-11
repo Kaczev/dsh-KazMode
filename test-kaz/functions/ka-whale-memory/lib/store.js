@@ -1,4 +1,4 @@
-// kaz-memory —— 记忆文件的读写。
+// ka-whale-memory —— 记忆文件的读写。
 //
 // 每个记忆一个 JSON：内容记忆 { location, name, context }；
 // 路径记忆 { location, name, paths }。写盘用临时文件 + rename（原子替换）。

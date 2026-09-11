@@ -1,4 +1,4 @@
-// kaz-memory —— 记忆六工具。
+// ka-whale-memory —— 记忆六工具。
 // 输入 / 处理 / 输出按《Kaz8.0设计.md》§3.1–3.6；工具面文案一律英文。
 //
 //   memory_search  BM25 相关度检索（global + local 一起排名）

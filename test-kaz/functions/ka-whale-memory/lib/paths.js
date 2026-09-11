@@ -1,4 +1,4 @@
-// kaz-memory —— 记忆库路径与文件命名。
+// ka-whale-memory —— 记忆库路径与文件命名。
 //
 // 布局（每个记忆一个 JSON 文件）：
 //   global：<dsh home>/storages/ka-whale-memory/<context|paths>/<文件>.json

@@ -1,4 +1,4 @@
-// kaz-memory —— BM25 相关性检索。
+// ka-whale-memory —— BM25 相关性检索。
 //
 // 分词：优先 Intl.Segmenter（中英文都能切）；不可用时回退到
 // "非字母数字切分 + CJK 连续段二元组"，保证中文也能检索。

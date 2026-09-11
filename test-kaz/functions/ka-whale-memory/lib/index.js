@@ -1,9 +1,9 @@
-// kaz-memory —— 记忆六工具插件（设计稿 §3.1–3.6）。
+// ka-whale-memory —— 记忆六工具插件（设计稿 §3.1–3.6）。
 //
 // 工具注册在预设 scope 上：主代理与子代理都看得见，但主代理的写三件
 //（save / update / forget）由 kaz-core 的工具面门按 §2.1 收掉。
 
-export const name = "kaz-memory";
+export const name = "ka-whale-memory";
 
 export const inject = ["tools"];
 
