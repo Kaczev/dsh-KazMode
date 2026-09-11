@@ -85,8 +85,43 @@ export function hitCount(text, terms) {
   return hits;
 }
 
+/** 去掉查询两端成对的引号（模型常带引号搜原句）。 */
+export function stripQueryQuotes(input) {
+  let text = String(input ?? "").trim();
+  const pairs = [['"', '"'], ["'", "'"], ["\u201c", "\u201d"], ["\u300c", "\u300d"], ["\u300e", "\u300f"], ["\u300a", "\u300b"]];
+  let changed = true;
+  while (changed && text.length >= 2) {
+    changed = false;
+    for (const [open, close] of pairs) {
+      if (text.startsWith(open) && text.endsWith(close)) {
+        text = text.slice(1, -1).trim();
+        changed = true;
+      }
+    }
+  }
+  return text;
+}
+
+/**
+ * 一条记录的检索得分：原句命中最高，其次按匹配到的检索词长度加权。
+ * @returns {{score: number, exact: boolean, hits: number}}
+ */
+export function scoreEntry(text, needle, terms) {
+  const lower = text.toLowerCase();
+  if (needle.length > 0 && lower.includes(needle)) return { score: 1000 + needle.length, exact: true, hits: terms.length };
+  let hits = 0;
+  let weight = 0;
+  for (const term of terms) {
+    if (lower.includes(term)) {
+      hits += 1;
+      weight += Math.min(term.length, 4);
+    }
+  }
+  return { score: weight, exact: false, hits };
+}
+
 /** 取命中处附近的片段（优先原句，其次检索词；都没有就取开头）。 */
-export function snippetOf(text, needle, radius = 120) {
+export function snippetOf(text, needle, radius = 200) {
   const lower = text.toLowerCase();
   const exact = String(needle ?? "").trim().toLowerCase();
   let idx = exact.length > 0 ? lower.indexOf(exact) : -1;
@@ -103,19 +138,24 @@ export function snippetOf(text, needle, radius = 120) {
 }
 
 /**
- * 在记录里找 query；原句命中优先，其次按检索词命中。
- * @returns {{seq: number, label: string, match: "exact"|"terms", snippet: string}[]}
+ * 在记录里找 query：原句命中优先，其次按检索词加权；同分新的在前。
+ * @returns {{hits: {seq: number, label: string, match: "exact"|"terms", snippet: string}[], total: number}}
  */
-export function searchEntries(entries, query, { limit = 20, radius = 120 } = {}) {
-  const needle = String(query ?? "").trim().toLowerCase();
+export function searchEntries(entries, query, { limit = 20, radius = 200 } = {}) {
+  const needle = stripQueryQuotes(query).toLowerCase();
   const terms = termsOf(query);
-  const hits = [];
+  const scored = [];
   for (const entry of entries) {
-    if (hits.length >= limit) break;
-    const exact = needle.length > 0 && entry.text.toLowerCase().includes(needle);
-    const matched = exact || (terms.length > 0 && hitCount(entry.text, terms) > 0);
-    if (!matched) continue;
-    hits.push({ seq: entry.seq, label: entry.label, match: exact ? "exact" : "terms", snippet: snippetOf(entry.text, query, radius) });
+    const { score, exact } = scoreEntry(entry.text, needle, terms);
+    if (score <= 0) continue;
+    scored.push({ entry, score, exact });
   }
-  return hits;
+  scored.sort((a, b) => (b.score - a.score) || (b.entry.seq - a.entry.seq));
+  const hits = scored.slice(0, Math.max(0, limit)).map(({ entry, exact }) => ({
+    seq: entry.seq,
+    label: entry.label,
+    match: exact ? "exact" : "terms",
+    snippet: snippetOf(entry.text, needle.length > 0 ? needle : query, radius),
+  }));
+  return { hits, total: scored.length };
 }

@@ -6,6 +6,7 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { toolPairingBalancedAfter, toolPairingBalancedBefore } from "@deepseek-ai/dsh-compaction";
+import { readPressure } from "./reminder.js";
 import { entriesOfSession, hitCount, termsOf } from "./session-log.js";
 
 const RESULT_SCHEMA = {
@@ -70,6 +71,21 @@ export function retainBoundaryIdx(nodes, totalTokens, keepRecentPercent) {
 }
 
 /**
+ * 压缩候选（按顺序尝试）：先整簇，再从得分最高的单条开始逐个退小段——
+ * 大锚点跨不过安全边界时，自动退到还能压的最强小段。
+ * @param {{index: number, seq: number, score: number}[]} matched - 命中记录。
+ * @param {{group: object[]}|null} cluster - 最密一簇。
+ * @returns {object[][]} 每组是一个 candidate.group。
+ */
+export function orderedCandidates(matched, cluster) {
+  const candidates = [];
+  if (cluster !== null && Array.isArray(cluster.group) && cluster.group.length > 0) candidates.push(cluster.group);
+  const ranked = [...matched].sort((a, b) => (b.score - a.score) || (b.seq - a.seq));
+  for (const item of ranked) candidates.push([item]);
+  return candidates;
+}
+
+/**
  * 命中簇 → surface 上的安全区间：起点/终点映到最近的 surface 节点，
  * 再向两侧扩到配对平衡的边界；头部 system/message 节点不参与。
  * @returns {{startIdx: number, endIdx: number}|null}
@@ -95,7 +111,7 @@ export function contextCompressTool(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Compress a redundant middle span of this conversation into a summary. Say what to drop (keywords, an exact sentence, or a topic); the tool finds the smallest span covering it, expands to safe boundaries, and compresses that span with the built-in compaction. The most recent part stays untouched (keep_recent, default 20%). One span per call; call again for another span.",
+      "Compress a redundant middle span of this conversation into a summary. Say what to drop (keywords, an exact sentence, or a topic); the tool finds the smallest span covering it, expands to safe boundaries, and compresses that span with the built-in compaction. If the broad match has no safe boundary, it narrows to the strongest matching sub-span. The most recent part stays untouched (keep_recent, default 20%). One span per call; call again for another span.",
     parameters: {
       drop: { type: "string", required: true, description: "What to compress away: keywords, an exact sentence, or a topic description." },
       keep_recent: { type: "integer", description: "Percentage of the current context to keep untouched at the end (default 20, max 90)." },
@@ -122,15 +138,23 @@ export function contextCompressTool(ctx) {
       if (compaction === undefined || typeof compaction.compactRegion !== "function") return { ok: false, message: "the compaction provider is unavailable" };
       const measurement = meter.measure(session);
       const nodes = measurement?.nodes;
-      const range = pickRange(session, nodes, cluster);
-      if (range === null) return { ok: false, message: "the matched content has no safe boundaries to compress" };
       const retainIdx = retainBoundaryIdx(nodes, measurement.totalTokens, keepRecent);
-      let endIdx = Math.min(range.endIdx, retainIdx - 1);
-      while (endIdx >= range.startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
-      if (endIdx < range.startIdx) return { ok: false, message: `keep_recent=${keepRecent}% leaves no span to compress` };
-      const startSeq = nodes[range.startIdx].seq;
-      const endSeq = nodes[endIdx].seq;
-      const spanTokens = nodes.slice(range.startIdx, endIdx + 1).reduce((sum, node) => sum + (Number(node?.tokens) || 0), 0);
+      let chosen = null;
+      for (const group of orderedCandidates(matched, cluster)) {
+        const range = pickRange(session, nodes, { group });
+        if (range === null) continue;
+        let endIdx = Math.min(range.endIdx, retainIdx - 1);
+        while (endIdx >= range.startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
+        if (endIdx < range.startIdx) continue;
+        chosen = { startIdx: range.startIdx, endIdx };
+        break;
+      }
+      if (chosen === null) {
+        return { ok: false, message: `no safe compressible span found for "${drop}"; try a narrower target or a smaller keep_recent` };
+      }
+      const startSeq = nodes[chosen.startIdx].seq;
+      const endSeq = nodes[chosen.endIdx].seq;
+      const spanTokens = nodes.slice(chosen.startIdx, chosen.endIdx + 1).reduce((sum, node) => sum + (Number(node?.tokens) || 0), 0);
       try {
         await compaction.compactRegion(startSeq, endSeq, agent, exec?.signal);
       } catch (error) {
@@ -142,7 +166,9 @@ export function contextCompressTool(ctx) {
             : message;
         return { ok: false, message: reason };
       }
-      return { ok: true, message: `compressed seq ${startSeq}-${endSeq} (~${spanTokens} tokens)` };
+      const pressure = readPressure(ctx, session);
+      const usage = pressure === null ? "" : `; context usage ~${pressure.percent}%`;
+      return { ok: true, message: `compressed seq ${startSeq}-${endSeq} (~${spanTokens} tokens)${usage}` };
     },
   });
 }
