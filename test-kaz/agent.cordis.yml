@@ -24,6 +24,9 @@
 - id: kaz-core
   name: ./functions/kaz-core/lib/index.js
 
+- id: kaz-memory
+  name: ./functions/kaz-memory/lib/index.js
+
 # ── shell / 文件系统 ────────────────────────────────────────────────────────
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
