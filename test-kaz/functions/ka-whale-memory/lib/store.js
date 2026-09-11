@@ -58,16 +58,6 @@ export async function readMemoryFile(file) {
   }
 }
 
-/** 目标文件是否已存在（同名同库同类的判重）。 */
-export async function memoryExists(location, kind, name, cwd) {
-  try {
-    await fs.access(memoryFile(location, kind, name, cwd));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** 写一个记忆文件（原子替换）。 */
 export async function writeMemory(location, kind, name, body, cwd) {
   const file = memoryFile(location, kind, name, cwd);
