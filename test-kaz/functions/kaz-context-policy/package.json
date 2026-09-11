@@ -1,0 +1,7 @@
+{
+  "name": "kaz-context-policy",
+  "version": "8.0.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js"
+}

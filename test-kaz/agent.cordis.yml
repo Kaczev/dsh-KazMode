@@ -5,9 +5,10 @@
 #     从 functions/kaz-shared 注入（单一事实源）。
 #   * 系统提示面：只摘掉平台默认的 harness:identity 段（避免看起来像标准模式）；
 #     平台的工具指引、环境说明等段落保留。
-#   * 只挂现在就需要、且已存在的行；记忆 / 上下文 / 工作流工具按功能逐个加入。
+#   * 只挂现在就需要、且已存在的行；工作流工具按功能逐个加入。
 #   * kaz-shared 的工具面门：主代理黑名单（注册表收紧 + assemble 期过滤工具表）。
-#   * 本文件当前没有需要 isolate 的服务行；将来加服务行时必须放进带 isolate 的组。
+#   * compaction 组带 isolate（compaction realm）：内置压缩 provider 与上下文三件同组，
+#     组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
@@ -58,3 +59,17 @@
 
 - id: tool-subagent-list-agents
   name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+# ── compaction 组：内置压缩 provider + 上下文三件（同组共享 compaction realm）──
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: kaz-context-policy
+      name: ./functions/kaz-context-policy/lib/index.js
+
