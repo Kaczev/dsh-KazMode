@@ -10,19 +10,19 @@
 > 5. 全程不要向用户提问，除非出现本文件未覆盖的错误。
 > 6. 目标机器是 Windows + PowerShell。
 >
-> **版本要求**：Kaz 预设形态仅支持 dsh `0.1.5-rc.1`（第 0 步硬校验；不符合就停）。
+> **版本要求**：Kaz 预设形态**只支持 dsh `0.1.5-rc.2`**（第 0 步硬校验；不符合就停）。主环境 `.dsh` 的运行时是全局 `0.1.5-rc.2`，测试环境 `.dsh-test` 是它自己的本地副本 `0.1.5-rc.2`，救援环境 `.dsh-clean` 固定 `0.1.1-rc.2`（按设计过不了闸门）。
 > **旧插件形态用户**（dsh `0.1.1-rc.2`，还装着 `KazPlugins` + `cordis.patch.yml` 插件的）：先看 `ds安装指引.md` 的**附录 A** 做迁移清理，升级 dsh 后再按本文件更新。
 
 ---
 
 ## 第 0 步 版本闸门（硬性，必须先通过）
 
-> Kaz 预设形态只支持 dsh `0.1.5-rc.1`。
+> Kaz 预设形态**只支持 dsh `0.1.5-rc.2`**。
 > 版本号取自**运行时包** `@deepseek-ai/dsh/package.json` 的 `version` 字段（与安装程序同一口径），**不要**用 `dsh --version` 判断。
 > 第 3 步的安装程序会按目标 home 再校验一次，那才是最终权威；这里先拦下明显不匹配的机器。
 
 ```powershell
-$supportedDsh = @("0.1.5-rc.1")
+$supportedDsh = @("0.1.5-rc.2")
 $candidates = @(
   (Join-Path $env:USERPROFILE ".dsh\tools\dsh-cli\node_modules\@deepseek-ai\dsh\package.json"),
   (Join-Path $env:USERPROFILE ".dsh\profiles\web\node_modules\@deepseek-ai\dsh\package.json"),
@@ -47,7 +47,9 @@ if ($supportedDsh -notcontains $dshVer) {
 - 输出 `VERSION GATE: PASS` → 继续第 1 步。
 - 输出 `VERSION GATE: FAIL` → **立即停止**：不要执行本文件任何后续步骤。把下面这段话原样告诉用户：
 
-> 本版 Kaz 是 DSH agent preset（预设形态），仅支持 dsh `0.1.5-rc.1`，检测到本机运行时版本不在支持列表内。请先把 dsh 升级或恢复到 `0.1.5-rc.1` 再更新；旧插件形态请先按 `ds安装指引.md` 附录 A 迁移。
+> 本版 Kaz 是 DSH agent preset（预设形态），**只支持 dsh `0.1.5-rc.2`**，检测到本机运行时版本不在支持列表内。请先把 dsh 升级到 `0.1.5-rc.2` 再更新；旧插件形态请先按 `ds安装指引.md` 附录 A 迁移。若用户明确要求把运行时**回退到 `0.1.5-rc.1`**：安装 / 更新必须显式加 `-SkipVersionCheck`，并且要把该 home 启动器的 `EXPECTED_CLI` 一起改回 `0.1.5-rc.1`，否则启动器开屏就拒绝启动——回退不是受支持状态，只能由用户决定。
+
+> **三台 home 的闸门读到的都是自己的真实版本（已无「残留副本遮蔽」现象）**：第 0 步 / 第 3 步的候选顺序先读 `<home>\tools\dsh-cli\...`，再读 `<home>\profiles\<profile>\node_modules\@deepseek-ai\dsh\...`，最后读全局 `%APPDATA%\npm`，取第一个存在者即停。主环境 `.dsh` 前两个候选都不存在（那份 rc.1 残留副本已删除），读到**全局 `0.1.5-rc.2`**；`.dsh-test` 读到自己的本地副本 `0.1.5-rc.2`；`.dsh-clean` 读到自己保留的 `0.1.1-rc.2`，按预期 `FAIL`。**看打印出来的路径判断闸门读的是哪一份**。
 
 > 若你要更新的是非默认 home，第 0 步仍按默认 `%USERPROFILE%\.dsh` 预检；目标 home 的真实闸门由第 3 步的安装程序执行。
 
@@ -83,7 +85,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -ProfileName web -DryRun
 ```
 
-- 预演就报 `VERSION GATE: FAIL` → 该 home 的 dsh 不是 `0.1.5-rc.1`：**停止**，按第 0 步的说明转告用户；不要用 `-SkipVersionCheck` 绕过。
+- 预演就报 `VERSION GATE: FAIL` → 该 home 的运行时 dsh 不是 `0.1.5-rc.2`：**停止**，按第 0 步的说明转告用户；**不要**自行用 `-SkipVersionCheck` 绕过（唯一例外：用户明确要求回退到 `0.1.5-rc.1`，那时按第 0 步的说明加它）。
 - 预演报 `multiple profiles under ...; pass -ProfileName` → 在命令里加 `-ProfileName web`（或该 home 里真正有 `node_modules` 的那个 profile 名）。
 
 ## 第 3 步 正式重跑安装程序
@@ -107,7 +109,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHomes
 ```
 
-- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期**：预期 `.dsh`（主环境）与 `.dsh-test` 报 `OK`；`.dsh-clean`（救援环境，仍是 dsh `0.1.1-rc.2`）报 `FAIL` 属预期——它保留旧运行时当最后防线。
+- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期**：`.dsh`（主环境，闸门读到全局 `0.1.5-rc.2`）与 `.dsh-test`（本地副本 `0.1.5-rc.2`）报 `OK`；`.dsh-clean`（救援环境，仍是 dsh `0.1.1-rc.2`）报 `FAIL` 属预期——它保留旧运行时当最后防线。
 - 若某个 home 的 `.agent-presets\kaz` 本身就是仓库 `test-kaz` 的 junction 目标，安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——正常分支。
 
 **出错处理**：
@@ -144,7 +146,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 - 删 `<profile>\KazPlugins`、清掉指向旧插件的 junction；
 - 清 `package.json` 里 `file:KazPlugins/...` 依赖行（保留 `file:KazPrivatePlugins/...` 私有行）；
 - 清 `cordis.patch.yml` 里 8 个 Kaz insert 块（保留 `kaz-skill-*` 私有块）；
-- 把 dsh 升级到 `0.1.5-rc.1`，重启后再按本文件走第 0–5 步。
+- 把 dsh 升级到 `0.1.5-rc.2`（当前唯一受支持版本），重启后再按本文件走第 0–5 步。
 
 7.5.0 之前的旧更新步骤不再保留；需要时查 7.5.0 之前的 git 历史。
 
@@ -154,8 +156,8 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 | 现象 | 处理 |
 | --- | --- |
-| 第 0 步 / 预演 / 正式运行报 `VERSION GATE: FAIL` | 目标 home 的运行时不是 `0.1.5-rc.1`：**停止**，按第 0 步的说明转告用户；旧形态先走 `ds安装指引.md` 附录 A。**不要**用 `-SkipVersionCheck` |
-| `-AllHomes` 里某个 home 报 `FAIL` | 该 home 的运行时 dsh 不是 `0.1.5-rc.1`：主环境 `.dsh` 与 `.dsh-test` 应 `OK`；`.dsh-clean`（0.1.1-rc.2 救援环境）报 `FAIL` 属预期。**不要**用 `-SkipVersionCheck` |
+| 第 0 步 / 预演 / 正式运行报 `VERSION GATE: FAIL` | 目标 home 的运行时不是 `0.1.5-rc.2`：**停止**，按第 0 步的说明转告用户；旧形态先走 `ds安装指引.md` 附录 A。**不要**自行用 `-SkipVersionCheck`；唯一例外是用户明确要求回退到 `0.1.5-rc.1`（那时按第 0 步的说明加它，并提醒用户同步启动器的 `EXPECTED_CLI`） |
+| `-AllHomes` 里某个 home 报 `FAIL` | 该 home 的运行时 dsh 不是 `0.1.5-rc.2`：主环境 `.dsh`（全局 `0.1.5-rc.2`）与测试环境 `.dsh-test`（本地副本 `0.1.5-rc.2`）应 `OK`；`.dsh-clean`（`0.1.1-rc.2` 救援环境）报 `FAIL` 属设计如此。**不要**自行用 `-SkipVersionCheck`（唯一例外：用户明确要求回退到 `0.1.5-rc.1`，见第 0 步） |
 | `multiple profiles under ...; pass -ProfileName` | 该 home 有多个 profile：加 `-ProfileName web` |
 | `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续 |
 | `required runtime package missing: ...\@deepseek-ai` | 该 profile 的 `node_modules\@deepseek-ai` 不存在：先修好 dsh 运行时再重跑 |
