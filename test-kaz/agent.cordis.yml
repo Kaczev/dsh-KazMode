@@ -1,0 +1,51 @@
+# kaz 预设（Kaz 8.0 试验）——《Kaz8.0设计.md》的落地组合。
+#
+# 当前阶段：功能 1（persona 层）+ 最小载体。
+#   * persona 行给短兜底文本；真实主代理 persona 由 ./kaz-system-prompt.mjs
+#     从 functions/kaz-prompts 注入（单一事实源）。
+#   * 只挂现在就需要、且已存在的行；记忆 / 上下文 / 工作流工具按功能逐个加入。
+#   * 本文件当前没有需要 isolate 的服务行；将来加服务行时必须放进带 isolate 的组。
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    prefix: "We are the user's point of contact and the work's arranger."
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+- id: kaz-system-prompt
+  name: ./kaz-system-prompt.mjs
+
+# ── shell / 文件系统 ────────────────────────────────────────────────────────
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── 其余模型面对工具 ─────────────────────────────────────────────────────────
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+
+# ── 子代理控制（list_agents / send_message / interrupt_agent）────────────────
+- id: tool-subagent-control
+  name: '@deepseek-ai/dsh-tool-subagent-control'
+
+- id: tool-subagent-list-agents
+  name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
