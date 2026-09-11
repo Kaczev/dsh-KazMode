@@ -1,4 +1,4 @@
-// kaz-core —— Kaz 8.0 的工具面门。
+// kaz-shared —— Kaz 8.0 的工具面门。
 //
 // 当前只做一件事：给主代理挂上 §2.1 工具面黑名单（写记忆三件对主代理不可见、
 // 调用即报错）。子代理的黑名单由派发时交给平台处理（toolFilter），不在这里管；
@@ -7,11 +7,11 @@
 // 挂点：agent/created —— 每个 agent 创建时，在它自己的 scope 上收紧工具面。
 // 还没挂上的工具名会被跳过（等工具挂上后自然收紧），单个名字失败不影响其它名字。
 
-export const name = "kaz-core";
+export const name = "kaz-shared";
 
 export const inject = [];
 
-import { MAIN_BLACKLIST } from "../../kaz-prompts/lib/blacklists.js";
+import { MAIN_BLACKLIST } from "./blacklists.js";
 import { isSubagentAgent } from "./agent-role.js";
 
 /**
@@ -24,7 +24,7 @@ import { isSubagentAgent } from "./agent-role.js";
 export function restrictTools(agent, names, logger) {
   const tools = agent?.ctx?.tools;
   if (tools === undefined || tools === null || typeof tools.restrict !== "function") {
-    logger?.warn?.("[kaz-core] tools registry unavailable; blacklist not applied");
+    logger?.warn?.("[kaz-shared] tools registry unavailable; blacklist not applied");
     return { applied: [], skipped: [...names] };
   }
   const applied = [];
@@ -38,7 +38,7 @@ export function restrictTools(agent, names, logger) {
     }
   }
   if (skipped.length > 0) {
-    logger?.debug?.(`[kaz-core] blacklist skipped (not mounted yet): ${skipped.join(", ")}`);
+    logger?.debug?.(`[kaz-shared] blacklist skipped (not mounted yet): ${skipped.join(", ")}`);
   }
   return { applied, skipped };
 }
@@ -51,7 +51,7 @@ export function apply(ctx) {
       if (isSubagentAgent(agent)) return; // 子代理：黑名单由派发时给定
       restrictTools(agent, MAIN_BLACKLIST, ctx.logger);
     } catch (error) {
-      ctx.logger?.warn?.(`[kaz-core] main blacklist failed: ${String(error)}`);
+      ctx.logger?.warn?.(`[kaz-shared] main blacklist failed: ${String(error)}`);
     }
   });
 }

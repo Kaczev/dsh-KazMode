@@ -1,7 +1,7 @@
 // kaz-system-prompt —— Kaz 8.0 系统提示控制器。
 //
 // 两件事：
-//   1) persona 注入：主代理的系统提示 persona 取 functions/kaz-prompts 的
+//   1) persona 注入：主代理的系统提示 persona 取 functions/kaz-shared 的
 //      MAIN_PERSONA（单一事实源）；子代理保留派发时给定的自己的 persona。
 //   2) 摘掉平台默认的 harness:identity 段（"You are an AI agent powered by
 //      DeepSeek Harness."）——它会让 Kaz 看起来像标准模式。其余平台段落
@@ -15,8 +15,8 @@ export const name = "kaz-system-prompt";
 export const inject = [];
 
 import { PERSONA_PREFIX_SECTION } from "@deepseek-ai/dsh-persona";
-import { MAIN_PERSONA } from "./functions/kaz-prompts/lib/roles.js";
-import { isSubagentAgent } from "./functions/kaz-core/lib/agent-role.js";
+import { MAIN_PERSONA } from "./functions/kaz-shared/lib/roles.js";
+import { isSubagentAgent } from "./functions/kaz-shared/lib/agent-role.js";
 
 /** 不允许出现在模型系统提示里的平台段落名。 */
 export const DROP_SECTIONS = new Set(["harness:identity"]);

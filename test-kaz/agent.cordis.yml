@@ -2,7 +2,7 @@
 #
 # 当前阶段：功能 1（persona 层）+ 最小载体。
 #   * persona 行给短兜底文本；真实主代理 persona 由 ./kaz-system-prompt.mjs
-#     从 functions/kaz-prompts 注入（单一事实源）。
+#     从 functions/kaz-shared 注入（单一事实源）。
 #   * 系统提示面：只摘掉平台默认的 harness:identity 段（避免看起来像标准模式）；
 #     平台的工具指引、环境说明等段落保留。
 #   * 只挂现在就需要、且已存在的行；记忆 / 上下文 / 工作流工具按功能逐个加入。
@@ -21,8 +21,8 @@
 - id: kaz-system-prompt
   name: ./kaz-system-prompt.mjs
 
-- id: kaz-core
-  name: ./functions/kaz-core/lib/index.js
+- id: kaz-shared
+  name: ./functions/kaz-shared/lib/index.js
 
 - id: ka-whale-memory
   name: ./functions/ka-whale-memory/lib/index.js
