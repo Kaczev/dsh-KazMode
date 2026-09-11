@@ -65,8 +65,6 @@ import { randomUUID } from "node:crypto";
 import {
   MAIN_ROLE,
   MAIN_STAGE_IDS,
-  FIRST_ROUND_STARTUP_FORM,
-  FIRST_ROUND_STARTUP_TEXT,
   V09_SUBAGENT_ROLES,
   V09_STAGE_IDS,
   V09_ROLE_PERSONAS,
@@ -1201,6 +1199,14 @@ export function isUserMessage(message) {
   return true;
 }
 
+/** 注入记录的标签：dsh schema 只放行固定 form 白名单，新写法把标签放在 notice 的
+ *  summary 里（form: "notice", summary: "stage:x"），旧记录直接写在 form 里
+ *  （stage:* / startup-tool-hint）。判定时两者等效。 */
+function injectedTagOf(source) {
+  if (source === null || typeof source !== "object") return undefined;
+  if (source.form === "notice" && typeof source.summary === "string") return source.summary;
+  return source.form;
+}
 /** 会话日志里是否已注入过 ka-whale-workflow 的指定 form 消息。 */
 function hasInjectedBefore(agent, form) {
   try {
@@ -1213,7 +1219,7 @@ function hasInjectedBefore(agent, form) {
       const source = data.source;
       if (source === null || typeof source !== "object") return false;
       if (source.kind !== "plugin" || source.plugin !== "ka-whale-workflow") return false;
-      return form === undefined || source.form === form;
+      return form === undefined || injectedTagOf(source) === form;
     });
   } catch {
     return false;
@@ -1273,7 +1279,7 @@ export function hasInjectedInTurn(agent, form, turn) {
       const source = data.source;
       if (source === null || typeof source !== "object") continue;
       if (source.kind !== "plugin" || source.plugin !== "ka-whale-workflow") continue;
-      if (form === undefined || source.form === form) return true;
+      if (form === undefined || injectedTagOf(source) === form) return true;
     }
     return false;
   } catch {
@@ -2117,18 +2123,6 @@ export default {
         minimalDone: true,
       });
       return updated === true;
-    }
-
-    /** 受控子代理首轮 Minimal startup hint（与主模型 [ka-whale-workflow first-round]
-     *  对齐：首次工具调用前不注入完整 role stage 正文，只提示先做一次工具调用）。 */
-    function controlledStartupHintText(role) {
-      const initial = V09_SUBAGENT_ROLE_INITIAL_STAGES[role] ?? "";
-      const report = V09_ROLE_REPORT_TOOLS[role] ?? "";
-      return `[ka-whale-workflow first-round]
->
-Mode: Minimal startup (${role} subagent, before the first tool call).
-Before we answer, call memory_search or context_search exactly once. After that first tool call, ka-whale-workflow starts ${initial} and the full ${role} tool surface unlocks (including ${report}). Do not end the turn before making the call.
-<`;
     }
 
     /** 解析父主 relay 的规范首行 `planItemId: <id>`（与 ka_sub_whale followup 同格式）。
@@ -4349,50 +4343,6 @@ Before we answer, call memory_search or context_search exactly once. After that 
         //   - controlled v0.9 subagents 经 request.persona 携带 KAZ_ROLE_PROMPTS.subagent.*；
         //   - 旧 unknown-subagent 通用 SUBAGENT_FLOW_TEXT 注入路径已删除。
 
-        // 首轮 startup hint：主模型与受控子代理在 idle + Minimal（首次工具调用前）
-        // 都不注入完整 stage 正文；这里一次性提示先调用 memory_search / context_search
-        // 解锁工作流。主模型首次 tool/call 后进入 assess-complexity；受控子代理首次
-        // tool/call 后进入其 role 首阶段（challenge-plan / plan-memory / plan-plugin）。
-        const isMainStartupCandidate = controlledRoleNow === null && !subagentNow;
-        const isControlledStartupCandidate = controlledRoleNow !== null;
-        const shouldInjectStartupHint =
-          !skipSubagentNow &&
-          (isMainStartupCandidate || isControlledStartupCandidate) &&
-          typeof sessionIdNow === "string" &&
-          sessionIdNow.length > 0 &&
-          turn < 2 &&
-          [
-            ...(Array.isArray(payload?.messages) ? payload.messages : []),
-            ...messages,
-          ].some((message) => isUserMessage(message)) &&
-          stageOfAgent(agent) === "idle" &&
-          isMinimal(agent) &&
-          !hasInjectedBefore(agent, FIRST_ROUND_STARTUP_FORM);
-        if (shouldInjectStartupHint) {
-          const startupHintText =
-            controlledRoleNow !== null
-              ? controlledStartupHintText(controlledRoleNow)
-              : FIRST_ROUND_STARTUP_TEXT;
-          try {
-            const message = createUserMessage({
-              content: [{ type: "text", text: startupHintText }],
-              source: {
-                kind: "plugin",
-                plugin: "ka-whale-workflow",
-                form: FIRST_ROUND_STARTUP_FORM,
-              },
-            });
-            messages.push(message);
-            appended = true;
-            reportRoundDisplay(agent, startupHintText, "首轮 startup hint");
-            recordCostMeterAdd(agent, { injectedChars: startupHintText.length });
-          } catch (error) {
-            ctx.logger.warn(
-              `[ka-whale-workflow] 构造首轮 startup hint 注入消息失败：${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
-        }
-
         // v0.9 阶段入口注入：每次进入 v0.9 stage 时 pending 一次，注入后即清除。
         if (typeof sessionIdNow === "string" && sessionIdNow.length > 0) {
           const pendingStage = stageStore.getPendingStageInjection(sessionIdNow);
@@ -4425,7 +4375,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
                   source: {
                     kind: "plugin",
                     plugin: "ka-whale-workflow",
-                    form: `stage:${pendingStage}`,
+                    form: "notice",
+                    summary: `stage:${pendingStage}`,
                   },
                 });
                 messages.push(message);
@@ -4495,7 +4446,8 @@ Before we answer, call memory_search or context_search exactly once. After that 
                   source: {
                     kind: "plugin",
                     plugin: "ka-whale-workflow",
-                    form: `stage:${pendingStage}`,
+                    form: "notice",
+                    summary: `stage:${pendingStage}`,
                   },
                 });
                 messages.push(message);

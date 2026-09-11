@@ -107,7 +107,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHomes
 ```
 
-- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期**：`.dsh`（主环境，dsh `0.1.1-rc.2` 旧插件形态）报 `FAIL` 是正常的；`.dsh-clean` / `.dsh-test` 应 `OK`。
+- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期**：预期 `.dsh`（主环境）与 `.dsh-test` 报 `OK`；`.dsh-clean`（救援环境，仍是 dsh `0.1.1-rc.2`）报 `FAIL` 属预期——它保留旧运行时当最后防线。
 - 若某个 home 的 `.agent-presets\kaz` 本身就是仓库 `test-kaz` 的 junction 目标，安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——正常分支。
 
 **出错处理**：
@@ -155,7 +155,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 | 现象 | 处理 |
 | --- | --- |
 | 第 0 步 / 预演 / 正式运行报 `VERSION GATE: FAIL` | 目标 home 的运行时不是 `0.1.5-rc.1`：**停止**，按第 0 步的说明转告用户；旧形态先走 `ds安装指引.md` 附录 A。**不要**用 `-SkipVersionCheck` |
-| `-AllHomes` 里 `.dsh` 报 `FAIL` | 正常：主环境仍是旧插件形态；`.dsh-test` / `.dsh-clean` 应为 `OK` |
+| `-AllHomes` 里某个 home 报 `FAIL` | 该 home 的运行时 dsh 不是 `0.1.5-rc.1`：主环境 `.dsh` 与 `.dsh-test` 应 `OK`；`.dsh-clean`（0.1.1-rc.2 救援环境）报 `FAIL` 属预期。**不要**用 `-SkipVersionCheck` |
 | `multiple profiles under ...; pass -ProfileName` | 该 home 有多个 profile：加 `-ProfileName web` |
 | `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续 |
 | `required runtime package missing: ...\@deepseek-ai` | 该 profile 的 `node_modules\@deepseek-ai` 不存在：先修好 dsh 运行时再重跑 |

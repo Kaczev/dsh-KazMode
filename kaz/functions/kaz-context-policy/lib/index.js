@@ -26,7 +26,7 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { KazCompactionEngine } from "./kaz-compaction-engine.js";
 import { searchContext, readContext } from "./context-search-read.js";
-import { buildSearchRecords } from "./session-context-adapter.js";
+import { buildSearchRecords, normalizeSessionView } from "./session-context-adapter.js";
 
 const renderJsonText = (_args, value) => [
   { type: "text", text: JSON.stringify(value, null, 2) },
@@ -39,8 +39,11 @@ function structuredError(code, reason) {
 function sessionEventsOf(exec) {
   try {
     const session = exec && exec.agent && exec.agent.session;
-    if (session !== null && session !== undefined && Array.isArray(session.events)) {
-      return session.events;
+    if (session === null || session === undefined) return null;
+    // 0.1.1 的 { events } 与 0.1.5 的会话句柄（.seq + .eventAt）都归一化成数组。
+    const view = normalizeSessionView(session);
+    if (view !== null && view !== undefined && Array.isArray(view.events)) {
+      return view.events;
     }
   } catch {
     return null;
@@ -232,6 +235,9 @@ function contextCompressDef(ctx) {
           "context_compress requires exec.agent.session",
         );
       }
+      // provider 吃的是本插件自己的 { events, surface } 契约；0.1.5 句柄先归一化。
+      // tokenMeter 仍用原始 session（官方服务自己认句柄）。
+      const sessionView = normalizeSessionView(session);
       const strategy = args?.strategy === "fold" ? "fold" : "suggest";
       try {
         let measurement;
@@ -246,7 +252,7 @@ function contextCompressDef(ctx) {
         // 手动 suggest/fold 路径：manual=true 触发 dynamicMaxFoldTokens
         // （当前 totalTokens * foldTargetRatio，默认 50%）并启用 fillToBudget
         // 连续填充；auto 不走此分支。
-        const range = provider.selectRange(session, measurement, {
+        const range = provider.selectRange(sessionView, measurement, {
           overflow: false,
           force: false,
           manual: true,

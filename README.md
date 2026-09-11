@@ -166,7 +166,7 @@ dsh-KazMode/
 - **`no profiles directory under ...`** / **`required runtime package missing: ...\node_modules\@deepseek-ai`**：该 home / profile 还没装好 dsh 运行时，先把 dsh 装好再装预设。
 - **`cannot replace non-empty real directory`**：预设 `node_modules\@deepseek-ai`（或 `zod`）是真实目录而不是 junction；备份后删除该目录，再重跑安装程序。
 - **看到 `KAZ-PRESET-INSTALL OK` 但好像没生效**：如果那次带了 `-DryRun`，OK 只是预演；去掉 `-DryRun` 重跑一次。
-- **`-AllHomes` 里 `.dsh` 报 FAIL**：正常——主环境仍是旧插件形态；支持 `0.1.5-rc.1` 的 home 才会 `OK`。
+- **`-AllHomes` 里某个 home 报 `FAIL`**：该 home 的运行时 dsh 不是 `0.1.5-rc.1`。主环境 `.dsh` 自 7.6.1 起已是预设形态、应 `OK`；`.dsh-clean`（救援环境，`0.1.1-rc.2`）报 `FAIL` 属预期。
 - **`robocopy` 镜像把目标里多出的文件删了**：`/MIR` 是镜像语义，`node_modules` 除外；不要往 `.agent-presets\kaz` 里放自定义文件，备份在 `<home>\tools\kaz-preset-backup-*`（会累积，可手动清理）。
 - **绝对不要**对仓库运行 `git clean -fdx` / `git checkout -f`：`test-kaz` 是仓库 ↔ live 的 junction，会顺着写坏 live 预设。
 - **用 `Set-Content -Encoding UTF8` 写 YAML/JSON 产生 BOM**：BOM 可能破坏 JSON.parse；用支持 UTF-8 无 BOM 的编辑器/工具。
@@ -188,7 +188,7 @@ dsh-KazMode/
 | `test-kaz/functions/<组件>/` | 预设自带的 Kaz 组件（workflow / memory / context-policy / shared） |
 | `<home>\.agent-presets\kaz\` | 安装后的 live 预设目录（由 `test-kaz/` 镜像而来） |
 | `<home>\tools\kaz-preset-backup-<时间戳>\` | 每次安装前的自动备份（排除 `node_modules`） |
-| `<home>\tools\dsh-cli\` | 该 home 的**本地 CLI 副本**（版本锚：`@deepseek-ai/dsh` + `dsh-base` + `dsh-web-app` 三件套同版本）。各 home 启动器用它而不是全局 `dsh`，并在开屏按 `EXPECTED_CLI` 做版本门，避免一次 `npm i -g` 把多个 home 一起带走 |
+| `<home>\tools\dsh-cli\` | **home 本地 CLI 副本**（`@deepseek-ai/dsh` + `dsh-base` + `dsh-web-app` 三件套同版本）。`clean` / `test` 两个 home 的启动器用它并在开屏按 `EXPECTED_CLI` 做版本门。**主环境 `.dsh` 不用它**：主环境锚定在机器的全局 `dsh`（`%APPDATA%\npm`），启动器同样做版本门 |
 | `ds安装指引.md` / `ds更新指引.md` | 给 DeepSeek 的安装 / 更新步骤（决策完备，唯一做法） |
 | `ds安装法的提示词.txt` / `ds更新法的提示词.txt` | 发给 DeepSeek 的简短提示词，指向对应指引 |
 | `一些指引/` | 旧面板入口截图（legacy 章节用） |
@@ -198,6 +198,12 @@ dsh-KazMode/
 ### 8.2 发版说明（给未来的我和 agent）
 
 - **7.6.0**：旧插件形态从仓库移除（`KazPlugins/` 与仓库根指向主预设的冗余 `kaz` junction），旧形态源只从 7.5.1 及更早的 git 历史取用；主环境 `.dsh` 迁移到预设形态并加装本地 CLI 副本与启动器版本门（见 8.1）；修复 `install-kaz-preset.ps1` 的一个真 bug——`Clear-LinkPath` 在**全新 home**（`<preset>\node_modules` 下尚无 junction）时会执行 `cmd /c rmdir` 到一个不存在的路径，该 stderr 在 `$ErrorActionPreference = 'Stop'` 下变成终止性错误，导致**文件已镜像、两个 junction 未建、退出码 1**的半成品状态；现在该调用被 `try { } catch { }` 包住。
+- **7.6.1**：
+  - `ka-whale-memory` **不再做任何上下文注入**：guidance / 遗忘指引 / autoLoad 快照注入（以及 settings 里的 `guidance*` 字段、首轮定位缓存、`autoLoad` RPC）全部删除，插件只剩六个记忆工具与存储引擎。
+  - `ka-whale-workflow` 删掉首轮 `startup-tool-hint` 注入（它是为「首轮只留两个工具」的 Minimal 机制准备的，预设形态已无该机制）。
+  - 其余注入记录改用 **schema 合规**的写法：`source: { kind: "plugin", plugin: "ka-whale-workflow", form: "notice", summary: "stage:<阶段>" }`；读侧 `injectedTagOf()` 对旧写法（`form: "stage:*"` / `startup-tool-hint`）与新写法等效识别。原因：dsh 0.1.5 的 v0→v1 会话迁移**只放行** `instructions` / `catalog` / `snapshot` / `notice` / `relay` / `recall` 六个 form，我们自造的值会让**整份历史会话**读不出来（`refuses this format v0 Session`）。
+  - 旧日志修复脚本：`不入库文件\kaz-form-fix-20260911\fix-session-form.mjs` 逐帧解压 → 把非法 `form` 改写成 `notice` + `summary`（原标签保留）→ 逐帧重编码写回，并用 `dsh-session-format-v0-to-v1.assertReleasedEventPayload` 做改前/改后判定。
+  - 主环境运行时锚点回到**全局 dsh**：`dsh启动.bat` 改为调用 `%APPDATA%\npm\dsh.cmd` 并按 `EXPECTED_CLI` 门禁；`.dsh\tools\dsh-cli` 不再被主环境使用（`clean` / `test` 仍各自固定副本）。
 
 - **预设形态没有「面板本地版本」**：旧插件形态那个读 `KazPlugins/kaz-mode/package.json` 的 `version` 字段、并与 GitHub tag 比较的机制，随面板一起退役。预设形态的版本就是仓库的 **git tag / 提交**；改预设请改 `test-kaz/`。
 - 支持版本是**硬编码在 `install-kaz-preset.ps1` 里的 `$SupportedVersions`**（当前 `0.1.5-rc.1`）。升级适配的 dsh 版本时，改这一处，并同步三份文档（`README.md`、`ds安装指引.md`、`ds更新指引.md`）里的版本号。

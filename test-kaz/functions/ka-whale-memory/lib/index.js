@@ -38,7 +38,6 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { MemoryEngine } from "./engine.js";
 import { effectiveToolWhitelist, TOOL_WHITELIST } from "../../kaz-shared/lib/tool-lists.js";
 
@@ -249,22 +248,6 @@ function present(title, kind, rawInput) {
   return { card: "generic", title, kind, ...(rawInput === undefined ? {} : { rawInput }) };
 }
 
-/** 指引总述行（S 信息）：memory_search 可调用时作为指引第一行。
- *  2026-08-21：改为主动行动式措辞——模型应当主动查记忆、主动存记忆，
- *  而不是等到"遇到难题"才想起记忆。
- *  2026-08-23：固定指引默认由 guidanceHeadEnabled=false 关闭；开启后
- *  guidanceHead 留空时仍使用这条内置默认。 */
-const GUIDANCE_HEAD = [
-  "We need to search the memory (memory_search) at the start of a task for relevant information.",
-  "We need to save memories (memory_save) with concise and sharp content that captures the reasoned solutions and key insights we've derived — so we can reference them when facing similar problems in the future."
-].join("\n");
-
-/** 每轮首次 memory_search 之后注入的遗忘指引。 */
-const GUIDANCE_FORGET = [
- "We need to get details of memories (memory_detail) when we need more information about a specific memory.",
- "We need to forget memories (memory_forget) that are no longer relevant, including approaches that turned out to be ineffective, solutions that have been superseded, or tasks that have been completed and no longer need to be retained.",
- "We need to update memories (memory_update) when the stored content is incorrect, when the content needs to be revised, or when the memory's name or keywords are no longer accurate — and also when we discover that a previously saved approach or solution is ineffective, outdated, or can be improved."
-].join("\n");
 
 /** 判断某个记忆工具当前是否可用：
  *  1) 注册检查：plugin-filter / 组合移除会让工具不在注册表（工具面过滤后也不可见）；
@@ -284,111 +267,9 @@ function toolAvailable(name, grouping, kazSettings) {
   return true;
 }
 
-/**
- * 判断 memory_search 在当前代理环境是否真的可调用：
- *   1) 注册 + Kaz 工具面检查（toolAvailable）——不在注册表 / 不在 Kaz
- *      白名单即视为不可用；
- *   2) 方案 A：kazMode 服务存在时按 agent 会话的工具面判定（该会话
- *      ka-whale-memory 关闭 / 不在白名单 / 首阶段极简都会被 kaz-mode 排除；
- *      36.9 起不再单独依赖 round-minimal 服务）；
- *   3) schemas(agent) 实际包含 memory_search——原生模式即直接工具面；
- *      Code Mode 下 wire 折叠为 run_code，schemas(agent) 返回的正是
- *      run_code SDK 可绑定的全部可见工具（含 memory_search），因此
- *      "在 schemas 里" 即代表"当前环境能经 run_code 调用"。
- *  读不到的服务 / 设置一律按"不受限制"处理；判定失败按"不可用"处理。
- */
-function memorySearchCallable(agent, grouping, kazSettings, toolsSvc, kazModeSvc) {
-  // kazMode 服务存在时按 agent 会话的工具面判定（该会话 ka-whale-memory
-  // 关闭 / 不在白名单 / 首阶段极简都会被排除）；服务缺失时回退旧逻辑。
-  if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.toolVisible === "function") {
-    try {
-      return kazModeSvc.toolVisible(agent, "memory_search") === true;
-    } catch {
-      return false;
-    }
-  }
-  if (!toolAvailable("memory_search", grouping, kazSettings)) return false;
-  try {
-    const schemas =
-      toolsSvc !== undefined && toolsSvc !== null && typeof toolsSvc.schemas === "function"
-        ? toolsSvc.schemas(agent)
-        : [];
-    return (
-      Array.isArray(schemas) &&
-      schemas.some((schema) => schema !== null && typeof schema === "object" && schema.name === "memory_search")
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * 拼装首轮工具调用后注入的 [ka-whale-memory guidance] 上下文消息：
- *  统一消息格式 [标题] / > / 内容 / <；只发总述行（S）——记忆工具的具体
- *  用法由各工具描述自带，不再逐行重复 A/B/C/D。仅当 memory_search 在当前
- *  环境确实可调用（存在且可直接使用或经 run_code SDK 调用）时发送；
- *  memory_search 不可用时返回空串（不向模型发指引——没有检索能力的指引
- *  只会干扰模型思考）。
- *
- *  overrides.head：总述行覆盖（空 = 内置默认 GUIDANCE_HEAD）。
- */
-function composeGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, kazModeSvc) {
-  const head =
-    overrides !== null &&
-    typeof overrides === "object" &&
-    typeof overrides.head === "string" &&
-    overrides.head.trim().length > 0
-      ? overrides.head.trim()
-      : GUIDANCE_HEAD;
-  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, kazModeSvc)) return "";
-  return ["[ka-whale-memory guidance]", ">", head, "<"].join("\n");
-}
-
-/**
- * 拼装每轮首次 memory_search 之后注入的 [ka-whale-memory guidance] 上下文消息：
- *  提醒模型用 memory_forget 清理已完成、不再需要保留的任务记忆。
- *  仅在 memory_search 与 memory_forget 当前环境都确实可调用时发送。
- *
- *  overrides.forget：guidanceForget 覆盖（留空 = 内置默认）。
- */
-function composeForgetGuidance(grouping, kazSettings, overrides = {}, agent, toolsSvc, kazModeSvc) {
-  if (!memorySearchCallable(agent, grouping, kazSettings, toolsSvc, kazModeSvc)) return "";
-  if (kazModeSvc !== null && kazModeSvc !== undefined && typeof kazModeSvc.toolVisible === "function") {
-    try {
-      if (kazModeSvc.toolVisible(agent, "memory_forget") !== true) return "";
-    } catch {
-      return "";
-    }
-  } else if (!toolAvailable("memory_forget", grouping, kazSettings)) {
-    return "";
-  }
-  const line =
-    overrides !== null &&
-    typeof overrides === "object" &&
-    typeof overrides.forget === "string" &&
-    overrides.forget.trim().length > 0
-      ? overrides.forget.trim()
-      : GUIDANCE_FORGET;
-  return ["[ka-whale-memory guidance]", ">", line, "<"].join("\n");
-}
 const SETTINGS_SCHEMA = z.object({
-  /** 总开关（Kaz 模式面板提供开关）：关闭时完全不注入记忆指引、不自动载入，
-   *  客户端也不渲染记忆面板（sidebar 按钮与面板整体隐藏）。 */
+  /** 总开关：关闭时完全注销六工具（热重载）；Kaz 模式下会话级可见性由 kaz-mode 按 agent 会话过滤。 */
   enabled: z.boolean().default(true),
-  /** 整段指引覆盖（旧字段，保留兼容）：非空时完全取代动态拼装。 */
-  guidance: z.string().default(""),
-  /** 固定提示总述行开关：默认关；开启后按 guidanceHead（留空 = 内置默认）注入。 */
-  guidanceHeadEnabled: z.boolean().default(false),
-  /** 固定提示总述行文本：仅在 guidanceHeadEnabled=true 时生效；留空 = 内置默认。 */
-  guidanceHead: z.string().default(""),
-  /** 遗忘指引开关：默认开；关闭后不注入；按 guidanceForget（留空 = 内置默认）注入。 */
-  guidanceForgetEnabled: z.boolean().default(true),
-  /** 以下三个字段保留兼容（2026-08-17 起不再生效）：工具细节已并入各工具描述。
-   *  guidanceForget 自每轮首次 memory_search 遗忘指引起恢复生效（覆盖默认遗忘指引）。 */
-  guidanceSearch: z.string().default(""),
-  guidanceSave: z.string().default(""),
-  guidanceList: z.string().default(""),
-  guidanceForget: z.string().default(""),
   /** BM25 检索参数（memory_search 相关性评分用）：改 settings.yaml 生效，无需 UI。 */
   bm25: z
     .object({
@@ -409,12 +290,6 @@ const SETTINGS_SCHEMA = z.object({
 
 /** 本插件 settings.yaml 段的默认配置（镜像作者 settings.yaml；仅含非运行时字段）。 */
 export const DEFAULT_SECTION = {
-  guidance: "",
-  enabled: true,
-  guidanceHeadEnabled: false,
-  guidanceHead: "",
-  guidanceForgetEnabled: true,
-  guidanceForget: "",
   bm25: { k1: 1.2, b: 0.75 },
   lifecycle: { C: 64, Nmin: 2, tau: 0.15, idleWindowDays: 30 },
 };
@@ -493,20 +368,12 @@ export async function apply(ctx, config = {}) {
   const memory = ctx.get("memory");
   if (memory === undefined) throw new Error("memory engine failed to register");
 
-  // ---- 设置（仅 guidance 配置；记忆数据不走 settings） ----
+  // ---- 设置（bm25 / lifecycle 参数；记忆数据不走 settings） ----
   // settings 服务惰性获取：apply 阶段可能尚未挂载（启动竞态），所有读写都在
   // 调用时解析；注册内部用 inject 等待服务，注册不受影响。
   const getSettings = () => ctx.get("settings");
   let source = () => ({
     enabled: true,
-    guidance: "",
-    guidanceHeadEnabled: false,
-    guidanceHead: "",
-    guidanceForgetEnabled: true,
-    guidanceForget: "",
-    guidanceSearch: "",
-    guidanceSave: "",
-    guidanceList: "",
   });
 
   // ---- 项目根解析 ----
@@ -564,10 +431,6 @@ export async function apply(ctx, config = {}) {
     return lastProjectRoot;
   }
 
-  /** 进程内缓存：某 agent 首次注入固定指引的 turn；用于避免重复扫描事件。 */
-  const guidanceFirstTurnCache = new WeakMap();
-  /** 进程内缓存：某 agent 最近一次已注入遗忘指引的 turn。 */
-  const forgetInjectedTurn = new WeakMap();
 
   // ---- 面板「记忆保存/更新」事件队列 ----
   // 只在进程内保留最近 50 条 remembered/updated 事件，供客户端 recentChanges
@@ -673,10 +536,6 @@ export async function apply(ctx, config = {}) {
         const record = await memory.setStatus(String(payload?.id), status);
         return { ok: true, value: metaValue(record) };
       }
-      if (endpoint === "autoLoad") {
-        const record = await memory.setAutoLoad(String(payload?.id), payload?.autoLoad === true);
-        return { ok: true, value: metaValue(record) };
-      }
       if (endpoint === "forget") {
         const deleted = await memory.forget(String(payload?.id));
         return { ok: true, value: { deleted } };
@@ -697,337 +556,6 @@ export async function apply(ctx, config = {}) {
   // 预设化 v1（无客户端面板）：不再注册 /ka-whale-memory RPC 通道。
   // 0.1.5 的 connection.rpc.handle 会经调用方 ctx 访问 webServer（本插件未注入该服务），
   // 注册即抛 "cannot get property \"webServer\" without inject"；面板已删，无需该通道。
-
-  // ---- 固定指引文本：settings 里 guidance 留空则发固定总述行
-  // （工具细节由工具描述自带，不再重复 A/B/C/D 行）；仅在 memory_search 当前
-  // 环境可调用时以合成用户消息注入。Kaz 模式会把 systemPrompt 段全部滤掉，
-  // 所以这里不再注册 tool:memory:ka-whale-memory 段，改为 pre-step 上下文注入。
-  // 方案 A：kazMode 服务存在时按 agent 会话判定工具可用性（后台会话不受
-  // 切换对话影响）；服务缺失时回退全局 enabled 兜底。----
-  const getKazModeSvc = () => {
-    try {
-      const svc = ctx.get("kazMode");
-      return svc !== undefined && svc !== null && typeof svc.toolVisible === "function" ? svc : null;
-    } catch {
-      return null;
-    }
-  };
-
-  /** 生效配置 = kazMode.pluginConfig（完整）；服务缺失时回落到插件自身 settings.yaml。 */
-  function liveFor(agent) {
-    try {
-      const svc = ctx.get("kazMode");
-      if (svc !== undefined && svc !== null && typeof svc.pluginConfig === "function") {
-        const cfg = svc.pluginConfig(agent, "ka-whale-memory");
-        if (cfg !== null && cfg !== undefined && typeof cfg === "object") return cfg;
-      }
-    } catch {
-      // fall through
-    }
-    return source();
-  }
-
-  const guidanceText = (agent) => {
-    const current = liveFor(agent);
-    const kazModeSvc = getKazModeSvc();
-    // 总开关（硬闸门，2026-08-21 修复）：生效 enabled=false 时一律不注入。
-    if (current === null || typeof current !== "object" || current.enabled === false) return "";
-    const legacy =
-      current !== null && typeof current === "object" && typeof current.guidance === "string"
-        ? current.guidance.trim()
-        : "";
-    if (legacy.length > 0) return legacy; // 旧字段 guidance：整段覆盖（兼容旧配置）
-    // 固定提示总述行开关（2026-08-23）：默认关；开启后才按 guidanceHead 注入。
-    if (current.guidanceHeadEnabled !== true) return "";
-    const settings = getSettings();
-    let kazSettings;
-    try {
-      kazSettings = settings === undefined ? undefined : settings.get("kaz-mode");
-    } catch {
-      kazSettings = undefined;
-    }
-    const head =
-      current !== null && typeof current === "object" && typeof current.guidanceHead === "string"
-        ? current.guidanceHead
-        : "";
-    return composeGuidance(ctx.get("toolGrouping"), kazSettings, { head }, agent, ctx.get("tools"), kazModeSvc);
-  };
-  /** 每轮首次 memory_search 之后注入的遗忘指引：同受总开关控制；旧字段 guidance
-   *  整段覆盖时不再追加（兼容旧配置）；guidanceForgetEnabled 开关默认开，
-   *  关闭后不注入；guidanceForget 可覆盖默认遗忘指引。 */
-  const forgetGuidanceText = (agent) => {
-    const current = liveFor(agent);
-    const kazModeSvc = getKazModeSvc();
-    // 总开关（硬闸门，同 guidanceText）：生效 enabled=false 时一律不注入。
-    if (current === null || typeof current !== "object" || current.enabled === false) return "";
-    const legacy =
-      current !== null && typeof current === "object" && typeof current.guidance === "string"
-        ? current.guidance.trim()
-        : "";
-    if (legacy.length > 0) return ""; // 旧字段 guidance：整段覆盖（兼容旧配置）
-    // 遗忘指引开关（2026-08-23）：默认开；关闭后不注入。
-    if (current.guidanceForgetEnabled !== true) return "";
-    const settings = getSettings();
-    let kazSettings;
-    try {
-      kazSettings = settings === undefined ? undefined : settings.get("kaz-mode");
-    } catch {
-      kazSettings = undefined;
-    }
-    const forget =
-      current !== null && typeof current === "object" && typeof current.guidanceForget === "string"
-        ? current.guidanceForget
-        : "";
-    return composeForgetGuidance(ctx.get("toolGrouping"), kazSettings, { forget }, agent, ctx.get("tools"), kazModeSvc);
-  };
-  /** 尝试把本插件给模型发送的信息上报给 round-display 显示插件（best-effort）。
-   *  服务不存在时静默跳过，不影响主流程。 */
-  function reportRoundDisplay(agent, content, category) {
-    try {
-      const rd = ctx.get("roundDisplay");
-      if (rd !== undefined && rd !== null && typeof rd.report === "function" && typeof content === "string" && content.trim().length > 0) {
-        rd.report({
-          agent,
-          plugin: "ka-whale-memory",
-          title: "guidance",
-          content,
-          ...(typeof category === "string" && category.trim().length > 0 ? { category: category.trim() } : {}),
-        });
-      }
-    } catch (error) {
-      ctx.logger.debug(`[ka-whale-memory] 上报 round-display 失败：${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  /** 从 tool/call 事件里取工具名（兼容 event.name 与 event.data.name）。 */
-  function toolCallNameOf(event) {
-    if (event === null || typeof event !== "object" || event.type !== "tool/call") return undefined;
-    const data = event.data;
-    const name = data !== null && typeof data === "object" ? data.name : undefined;
-    return typeof name === "string" ? name : typeof event.name === "string" ? event.name : undefined;
-  }
-
-  /** 会话里是否已发生第一次工具调用；传入 toolName 时只匹配指定工具。 */
-  function hasToolCall(agent, toolName) {
-    try {
-      const events = agent?.session?.events;
-      if (!Array.isArray(events)) return false;
-      return events.some((event) => {
-        const name = toolCallNameOf(event);
-        if (name === undefined) return false;
-        return toolName === undefined || name === toolName;
-      });
-    } catch {
-      return false;
-    }
-  }
-
-  /** 指定 turn 内是否已发生过工具调用；传入 toolName 时只匹配指定工具。 */
-  function hasToolCallInTurn(agent, toolName, turn) {
-    try {
-      const events = agent?.session?.events;
-      if (!Array.isArray(events)) return false;
-      let turnStartIndex = -1;
-      for (let index = 0; index < events.length; index += 1) {
-        const event = events[index];
-        if (
-          event !== null &&
-          typeof event === "object" &&
-          event.type === "turn/start" &&
-          event.data !== null &&
-          typeof event.data === "object" &&
-          event.data.turn === turn
-        ) {
-          turnStartIndex = index;
-        }
-      }
-      if (turnStartIndex === -1) return false;
-      for (let index = turnStartIndex + 1; index < events.length; index += 1) {
-        const name = toolCallNameOf(events[index]);
-        if (name !== undefined && (toolName === undefined || name === toolName)) return true;
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * 指定 turn 内是否已注入过 ka-whale-memory 的指定 form 消息。
-   * 用于跨重启/同 turn 内防重复：以 turn/start 事件切分轮次。
-   */
-  function hasInjectedInTurn(agent, form, turn) {
-    try {
-      const events = agent?.session?.events;
-      if (!Array.isArray(events)) return false;
-      let turnStartIndex = -1;
-      for (let index = 0; index < events.length; index += 1) {
-        const event = events[index];
-        if (
-          event !== null &&
-          typeof event === "object" &&
-          event.type === "turn/start" &&
-          event.data !== null &&
-          typeof event.data === "object" &&
-          event.data.turn === turn
-        ) {
-          turnStartIndex = index;
-        }
-      }
-      if (turnStartIndex === -1) return false;
-      for (let index = turnStartIndex + 1; index < events.length; index += 1) {
-        const event = events[index];
-        if (event === null || typeof event !== "object" || event.type !== "user/message") continue;
-        const data = event.data;
-        if (data === null || typeof data !== "object") continue;
-        const source = data.source;
-        if (source === null || typeof source !== "object") continue;
-        if (source.kind !== "plugin" || source.plugin !== "ka-whale-memory") continue;
-        if (form !== undefined && source.form !== form) continue;
-        return true;
-      }
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * 首次发送固定指引（source.form === "guidance"）所在的轮次。
-   * 从会话事件里直接推导：找到第一条 guidance 用户消息，再找它前面最近的 turn/start。
-   * 找不到返回 undefined。
-   */
-  function firstGuidanceTurnOf(agent) {
-    try {
-      const events = agent?.session?.events;
-      if (!Array.isArray(events)) return undefined;
-      let firstIndex = -1;
-      for (let index = 0; index < events.length; index += 1) {
-        const event = events[index];
-        if (event === null || typeof event !== "object" || event.type !== "user/message") continue;
-        const data = event.data;
-        if (data === null || typeof data !== "object") continue;
-        const source = data.source;
-        if (source === null || typeof source !== "object") continue;
-        if (source.kind === "plugin" && source.plugin === "ka-whale-memory" && source.form === "guidance") {
-          firstIndex = index;
-          break;
-        }
-      }
-      if (firstIndex === -1) return undefined;
-      let turn = 0;
-      for (let index = 0; index <= firstIndex; index += 1) {
-        const event = events[index];
-        if (
-          event !== null &&
-          typeof event === "object" &&
-          event.type === "turn/start" &&
-          event.data !== null &&
-          typeof event.data === "object" &&
-          typeof event.data.turn === "number"
-        ) {
-          turn = event.data.turn;
-        }
-      }
-      return turn > 0 ? turn : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  // ---- 固定指引：首次工具调用后注入；之后每个 turn 开头重复注入 ----
-  // 记第一次发送固定指引的轮次为 n，则第 n+1、n+2、……轮都在对话开始
-  // （agent/pre-step，step === 1）再次注入同一固定指引。首次发送仍保持旧语义：
-  // 在会话已有第一次 tool/call 后的某个 pre-step 以合成用户消息注入一次。
-  // Kaz 模式系统提示词由 kaz 预设的 kaz-system-prompt.mjs 收敛（只保留 persona +
-  // 计划模式段），因此固定指引不再注册 systemPrompt.section；改为 agent/pre-step
-  // 合成用户消息注入（round-display 同步上报）。
-  ctx.on("agent/pre-step", async (payload, next) => {
-    const decision = await next();
-    if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
-    const agent = payload?.agent;
-    if (agent === null || agent === undefined || typeof agent !== "object") return decision;
-    const turn = payload?.turn;
-    if (typeof turn !== "number" || turn <= 0) return decision;
-
-    let firstTurn = guidanceFirstTurnCache.has(agent)
-      ? guidanceFirstTurnCache.get(agent)
-      : firstGuidanceTurnOf(agent);
-    if (firstTurn !== undefined) {
-      guidanceFirstTurnCache.set(agent, firstTurn);
-      // 已发送过：只在后续轮次的 turn 开头重复。
-      if (payload.step !== 1) return decision;
-      if (turn <= firstTurn) return decision;
-      // 跨重启/同 turn 防重复：会话事件里当前轮已注入过就不再注入。
-      if (hasInjectedInTurn(agent, "guidance", turn)) return decision;
-      const text = guidanceText(agent);
-      if (typeof text !== "string" || text.trim().length === 0) return decision;
-      let message;
-      try {
-        message = createUserMessage({
-          content: [{ type: "text", text }],
-          source: { kind: "plugin", plugin: "ka-whale-memory", form: "guidance" },
-        });
-      } catch (error) {
-        ctx.logger.warn(`[ka-whale-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
-        return decision;
-      }
-      reportRoundDisplay(agent, text);
-      return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
-    }
-
-    // 首次发送：首轮工具调用之后才注入，此时 memory_search 已进入工具面。
-    if (!hasToolCall(agent)) return decision;
-    const text = guidanceText(agent);
-    if (typeof text !== "string" || text.trim().length === 0) return decision;
-    let message;
-    try {
-      message = createUserMessage({
-        content: [{ type: "text", text }],
-        source: { kind: "plugin", plugin: "ka-whale-memory", form: "guidance" },
-      });
-    } catch (error) {
-      ctx.logger.warn(`[ka-whale-memory] 构造指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
-      return decision;
-    }
-    guidanceFirstTurnCache.set(agent, turn);
-    reportRoundDisplay(agent, text);
-    return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
-  });
-
-  // ---- 遗忘指引：每一轮首次 memory_search 之后注入一次 ----
-  // 提醒模型清理已完成、不再需要保留的任务记忆；按 turn 切分，每个 turn 内
-  // 只注入一次，跨重启/同 turn 由会话事件里的 forget-guidance 记录兜底。
-  ctx.on("agent/pre-step", async (payload, next) => {
-    const decision = await next();
-    if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
-    const agent = payload?.agent;
-    if (agent === null || agent === undefined || typeof agent !== "object") return decision;
-    const turn = payload?.turn;
-    if (typeof turn !== "number" || turn <= 0) return decision;
-    if (forgetInjectedTurn.get(agent) === turn) return decision;
-    if (hasInjectedInTurn(agent, "forget-guidance", turn)) {
-      forgetInjectedTurn.set(agent, turn);
-      return decision;
-    }
-    // 当前轮第一次 memory_search 之后才注入。
-    if (!hasToolCallInTurn(agent, "memory_search", turn)) return decision;
-    const text = forgetGuidanceText(agent);
-    if (typeof text !== "string" || text.trim().length === 0) return decision;
-    let message;
-    try {
-      message = createUserMessage({
-        content: [{ type: "text", text }],
-        source: { kind: "plugin", plugin: "ka-whale-memory", form: "forget-guidance" },
-      });
-    } catch (error) {
-      ctx.logger.warn(`[ka-whale-memory] 构造遗忘指引注入消息失败：${error instanceof Error ? error.message : String(error)}`);
-      return decision;
-    }
-    forgetInjectedTurn.set(agent, turn);
-    reportRoundDisplay(agent, text);
-    return { ...decision, messages: Array.isArray(decision.messages) ? [...decision.messages, message] : decision.messages };
-  });
 
   // ---- 组装层兜底：无条件移除基础英文记忆指引（tool:memory）----
   // ka-whale-memory 不再注册 tool:memory:ka-whale-memory 系统提示段；固定指引改为首轮
@@ -1313,14 +841,6 @@ export async function apply(ctx, config = {}) {
     SETTINGS_SCHEMA,
     {
       enabled: true,
-      guidance: "",
-      guidanceHeadEnabled: false,
-      guidanceHead: "",
-      guidanceForgetEnabled: true,
-      guidanceForget: "",
-      guidanceSearch: "",
-      guidanceSave: "",
-      guidanceList: "",
       bm25: { k1: 1.2, b: 0.75 },
       lifecycle: { C: 64, Nmin: 2, tau: 0.15, idleWindowDays: 30 },
     },

@@ -96,7 +96,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 - 扫描 `%USERPROFILE%\.dsh*` 中**含 `profiles` 目录**的 home，逐个安装，最后打印 `--- summary ---` 与逐行 `OK` / `FAIL` 汇总。
 - **预期结果**（本机示例）：
-  - `.dsh`（主环境，dsh `0.1.1-rc.2` 旧插件形态）→ `FAIL`，这是**正常**的，不是装坏了；它不支持预设形态，保持旧形态即可。
+  - 预期 `.dsh`（主环境）与 `.dsh-test` 报 `OK`；`.dsh-clean`（救援环境，仍是 dsh `0.1.1-rc.2`）报 `FAIL` 属预期——它保留旧运行时当最后防线。
   - `.dsh-clean`、`.dsh-test`（dsh `0.1.5-rc.1`）→ 应 `OK`。
 - 想让某个 home 跳过版本闸门（**仅调试，不要用**）：`-SkipVersionCheck`。指引要求你**不要**使用它。
 
@@ -222,7 +222,7 @@ Remove-Item (Join-Path $dshHome "storages\kaz-session-states.json") -Force -Erro
 | --- | --- |
 | 第 0 步 `VERSION GATE: FAIL` | runtime dsh 不是 `0.1.5-rc.1`：**停止**，把第 0 步给用户的说明原样转达；旧形态先走附录 A |
 | 第 2 步又报 `VERSION GATE: FAIL` | 目标 home 的运行时不受支持（如 `.dsh` 是 `0.1.1-rc.2`）：属预期，改用支持 `0.1.5-rc.1` 的 home；**不要**用 `-SkipVersionCheck` |
-| `-AllHomes` 里 `.dsh` 报 `FAIL` | 正常：主环境仍是旧插件形态；`.dsh-test` / `.dsh-clean` 应为 `OK` |
+| `-AllHomes` 里某个 home 报 `FAIL` | 该 home 的运行时 dsh 不是 `0.1.5-rc.1`：主环境 `.dsh` 与 `.dsh-test` 应 `OK`；`.dsh-clean`（0.1.1-rc.2 救援环境）报 `FAIL` 属预期。**不要**用 `-SkipVersionCheck` |
 | `multiple profiles under ...; pass -ProfileName` | 该 home 有多个 profile：命令里加 `-ProfileName web` |
 | `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续装 |
 | `required runtime package missing: ...\@deepseek-ai` | 该 profile 的 `node_modules\@deepseek-ai` 不存在：先修好 dsh 运行时再重跑 |
