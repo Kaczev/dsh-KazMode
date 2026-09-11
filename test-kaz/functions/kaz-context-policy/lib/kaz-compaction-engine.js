@@ -24,7 +24,7 @@ import {
   LAYER_PRIORITY_DEFAULT,
   selectCompressRange,
 } from "./select-compress-range.js";
-import { buildCompressUnits, foldSurfaceNodes } from "./session-context-adapter.js";
+import { buildCompressUnits, foldSurfaceNodes, normalizeSessionView } from "./session-context-adapter.js";
 
 export const BASIC_CONFIG_KEYS = Object.freeze([
   "thresholdRatio",
@@ -226,7 +226,8 @@ function sumRange(nodes, startIndex, endIndex) {
 }
 
 /** surface 位置序 → seq 的映射；优先 session.surface，缺省回退 fold。 */
-function surfaceNodesOfSession(session) {
+function surfaceNodesOfSession(rawSession) {
+  const session = normalizeSessionView(rawSession);
   if (session && isPlainObject(session.surface) && Array.isArray(session.surface.nodes)) {
     return session.surface.nodes.slice();
   }
@@ -334,8 +335,11 @@ function resolveManualFoldMax(measurement, foldTargetRatio, fallbackMaxFoldToken
  * @param rawOptions 支持 M1 四个配置 + protectedUnitIds/fillToBudget/useMeterTokens/adapterOptions
  * @returns selectCompressRange 的结果，失败也原样返回 { ok:false, code, reason }
  */
-export function selectKazRange(session, measurement, rawOptions) {
+export function selectKazRange(rawSession, measurement, rawOptions) {
   const opts = selectionOptionsFrom(rawOptions);
+  // dsh 0.1.5：agent.session 是带方法的句柄（无 .events 数组），先归一化成
+  // { events, surface } 视图；0.1.1 的 { events } 形态原样通过。
+  const session = normalizeSessionView(rawSession);
   const units = buildCompressUnits(session, opts.adapterOptions);
   const pricedUnits =
     opts.useMeterTokens && measurement !== undefined && measurement !== null

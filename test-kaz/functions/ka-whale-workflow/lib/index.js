@@ -459,13 +459,17 @@ export function isSubagentReportMessage(message) {
 }
 
 /** 是否为父主模型经 DSH send_message（ctx.subagents.followup）投递给受控子代理的消息。
- *  dsh-tool-subagent-control 的 source 固定为 { kind: "coordinator", form: "relay",
- *  senderSessionId: parent.id }。 */
+ *  dsh 0.1.1 的 source 为 { kind: "coordinator", form: "relay", senderSessionId: parent.id }；
+ *  dsh 0.1.5 起同一 seam 的 kind 变成 "agent-message"
+ *  （@deepseek-ai/dsh-subagent 的 AgentMessageSource：{ kind: "agent-message",
+ *  form: "relay", senderSessionId }）。两个 kind 都接受，form 必须是 "relay"；
+ *  只认这一种形状，避免把普通用户消息或子代理汇报当成父级回复而误清硬等门。 */
 export function isParentMainSendMessage(message) {
   try {
     const source = message?.source;
     if (source === null || source === undefined || typeof source !== "object") return false;
-    return source.kind === "coordinator" && source.form === "relay";
+    if (source.form !== "relay") return false;
+    return source.kind === "coordinator" || source.kind === "agent-message";
   } catch {
     return false;
   }

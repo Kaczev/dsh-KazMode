@@ -42,6 +42,39 @@ function failure(message) {
   throw new TypeError(message);
 }
 
+/** 归一化会话输入；本插件内部一律消费 { events: [...], surface?: { nodes } }。
+ *  dsh 0.1.1：exec.agent.session.events 本身就是事件数组，原样通过。
+ *  dsh 0.1.5：agent.session 是带方法的会话句柄（.seq / .eventAt(seq) /
+ *  .surface.nodes —— 官方 @deepseek-ai/dsh-compaction-basic 就是这么用的），
+ *  没有 .events 数组，这里按 seq 折叠出事件数组并带上 surface.nodes
+ *  （surface 缺省时下游用 foldSurfaceNodes 从事件重建）。 */
+export function normalizeSessionView(session) {
+  if (session === null || session === undefined || typeof session !== "object") return session;
+  if (Array.isArray(session.events)) return session;
+  if (
+    !Number.isInteger(session.seq) ||
+    session.seq < 0 ||
+    typeof session.eventAt !== "function"
+  ) {
+    return session;
+  }
+  const events = [];
+  for (let seq = 0; seq < session.seq; seq += 1) {
+    let event;
+    try {
+      event = session.eventAt(seq);
+    } catch {
+      event = undefined;
+    }
+    if (event !== null && event !== undefined) events.push(event);
+  }
+  const view = { events };
+  if (isPlainObject(session.surface) && Array.isArray(session.surface.nodes)) {
+    view.surface = { nodes: session.surface.nodes.slice() };
+  }
+  return view;
+}
+
 function normalizeOpts(rawOpts) {
   if (rawOpts === undefined) rawOpts = {};
   if (!isPlainObject(rawOpts)) {
@@ -185,9 +218,10 @@ export function foldSurfaceNodes(events) {
   return nodes;
 }
 
-function surfaceNodesOf(session) {
+function surfaceNodesOf(rawSession) {
+  const session = normalizeSessionView(rawSession);
   if (!isPlainObject(session) || !Array.isArray(session.events)) {
-    failure("session must be { events: [...] }");
+    failure("session must be { events: [...] } or a dsh 0.1.5 session handle (.seq + .eventAt)");
   }
   if (
     session.surface !== undefined &&
@@ -357,8 +391,9 @@ export function buildSearchRecords(events) {
  *   assistantLayer（默认 detail）、toolResultLayer（默认 detail）、
  *   largeToolResultChars（默认 4096）
  */
-export function buildCompressUnits(session, rawOpts) {
+export function buildCompressUnits(rawSession, rawOpts) {
   const opts = normalizeOpts(rawOpts);
+  const session = normalizeSessionView(rawSession);
   const nodes = surfaceNodesOf(session);
   const eventsBySeq = new Map();
   for (const event of session.events) {
