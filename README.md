@@ -4,7 +4,7 @@
 >
 > **7.5.0 起 Kaz 从「插件全家桶」改为 DSH agent preset（预设形态）**：无面板、无插件开关、无客户端 UI，首轮即完整 Stable 工具面。预设代码在仓库 `test-kaz/`，安装/更新由仓库根 `install-kaz-preset.ps1` 完成，只支持 dsh `0.1.5-rc.1`。
 >
-> 旧的「插件形态」（≤ 7.4.x，仅适用于 dsh `0.1.1-rc.2`）仍在仓库 `KazPlugins/` 里保留，见 §五。
+> 旧的「插件形态」（≤ 7.4.x，仅适用于 dsh `0.1.1-rc.2`）自 7.6.0 起**不再随仓库发布**：`KazPlugins/` 已从仓库移除，需要时取 7.5.1 及更早的 git 历史，见 §五。
 
 ## 一、核心特性（预设形态）
 
@@ -32,7 +32,7 @@
 | 形态 | dsh 版本 | 安装 / 更新方式 | 源 |
 | --- | --- | --- | --- |
 | **预设形态（当前，7.5.0+）** | `0.1.5-rc.1` | 运行仓库根 `install-kaz-preset.ps1` | 仓库 `test-kaz/` |
-| 旧插件形态（legacy，≤ 7.4.x） | `0.1.1-rc.2` | 手动复制 + `npm install` + `cordis.patch.yml`（见 §五） | 仓库 `KazPlugins/` |
+| 旧插件形态（legacy，≤ 7.4.x） | `0.1.1-rc.2` | 手动复制 + `npm install` + `cordis.patch.yml`（见 §五） | git 历史（≤ 7.5.1）的 `KazPlugins/` |
 
 - 版本闸门按**运行时包** `@deepseek-ai/dsh/package.json` 的 `version` 判定，**只放行 `0.1.5-rc.1`**；不匹配时安装程序输出 `VERSION GATE: FAIL` 并以退出码 1 结束。`-SkipVersionCheck` 只用于调试，正常不要用。
 - 两形态互斥：预设形态不安装 `KazPlugins/`，旧形态不安装预设。
@@ -107,7 +107,6 @@ dsh-KazMode/
 ├── test-kaz/                  # 预设形态源（安装程序镜像到 .agent-presets/kaz）
 ├── ds安装指引.md / ds更新指引.md           # 给 DeepSeek 的安装/更新步骤（决策完备，勿让 DS 读 README）
 ├── ds安装法的提示词.txt / ds更新法的提示词.txt  # 发给 DeepSeek 的提示词，指向对应指引
-├── KazPlugins/                # 旧插件形态源（legacy，见 §五；预设形态不使用）
 ├── 一些指引/                  # 旧面板入口截图（legacy 面板章节用）
 ├── 其它好用的工具/             # 可选：DSH 实用插件
 │   └── dsh-deepseek-balance/
@@ -124,7 +123,6 @@ dsh-KazMode/
 | `test-kaz/kaz-system-prompt.mjs` | persona / 系统提示词控制器 |
 | `test-kaz/functions/kaz-shared/` | 工具清单单一事实源（纯模块，随预设镜像，不需要单独安装） |
 | `ds安装指引.md` / `ds更新指引.md` | 给 DeepSeek 的安装 / 更新步骤 |
-| `KazPlugins/` | 旧插件形态源（legacy，仅 dsh `0.1.1-rc.2`） |
 
 ---
 
@@ -145,7 +143,7 @@ dsh-KazMode/
 
 **旧步骤全文**（旧的 `cordis.patch.yml` 完整示例、`settings.yaml` 说明、逐条安装步骤）不再在本 README 维护，需要时查 7.5.0 之前的 git 历史（对应 tag / 旧提交里的 `README.md`、`ds安装指引.md`、`ds更新指引.md`）。
 
-`KazPlugins/` 目录仍保留在仓库中供旧形态使用；**预设形态不安装它**。
+`KazPlugins/` 自 7.6.0 起已从仓库移除（旧形态源请取 7.5.1 及更早的 git 历史）；**预设形态不安装它**。
 
 ---
 
@@ -190,14 +188,16 @@ dsh-KazMode/
 | `test-kaz/functions/<组件>/` | 预设自带的 Kaz 组件（workflow / memory / context-policy / shared） |
 | `<home>\.agent-presets\kaz\` | 安装后的 live 预设目录（由 `test-kaz/` 镜像而来） |
 | `<home>\tools\kaz-preset-backup-<时间戳>\` | 每次安装前的自动备份（排除 `node_modules`） |
+| `<home>\tools\dsh-cli\` | 该 home 的**本地 CLI 副本**（版本锚：`@deepseek-ai/dsh` + `dsh-base` + `dsh-web-app` 三件套同版本）。各 home 启动器用它而不是全局 `dsh`，并在开屏按 `EXPECTED_CLI` 做版本门，避免一次 `npm i -g` 把多个 home 一起带走 |
 | `ds安装指引.md` / `ds更新指引.md` | 给 DeepSeek 的安装 / 更新步骤（决策完备，唯一做法） |
 | `ds安装法的提示词.txt` / `ds更新法的提示词.txt` | 发给 DeepSeek 的简短提示词，指向对应指引 |
-| `KazPlugins/` | 旧插件形态源（legacy，仅 dsh `0.1.1-rc.2`） |
 | `一些指引/` | 旧面板入口截图（legacy 章节用） |
 | `其它好用的工具/` | 可选独立 DSH 工具/插件 |
 | `其它好用的预设/` | 可选实验性 Router 预设 |
 
 ### 8.2 发版说明（给未来的我和 agent）
+
+- **7.6.0**：旧插件形态从仓库移除（`KazPlugins/` 与仓库根指向主预设的冗余 `kaz` junction），旧形态源只从 7.5.1 及更早的 git 历史取用；主环境 `.dsh` 迁移到预设形态并加装本地 CLI 副本与启动器版本门（见 8.1）；修复 `install-kaz-preset.ps1` 的一个真 bug——`Clear-LinkPath` 在**全新 home**（`<preset>\node_modules` 下尚无 junction）时会执行 `cmd /c rmdir` 到一个不存在的路径，该 stderr 在 `$ErrorActionPreference = 'Stop'` 下变成终止性错误，导致**文件已镜像、两个 junction 未建、退出码 1**的半成品状态；现在该调用被 `try { } catch { }` 包住。
 
 - **预设形态没有「面板本地版本」**：旧插件形态那个读 `KazPlugins/kaz-mode/package.json` 的 `version` 字段、并与 GitHub tag 比较的机制，随面板一起退役。预设形态的版本就是仓库的 **git tag / 提交**；改预设请改 `test-kaz/`。
 - 支持版本是**硬编码在 `install-kaz-preset.ps1` 里的 `$SupportedVersions`**（当前 `0.1.5-rc.1`）。升级适配的 dsh 版本时，改这一处，并同步三份文档（`README.md`、`ds安装指引.md`、`ds更新指引.md`）里的版本号。

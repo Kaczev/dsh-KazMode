@@ -1,6 +1,0 @@
-{
-  "name": "kaz-context-policy",
-  "type": "module",
-  "private": true,
-  "main": "lib/index.js"
-}

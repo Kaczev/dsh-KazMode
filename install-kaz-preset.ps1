@@ -79,7 +79,7 @@ function Resolve-ProfileName([string]$TargetHome, [string]$Wanted) {
 function Clear-LinkPath([string]$Path, [bool]$WhatIfOnly) {
   if (-not (Test-Path $Path)) {
     # May be a dangling junction; rmdir is harmless if it is not there.
-    if (-not $WhatIfOnly) { cmd /c rmdir "$Path" 2>$null | Out-Null }
+    if (-not $WhatIfOnly) { try { cmd /c rmdir "$Path" 2>&1 | Out-Null } catch { } }
     return
   }
   $item = Get-Item $Path -Force
