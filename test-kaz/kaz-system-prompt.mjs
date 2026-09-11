@@ -1,11 +1,11 @@
-// kaz-system-prompt —— Kaz 8.0 系统提示控制器（persona 注入）。
+// kaz-system-prompt —— Kaz 8.0 系统提示控制器。
 //
-// 作用：主代理的系统提示 persona 取 functions/kaz-prompts 的 MAIN_PERSONA
-//（单一事实源），而不是 agent.cordis.yml 里的短兜底；子代理保留派发时给定的
-// 自己的 persona，不被覆盖。
-//
-// 只做这一件事。阶段注入（ka-whale-workflow）与压缩提醒（ka-context-policy）
-// 各自在对应功能里注册段落，不并进这里。
+// 两件事：
+//   1) persona 注入：主代理的系统提示 persona 取 functions/kaz-prompts 的
+//      MAIN_PERSONA（单一事实源）；子代理保留派发时给定的自己的 persona。
+//   2) 提示面收口：只保留 Kaz 自己的注入段落（现在=persona；以后的阶段注入、
+//      压缩提醒由对应功能加进 KEEP_SECTIONS）。平台默认的 base 身份句、工具
+//      指引、环境说明等段落一律丢弃——否则模型看到的就是"标准模式"的提示。
 
 export const name = "kaz-system-prompt";
 
@@ -13,6 +13,9 @@ export const inject = [];
 
 import { PERSONA_PREFIX_SECTION } from "@deepseek-ai/dsh-persona";
 import { MAIN_PERSONA } from "./functions/kaz-prompts/lib/roles.js";
+
+/** 允许出现在模型系统提示里的段落名（Kaz 自己的注入内容）。 */
+export const KEEP_SECTIONS = new Set([PERSONA_PREFIX_SECTION]);
 
 /** 判断是否为子代理会话（子代理的 persona 由派发时给定，必须原样保留）。 */
 function isSubagentAgent(agent) {
@@ -43,17 +46,24 @@ export function apply(ctx) {
   ctx.on("system-prompt/assemble", async (assembly, context, next) => {
     try {
       const agent = context?.agent;
-      if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.sections) && !isSubagentAgent(agent)) {
-        let replaced = false;
-        for (const section of assembly.sections) {
-          if (section !== null && typeof section === "object" && section.name === PERSONA_PREFIX_SECTION) {
-            section.text = MAIN_PERSONA;
-            replaced = true;
+      if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.sections)) {
+        const isSubagent = isSubagentAgent(agent);
+        const sections = assembly.sections;
+        let kept = sections.filter(
+          (section) => section !== null && typeof section === "object" && KEEP_SECTIONS.has(section.name),
+        );
+        if (!isSubagent) {
+          const persona = kept.find((section) => section.name === PERSONA_PREFIX_SECTION);
+          if (persona === undefined) {
+            kept = [{ name: PERSONA_PREFIX_SECTION, order: 0, text: MAIN_PERSONA }, ...kept];
+          } else {
+            persona.text = MAIN_PERSONA;
           }
+        } else if (kept.length === 0) {
+          // 子代理的 persona 段缺位时不收口，避免把一个子代理的提示清空。
+          kept = sections;
         }
-        if (!replaced) {
-          assembly.sections.push({ name: PERSONA_PREFIX_SECTION, order: 0, text: MAIN_PERSONA });
-        }
+        assembly.sections = kept;
       }
     } catch (error) {
       ctx.logger?.warn?.(`[kaz-system-prompt] persona injection failed: ${String(error)}`);
