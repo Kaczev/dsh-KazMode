@@ -139,10 +139,13 @@ export function pickRange(session, nodes, cluster) {
 /**
  * 整段硬折叠的区间：可压中段 [起点, 终点]。
  * 起点 = 跳过头部 system/message 后的第一个配对平衡切点；终点 = 尾部保留带之前、
- * 且配对平衡的最后一个节点。给了 amount（token）时，在不超过它的范围里尽量多折。
+ * 且配对平衡的最后一个节点。
+ * `fromSeq` / `toSeq`（给了才生效）把区间收进这两点之间：模型可以从
+ * context_search / context_read 的输出拿到 `#seq`，像框选一样指定"压掉这两点中间"。
+ * `amount`（token）只在框选之外再限制折多大；不填就尽量多折。
  * @returns {{startIdx: number, endIdx: number}|null}
  */
-export function foldBand(session, nodes, retainIdx, amount = 0) {
+export function foldBand(session, nodes, retainIdx, amount = 0, fromSeq = 0, toSeq = 0) {
   if (!Array.isArray(nodes) || nodes.length === 0) return null;
   const types = eventTypesOf(session, nodes);
   const isSystem = (idx) => types.get(nodes[idx].seq) === "system/message";
@@ -153,6 +156,46 @@ export function foldBand(session, nodes, retainIdx, amount = 0) {
   let endIdx = Math.min(retainIdx - 1, nodes.length - 1);
   while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
   if (endIdx < startIdx) return null;
+
+  // 框选：把区间收进 [fromSeq, toSeq]，再向安全边界内收。
+  if (fromSeq > 0) {
+    let idx = -1;
+    for (let i = startIdx; i <= endIdx; i += 1) {
+      if (nodes[i].seq >= fromSeq) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) return null;
+    startIdx = idx;
+    while (startIdx <= endIdx && !toolPairingBalancedBefore(session, nodes[startIdx].seq)) startIdx += 1;
+    if (startIdx > endIdx) return null;
+  }
+  if (toSeq > 0) {
+    let idx = -1;
+    for (let i = endIdx; i >= startIdx; i -= 1) {
+      if (nodes[i].seq <= toSeq) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) return null;
+    endIdx = idx;
+    while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
+    if (endIdx < startIdx) return null;
+  }
+
+  // 区间里不许出现 system/message（平台只允许"恰好针对该节点"的改写）：
+  // 撞上就退到它前面最近的平衡切点。
+  for (let i = startIdx; i <= endIdx; i += 1) {
+    if (isSystem(i)) {
+      endIdx = i - 1;
+      while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
+      break;
+    }
+  }
+  if (endIdx < startIdx) return null;
+
   if (amount > 0) {
     let acc = 0;
     let cut = startIdx - 1;
@@ -173,10 +216,12 @@ export function contextCompressTool(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Compress a redundant middle span of this conversation into a summary. Two ways: give `drop` (keywords, an exact sentence, or a topic) and the tool finds the smallest span covering it; or give no `drop` (optionally `amount` in tokens) and the tool folds the largest safe span of the compactable middle in one call. Spans expand to safe boundaries and never cut a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
+      "Compress a redundant middle span of this conversation into a summary. Three ways: give `drop` (keywords, an exact sentence, or a topic) and the tool finds the smallest span covering it; or give `from_seq` / `to_seq` (the `#seq` numbers you see in context_search / context_read output) to box an exact span and fold just that; or give neither (optionally `amount` in tokens) and the tool folds the largest safe span of the compactable middle in one call. Spans expand to safe boundaries and never cut a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
     parameters: {
-      drop: { type: "string", description: "What to compress away: keywords, an exact sentence, or a topic description. Omit to fold the largest safe span instead." },
-      amount: { type: "integer", description: "Only without `drop`: roughly how many tokens to fold (omit to fold as much as the compactable middle allows)." },
+      drop: { type: "string", description: "What to compress away: keywords, an exact sentence, or a topic description. Do not combine with from_seq / to_seq or amount." },
+      from_seq: { type: "integer", description: "Box mode: first seq of the span to fold (omit to start at the earliest compactable point)." },
+      to_seq: { type: "integer", description: "Box mode: last seq of the span to fold (omit to end at the kept-recent boundary)." },
+      amount: { type: "integer", description: "Fold mode (no `drop`, no box): roughly how many tokens to fold (omit to fold as much as the compactable middle allows)." },
       keep_recent: { type: "integer", description: "Percentage of the current context to keep untouched at the end (default 20, max 90)." },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
@@ -187,6 +232,14 @@ export function contextCompressTool(ctx) {
       const drop = String(args?.drop ?? "").trim();
       const keepRecent = clampInt(args?.keep_recent, 20, 0, 90);
       const amount = clampInt(args?.amount, 0, 0, Number.MAX_SAFE_INTEGER);
+      const fromSeq = clampInt(args?.from_seq, 0, 0, Number.MAX_SAFE_INTEGER);
+      const toSeq = clampInt(args?.to_seq, 0, 0, Number.MAX_SAFE_INTEGER);
+      if (drop.length > 0 && (fromSeq > 0 || toSeq > 0)) {
+        return {
+          ok: false,
+          message: "drop and from_seq/to_seq are two different modes — pass either a `drop` description or a box, not both",
+        };
+      }
       const terms = drop.length > 0 ? termsOf(drop) : [];
       const matched = [];
       if (drop.length > 0) {
@@ -207,13 +260,15 @@ export function contextCompressTool(ctx) {
       const retainIdx = retainBoundaryIdx(nodes, measurement.totalTokens, keepRecent);
       let chosen = null;
       if (drop.length === 0) {
-        // 整段硬折叠：不指定内容，直接把可压中段里最大的一段压掉（旧 kaz 的"硬压"行为）。
-        chosen = foldBand(session, nodes, retainIdx, amount);
+        // 整段硬折叠 / 框选：不指定内容、或指定两点，直接把这一段压掉（旧 kaz 的"硬压"行为）。
+        chosen = foldBand(session, nodes, retainIdx, amount, fromSeq, toSeq);
         if (chosen === null) {
+          const boxed = fromSeq > 0 || toSeq > 0;
           return {
             ok: false,
-            message:
-              "nothing foldable: the protected head, the kept-recent tail and already-compacted spans leave no safe span — try a smaller keep_recent, or start a new conversation",
+            message: boxed
+              ? `nothing foldable inside [${fromSeq > 0 ? fromSeq : "start"} .. ${toSeq > 0 ? toSeq : "tail"}] after safe-boundary snapping — the box may sit inside the protected head, the kept-recent tail, or an already-compacted span`
+              : "nothing foldable: the protected head, the kept-recent tail and already-compacted spans leave no safe span — try a smaller keep_recent, or start a new conversation",
           };
         }
       } else {
