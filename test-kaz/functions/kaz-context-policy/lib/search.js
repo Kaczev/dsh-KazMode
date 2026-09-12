@@ -1,6 +1,6 @@
-// kaz-context-policy —— context_search / context_search_from_companion。
-// 输入 / 说明 / 效果 / 输出按《Kaz8.0设计.md》§3.8、§3.8.5；文案一律英文。
-// 检索按得分排序（原句命中优先、其次检索词加权、同分新的在前），并回报总数。
+// kaz-context-policy —— context_search（§3.8）。
+// 默认查本会话；带 companion 就查另一个 agent 的会话记录（跨会话、只读）。
+// 文案一律英文；检索按得分排序（原句命中优先、其次检索词加权、同分新的在前），并回报总数。
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { entriesOfSession, searchEntries } from "./session-log.js";
@@ -94,6 +94,7 @@ export async function resolveCompanion(ctx, agent, name) {
 
 const SEARCH_PARAMS = {
   query: { type: "string", required: true, description: "Keywords or an exact sentence to find. Surrounding quotes are stripped before matching." },
+  companion: { type: "string", description: 'Whose log to search: "main", or a subagent id or label; omit for this conversation.' },
   limit: { type: "integer", description: "Maximum number of results (default 20, max 50)." },
   after_seq: { type: "integer", description: "Only look at records with a sequence number greater than this (default 0 = all)." },
   chars: { type: "integer", description: "Snippet width per hit in characters (default 400, max 2000)." },
@@ -105,46 +106,30 @@ const SEARCH_OPTIONS = (args) => ({
   radius: Math.round(clampInt(args?.chars, 400, 80, 2000) / 2),
 });
 
-export function contextSearchTool() {
+export function contextSearchTool(ctx) {
   return defineTool({
     name: "context_search",
     description:
-      "Search the original text of this conversation's log, including parts already compressed out of the current context. Read-only; use it when exact words are needed instead of guessing. Results are ranked (exact phrase first, then keyword coverage, newest first on ties) and report the total match count; limit/after_seq/chars narrow the scope.",
+      'Search the original text of a conversation log, including parts already compressed out of the current context. By default it searches this conversation; pass `companion` ("main" or a subagent id/label) to search another agent\'s log instead. Read-only; use it when exact words are needed instead of guessing. Results are ranked (exact phrase first, then keyword coverage, newest first on ties) and report the total match count; limit/after_seq/chars narrow the scope.',
     parameters: SEARCH_PARAMS,
     output: { schema: HITS_SCHEMA, render: renderHits },
     async execute(args, exec) {
-      const session = exec?.agent?.session;
+      let session = exec?.agent?.session;
+      let from = "this";
+      const companion = typeof args?.companion === "string" ? args.companion.trim() : "";
+      if (companion.length > 0) {
+        const resolved = await resolveCompanion(ctx, exec?.agent, companion);
+        if (resolved.error !== undefined) return { ok: false, message: resolved.error, total: 0, hits: [] };
+        session = resolved.session;
+        from = resolved.from;
+      }
       if (session === undefined || session === null) return { ok: false, message: "this agent has no session", total: 0, hits: [] };
       const { hits, total } = searchEntries(entriesOfSession(session), args?.query, SEARCH_OPTIONS(args));
       return {
         ok: true,
-        message: `${total} match(es) in this conversation's log`,
+        message: `${total} match(es) in ${from === "this" ? "this conversation's" : `${from}'s`} log`,
         total,
-        hits: hits.map((hit) => ({ seq: hit.seq, from: "this", label: hit.label, snippet: hit.snippet })),
-      };
-    },
-  });
-}
-
-export function contextSearchFromCompanionTool(ctx) {
-  return defineTool({
-    name: "context_search_from_companion",
-    description:
-      'Search another agent\'s conversation log the same way context_search searches this one: the main agent ("main") or one of its subagents (by id or label). Read-only and cross-session; the same limit/after_seq/chars options apply.',
-    parameters: {
-      companion: { type: "string", required: true, description: 'Whose log to search: "main", or a subagent id or label.' },
-      ...SEARCH_PARAMS,
-    },
-    output: { schema: HITS_SCHEMA, render: renderHits },
-    async execute(args, exec) {
-      const resolved = await resolveCompanion(ctx, exec?.agent, args?.companion);
-      if (resolved.error !== undefined) return { ok: false, message: resolved.error, total: 0, hits: [] };
-      const { hits, total } = searchEntries(entriesOfSession(resolved.session), args?.query, SEARCH_OPTIONS(args));
-      return {
-        ok: true,
-        message: `${total} match(es) in ${resolved.from}'s log`,
-        total,
-        hits: hits.map((hit) => ({ seq: hit.seq, from: resolved.from, label: hit.label, snippet: hit.snippet })),
+        hits: hits.map((hit) => ({ seq: hit.seq, from, label: hit.label, snippet: hit.snippet })),
       };
     },
   });

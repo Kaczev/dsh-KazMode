@@ -29,7 +29,7 @@ export const MEMORY_MAINTAINER_BLACKLIST = Object.freeze([
 export const RESERVED_TOOLS = Object.freeze([
   "context_compress",
   "context_search",
-  "context_search_from_companion",
+  "context_read",
 ]);
 
 /**

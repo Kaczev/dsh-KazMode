@@ -21,6 +21,14 @@ function getSegmenter() {
   return segmenter;
 }
 
+/** 把 snake.html / test-snake.mjs 这类"点、连字符、斜杠"连接的标识符拆成子词元（同时保留整词），
+ *  否则 Segmenter 会把它们当成一个整词，查询 "snake"/"html" 都命中不了。 */
+function expandCompound(token) {
+  if (!/[.\-/\\]/.test(token)) return [token];
+  const parts = token.split(/[.\-/\\]+/).filter((part) => part.length > 0);
+  return parts.length > 0 ? [token, ...parts] : [token];
+}
+
 /** 文本 → 词元（小写）。 */
 export function tokenize(value) {
   const lower = String(value ?? "").toLowerCase();
@@ -28,7 +36,7 @@ export function tokenize(value) {
   const tokens = [];
   if (seg !== null) {
     for (const part of seg.segment(lower)) {
-      if (part.isWordLike) tokens.push(part.segment);
+      if (part.isWordLike) tokens.push(...expandCompound(part.segment));
     }
     return tokens;
   }
