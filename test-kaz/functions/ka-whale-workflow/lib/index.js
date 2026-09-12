@@ -172,32 +172,6 @@ export function apply(ctx) {
     return next();
   });
 
-  // 收尾保障：主代理结束一轮（turn/end）时，安排里没有 memoryMaintainer 就进入 memory 阶段，
-  // 并追加一条消息把它唤醒去做安排——不必等用户的下一条消息。
-  ctx.on("session/event", async (session, event) => {
-    if (event === null || typeof event !== "object" || event.type !== "turn/end") return;
-    const sessionId = session?.id;
-    if (typeof sessionId !== "string" || sessionId.length === 0) return;
-    const agents = ctx.get("agents");
-    const agent =
-      agents !== undefined && agents !== null && typeof agents.get === "function" ? agents.get(sessionId) : undefined;
-    if (agent === undefined || agent === null || isSubagentAgent(agent)) return;
-    const state = await refresh(session);
-    if (state === null || state.stage !== "idle") return;
-    if (state.entries.length === 0) return;
-    if (state.entries.some((entry) => entry.persona === "memoryMaintainer")) return;
-    store.setStage(sessionId, "memory");
-    const inbox = agent.inbox;
-    if (inbox === undefined || inbox === null || typeof inbox.append !== "function") return;
-    inbox.append(
-      "next-turn",
-      createUserMessage({
-        content: [{ type: "text", text: renderStageText("memory") }],
-        source: { kind: "plugin", plugin: "ka-whale-workflow", form: "notice", summary: "stage:memory" },
-      }),
-    );
-  });
-
   ctx.tools.register(writeArrangementTool({ store }));
   ctx.tools.register(getArrangementTool({ store }));
   ctx.tools.register(kaSubWhaleTool({ ctx, store }));

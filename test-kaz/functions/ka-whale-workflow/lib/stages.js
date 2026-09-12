@@ -3,22 +3,19 @@
 //        idle 的正文可再带"子代理现状"块。
 // 正文一律英文（模型面文案），逐字来自设计稿。
 
-export const STAGES = Object.freeze(["idle", "arrange_agent", "memory"]);
+export const STAGES = Object.freeze(["idle", "arrange_agent"]);
 
 export const STAGE_BODIES = Object.freeze({
   idle:
-    "Normal stage. On each user message, first judge: should we go to arrange_agent (go when a subagent must be added or adjusted); if not, just finish the work. Subagent reports come to you automatically — handle them before moving on. To see the arrangement as it is, use get-arrangement; to change it, use whale_report to jump to arrange_agent.",
+    "Normal stage. On each user message, first judge: should we go to arrange_agent (go when a subagent must be added or adjusted); if not, just finish the work. Whenever there is experience worth keeping — not only inside a report — go to arrange_agent and dispatch a memoryMaintainer to record it. Subagent reports come to you automatically — handle them before moving on. To see the arrangement as it is, use get-arrangement; to change it, use whale_report to jump to arrange_agent.",
   arrange_agent:
     "Arrangement stage: use write-arrangement to record this round's dispatch plan (persona / blacklist / task / fork). The arrangement must contain memoryMaintainer — only it can write memories. When done, use whale_report to return to idle, then dispatch item by item.",
-  memory:
-    "This conversation's arrangement has no memoryMaintainer. Use whale_report to jump to arrange_agent, write memoryMaintainer into the arrangement, and dispatch it.",
 });
 
 /** 可跳转关系（§5.1 表格的"可跳转"列）。 */
 export const LEGAL_TRANSITIONS = Object.freeze({
   idle: Object.freeze(["arrange_agent"]),
   arrange_agent: Object.freeze(["idle"]),
-  memory: Object.freeze(["arrange_agent", "idle"]),
 });
 
 /** 注入头。 */

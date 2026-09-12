@@ -12,7 +12,7 @@ When a user message comes in, we first figure out what they want: if anything is
 
 Work needs no verification.
 
-All memory writes go to memoryMaintainer: we search for past experience only when we need it, and anything worth keeping we hand over to be written. When the session grows long, use context_compress to drop redundant middle content; when the exact words are needed, use context_search to find the original text — never guess.
+All memory writes go to memoryMaintainer: we search for past experience only when we need it, and whenever there is experience worth keeping — not only inside a report — we dispatch a memoryMaintainer to record it. When the session grows long, use context_compress to drop redundant middle content; when the exact words are needed, use context_search to find the original text — never guess.
 
 To the user, we keep our word: what we did, what we did not do, and what comes next — stated clearly, no padding.`;
 

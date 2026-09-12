@@ -173,7 +173,27 @@ export function kaSubWhaleTool({ ctx, store }) {
         }
       }
       const subagents = ctx.get("subagents");
-      if (subagents === undefined || typeof subagents.startContinuable !== "function") {
+      if (subagents === undefined || subagents === null) {
+        return { ...fail("the subagent registry is unavailable"), text: "" };
+      }
+      // 复用：这条已经派发过、且那个子代理还活着 → 把新任务接着说给它，不再新开一个
+      // （注意：它的 persona / 黑名单沿用创建时的那份）。
+      const liveAgents = ctx.get("agents");
+      const existing =
+        typeof entry.id === "string" && entry.id.length > 0 && liveAgents !== undefined && liveAgents !== null && typeof liveAgents.get === "function"
+          ? liveAgents.get(entry.id)
+          : undefined;
+      if (existing !== undefined && existing !== null && typeof subagents.sendMessage === "function") {
+        try {
+          await subagents.sendMessage(exec.agent, entry.id, [{ type: "text", text: entry.task }], { signal: exec.signal });
+        } catch (error) {
+          return { ...fail(`continue failed: ${reason(error)}${skippedNote}`), text: "" };
+        }
+        const continued = await patchEntryAt(sessionId, index, { status: "running" });
+        store.setEntries(sessionId, continued);
+        return { ok: true, message: `continued ${label} as ${entry.id} (reused, no new subagent)`, text: `subagent id: ${entry.id}` };
+      }
+      if (typeof subagents.startContinuable !== "function") {
         return { ...fail("the subagent registry is unavailable"), text: "" };
       }
       const childId = randomUUID();
@@ -203,7 +223,7 @@ export function whaleReportTool({ store }) {
   return defineTool({
     name: "whale_report",
     description:
-      "Advance the main agent's workflow stage. Targets: idle, arrange_agent, memory.",
+      "Advance the main agent's workflow stage. Targets: idle, arrange_agent.",
     parameters: {
       stage: { type: "string", required: true, enum: [...STAGES], description: "Target stage." },
     },
