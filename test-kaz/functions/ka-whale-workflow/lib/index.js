@@ -52,6 +52,8 @@ function createStore(persistStage = null) {
         // 刹车提示：本轮（自最近一条用户消息）的全部工具调用次数，以及已触发到哪个节点。
         roundToolCalls: 0,
         divingMilestone: 0,
+        // 是否已经看过这个会话的事件流（首次只看游标、不回放历史，见 refresh）。
+        scannedOnce: false,
       };
       sessions.set(sessionId, state);
     }
@@ -127,9 +129,17 @@ export function apply(ctx) {
     }
 
     if (lastSeq > state.scannedSeq) {
-      // **必须正序**（旧→新）处理：计数器（记忆提示的连续数、刹车提示的本轮总数）依赖事件先后。
-      // 倒序会让"用户消息清零"最后执行，把刚数好的计数抹掉——实测踩过这个坑。
-      // 结算子代理补丁与顺序无关，正序同样正确。
+      if (!state.scannedOnce) {
+        // **首次看到这个会话**：只把游标推到当前末尾，**不数历史**。
+        // 计数器只关心"从现在起"的活动；新进程（重启后）scannedSeq 从 0 开始，
+        // 若在这里回放整段历史，32 次门槛会被历史一次性跨过 —— 表现为"一开局就注入刹车提示"。
+        // 实测踩过：重启后第一次 pre-step 立刻弹提示。
+        state.scannedOnce = true;
+        state.scannedSeq = lastSeq;
+        return state;
+      }
+      // **必须正序**（旧→新）处理：计数器依赖事件先后——倒序会让"用户消息清零"最后执行，
+      // 把刚数好的计数抹掉（同样实测踩过）。结算子代理补丁与顺序无关，正序同样正确。
       for (const event of events) {
         if (!(event.seq > state.scannedSeq)) continue;
         // 提示计数：同一次扫描、同一个"已扫到哪"的守卫，所以每个事件只算一次，天然幂等。
@@ -151,7 +161,7 @@ export function apply(ctx) {
     if (session === undefined || session === null || typeof session !== "object") return null;
     let hintState = subagentHintStates.get(session);
     if (hintState === undefined) {
-      hintState = { roundToolCalls: 0, divingMilestone: 0, scannedSeq: 0 };
+      hintState = { roundToolCalls: 0, divingMilestone: 0, scannedSeq: 0, scannedOnce: false };
       subagentHintStates.set(session, hintState);
     }
     return hintState;
@@ -175,6 +185,12 @@ export function apply(ctx) {
       const lastSeq = events.length > 0 ? events[events.length - 1].seq : 0;
       let shouldHint = false;
       if (lastSeq > hintState.scannedSeq) {
+        if (!hintState.scannedOnce) {
+          // 同主代理：子代理首次被看到时只看游标，不回放它已发生的工具调用。
+          hintState.scannedOnce = true;
+          hintState.scannedSeq = lastSeq;
+          return decision;
+        }
         // 同样**正序**：子代理的计数也依赖事件先后（用户消息要先把本轮清零）。
         for (const event of events) {
           if (!(event.seq > hintState.scannedSeq)) continue;

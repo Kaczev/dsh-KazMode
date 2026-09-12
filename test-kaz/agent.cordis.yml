@@ -56,8 +56,20 @@
   name: '@deepseek-ai/dsh-tool-jobs'
 
 # ── 技能 ────────────────────────────────────────────────────────────────────
+# 预设自带的技能放在预设根的 `skills/` 下（一个技能一个目录，内含 SKILL.md），
+# 用 customSkillDirs 指过去——**技能随预设一起发版**，改测试区→推广主区即可。
+#
+# 路径写法照官方 cordis 预设（agent-presets/presets/cordis/agent.cordis.yml）：
+#   !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+# `baseUrl` 是**本组合文件所在目录**，它在 `!!js` 的求值作用域里（该作用域是
+# `with (loaderCtx) { eval(expr) }`：`baseUrl`/`process`/`globalThis` 可达，
+# 但 `__dirname`/`require`/`module` 不可达——别写那三个）。
+# 不能省成相对路径 `./skills`：customSkillDirs 走 path.resolve()，按进程 CWD 解析。
 - id: skill-filesystem
   name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs:
+      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
