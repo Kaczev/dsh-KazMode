@@ -139,7 +139,7 @@ export function contextCompressTool(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Compress a redundant middle span of this conversation into a summary. Box the span with `from_seq` and `to_seq` — both are required, and they are the `#seq` numbers shown in context_search / context_read output. The span is snapped to safe boundaries and never cuts a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
+      "Compress a redundant middle span of this conversation into a summary. Box the span with `from_seq` and `to_seq` — both are required, and they are the `#seq` numbers shown in context_search / context_read output. The span is snapped to safe boundaries and never cuts a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 10%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
     parameters: {
       from_seq: { type: "integer", required: true, description: "First seq of the span to fold (the `#seq` shown in context_search / context_read output)." },
       to_seq: { type: "integer", required: true, description: "Last seq of the span to fold (the `#seq` shown in context_search / context_read output)." },

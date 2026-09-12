@@ -1,0 +1,5 @@
+# Build output that must not be committed
+node_modules/
+# Visual verification artifacts (regenerate with `npm run preview`)
+dev/
+*.log
