@@ -140,7 +140,7 @@ export function contextCompressTool(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Compress a redundant middle span of this conversation into a summary. Say what to drop (keywords, an exact sentence, or a topic); the tool finds the smallest span covering it, expands to safe boundaries, and compresses that span with the built-in compaction. If the broad match has no safe boundary, it narrows to the strongest matching sub-span. The most recent part stays untouched (keep_recent, default 20%). One span per call; call again for another span.",
+      "Compress a redundant middle span of this conversation into a summary. Say what to drop (keywords, an exact sentence, or a topic); the tool finds the smallest span covering it, expands to safe boundaries, and compresses that span with the built-in compaction. If the broad match has no safe boundary, it narrows to the strongest matching sub-span. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
     parameters: {
       drop: { type: "string", required: true, description: "What to compress away: keywords, an exact sentence, or a topic description." },
       keep_recent: { type: "integer", description: "Percentage of the current context to keep untouched at the end (default 20, max 90)." },
@@ -167,19 +167,37 @@ export function contextCompressTool(ctx) {
       if (compaction === undefined || typeof compaction.compactRegion !== "function") return { ok: false, message: "the compaction provider is unavailable" };
       const measurement = meter.measure(session);
       const nodes = measurement?.nodes;
+      if (!Array.isArray(nodes) || nodes.length === 0) return { ok: false, message: "the token meter reported no surface nodes" };
       const retainIdx = retainBoundaryIdx(nodes, measurement.totalTokens, keepRecent);
       let chosen = null;
+      let sawTail = false;
+      let sawUnsafe = false;
       for (const group of orderedCandidates(matched, cluster)) {
         const range = pickRange(session, nodes, { group });
-        if (range === null) continue;
+        if (range === null) {
+          sawUnsafe = true;
+          continue;
+        }
+        if (range.startIdx >= retainIdx) {
+          sawTail = true;
+          continue;
+        }
         let endIdx = Math.min(range.endIdx, retainIdx - 1);
         while (endIdx >= range.startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
-        if (endIdx < range.startIdx) continue;
+        if (endIdx < range.startIdx) {
+          sawTail = true;
+          continue;
+        }
         chosen = { startIdx: range.startIdx, endIdx };
         break;
       }
       if (chosen === null) {
-        return { ok: false, message: `no safe compressible span found for "${drop}"; try a narrower target or a smaller keep_recent` };
+        const reason = sawTail
+          ? `the matches sit inside the retained recent part (keep_recent=${keepRecent}%) — retry with a smaller keep_recent`
+          : sawUnsafe
+            ? "the matching spans are not safely compressible (protected head, already-compacted region, or an unbalanced tool pair)"
+            : "no matching span";
+        return { ok: false, message: `nothing safely compressible for "${drop}": ${reason}` };
       }
       const startSeq = nodes[chosen.startIdx].seq;
       const endSeq = nodes[chosen.endIdx].seq;
