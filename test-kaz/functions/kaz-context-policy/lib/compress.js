@@ -28,21 +28,25 @@ function clampInt(value, fallback, min, max) {
 }
 
 /**
- * 读 surface 节点对应的事件类型（seq → type）。
- * 注意：平台的 Session 没有 `session.events` 这个属性，必须用 `snapshotEvents()`——
- * 读错属性会让"跳过头部 system/message"永远失效，压缩区间就会扩到节点 0。
+ * 读 surface 节点的事实：事件类型（seq → type），以及"压缩摘要"节点的 seq 集合。
+ * 摘要节点（compaction checkpoint：`source.plugin === "compact"`）带着**新的**大序号插在
+ * 被压区间的位置上——它破坏"节点表里序号递增"的假设，而且本身已经是压缩产物、不能再压。
+ * 注意：平台的 Session 没有 `session.events`，必须用 `snapshotEvents()`。
  */
-function eventTypesOf(session, nodes) {
+function nodeFactsOf(session, nodes) {
   const wanted = new Set();
   for (const node of Array.isArray(nodes) ? nodes : []) {
     if (node !== null && typeof node === "object" && typeof node.seq === "number") wanted.add(node.seq);
   }
   const types = new Map();
+  const digests = new Set();
   const events = typeof session?.snapshotEvents === "function" ? session.snapshotEvents() : [];
   for (const event of events) {
-    if (event !== null && typeof event === "object" && wanted.has(event.seq)) types.set(event.seq, event.type);
+    if (event === null || typeof event !== "object" || !wanted.has(event.seq)) continue;
+    types.set(event.seq, event.type);
+    if (event.type === "user/message" && event.data?.source?.plugin === "compact") digests.add(event.seq);
   }
-  return types;
+  return { types, digests };
 }
 
 /** 按 token 预算求尾部保留边界：从尾向前累加到 keepRecent% 所对应的节点下标。 */
@@ -69,20 +73,22 @@ export function retainBoundaryIdx(nodes, totalTokens, keepRecentPercent) {
 export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
   if (!Array.isArray(nodes) || nodes.length === 0) return null;
   if (!(Number(fromSeq) > 0) || !(Number(toSeq) > 0)) return null;
-  const types = eventTypesOf(session, nodes);
+  const { types, digests } = nodeFactsOf(session, nodes);
   const isSystem = (idx) => types.get(nodes[idx].seq) === "system/message";
+  const isDigest = (idx) => digests.has(nodes[idx].seq);
+  const skip = (idx) => isSystem(idx) || isDigest(idx);
   let startIdx = 0;
-  while (startIdx < nodes.length && isSystem(startIdx)) startIdx += 1;
-  while (startIdx < nodes.length && !toolPairingBalancedBefore(session, nodes[startIdx].seq)) startIdx += 1;
+  while (startIdx < nodes.length && (skip(startIdx) || !toolPairingBalancedBefore(session, nodes[startIdx].seq))) startIdx += 1;
   if (startIdx >= nodes.length) return null;
   let endIdx = Math.min(retainIdx - 1, nodes.length - 1);
-  while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
+  while (endIdx >= startIdx && (skip(endIdx) || !toolPairingBalancedAfter(session, nodes[endIdx].seq))) endIdx -= 1;
   if (endIdx < startIdx) return null;
 
-  // 收进 [fromSeq, toSeq]，再向安全边界内收。
+  // 收进 [fromSeq, toSeq]，再向安全边界内收（摘要节点不参与映射）。
   {
     let idx = -1;
     for (let i = startIdx; i <= endIdx; i += 1) {
+      if (isDigest(i)) continue;
       if (nodes[i].seq >= fromSeq) {
         idx = i;
         break;
@@ -96,6 +102,7 @@ export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
   {
     let idx = -1;
     for (let i = endIdx; i >= startIdx; i -= 1) {
+      if (isDigest(i)) continue;
       if (nodes[i].seq <= toSeq) {
         idx = i;
         break;
@@ -107,10 +114,10 @@ export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
     if (endIdx < startIdx) return null;
   }
 
-  // 区间里不许出现 system/message（平台只允许"恰好针对该节点"的改写）：
+  // 区间里不许出现 system/message，也不许夹着已经压过的摘要节点：
   // 撞上就退到它前面最近的平衡切点。
   for (let i = startIdx; i <= endIdx; i += 1) {
-    if (isSystem(i)) {
+    if (skip(i)) {
       endIdx = i - 1;
       while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
       break;
