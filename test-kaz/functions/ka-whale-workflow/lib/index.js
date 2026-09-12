@@ -60,7 +60,7 @@ function createStore(persistStage = null) {
     loadEntries: async (sessionId) => {
       const state = stateFor(sessionId);
       if (!state.loaded) {
-        state.entries = await readArrangement(sessionId);
+        state.entries = await readArrangement(state.cwd, sessionId);
         state.loaded = true;
       }
       return state.entries;
@@ -102,7 +102,7 @@ export function apply(ctx) {
 
     store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
     if (!state.loaded) {
-      state.entries = await readArrangement(sessionId);
+      state.entries = await readArrangement(state.cwd, sessionId);
       // 重启后从项目里的阶段文件恢复（只认已知阶段名）。
       const persisted = await readStage(state.cwd, sessionId);
       if (persisted !== undefined && STAGES.includes(persisted)) state.stage = persisted;
@@ -117,7 +117,7 @@ export function apply(ctx) {
         if (patch === null || patch.childId.length === 0) continue;
         const index = state.entries.findIndex((entry) => entry.id === patch.childId);
         if (index < 0) continue;
-        state.entries = await patchEntryAt(sessionId, index, { status: patch.status, summary: patch.summary });
+        state.entries = await patchEntryAt(state.cwd, sessionId, index, { status: patch.status, summary: patch.summary });
       }
       state.scannedSeq = lastSeq;
     }

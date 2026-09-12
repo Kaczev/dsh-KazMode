@@ -1,5 +1,6 @@
 // ka-whale-workflow —— 安排文件（《Kaz8.0设计.md》§5.2）。
-// 存储：<DSH_HOME>/storages/arrangements/<对话 id>.json，一个对话一个 JSON。
+// 存储：<项目>/.dsh/storages/arrangements/<对话 id>.json，一个对话一个 JSON
+// （与阶段文件 workflow_stages.json 同根）。cwd 缺失时才退回 home 的 storages。
 // 主代理写 persona/blacklist/task/fork；id/status/summary 由程序回填/搬运。
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -9,14 +10,16 @@ import { join } from "node:path";
 /** summary 超长截断的长度（设计稿：取首行、超长截断）。 */
 export const SUMMARY_MAX_CHARS = 200;
 
-export function arrangementsDir() {
-  const home = process.env.DSH_HOME ?? join(homedir(), ".dsh");
-  return join(home, "storages", "arrangements");
+/** 安排目录：项目目录下的 .dsh/storages/arrangements（cwd 为空时退回 home）。 */
+export function arrangementsDir(cwd) {
+  const base =
+    typeof cwd === "string" && cwd.trim().length > 0 ? join(cwd.trim(), ".dsh") : (process.env.DSH_HOME ?? join(homedir(), ".dsh"));
+  return join(base, "storages", "arrangements");
 }
 
-export function arrangementFile(sessionId) {
+export function arrangementFile(cwd, sessionId) {
   const safe = String(sessionId ?? "").replace(/[^a-zA-Z0-9._-]+/g, "_");
-  return join(arrangementsDir(), `${safe.length > 0 ? safe : "unknown"}.json`);
+  return join(arrangementsDir(cwd), `${safe.length > 0 ? safe : "unknown"}.json`);
 }
 
 /** 取一行：压平空白 + 超长截断。 */
@@ -64,19 +67,19 @@ export function normalizeEntry(raw) {
   };
 }
 
-export async function readArrangement(sessionId) {
+export async function readArrangement(cwd, sessionId) {
   try {
-    const parsed = JSON.parse(await readFile(arrangementFile(sessionId), "utf8"));
+    const parsed = JSON.parse(await readFile(arrangementFile(cwd, sessionId), "utf8"));
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-export async function writeArrangement(sessionId, entries) {
-  const dir = arrangementsDir();
+export async function writeArrangement(cwd, sessionId, entries) {
+  const dir = arrangementsDir(cwd);
   await mkdir(dir, { recursive: true });
-  const file = arrangementFile(sessionId);
+  const file = arrangementFile(cwd, sessionId);
   const tmp = `${file}.${process.pid}.tmp`;
   await writeFile(tmp, JSON.stringify(entries, null, 2), "utf8");
   await rename(tmp, file);
@@ -84,11 +87,11 @@ export async function writeArrangement(sessionId, entries) {
 }
 
 /** 按下标回填一个条目；返回更新后的数组。 */
-export async function patchEntryAt(sessionId, index, patch) {
-  const entries = await readArrangement(sessionId);
+export async function patchEntryAt(cwd, sessionId, index, patch) {
+  const entries = await readArrangement(cwd, sessionId);
   if (index < 0 || index >= entries.length) return entries;
   const next = entries.map((entry, i) => (i === index ? { ...entry, ...patch } : entry));
-  await writeArrangement(sessionId, next);
+  await writeArrangement(cwd, sessionId, next);
   return next;
 }
 

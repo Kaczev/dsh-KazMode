@@ -47,6 +47,12 @@ function sessionIdOf(exec) {
   return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
+/** 会话的项目目录（安排文件的落点）。 */
+function sessionCwdOf(exec) {
+  const cwd = exec?.agent?.session?.header?.cwd;
+  return typeof cwd === "string" ? cwd : "";
+}
+
 /** persona 的匹配键：字符串本身，或 [角色, 描述] 的角色名。 */
 function personaKey(persona) {
   return Array.isArray(persona) ? persona[0] : typeof persona === "string" ? persona : "";
@@ -100,7 +106,7 @@ export function writeArrangementTool({ store }) {
         const old = previous.find((prev) => personaKey(prev.persona) === personaKey(entry.persona));
         entries.push(old === undefined ? entry : { ...entry, id: old.id, status: old.status, summary: old.summary });
       }
-      await writeArrangement(sessionId, entries);
+      await writeArrangement(sessionCwdOf(exec), sessionId, entries);
       store.setEntries(sessionId, entries);
       return ok(`arrangement written: ${entries.length} entr${entries.length === 1 ? "y" : "ies"}`);
     },
@@ -224,7 +230,7 @@ export function kaSubWhaleTool({ ctx, store }) {
         } catch (error) {
           return { ...fail(`continue failed: ${reason(error)}${skippedNote}`), text: "" };
         }
-        const continued = await patchEntryAt(sessionId, index, { id: reusableId, status: "running" });
+        const continued = await patchEntryAt(sessionCwdOf(exec), sessionId, index, { id: reusableId, status: "running" });
         store.setEntries(sessionId, continued);
         return { ok: true, message: `continued ${label} as ${reusableId} (reused, no new subagent)`, text: `subagent id: ${reusableId}` };
       }
@@ -247,7 +253,7 @@ export function kaSubWhaleTool({ ctx, store }) {
         return { ...fail(`dispatch failed: ${reason(error)}${note}${skippedNote}`), text: "" };
       }
       const startedId = started?.childId ?? childId;
-      const next = await patchEntryAt(sessionId, index, { id: startedId, status: "running" });
+      const next = await patchEntryAt(sessionCwdOf(exec), sessionId, index, { id: startedId, status: "running" });
       store.setEntries(sessionId, next);
       return { ok: true, message: `dispatched ${label} as ${startedId} (${provider})${note}${skippedNote}`, text: `subagent id: ${startedId}` };
     },
