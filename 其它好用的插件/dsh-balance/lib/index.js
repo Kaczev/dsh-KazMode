@@ -1,5 +1,5 @@
 /**
- * dsh-deepseek-balance — host (Node) half.
+ * dsh-balance — host (Node) half.
  *
  * Responsibilities:
  *   1. Resolve the DeepSeek API key without ever sending it to the browser:
@@ -11,7 +11,7 @@
  *
  * The browser only ever sees local JSON: no key, no upstream call.
  *
- * @module dsh-deepseek-balance
+ * @module dsh-balance
  */
 
 import { readFileSync } from 'node:fs'
@@ -22,7 +22,7 @@ export const name = 'deepseek-balance'
 export const inject = ['webServer']
 
 /** Prefix of every route this plugin owns. */
-export const ROUTE_PREFIX = '/dsh-deepseek-balance'
+export const ROUTE_PREFIX = '/dsh-balance'
 /** The single JSON endpoint the widget polls. */
 export const BALANCE_PATH = `${ROUTE_PREFIX}/balance`
 /** Read-only counters, for diagnosing a widget that is not updating. */
@@ -457,12 +457,12 @@ export function apply(ctx, config = {}) {
       },
     })
 
-    ctx.logger?.info?.(`[dsh-deepseek-balance] routes registered: ${BALANCE_PATH}, ${STATS_PATH}`)
+    ctx.logger?.info?.(`[dsh-balance] routes registered: ${BALANCE_PATH}, ${STATS_PATH}`)
     return () => {
       if (typeof disposeBalance === 'function') disposeBalance()
       if (typeof disposeStats === 'function') disposeStats()
     }
-  }, 'dsh-deepseek-balance: routes')
+  }, 'dsh-balance: routes')
 }
 
 //#endregion

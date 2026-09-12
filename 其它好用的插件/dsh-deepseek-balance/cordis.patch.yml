@@ -1,6 +1,0 @@
-# dsh-deepseek-balance bundle patch: inserts the plugin row into the web profile
-# roster. Loaded automatically when this package appears in the profile's
-# dsh.profile.bundles list.
-- insert:
-    - id: deepseek-balance
-      name: 'dsh-deepseek-balance'

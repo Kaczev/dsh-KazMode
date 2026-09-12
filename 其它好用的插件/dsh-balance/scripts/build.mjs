@@ -1,5 +1,5 @@
 /**
- * Build the two runtime artifacts of dsh-deepseek-balance:
+ * Build the two runtime artifacts of dsh-balance:
  *
  *   lib/index.js  — the host half (plain ESM, copied from src/).
  *   lib/client.js — the browser half, wrapped in the DSH module-loader
@@ -51,4 +51,4 @@ ${factoryBody}
 writeFileSync(join(libDir, 'client.js'), bundle)
 
 const hostBytes = readFileSync(join(libDir, 'index.js')).length
-console.log(`dsh-deepseek-balance: lib/index.js (${hostBytes} B) + lib/client.js (${bundle.length} B)`)
+console.log(`dsh-balance: lib/index.js (${hostBytes} B) + lib/client.js (${bundle.length} B)`)

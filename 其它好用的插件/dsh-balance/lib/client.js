@@ -1,5 +1,11 @@
+window.__ModuleLoader__.load({
+	id: "dsh-balance",
+	factory: (require) => {
+		var module = { exports: {} };
+		var exports = module.exports;
+		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 /**
- * dsh-deepseek-balance — browser half.
+ * dsh-balance — browser half.
  *
  * A floating balance card on the DSH `shell.overlay` layer:
  *   - polls one local route (the host proxies DeepSeek, so no API key here)
@@ -26,11 +32,11 @@ const {
 } = React
 
 /** Local JSON route served by this plugin's host half. */
-const BALANCE_PATH = '/dsh-deepseek-balance/balance'
+const BALANCE_PATH = '/dsh-balance/balance'
 /** One persisted slot in localStorage. */
-const STORAGE_KEY = 'dsh-deepseek-balance:v2'
-const STYLE_TAG_ID = 'dsh-deepseek-balance/styles'
-const PLUGIN_ID = 'dsh-deepseek-balance'
+const STORAGE_KEY = 'dsh-balance:v2'
+const STYLE_TAG_ID = 'dsh-balance/styles'
+const PLUGIN_ID = 'dsh-balance'
 
 /** How often the widget asks the local route (the host serves a cache). */
 const POLL_MS = 2500
@@ -1501,11 +1507,11 @@ function BalanceWidget(props) {
  */
 function apply(ctx) {
   const removeStyle = adoptStyles()
-  ctx.effect(() => () => removeStyle(), 'dsh-deepseek-balance: stylesheet')
+  ctx.effect(() => () => removeStyle(), 'dsh-balance: stylesheet')
 
   const slots = ctx.slots
   if (slots === undefined || typeof slots.inject !== 'function' || typeof slots.register !== 'function') {
-    ctx.logger?.warn?.('[dsh-deepseek-balance] slots 服务不可用，挂件未注册')
+    ctx.logger?.warn?.('[dsh-balance] slots 服务不可用，挂件未注册')
     return
   }
 
@@ -1514,9 +1520,14 @@ function apply(ctx) {
     id: PLUGIN_ID,
     order: 90,
     label: 'DeepSeek 余额',
-  }, (props) => h(BalanceWidget, props))), 'dsh-deepseek-balance: overlay registration')
+  }, (props) => h(BalanceWidget, props))), 'dsh-balance: overlay registration')
 }
 
 const inject = ['slots']
 
-export { apply, inject, BalanceWidget }
+exports.apply = apply;
+exports.inject = inject;
+exports.BalanceWidget = BalanceWidget;
+		return module.exports;
+	}
+});

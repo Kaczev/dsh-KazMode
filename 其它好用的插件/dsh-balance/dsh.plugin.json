@@ -1,9 +1,9 @@
 {
-  "name": "dsh-deepseek-balance",
+  "name": "dsh-balance",
   "description": "DeepSeek 账户余额悬浮挂件：实时余额、变化折线虚影、老虎机数字、吸附边缘。",
   "version": "0.2.0",
   "entry": {
-    "name": "dsh-deepseek-balance",
+    "name": "dsh-balance",
     "inject": ["webServer"]
   },
   "client": {

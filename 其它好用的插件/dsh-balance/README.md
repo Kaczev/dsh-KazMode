@@ -1,23 +1,24 @@
-# dsh-deepseek-balance
+# dsh-balance
 
 DeepSeek 账户余额悬浮挂件 —— 一枚给 **DSH Web UI**（DeepSeek Harness `0.1.5-rc.2`）用的浏览器插件。
 
 一个能拖的玻璃小卡片，实时显示你的 DeepSeek 余额：数字是**老虎机式滚动**的，底下是一条**带虚影和颜色**的余额折线，钱掉得越猛卡片抖得越厉害、颜色越红。
 
 ```
-┌────────────────────────────┐
-│ ● DeepSeek 余额      ▾  ↻ │   ● 绿=正常 黄=数据滞后 红=拿不到
-│ 4 4 . 7 2 5 0 CNY  -0.1840 │   ← 数字以老虎机方式滚到新值
-│ ╭──────────────╮           │
-│ │  折线 + 虚影  │           │   ← 颜色随跌幅剧烈程度变化
-│ ╰──────────────╯           │
-│ 本次 ¥0.184   还能撑 6.2 天 │
-└────────────────────────────┘
+┌──────────────────┐
+│ ● DeepSeek 余额  │   ● 绿=正常 黄=数据滞后 红=拿不到
+│ 4 4 . 7 0 CNY    │   ← 折线是背景层，数字压在上面（老虎机滚动）
+│ 还能撑 6.2 天  3秒│
+└──────────────────┘
 ```
+
+## 作者
+
+Kaz。插件本体（`dsh-balance`）由 Kaz 设计与实现。
 
 ## 功能
 
-- **实时余额**：浏览器每 **2.5 秒**问一次本地路由，宿主端 **8 秒**才真正打一次 DeepSeek 官网并缓存结果 —— 肉眼看几乎同步，但不会把上游打爆（`/dsh-deepseek-balance/stats` 能看到实际次数）。
+- **实时余额**：浏览器每 **2.5 秒**问一次本地路由，宿主端 **8 秒**才真正打一次 DeepSeek 官网并缓存结果 —— 肉眼看几乎同步，但不会把上游打爆（`/dsh-balance/stats` 能看到实际次数）。
 - **卡片只有 150×66**：折线是**背景层**（整卡铺满、半透明、上面压着一层渐隐遮罩），数字直接压在它上面，不再是数字下面单独占一条。
 - **折线虚影**：当前折线之下叠着三层更淡、更高一点的旧迹，像余晖一样拖着走；折线本身是贝塞尔平滑曲线，曲线下方有渐变填充。
 - **颜色表示剧烈程度**：每一段线单独上色，从青灰（几乎没动）→ 绿 → 琥珀 → 橙 → 红（剧烈下跌）。参考尺度取「一次 API 调用量级（¥0.005）」与「余额的 1%」的几何平均，所以 ¥5 和 ¥5000 的账户都读得出轻重。
@@ -44,18 +45,18 @@ DeepSeek 账户余额悬浮挂件 —— 一枚给 **DSH Web UI**（DeepSeek Har
 
 ## 安装
 
-插件目录 = 本仓库的 `其它好用的插件/dsh-deepseek-balance`。装进 web profile：
+插件目录 = 本仓库的 `其它好用的插件/dsh-balance`。装进 web profile：
 
 ```powershell
 # 1. 让 profile 能解析到这个包（开发机上可以直接用 Junction 指回源目录）
 New-Item -ItemType Junction `
-  -Path  "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-deepseek-balance" `
-  -Target "<克隆下来的仓库>\其它好用的插件\dsh-deepseek-balance"
+  -Path  "$env:USERPROFILE\.dsh\profiles\web\node_modules\dsh-balance" `
+  -Target "<克隆下来的仓库>\其它好用的插件\dsh-balance"
 
 # 2. 把插件挂进 profile 的 bundle 列表：
 #    %USERPROFILE%\.dsh\profiles\web\package.json
-#      dependencies 里加      "dsh-deepseek-balance": "file:dsh-deepseek-balance",
-#      dsh.profile.bundles 里加 "dsh-deepseek-balance"
+#      dependencies 里加      "dsh-balance": "file:dsh-balance",
+#      dsh.profile.bundles 里加 "dsh-balance"
 
 # 3. 重启 dsh web，浏览器刷新页面
 ```
@@ -98,15 +99,15 @@ node scripts/collect-preview.mjs # 无头 Edge 渲染该页，并读回画布像
 
 | 路径 | 用途 |
 | --- | --- |
-| `/dsh-deepseek-balance/balance` | 挂件轮询的 JSON；宿主端缓存 + 请求合并，`stale` 标记是否用的旧数据 |
-| `/dsh-deepseek-balance/stats` | 只读计数（服务次数、上游次数、缓存余额、Key 来源），排查「挂件不更新」用 |
+| `/dsh-balance/balance` | 挂件轮询的 JSON；宿主端缓存 + 请求合并，`stale` 标记是否用的旧数据 |
+| `/dsh-balance/stats` | 只读计数（服务次数、上游次数、缓存余额、Key 来源），排查「挂件不更新」用 |
 
 两个路由都只暴露余额与计数，不含 Key。
 
 ## 目录
 
 ```
-dsh-deepseek-balance/
+dsh-balance/
 ├── src/index.js       宿主半：Key 解析、上游调用、缓存、路由
 ├── src/client.js      浏览器半：挂件、老虎机、canvas 折线、抖动、吸附
 ├── scripts/           构建 + 五层验证脚本

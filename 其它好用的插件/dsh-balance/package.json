@@ -1,5 +1,5 @@
 {
-  "name": "dsh-deepseek-balance",
+  "name": "dsh-balance",
   "version": "0.2.0",
   "private": true,
   "description": "DeepSeek account balance widget for the DSH Web GUI: live balance, ghost-trail sparkline with intensity colors, slot-machine digits, drop shake, edge snapping.",

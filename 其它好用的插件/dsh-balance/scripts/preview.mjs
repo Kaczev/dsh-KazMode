@@ -107,7 +107,7 @@ const html = `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>dsh-deepseek-balance 预览</title>
+<title>dsh-balance 预览</title>
 <style>
   :root {
     --dsw-alias-bg-overlay: rgba(255,255,255,.94);
@@ -140,7 +140,7 @@ const html = `<!doctype html>
 <style>${cssMatch[1]}</style>
 </head>
 <body>
-<h1>dsh-deepseek-balance · 挂件外观预览</h1>
+<h1>dsh-balance · 挂件外观预览</h1>
 <p class="lede">这一页用的是插件真正发布的 CSS 与 canvas 绘制函数（从 lib/client.js 抽出），不是重画的示意稿。</p>
 <div class="stage" id="stage">${pillHtml}</div>
 <script>
@@ -279,4 +279,4 @@ setTimeout(send, 1200);
 
 mkdirSync(join(root, 'dev'), { recursive: true })
 writeFileSync(join(root, 'dev', 'preview.html'), html)
-console.log(`dsh-deepseek-balance: wrote dev/preview.html (${html.length} B)`)
+console.log(`dsh-balance: wrote dev/preview.html (${html.length} B)`)

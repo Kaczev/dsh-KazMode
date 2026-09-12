@@ -73,7 +73,7 @@
 - 安装程序把源镜像到 `<home>\.agent-presets\kaz`，再在预设的 `node_modules\` 下建两个 junction：`zod` 指回 `<home>\profiles\<profile>\node_modules`，`@deepseek-ai` 指回**同一 home 内的共享运行时包集**（`<home>\profiles\node_modules\@deepseek-ai`；该层没有运行时包时才回退 profile 那一层，见 §2.2）。预设自带的 `functions/*` 之间用相对路径互相引用，因此不需要 `npm install`。
 - 预设根目录的 `VERSION` 文件（一行 `8.0.0`）就是**预设自己的版本号**，随镜像一起进 live 预设目录；它由人手工维护，见 §8.2。
 - ⚠️ **别对测试区跑默认安装**：默认源是发布源（`kaz/`），对 `-DshHome .dsh-test` 跑默认安装会把发布源盖到测试区、冲掉开发副本。要装测试区就用 `-Source test-kaz`。
-- **绝不要**在仓库里运行 `git clean -fdx` 或 `git checkout -f`：`kaz\`、`test-kaz\`、`其它好用的插件\dsh-deepseek-balance\` 都是仓库 ↔ live 的 junction，这类命令会顺着 junction 写坏 live 预设/插件源。仓库脏了用 `git status` / `git diff` 查看，只手动改需要的文件。
+- **绝不要**在仓库里运行 `git clean -fdx` 或 `git checkout -f`：`kaz\`、`test-kaz\`、`其它好用的插件\dsh-balance\` 都是仓库 ↔ live 的 junction，这类命令会顺着 junction 写坏 live 预设/插件源。仓库脏了用 `git status` / `git diff` 查看，只手动改需要的文件。
 
 ---
 
@@ -175,7 +175,7 @@ dsh-KazMode/
 
 | 路径 | 说明 | 安装提示 |
 | --- | --- | --- |
-| `其它好用的插件/dsh-deepseek-balance/` | DeepSeek 账户余额悬浮挂件：实时余额、折线虚影与强度配色、老虎机数字、暴跌抖动、边缘吸附（独立 DSH Web 插件） | 安装方式见该目录内 `README.md` |
+| `其它好用的插件/dsh-balance/` | 余额悬浮挂件：实时余额、折线虚影与强度配色、老虎机数字、暴跌抖动、边缘吸附（独立 DSH Web 插件） | 安装方式见该目录内 `README.md` |
 | `其它好用的预设/router-spec/` | 实验性 Router Spec 预设 | 复制到 `%USERPROFILE%\.dsh\.agent-presets\router-spec\` |
 | `其它好用的预设/router-standard/` | 实验性 Router Standard 预设 | 复制到 `%USERPROFILE%\.dsh\.agent-presets\router-standard\` |
 
@@ -191,7 +191,7 @@ dsh-KazMode/
 - **看到 `KAZ-PRESET-INSTALL OK` 但好像没生效**：如果那次带了 `-DryRun`，OK 只是预演；去掉 `-DryRun` 重跑一次。
 - **`-AllHomes` 里某个 home 报 `FAIL`**：该 home 的运行时 dsh 不是 `0.1.5-rc.2`（`.dsh-clean` 报 `FAIL` 属设计如此）。
 - **`robocopy` 镜像把目标里多出的文件删了**：`/MIR` 是镜像语义，`node_modules` 除外；不要往 `.agent-presets\kaz` 里放自定义文件，备份在 `<home>\tools\kaz-preset-backup-*`（会累积，可手动清理）。
-- **绝对不要**对仓库运行 `git clean -fdx` / `git checkout -f`：`kaz`、`test-kaz`、`其它好用的插件\dsh-deepseek-balance` 都是仓库 ↔ live 的 junction，会顺着写坏 live 预设/插件源。
+- **绝对不要**对仓库运行 `git clean -fdx` / `git checkout -f`：`kaz`、`test-kaz`、`其它好用的插件\dsh-balance` 都是仓库 ↔ live 的 junction，会顺着写坏 live 预设/插件源。
 - **用 `Set-Content -Encoding UTF8` 写 YAML/JSON 产生 BOM**：BOM 可能破坏 JSON.parse；用支持 UTF-8 无 BOM 的编辑器/工具。
 - **遇到 `write/edit` 报 `ReplaceFileW EIO (Win32 1175)`**：Windows 偶发文件系统错误，重试即可。
 - **改动不生效**：预设是文件镜像，必须重启 `dsh web` + 强刷浏览器。

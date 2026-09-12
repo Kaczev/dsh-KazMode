@@ -24,7 +24,7 @@ import { join } from 'node:path'
 
 const port = Number(process.argv[2] ?? 3270)
 const seconds = Number(process.argv[3] ?? 20)
-const BALANCE_PATH = '/dsh-deepseek-balance/balance'
+const BALANCE_PATH = '/dsh-balance/balance'
 
 const browsers = [
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -67,7 +67,7 @@ const OBSERVER = `<script>
   window.fetch = function (input, init) {
     var url = typeof input === 'string' ? input : (input && input.url) || '';
     var record = { at: Date.now() - started, url: String(url).slice(0, 120), status: 0, error: null, bodyBytes: 0 };
-    if (String(url).indexOf('/dsh-deepseek-balance/') === 0) fetches.push(record);
+    if (String(url).indexOf('/dsh-balance/') === 0) fetches.push(record);
     var promise;
     try {
       promise = original.apply(this, arguments);
@@ -75,7 +75,7 @@ const OBSERVER = `<script>
       record.error = String(error && error.message ? error.message : error);
       throw error;
     }
-    if (record.url.indexOf('/dsh-deepseek-balance/') === 0) {
+    if (record.url.indexOf('/dsh-balance/') === 0) {
       promise.then(function (response) {
         record.status = response.status;
         response.clone().text().then(function (text) { record.bodyBytes = text.length; }).catch(function () {});
@@ -121,7 +121,7 @@ const OBSERVER = `<script>
       reels: document.querySelectorAll('.dsb-reel').length,
       visible: visibleAmount(),
       status: root ? root.getAttribute('data-low') : null,
-      stored: (function () { try { var raw = localStorage.getItem('dsh-deepseek-balance:v2'); return raw ? (JSON.parse(raw).samples || []).length : -1; } catch (error) { return -2; } })(),
+      stored: (function () { try { var raw = localStorage.getItem('dsh-balance:v2'); return raw ? (JSON.parse(raw).samples || []).length : -1; } catch (error) { return -2; } })(),
     });
   }, 1000);
   setInterval(function () {
@@ -311,7 +311,7 @@ if (latest === null) {
   const hostBalance = (await (async () => {
     try {
       // Read the host's own reading through the app port, not the proxy.
-      const stats = await (await fetch(`http://127.0.0.1:${port + 1}/dsh-deepseek-balance/stats`)).json()
+      const stats = await (await fetch(`http://127.0.0.1:${port + 1}/dsh-balance/stats`)).json()
       return stats.cachedBalance
     } catch {
       return null
