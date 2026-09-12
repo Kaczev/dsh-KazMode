@@ -61,12 +61,14 @@ export function retainBoundaryIdx(nodes, totalTokens, keepRecentPercent) {
 /**
  * 框选区间：把 [fromSeq, toSeq] 收进可压中段 [起点, 终点]。
  * 起点 = 跳过头部 system/message 后的第一个配对平衡切点；终点 = 尾部保留带之前、
- * 且配对平衡的最后一个节点。给了 from/to 就把区间收进这两点之间（可以只给一边），
- * 再向内收：起点后移到配对平衡处、终点前移到配对平衡处，撞上 system/message 就退到它前面。
+ * 且配对平衡的最后一个节点。两边都必须给（缺一边直接返回 null）：
+ * 区间先收进这两点之间，再向内收——起点后移到配对平衡处、终点前移到配对平衡处，
+ * 撞上 system/message 就退到它前面。
  * @returns {{startIdx: number, endIdx: number}|null}
  */
-export function foldBand(session, nodes, retainIdx, fromSeq = 0, toSeq = 0) {
+export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
   if (!Array.isArray(nodes) || nodes.length === 0) return null;
+  if (!(Number(fromSeq) > 0) || !(Number(toSeq) > 0)) return null;
   const types = eventTypesOf(session, nodes);
   const isSystem = (idx) => types.get(nodes[idx].seq) === "system/message";
   let startIdx = 0;
@@ -77,8 +79,8 @@ export function foldBand(session, nodes, retainIdx, fromSeq = 0, toSeq = 0) {
   while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
   if (endIdx < startIdx) return null;
 
-  // 框选：把区间收进 [fromSeq, toSeq]，再向安全边界内收。
-  if (fromSeq > 0) {
+  // 收进 [fromSeq, toSeq]，再向安全边界内收。
+  {
     let idx = -1;
     for (let i = startIdx; i <= endIdx; i += 1) {
       if (nodes[i].seq >= fromSeq) {
@@ -91,7 +93,7 @@ export function foldBand(session, nodes, retainIdx, fromSeq = 0, toSeq = 0) {
     while (startIdx <= endIdx && !toolPairingBalancedBefore(session, nodes[startIdx].seq)) startIdx += 1;
     if (startIdx > endIdx) return null;
   }
-  if (toSeq > 0) {
+  {
     let idx = -1;
     for (let i = endIdx; i >= startIdx; i -= 1) {
       if (nodes[i].seq <= toSeq) {
@@ -122,10 +124,10 @@ export function contextCompressTool(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Compress a redundant middle span of this conversation into a summary. Box the span with `from_seq` / `to_seq` — the `#seq` numbers shown in context_search / context_read output; omit a side to use its natural boundary (the earliest compactable point, or the kept-recent boundary), so passing neither end folds the whole compactable middle in one call. The span is snapped to safe boundaries and never cuts a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
+      "Compress a redundant middle span of this conversation into a summary. Box the span with `from_seq` and `to_seq` — both are required, and they are the `#seq` numbers shown in context_search / context_read output. The span is snapped to safe boundaries and never cuts a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
     parameters: {
-      from_seq: { type: "integer", description: "First seq of the span to fold (omit to start at the earliest compactable point)." },
-      to_seq: { type: "integer", description: "Last seq of the span to fold (omit to end at the kept-recent boundary)." },
+      from_seq: { type: "integer", required: true, description: "First seq of the span to fold (the `#seq` shown in context_search / context_read output)." },
+      to_seq: { type: "integer", required: true, description: "Last seq of the span to fold (the `#seq` shown in context_search / context_read output)." },
       keep_recent: { type: "integer", description: "Percentage of the current context to keep untouched at the end (default 20, max 90)." },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
@@ -136,7 +138,10 @@ export function contextCompressTool(ctx) {
       const keepRecent = clampInt(args?.keep_recent, 20, 0, 90);
       const fromSeq = clampInt(args?.from_seq, 0, 0, Number.MAX_SAFE_INTEGER);
       const toSeq = clampInt(args?.to_seq, 0, 0, Number.MAX_SAFE_INTEGER);
-      if (fromSeq > 0 && toSeq > 0 && fromSeq > toSeq) {
+      if (fromSeq <= 0 || toSeq <= 0) {
+        return { ok: false, message: "from_seq and to_seq are both required — give the two #seq ends of the span to compress" };
+      }
+      if (fromSeq > toSeq) {
         return { ok: false, message: `from_seq (${fromSeq}) is after to_seq (${toSeq}) — swap the two ends of the box` };
       }
       const meter = ctx.get("tokenMeter");
@@ -149,12 +154,9 @@ export function contextCompressTool(ctx) {
       const retainIdx = retainBoundaryIdx(nodes, measurement.totalTokens, keepRecent);
       const chosen = foldBand(session, nodes, retainIdx, fromSeq, toSeq);
       if (chosen === null) {
-        const boxed = fromSeq > 0 || toSeq > 0;
         return {
           ok: false,
-          message: boxed
-            ? `nothing foldable inside [${fromSeq > 0 ? fromSeq : "start"} .. ${toSeq > 0 ? toSeq : "tail"}] after safe-boundary snapping — the box may sit inside the protected head, the kept-recent tail, or an already-compacted span`
-            : "nothing foldable: the protected head, the kept-recent tail and already-compacted spans leave no safe span — try a smaller keep_recent, or start a new conversation",
+          message: `nothing foldable inside [${fromSeq} .. ${toSeq}] after safe-boundary snapping — the box may sit inside the protected head, the kept-recent tail, or an already-compacted span`,
         };
       }
       const startSeq = nodes[chosen.startIdx].seq;
