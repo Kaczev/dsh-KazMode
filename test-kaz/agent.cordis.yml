@@ -29,6 +29,9 @@
 - id: ka-whale-memory
   name: ./functions/ka-whale-memory/lib/index.js
 
+- id: ka-whale-workflow
+  name: ./functions/ka-whale-workflow/lib/index.js
+
 # ── shell / 文件系统 ────────────────────────────────────────────────────────
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
