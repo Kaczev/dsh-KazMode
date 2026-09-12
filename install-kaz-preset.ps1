@@ -4,8 +4,9 @@ install-kaz-preset.ps1 - Windows installer for the Kaz agent preset.
 What it does:
   1. Resolves a DSH home (default: %USERPROFILE%\.dsh) and one profile inside it.
   2. Version-gates the runtime (supported: 0.1.5-rc.2 only).
-  3. Mirrors the preset template (repo\test-kaz, node_modules excluded) into
-     <DshHome>\.agent-presets\kaz.
+  3. Mirrors the preset source (repo\kaz = the released copy users install;
+     pass -Source test-kaz to promote the test-area development copy instead)
+     into <DshHome>\.agent-presets\kaz, node_modules excluded.
   4. Creates/refreshes the two runtime junctions the preset needs:
        <preset>\node_modules\@deepseek-ai -> the home's WIDER runtime package tree,
                                             <DshHome>\profiles\node_modules\@deepseek-ai,
@@ -32,8 +33,8 @@ Notes:
     rollback override (only for a user-chosen return to 0.1.5-rc.1, which also
     needs the launcher's EXPECTED_CLI set back); normal installs and updates
     must never use it.
-  - Never run "git clean -fdx" or "git checkout -f" while test-kaz is a junction
-    to a live preset; those commands would write through it.
+  - Never run "git clean -fdx" or "git checkout -f" while kaz or test-kaz is a
+    junction to a live preset; those commands would write through it.
 #>
 param(
   [string]$DshHome = (Join-Path $env:USERPROFILE '.dsh'),
@@ -49,7 +50,7 @@ $ErrorActionPreference = 'Stop'
 $PresetName = 'kaz'
 $SupportedVersions = @('0.1.5-rc.2')
 
-if ([string]::IsNullOrWhiteSpace($Source)) { $Source = Join-Path $PSScriptRoot 'test-kaz' }
+if ([string]::IsNullOrWhiteSpace($Source)) { $Source = Join-Path $PSScriptRoot 'kaz' }
 
 function Write-Step([string]$Message) { Write-Host $Message }
 

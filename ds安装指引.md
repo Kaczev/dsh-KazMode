@@ -57,15 +57,15 @@ if ($supportedDsh -notcontains $dshVer) {
 ```powershell
 $repo = "本文件所在目录"   # 例如 C:\Users\xxx\Documents\GitHub\dsh-KazMode
 Test-Path (Join-Path $repo "install-kaz-preset.ps1")
-Test-Path (Join-Path $repo "test-kaz\preset.yml")
+Test-Path (Join-Path $repo "kaz\preset.yml")
 ```
 
 - 两条都返回 `True` → 继续第 2 步。
-- 任一为 `False` → **停止**，告诉用户："仓库不完整：缺少 `install-kaz-preset.ps1` 或 `test-kaz\preset.yml`，请重新获取完整仓库。"
+- 任一为 `False` → **停止**，告诉用户："仓库不完整：缺少 `install-kaz-preset.ps1` 或 `kaz\preset.yml`，请重新获取完整仓库。"
 
 ## 第 2 步 运行安装程序
 
-安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `test-kaz\` 镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的两个 junction（`zod` → `<home>\profiles\<profile>\node_modules`；`@deepseek-ai` → **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`，仅当该层没有运行时包时才回退 profile 那一层）→ 打印 `KAZ-PRESET-INSTALL OK`。
+安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的两个 junction（`zod` → `<home>\profiles\<profile>\node_modules`；`@deepseek-ai` → **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`，仅当该层没有运行时包时才回退 profile 那一层）→ 打印 `KAZ-PRESET-INSTALL OK`。
 
 > **`@deepseek-ai` 为什么指共享层（别改回 profile 层）**：预设解析插件名时**先看自己的 `node_modules`**，这个链接指向哪一层就决定了哪些包可见；一个指向父目录的链接还会截断向上的查找。profile 那一层（`<home>\profiles\<profile>\node_modules\@deepseek-ai`）可能只有该 profile 装过的子集，而 Kaz 8.0 的组合需要 `dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `dsh-tool-ask-user`（组合里的一行）等**只存在于共享层**的包——指错就直接**预设挂不起来**。以 `linked: ... -> ...` 那行打印的路径为准。
 
@@ -108,10 +108,10 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 **2.5 指定预设源（`-Source`，一般不需要）**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Source "D:\下载\dsh-KazMode\test-kaz"
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Source "D:\下载\dsh-KazMode\kaz"
 ```
 
-- 默认 `-Source` 就是脚本旁边的 `test-kaz`，正常安装**不要**传这个参数。
+- 默认 `-Source` 就是脚本旁边的 `kaz`（发布源），正常安装**不要**传这个参数。（`test-kaz\` 是测试区开发副本、不稳定，只有维护者把测试区成果推广到主区时才显式传它。）
 
 **成功标志**：输出 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`，并打印 `linked: ...` 两行 junction。
 
@@ -122,7 +122,7 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
 (Get-Item "$env:USERPROFILE\.dsh\.agent-presets\kaz\node_modules\@deepseek-ai").Target   # 应指向 <home>\profiles\node_modules\@deepseek-ai
 ```
 
-- `VERSION` 打印的不是 `8.0.0`（或文件不存在）→ 镜像没到位：重跑安装程序；仍不对就报告用户 `test-kaz\VERSION` 的问题。
+- `VERSION` 打印的不是 `8.0.0`（或文件不存在）→ 镜像没到位：重跑安装程序；仍不对就报告用户 `kaz\VERSION` 的问题。
 - junction 目标指向 `...\profiles\<profile>\node_modules\@deepseek-ai`（而不是 `...\profiles\node_modules\@deepseek-ai`）→ 说明用的是旧版安装程序，或该 home 的共享层没有运行时包：先确认共享层存在，再重跑当前仓库的安装程序；这不是「可以忽略的警告」，否则预设会挂不起来。
 
 **出错处理**：
@@ -136,7 +136,7 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
 - 报 `WARN: optional runtime package missing: ...\node_modules\zod` → `zod` 是可选 junction，安装会继续；若之后运行报 `zod` 解析失败，再回该 profile 补装 `zod`。
 - 安装成功、但新对话里预设挂不起来（组合里某一行 `names a plugin that cannot be resolved`）→ 先看 `linked: <preset>\node_modules\@deepseek-ai -> ...` 指到哪一层：必须是**共享层** `<home>\profiles\node_modules\@deepseek-ai`。指到 profile 层就重跑当前仓库的安装程序；手工修法是 `cmd /c rmdir "<preset>\node_modules\@deepseek-ai"` 后重建 junction 指向共享层。
 
-> 补充：若某个 home 的 `.agent-presets\kaz` **本身就是**仓库 `test-kaz` 的 junction 目标，安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——这是正常分支，无需处理。
+> 补充：若目标 home 的 `.agent-presets\kaz` 与仓库源目录（默认 `kaz\`）**本来就是同一个目录**（开发机上主区就是这样），安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——这是正常分支，无需处理。
 
 ## 第 3 步 交给用户收尾（重要）
 
@@ -153,7 +153,7 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
 
 - 新对话已选中 **Kaz 模式**（`kaz`）。
 - **persona 首句**：`We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.`；用 "We" 思考（ALWAYS REASON AS 'WE'），模型输出全英文。
-- **主代理工具面**（与官方标准预设对齐；完整清单以 `test-kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
+- **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文三件：`context_search` / `context_read` / `context_compress`

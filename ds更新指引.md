@@ -67,7 +67,7 @@ git pull
 - `git pull` 报网络错误 / 冲突 → **停止**，把报错原文报告给用户，不要自行 `git reset` / `git checkout -f` / `git clean`。
 - 若你的仓库是从 zip/tar 解压来的（目录里没有 `.git`）→ 跳过 `git pull`，重新下载最新包并覆盖仓库目录即可，然后继续第 2 步。
 
-> **禁令（重要）**：**绝不**在仓库里运行 `git clean -fdx` 或 `git checkout -f`。本仓库的 `test-kaz\` 是仓库 ↔ live 预设目录之间的 junction，这类命令会**顺着 junction 把 live 预设写坏**。仓库脏了用 `git status` / `git diff` 看，只手动改需要改的那几个文件。
+> **禁令（重要）**：**绝不**在仓库里运行 `git clean -fdx` 或 `git checkout -f`。本仓库的 `kaz\` 与 `test-kaz\` 都是仓库 ↔ live 预设目录之间的 junction，这类命令会**顺着 junction 把 live 预设写坏**。仓库脏了用 `git status` / `git diff` 看，只手动改需要改的那几个文件。
 
 ## 第 2 步 预演（`-DryRun`，先看清要改什么）
 
@@ -97,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 更新就是**重跑同一个安装程序**，它会自动：
 
 1. 把现有预设备份到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）；
-2. 用 `robocopy /MIR` 把仓库 `test-kaz\` **镜像**到 `<home>\.agent-presets\kaz`（排除 `node_modules`）；
+2. 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）**镜像**到 `<home>\.agent-presets\kaz`（排除 `node_modules`）；
 3. **原地重建**预设 `node_modules` 下的两个 junction：`zod`（可选）→ `<home>\profiles\<profile>\node_modules`；`@deepseek-ai`（必需）→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`（仅当该层没有运行时包时才回退 profile 那一层）。先 `rmdir` 旧链接再新建，幂等；
 4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
@@ -111,7 +111,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 ```
 
 - `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期**：`.dsh`（主环境，闸门读到全局 `0.1.5-rc.2`）与 `.dsh-test`（本地副本 `0.1.5-rc.2`）报 `OK`；`.dsh-clean`（救援环境，仍是 dsh `0.1.1-rc.2`）报 `FAIL` 属预期——它保留旧运行时当最后防线。
-- 若某个 home 的 `.agent-presets\kaz` 本身就是仓库 `test-kaz` 的 junction 目标，安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——正常分支。
+- 若目标 home 的 `.agent-presets\kaz` 与仓库源目录（默认 `kaz\`）本来就是同一个目录（开发机上主区就是这样），安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——正常分支。
 
 **出错处理**：
 - `cannot replace real directory` / `cannot replace non-empty real directory` → `node_modules\@deepseek-ai`（或 `zod`）是真实目录而不是 junction：先备份，再删除该目录，然后重跑本步。
@@ -134,7 +134,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 - 新对话已选中 **Kaz 模式**（`kaz`）。
 - **persona 首句**：`We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.`；用 "We" 思考（ALWAYS REASON AS 'WE'），模型输出全英文。
-- **主代理工具面**（与官方标准预设对齐；完整清单以 `test-kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
+- **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文三件：`context_search` / `context_read` / `context_compress`
@@ -172,7 +172,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 | robocopy 报错（退出码 > 7）/ 目标目录多出的文件被删 | `/MIR` 是镜像语义：会删掉 `.agent-presets\kaz` 里多出的文件（`node_modules` 除外）；每次更新前的备份在 `tools\kaz-preset-backup-*`（会累积，可手动清理）；**不要**往预设目录放自定义文件 |
 | junction 建不上 / 权限不足 / `EPERM` | 让用户关闭 `dsh web` 后重跑；用普通权限即可，不要管理员强改 ACL，不要强杀进程 |
 | 看到 `KAZ-PRESET-INSTALL OK` 但好像没生效 | 若那次带了 `-DryRun`，OK 只是预演；去掉 `-DryRun` 重跑一次 |
-| 仓库里有奇怪的改动 / 想"清干净" | **绝不**运行 `git clean -fdx` 或 `git checkout -f`：`test-kaz` 是仓库 ↔ live 的 junction，会顺着写坏 live 预设；用 `git status` / `git diff` 查看，只手动改需要的文件 |
+| 仓库里有奇怪的改动 / 想"清干净" | **绝不**运行 `git clean -fdx` 或 `git checkout -f`：`kaz`、`test-kaz` 都是仓库 ↔ live 的 junction，会顺着写坏 live 预设；用 `git status` / `git diff` 查看，只手动改需要的文件 |
 | 更新后还想要旧插件形态的行为 | 预设形态**不含**面板 / 开关 / 提示音 / 轮次显示，这是设计如此；要回旧形态请用 7.5.0 之前的 git 历史 |
 | 报 `ReplaceFileW EIO (Win32 1175)` | Windows 偶发文件系统错误，重试同一条命令/编辑一次 |
 | 写 JSON/YAML 报 BOM 解析错误 | 用 UTF-8 无 BOM 保存 |
