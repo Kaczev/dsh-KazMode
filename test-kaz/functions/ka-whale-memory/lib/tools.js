@@ -55,7 +55,10 @@ async function collectDocs(kinds, locations, cwd) {
     for (const kind of kinds) {
       for (const entry of await listMemories(location, kind, cwd)) {
         const body = await bodyOf(entry);
-        if (body !== null) docs.push({ name: entry.name, text: indexTextOf(entry, body) });
+        if (body !== null) {
+          const summary = typeof entry.data?.summary === "string" ? entry.data.summary : "";
+          docs.push({ name: entry.name, text: indexTextOf(entry, body), summary });
+        }
       }
     }
   }
@@ -100,7 +103,7 @@ const RESULT_SCHEMA = {
 
 const RESULT_RENDER = (_args, value) => renderText(value.ok ? "success" : `failure: ${value.message}`);
 
-/** 只输出 name 的列表结果。 */
+/** 列表结果：每条给出 name + summary（summary 没有就是空串）。 */
 const NAMES_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -108,12 +111,25 @@ const NAMES_SCHEMA = {
     items: {
       type: "array",
       required: true,
-      items: { type: "string" },
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string", required: true },
+          summary: { type: "string", required: true },
+        },
+      },
     },
   },
 };
 
 const namesRender = (_args, value) => renderText(value.items.length > 0 ? JSON.stringify(value.items) : "no memories matched");
+
+/** 列表项：name + summary。 */
+const itemOf = (name, summary) => ({
+  name,
+  summary: typeof summary === "string" ? summary : "",
+});
 
 const present = (title, rawInput) => ({ card: "generic", title, kind: "other", rawInput });
 
@@ -121,7 +137,7 @@ export function memorySearchTool() {
   return defineTool({
     name: "memory_search",
     description:
-      "Search memories by BM25 relevance over their bodies, summaries, and keywords; global and local memories are ranked together. Read-only. Returns up to `limit` memory names, most relevant first; open one with memory_detail.",
+      "Search memories by BM25 relevance over their bodies, summaries, and keywords; global and local memories are ranked together. Read-only. Returns up to `limit` memories as name + summary, most relevant first; open one with memory_detail.",
     parameters: {
       keywords: { type: "string", required: true, description: "Keywords to search for." },
       kind: { type: "string", enum: ["context", "paths"], description: "Which kind to search; omit to search both." },
@@ -137,7 +153,8 @@ export function memorySearchTool() {
       const limit = clampInt(args.limit, 10, 1, 16);
       const docs = await collectDocs(kindsOf(args.kind), locationsOf(args.location), cwd);
       const ranked = scoreBM25(String(args.keywords ?? ""), docs);
-      return { items: ranked.slice(0, limit).map((hit) => hit.name) };
+      const summaryByName = new Map(docs.map((doc) => [doc.name, doc.summary]));
+      return { items: ranked.slice(0, limit).map((hit) => itemOf(hit.name, summaryByName.get(hit.name))) };
     },
     presentCall: (args) => present("Search memories", args),
   });
@@ -179,7 +196,7 @@ export function memoryDetailTool() {
 export function memoryListTool() {
   return defineTool({
     name: "memory_list",
-    description: "List memory names across the selected stores, newest first. Read-only.",
+    description: "List memories as name + summary across the selected stores, newest first. Read-only.",
     parameters: {
       location: { type: "string", enum: ["global", "local", "both"], description: "Which store to list: global, local, or both (default)." },
       limit: { type: "integer", description: "Maximum number of entries (default 16, max 32)." },
@@ -196,7 +213,9 @@ export function memoryListTool() {
         for (const kind of KINDS) all.push(...(await listMemories(location, kind, cwd)));
       }
       all.sort((a, b) => timeOf(b) - timeOf(a));
-      return { items: all.slice(0, limit).map((entry) => entry.name) };
+      return {
+        items: all.slice(0, limit).map((entry) => itemOf(entry.name, typeof entry.data?.summary === "string" ? entry.data.summary : "")),
+      };
     },
     presentCall: (args) => present("List memories", args),
   });
