@@ -129,15 +129,20 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 ## 第 5 步 自查（用户重启后，让用户按现象回报）
 
-> 预设形态**没有面板、没有插件开关、没有提示音**；下面现象对不上就说明没更新到位或没选预设。
+> Kaz 8.0 是**主代理的工作流预设**：没有面板、没有插件开关、没有提示音。下面现象对不上，就说明没更新到位或没选预设。
 
 - 新对话已选中 **Kaz 模式**（`kaz`）。
-- **工具面**：首轮即完整（不再是"首轮极简 → 再恢复"两阶段）。稳定主工具面是 kaz-shared 的 `KAZ_V09_MAIN_TOOLS`，共 **21 项**：
-  `ask_user_question` / `edit` / `glob` / `grep` / `memory_detail` / `memory_list` / `memory_search` / `pwsh` / `read` / `context_read` / `context_search` / `context_compress` / `ka_sub_whale` / `list_agents` / `send_message` / `interrupt_agent` / `todo_write` / `web_search` / `whale_report` / `plan_read` / `write`。
-- **记忆六工具**由 `ka-whale-memory` 提供：`memory_save` / `memory_update` / `memory_list` / `memory_search` / `memory_detail` / `memory_forget`（其中 `memory_search` / `memory_detail` / `memory_list` 在主面 21 项内）。
-- **上下文三件**：`context_search` / `context_read` / `context_compress` 均可用。
+- **persona 首句**：`We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.`；用 "We" 思考（ALWAYS REASON AS 'WE'），模型输出全英文。
+- **主代理工具面**（与官方标准预设对齐；完整清单以 `test-kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
+  - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
+  - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
+  - 上下文三件：`context_search` / `context_read` / `context_compress`
+  - 工作流四件：`write-arrangement` / `get-arrangement` / `ka_sub_whale` / `whale_report`
+  - 子代理控制三件：`list_agents` / `send_message` / `interrupt_agent`
+- **主代理看不到记忆写三件**（`memory_save` / `memory_update` / `memory_forget`）——这是设计（写记忆交给记忆管家）；**也看不到** `bash`、`get_goal` / `create_goal` / `update_goal`、官方 `subagent` / `subagent_fork`、`plan_mode`、`workflow`、`ralph`（刻意不挂，不是故障）。
+- **注入**：用户每发一条消息会看到 `[ka-whale-workflow idle]` 阶段注入（上下文注入，不是系统提示段）；上下文占用 ≥50% 时会出现 `[ka-context-policy compression-hint]` 提醒。
+- **数据落盘**：记忆在 `<home>\storages\ka-whale-memory\{context,paths}\`（全局）与 `<项目>\.dsh\storages\ka-whale-memory\{context,paths}\`（项目），一个记忆一个 JSON；安排在 `<项目>\.dsh\storages\arrangements\<sessionId>.json`。
 - **没有** Kaz 面板、没有开关行、没有提示音、没有 round-display 轮次显示。
-- **persona 首句**是 `We are the main agent of the ka-whale-workflow.`；思考/输出用 "We" / "Let's"，不再是 "Let me"。
 
 ## 旧版用户迁移（旧插件形态 → 预设形态）
 
