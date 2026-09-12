@@ -136,13 +136,47 @@ export function pickRange(session, nodes, cluster) {
   return startIdx <= endIdx ? { startIdx, endIdx } : null;
 }
 
+/**
+ * 整段硬折叠的区间：可压中段 [起点, 终点]。
+ * 起点 = 跳过头部 system/message 后的第一个配对平衡切点；终点 = 尾部保留带之前、
+ * 且配对平衡的最后一个节点。给了 amount（token）时，在不超过它的范围里尽量多折。
+ * @returns {{startIdx: number, endIdx: number}|null}
+ */
+export function foldBand(session, nodes, retainIdx, amount = 0) {
+  if (!Array.isArray(nodes) || nodes.length === 0) return null;
+  const types = eventTypesOf(session, nodes);
+  const isSystem = (idx) => types.get(nodes[idx].seq) === "system/message";
+  let startIdx = 0;
+  while (startIdx < nodes.length && isSystem(startIdx)) startIdx += 1;
+  while (startIdx < nodes.length && !toolPairingBalancedBefore(session, nodes[startIdx].seq)) startIdx += 1;
+  if (startIdx >= nodes.length) return null;
+  let endIdx = Math.min(retainIdx - 1, nodes.length - 1);
+  while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
+  if (endIdx < startIdx) return null;
+  if (amount > 0) {
+    let acc = 0;
+    let cut = startIdx - 1;
+    for (let i = startIdx; i <= endIdx; i += 1) {
+      acc += Number(nodes[i]?.tokens) || 0;
+      if (acc > amount) break;
+      cut = i;
+    }
+    if (cut < startIdx) return null;
+    endIdx = cut;
+    while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
+    if (endIdx < startIdx) return null;
+  }
+  return { startIdx, endIdx };
+}
+
 export function contextCompressTool(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Compress a redundant middle span of this conversation into a summary. Say what to drop (keywords, an exact sentence, or a topic); the tool finds the smallest span covering it, expands to safe boundaries, and compresses that span with the built-in compaction. If the broad match has no safe boundary, it narrows to the strongest matching sub-span. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
+      "Compress a redundant middle span of this conversation into a summary. Two ways: give `drop` (keywords, an exact sentence, or a topic) and the tool finds the smallest span covering it; or give no `drop` (optionally `amount` in tokens) and the tool folds the largest safe span of the compactable middle in one call. Spans expand to safe boundaries and never cut a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 20%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
     parameters: {
-      drop: { type: "string", required: true, description: "What to compress away: keywords, an exact sentence, or a topic description." },
+      drop: { type: "string", description: "What to compress away: keywords, an exact sentence, or a topic description. Omit to fold the largest safe span instead." },
+      amount: { type: "integer", description: "Only without `drop`: roughly how many tokens to fold (omit to fold as much as the compactable middle allows)." },
       keep_recent: { type: "integer", description: "Percentage of the current context to keep untouched at the end (default 20, max 90)." },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
@@ -151,16 +185,18 @@ export function contextCompressTool(ctx) {
       const session = agent?.session;
       if (session === undefined || session === null) return { ok: false, message: "this agent has no session" };
       const drop = String(args?.drop ?? "").trim();
-      if (drop.length === 0) return { ok: false, message: "drop is required" };
       const keepRecent = clampInt(args?.keep_recent, 20, 0, 90);
-      const terms = termsOf(drop);
+      const amount = clampInt(args?.amount, 0, 0, Number.MAX_SAFE_INTEGER);
+      const terms = drop.length > 0 ? termsOf(drop) : [];
       const matched = [];
-      entriesOfSession(session).forEach((entry, index) => {
-        const score = hitCount(entry.text, terms);
-        if (score > 0) matched.push({ index, seq: entry.seq, score });
-      });
-      if (matched.length === 0) return { ok: false, message: `nothing in this conversation matches "${drop}"` };
-      const cluster = densestCluster(matched);
+      if (drop.length > 0) {
+        entriesOfSession(session).forEach((entry, index) => {
+          const score = hitCount(entry.text, terms);
+          if (score > 0) matched.push({ index, seq: entry.seq, score });
+        });
+        if (matched.length === 0) return { ok: false, message: `nothing in this conversation matches "${drop}"` };
+      }
+      const cluster = drop.length > 0 ? densestCluster(matched) : null;
       const meter = ctx.get("tokenMeter");
       const compaction = ctx.get("compaction");
       if (meter === undefined || typeof meter.measure !== "function") return { ok: false, message: "the token meter is unavailable" };
@@ -170,34 +206,46 @@ export function contextCompressTool(ctx) {
       if (!Array.isArray(nodes) || nodes.length === 0) return { ok: false, message: "the token meter reported no surface nodes" };
       const retainIdx = retainBoundaryIdx(nodes, measurement.totalTokens, keepRecent);
       let chosen = null;
-      let sawTail = false;
-      let sawUnsafe = false;
-      for (const group of orderedCandidates(matched, cluster)) {
-        const range = pickRange(session, nodes, { group });
-        if (range === null) {
-          sawUnsafe = true;
-          continue;
+      if (drop.length === 0) {
+        // 整段硬折叠：不指定内容，直接把可压中段里最大的一段压掉（旧 kaz 的"硬压"行为）。
+        chosen = foldBand(session, nodes, retainIdx, amount);
+        if (chosen === null) {
+          return {
+            ok: false,
+            message:
+              "nothing foldable: the protected head, the kept-recent tail and already-compacted spans leave no safe span — try a smaller keep_recent, or start a new conversation",
+          };
         }
-        if (range.startIdx >= retainIdx) {
-          sawTail = true;
-          continue;
+      } else {
+        let sawTail = false;
+        let sawUnsafe = false;
+        for (const group of orderedCandidates(matched, cluster)) {
+          const range = pickRange(session, nodes, { group });
+          if (range === null) {
+            sawUnsafe = true;
+            continue;
+          }
+          if (range.startIdx >= retainIdx) {
+            sawTail = true;
+            continue;
+          }
+          let endIdx = Math.min(range.endIdx, retainIdx - 1);
+          while (endIdx >= range.startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
+          if (endIdx < range.startIdx) {
+            sawTail = true;
+            continue;
+          }
+          chosen = { startIdx: range.startIdx, endIdx };
+          break;
         }
-        let endIdx = Math.min(range.endIdx, retainIdx - 1);
-        while (endIdx >= range.startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
-        if (endIdx < range.startIdx) {
-          sawTail = true;
-          continue;
+        if (chosen === null) {
+          const reason = sawTail
+            ? `the matches sit inside the retained recent part (keep_recent=${keepRecent}%) — retry with a smaller keep_recent, or call again without drop to fold the largest span`
+            : sawUnsafe
+              ? "the matching spans are not safely compressible (protected head, already-compacted region, or an unbalanced tool pair) — call again without drop to fold the largest span"
+              : "no matching span";
+          return { ok: false, message: `nothing safely compressible for "${drop}": ${reason}` };
         }
-        chosen = { startIdx: range.startIdx, endIdx };
-        break;
-      }
-      if (chosen === null) {
-        const reason = sawTail
-          ? `the matches sit inside the retained recent part (keep_recent=${keepRecent}%) — retry with a smaller keep_recent`
-          : sawUnsafe
-            ? "the matching spans are not safely compressible (protected head, already-compacted region, or an unbalanced tool pair)"
-            : "no matching span";
-        return { ok: false, message: `nothing safely compressible for "${drop}": ${reason}` };
       }
       const startSeq = nodes[chosen.startIdx].seq;
       const endSeq = nodes[chosen.endIdx].seq;
