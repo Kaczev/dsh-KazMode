@@ -16,7 +16,7 @@ export const HINT_THRESHOLD_PERCENT = 50;
 export const HINT_STEP_PERCENT = 5;
 
 /** 建议目标：压到窗口的这个百分比以下。 */
-export const HINT_TARGET_PERCENT = 30;
+export const HINT_TARGET_PERCENT = 35;
 
 /** 每个对话最近一次提醒时的占用百分比（回落到阈值以下就清掉，重新计数）。 */
 const hintedPercent = new Map();

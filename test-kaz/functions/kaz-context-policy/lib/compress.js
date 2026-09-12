@@ -50,9 +50,17 @@ function nodeFactsOf(session, nodes) {
 }
 
 /** 按 token 预算求尾部保留边界：从尾向前累加到 keepRecent% 所对应的节点下标。 */
-export function retainBoundaryIdx(nodes, totalTokens, keepRecentPercent) {
+/**
+ * 按 token 预算求尾部保留边界：保留带 = **窗口**的 keepRecent%（从尾向前累加到那么多 token）。
+ * 口径说明：这里收的是"窗口"而不是"当前占用"——所以可压中段 ≈ (n − keepRecent/100)×窗口，
+ * n = 当前占用比例（例：n=0.5、keep_recent=10 → 可压 40% 窗口）。
+ * @param {object[]} nodes - surface 节点（各带 tokens）。
+ * @param {number} windowTokens - 上下文窗口大小（不是当前占用）。
+ * @param {number} keepRecentPercent - 保留带占窗口的百分比。
+ */
+export function retainBoundaryIdx(nodes, windowTokens, keepRecentPercent) {
   if (!Array.isArray(nodes) || nodes.length === 0) return 0;
-  const keepTokens = Math.ceil((Number(totalTokens) || 0) * (keepRecentPercent / 100));
+  const keepTokens = Math.ceil((Number(windowTokens) || 0) * (keepRecentPercent / 100));
   if (keepTokens <= 0) return nodes.length;
   let acc = 0;
   for (let i = nodes.length - 1; i >= 0; i -= 1) {
@@ -135,14 +143,14 @@ export function contextCompressTool(ctx) {
     parameters: {
       from_seq: { type: "integer", required: true, description: "First seq of the span to fold (the `#seq` shown in context_search / context_read output)." },
       to_seq: { type: "integer", required: true, description: "Last seq of the span to fold (the `#seq` shown in context_search / context_read output)." },
-      keep_recent: { type: "integer", description: "Percentage of the current context to keep untouched at the end (default 20, max 90)." },
+      keep_recent: { type: "integer", description: "Percentage of the context window to keep untouched at the end (default 10, max 90)." },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
     async execute(args, exec) {
       const agent = exec?.agent;
       const session = agent?.session;
       if (session === undefined || session === null) return { ok: false, message: "this agent has no session" };
-      const keepRecent = clampInt(args?.keep_recent, 20, 0, 90);
+      const keepRecent = clampInt(args?.keep_recent, 10, 0, 90);
       const fromSeq = clampInt(args?.from_seq, 0, 0, Number.MAX_SAFE_INTEGER);
       const toSeq = clampInt(args?.to_seq, 0, 0, Number.MAX_SAFE_INTEGER);
       if (fromSeq <= 0 || toSeq <= 0) {
@@ -158,7 +166,10 @@ export function contextCompressTool(ctx) {
       const measurement = meter.measure(session);
       const nodes = measurement?.nodes;
       if (!Array.isArray(nodes) || nodes.length === 0) return { ok: false, message: "the token meter reported no surface nodes" };
-      const retainIdx = retainBoundaryIdx(nodes, measurement.totalTokens, keepRecent);
+      // 保留带按**窗口**算（keep_recent% × 窗口）；投影拿不到时退回 surface 总额。
+      const pressure = readPressure(ctx, session);
+      const windowTokens = pressure !== null && pressure.window > 0 ? pressure.window : measurement.totalTokens;
+      const retainIdx = retainBoundaryIdx(nodes, windowTokens, keepRecent);
       const chosen = foldBand(session, nodes, retainIdx, fromSeq, toSeq);
       if (chosen === null) {
         return {
@@ -180,7 +191,6 @@ export function contextCompressTool(ctx) {
             : message;
         return { ok: false, message: reason };
       }
-      const pressure = readPressure(ctx, session);
       const usage = pressure === null ? "" : `; context usage ~${pressure.percent}%`;
       return { ok: true, message: `compressed seq ${startSeq}-${endSeq} (~${spanTokens} tokens)${usage}` };
     },
