@@ -51,7 +51,7 @@ export function hintText(ctx, session) {
   const need = hintNeedTokens(pressure);
   return [
     "[ka-context-policy compression-hint]",
-    `Context usage is ${pressure.percent}% (${pressure.used} / ${pressure.window} tokens). Pick a redundant middle span and run context_compress soon (say what to drop; the tool locates the range) — compressing at least ~${need} tokens brings usage under ${HINT_TARGET_PERCENT}%. This hint reappears every ${HINT_STEP_PERCENT}% of further growth.`,
+    `Context usage is ${pressure.percent}% (${pressure.used} / ${pressure.window} tokens). Pick a redundant middle span and run context_compress soon (box it with from_seq / to_seq, or omit both ends for the whole compactable middle) — compressing at least ~${need} tokens brings usage under ${HINT_TARGET_PERCENT}%. This hint reappears every ${HINT_STEP_PERCENT}% of further growth.`,
   ].join("\n");
 }
 

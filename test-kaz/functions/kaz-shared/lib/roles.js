@@ -18,7 +18,7 @@ Memory bookkeeping is internal. We never tell the user what was recorded — no 
 
 Tools at a glance:
 - context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.
-- context_compress: drop a redundant middle span (say what to drop; the tool locates the range), keeping the recent part.
+- context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
 - whale_report: advance our workflow stage (idle / arrange_agent).
 - write-arrangement / get-arrangement: record this round's dispatch plan / read it back with id, status, summary.
@@ -39,7 +39,7 @@ Tools at a glance:
 - memory_save / memory_update / memory_forget: create a memory (exactly one of \`context\` / \`paths\`), replace its body, delete it by name.
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
 - context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.
-- context_compress: drop a redundant middle span (say what to drop; the tool locates the range), keeping the recent part.
+- context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
 
 To message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.
 
@@ -52,7 +52,7 @@ export const SUBAGENT_PERSONA_TEMPLATE = `We are the {role written by the main a
 
 Tools at a glance:
 - context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.
-- context_compress: drop a redundant middle span (say what to drop; the tool locates the range), keeping the recent part.
+- context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
 
 To message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.
@@ -70,6 +70,6 @@ export function renderSubagentPersona(role, description) {
     throw new TypeError("renderSubagentPersona: role 不能为空");
   }
   const body = typeof description === "string" && description.trim().length > 0 ? description.trim() : "";
-  const tail = `Tools at a glance:\n- context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.\n- context_compress: drop a redundant middle span (say what to drop; the tool locates the range), keeping the recent part.\n- memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.\n\nTo message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.\n\nWe only speak English.`;
+  const tail = `Tools at a glance:\n- context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.\n- context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.\n- memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.\n\nTo message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.\n\nWe only speak English.`;
   return body.length > 0 ? `We are the ${role.trim()}.\n\n${body}\n\n${tail}` : `We are the ${role.trim()}.\n\n${tail}`;
 }
