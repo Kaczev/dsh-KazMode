@@ -98,10 +98,11 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 
 1. 把现有预设备份到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）；
 2. 用 `robocopy /MIR` 把仓库 `test-kaz\` **镜像**到 `<home>\.agent-presets\kaz`（排除 `node_modules`）；
-3. **原地重建**预设 `node_modules` 下的两个 junction：`@deepseek-ai`（必需）、`zod`（可选）→ `<home>\profiles\<profile>\node_modules`（先 `rmdir` 旧链接，再新建，幂等）；
+3. **原地重建**预设 `node_modules` 下的两个 junction：`zod`（可选）→ `<home>\profiles\<profile>\node_modules`；`@deepseek-ai`（必需）→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`（仅当该层没有运行时包时才回退 profile 那一层）。先 `rmdir` 旧链接再新建，幂等；
 4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
 - **不需要** `npm install`：预设只用那两个 junction 解析运行时；`<home>\profiles\<profile>\node_modules` 里的其它内容不会被改。
+- **更新后的两项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应打印 `8.0.0`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。
 - 更新别的 home / 多个 home（去掉 `-DryRun` 即可）：
 
 ```powershell

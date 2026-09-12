@@ -65,7 +65,9 @@ Test-Path (Join-Path $repo "test-kaz\preset.yml")
 
 ## 第 2 步 运行安装程序
 
-安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `test-kaz\` 镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的两个 junction（`@deepseek-ai`、`zod` → `<home>\profiles\<profile>\node_modules`）→ 打印 `KAZ-PRESET-INSTALL OK`。
+安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `test-kaz\` 镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的两个 junction（`zod` → `<home>\profiles\<profile>\node_modules`；`@deepseek-ai` → **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`，仅当该层没有运行时包时才回退 profile 那一层）→ 打印 `KAZ-PRESET-INSTALL OK`。
+
+> **`@deepseek-ai` 为什么指共享层（别改回 profile 层）**：预设解析插件名时**先看自己的 `node_modules`**，这个链接指向哪一层就决定了哪些包可见；一个指向父目录的链接还会截断向上的查找。profile 那一层（`<home>\profiles\<profile>\node_modules\@deepseek-ai`）可能只有该 profile 装过的子集，而 Kaz 8.0 的组合需要 `dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `dsh-tool-ask-user`（组合里的一行）等**只存在于共享层**的包——指错就直接**预设挂不起来**。以 `linked: ... -> ...` 那行打印的路径为准。
 
 **2.1 单 home（最常见：装到默认 `%USERPROFILE%\.dsh`）**
 
@@ -113,6 +115,16 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Source 
 
 **成功标志**：输出 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`，并打印 `linked: ...` 两行 junction。
 
+**成功后的两项核对**（各一条命令，看输出即可）：
+
+```powershell
+Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                     # 应打印 8.0.0
+(Get-Item "$env:USERPROFILE\.dsh\.agent-presets\kaz\node_modules\@deepseek-ai").Target   # 应指向 <home>\profiles\node_modules\@deepseek-ai
+```
+
+- `VERSION` 打印的不是 `8.0.0`（或文件不存在）→ 镜像没到位：重跑安装程序；仍不对就报告用户 `test-kaz\VERSION` 的问题。
+- junction 目标指向 `...\profiles\<profile>\node_modules\@deepseek-ai`（而不是 `...\profiles\node_modules\@deepseek-ai`）→ 说明用的是旧版安装程序，或该 home 的共享层没有运行时包：先确认共享层存在，再重跑当前仓库的安装程序；这不是「可以忽略的警告」，否则预设会挂不起来。
+
 **出错处理**：
 - 报 `VERSION GATE: FAIL` → 该 home 的运行时 dsh 不是 `0.1.5-rc.2`：**停下**，按第 0 步的说明转告用户；**不要**自行用 `-SkipVersionCheck` 绕过（唯一例外：用户明确要求回退到 `0.1.5-rc.1`，那时按第 0 步的说明加它）。
 - 报 `multiple profiles under ...; pass -ProfileName` → 在命令里加 `-ProfileName web`（或该 home 里真正有 `node_modules` 的那个 profile 名）。
@@ -122,6 +134,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Source 
 - 报 `preset robocopy failed (N)` / `backup robocopy failed (N)`（`N > 7` 才是错误）→ 目标目录被占用：让用户关闭正在运行的 dsh web，重跑同一条命令。
 - 报权限 / `EPERM` / 文件占用 → 让用户关闭 dsh web 后重试；**不要**用管理员权限强改 ACL，也不要强行杀进程。
 - 报 `WARN: optional runtime package missing: ...\node_modules\zod` → `zod` 是可选 junction，安装会继续；若之后运行报 `zod` 解析失败，再回该 profile 补装 `zod`。
+- 安装成功、但新对话里预设挂不起来（组合里某一行 `names a plugin that cannot be resolved`）→ 先看 `linked: <preset>\node_modules\@deepseek-ai -> ...` 指到哪一层：必须是**共享层** `<home>\profiles\node_modules\@deepseek-ai`。指到 profile 层就重跑当前仓库的安装程序；手工修法是 `cmd /c rmdir "<preset>\node_modules\@deepseek-ai"` 后重建 junction 指向共享层。
 
 > 补充：若某个 home 的 `.agent-presets\kaz` **本身就是**仓库 `test-kaz` 的 junction 目标，安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——这是正常分支，无需处理。
 

@@ -7,7 +7,13 @@ What it does:
   3. Mirrors the preset template (repo\test-kaz, node_modules excluded) into
      <DshHome>\.agent-presets\kaz.
   4. Creates/refreshes the two runtime junctions the preset needs:
-       <preset>\node_modules\@deepseek-ai -> <DshHome>\profiles\<profile>\node_modules\@deepseek-ai
+       <preset>\node_modules\@deepseek-ai -> the home's WIDER runtime package tree,
+                                            <DshHome>\profiles\node_modules\@deepseek-ai,
+                                            so rows living only there (dsh-persona,
+                                            dsh-tool-ask-user) stay resolvable; falls
+                                            back to <DshHome>\profiles\<profile>\
+                                            node_modules\@deepseek-ai when that wider
+                                            tree carries no runtime package
        <preset>\node_modules\zod          -> <DshHome>\profiles\<profile>\node_modules\zod
   5. Backs up an existing preset to <DshHome>\tools\kaz-preset-backup-<timestamp>.
 
@@ -166,6 +172,31 @@ function Install-OneHome([string]$TargetHome, [string]$WantedProfile) {
   $scopeTarget = Join-Path $TargetHome "profiles\$profile\node_modules\@deepseek-ai"
   $zodTarget = Join-Path $TargetHome "profiles\$profile\node_modules\zod"
   if (-not (Test-Path $scopeTarget)) { throw "runtime scope not found: $scopeTarget" }
+
+  # Which package tree the preset's @deepseek-ai junction must point at.
+  #
+  # The preset resolves a row's package name from its OWN node_modules first,
+  # so this junction is the one lookup that decides what the preset can see --
+  # and a link shadowing a parent directory stops the upward walk there. In a
+  # home whose runtime is complete, <home>\profiles\<profile>\node_modules\
+  # @deepseek-ai may hold only the subset that profile installed, while rows
+  # such as dsh-persona / dsh-tool-ask-user exist solely in the wider
+  # <home>\profiles\node_modules\@deepseek-ai beside it -- pointing at the
+  # subset makes those rows unresolvable (Kaz 8.0 needs both). Prefer the wider
+  # tree when it is a real Node resolution root (it carries the runtime package
+  # itself); otherwise keep the profile scope, so a home without one still
+  # installs exactly as before.
+  $scopeCandidates = @(
+    (Join-Path $TargetHome "profiles\node_modules\@deepseek-ai"),
+    $scopeTarget
+  )
+  foreach ($candidate in $scopeCandidates) {
+    $runtimeMarker = Join-Path $candidate 'dsh\package.json'
+    if (Test-Path $runtimeMarker) {
+      $scopeTarget = $candidate
+      break
+    }
+  }
 
   $links = @(
     @{ Path = (Join-Path $modulesDir '@deepseek-ai'); Target = $scopeTarget; Required = $true },

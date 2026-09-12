@@ -61,12 +61,15 @@
 
 行为要点：安装前把已有预设备份到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）；用 `robocopy /MIR` 把预设源**镜像**到 `<home>\.agent-presets\kaz`（排除 `node_modules`）；幂等重建预设 `node_modules` 下的两个 junction：`@deepseek-ai`（必需）、`zod`（可选）。成功输出 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
+**`@deepseek-ai` junction 指向哪个包集（关系到插件行能不能解析）**：优先 `<home>\profiles\node_modules\@deepseek-ai`（同 home 全部 profile 共享的那一层），只有当它没有运行时包（`dsh\package.json`）时才回退到 `<home>\profiles\<profile>\node_modules\@deepseek-ai`。原因：预设解析插件名时**先看自己的 `node_modules`**，一个指向父目录的链接会截断向上的查找——若指向 profile 自己那一份（只含该 profile 装过的子集），只在共享层存在的行（`dsh-persona`、`dsh-tool-ask-user` 等 30 个）就会解析失败，预设直接挂不起来。安装日志里 `linked: ... -> ...` 会打印实际选中的那一层。
+
 安装程序改动的是文件，**必须重启 dsh** 才会加载；重启后在新对话的预设选择器里选 **Kaz 模式**（preset id `kaz`）。
 
 ### 2.3 `test-kaz/` 与 junction（重要）
 
 - 本仓库的 `test-kaz\` 是**仓库 ↔ live 预设目录之间的 junction**（开发机上它直通 live 预设目录）；`test-kaz\node_modules\` 被 `.gitignore` 排除，不入库。
-- 安装程序把 `test-kaz\` 镜像到 `<home>\.agent-presets\kaz`，再在预设的 `node_modules\` 下建两个 junction（`@deepseek-ai`、`zod`）指回 `<home>\profiles\<profile>\node_modules`。预设自带的 `functions/*` 之间用相对路径互相引用，因此不需要 `npm install`。
+- 安装程序把 `test-kaz\` 镜像到 `<home>\.agent-presets\kaz`，再在预设的 `node_modules\` 下建两个 junction：`zod` 指回 `<home>\profiles\<profile>\node_modules`，`@deepseek-ai` 指回**同一 home 内的共享运行时包集**（`<home>\profiles\node_modules\@deepseek-ai`；该层没有运行时包时才回退 profile 那一层，见 §2.2）。预设自带的 `functions/*` 之间用相对路径互相引用，因此不需要 `npm install`。
+- 预设根目录的 `VERSION` 文件（一行 `8.0.0`）就是**预设自己的版本号**，随镜像一起进 live 预设目录；它由人手工维护，见 §8.2。
 - **绝不要**在仓库里运行 `git clean -fdx` 或 `git checkout -f`：本仓库与 live 预设通过 junction 相连，这类命令会顺着 junction 写坏 live 预设。仓库脏了用 `git status` / `git diff` 查看，只手动改需要的文件。
 
 ---
@@ -75,6 +78,7 @@
 
 ```
 test-kaz/
+├── VERSION                    # 预设版本号（一行 8.0.0；手工维护，随镜像进 live 预设）
 ├── preset.yml                 # 预设名与描述（Kaz 模式）
 ├── agent.cordis.yml           # 预设的 Cordis 组合定义（挂哪些行；哪些刻意不挂）
 ├── kaz-system-prompt.mjs      # 系统提示控制器：主代理 persona ← kaz-shared MAIN_PERSONA；摘掉 harness:identity
@@ -116,6 +120,7 @@ dsh-KazMode/
 | 路径 | 说明 |
 | --- | --- |
 | `install-kaz-preset.ps1` | 预设安装程序：版本闸门 → 备份 → `robocopy /MIR` 镜像 → 重建两个 junction → `KAZ-PRESET-INSTALL OK` |
+| `test-kaz/VERSION` | 预设版本号（一行 `8.0.0`；手工维护） |
 | `test-kaz/preset.yml` | `kaz` 预设的显示名称与描述 |
 | `test-kaz/agent.cordis.yml` | `kaz` 预设的完整 Cordis 组合定义 |
 | `test-kaz/kaz-system-prompt.mjs` | 系统提示词 / persona 控制器 |
@@ -173,6 +178,7 @@ dsh-KazMode/
 - **`multiple profiles under ...; pass -ProfileName`**：该 home 下有多个 profile；加 `-ProfileName web`。
 - **`no profiles directory under ...`** / **`required runtime package missing: ...\node_modules\@deepseek-ai`**：该 home / profile 还没装好 dsh 运行时，先把 dsh 装好再装预设。
 - **`cannot replace non-empty real directory`**：预设 `node_modules\@deepseek-ai`（或 `zod`）是真实目录而不是 junction；备份后删除该目录，再重跑安装程序。
+- **预设挂不起来 / 组合里某一行解析失败（`names a plugin that cannot be resolved`）**：预设解析插件名先看自己的 `node_modules`，`@deepseek-ai` 那个链接指向哪一层就决定了看得到哪些包。检查安装日志的 `linked: <preset>\node_modules\@deepseek-ai -> ...`：**应指向同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`（老版本安装程序会指向 `<home>\profiles\<profile>\node_modules\@deepseek-ai`，那一层可能缺 `dsh-persona`、`dsh-tool-ask-user` 等只在共享层存在的包）。指错了就重跑当前仓库的安装程序，或手工 `rmdir` 旧链接后重建。
 - **看到 `KAZ-PRESET-INSTALL OK` 但好像没生效**：如果那次带了 `-DryRun`，OK 只是预演；去掉 `-DryRun` 重跑一次。
 - **`-AllHomes` 里某个 home 报 `FAIL`**：该 home 的运行时 dsh 不是 `0.1.5-rc.2`（`.dsh-clean` 报 `FAIL` 属设计如此）。
 - **`robocopy` 镜像把目标里多出的文件删了**：`/MIR` 是镜像语义，`node_modules` 除外；不要往 `.agent-presets\kaz` 里放自定义文件，备份在 `<home>\tools\kaz-preset-backup-*`（会累积，可手动清理）。
@@ -191,6 +197,7 @@ dsh-KazMode/
 | 路径 | 说明 |
 | --- | --- |
 | `install-kaz-preset.ps1` | 唯一安装 / 更新 / 卸载入口（Windows，ASCII，PowerShell 5.1 安全） |
+| `test-kaz/VERSION` | 预设版本号（一行 `8.0.0`；手工维护，来源即仓库这一份） |
 | `test-kaz/preset.yml` | `kaz` 预设的显示名称与描述 |
 | `test-kaz/agent.cordis.yml` | `kaz` 预设的完整 Cordis 组合定义 |
 | `test-kaz/kaz-system-prompt.mjs` | 系统提示词 / persona 控制器 |
@@ -204,13 +211,15 @@ dsh-KazMode/
 
 ### 8.2 发版说明（给未来的我和 agent）
 
-- **Kaz 8.0（预设重写，未发 tag）**：从零重写，与旧 kaz 无代码关联。
+- **Kaz 8.0.0（2026-09-12，预设重写，未发 tag）**：从零重写，与旧 kaz 无代码关联。
   - 三方 persona 全英文；主代理首句 `We are the user's point of contact and the work's arranger: ...`。
   - 工具面与官方 `standard` 预设对齐，只靠黑名单控制角色可见性：主代理看不到记忆写三件；记忆管家有一份点名黑名单；子代理黑名单由主代理派发时写。
   - 记忆改为文件式双作用域（global / local × context / paths），一个记忆一个 JSON，`name` 全局唯一且即文件名；BM25 检索（Intl.Segmenter 中英文分词）。
   - 上下文三件：`context_search`（含 `companion` 跨 agent）、`context_read`、`context_compress`（只做框选：`from_seq` / `to_seq` 两端必填，`keep_recent` 管尾部保留带）；≥50% 注入压缩提醒。
   - 工作流：`idle` / `arrange_agent` 阶段机 + `write-arrangement` / `get-arrangement` / `ka_sub_whale` / `whale_report`；安排文件在 `<项目>\.dsh\storages\arrangements\`；自带 `kaz-fork` provider（可 fork 主代理或某个存活子代理的历史）。
   - 刻意不挂：`tool-bash`、goal 两行、官方 `tool-subagent` / `tool-subagent-fork`、`plan-mode`、`tool-workflow` / `workflow-worker-thread`、`tool-ralph`。
+  - **新增 `VERSION` 文件**（一行 `8.0.0`）：预设自己的版本号，即 `test-kaz/VERSION`，随镜像进 live 预设目录（`<home>\.agent-presets\kaz\VERSION`）。**手工维护**——发版时改这一行；安装程序只镜像、不生成、不校验。`preset.yml` 只认 `name` / `description` / `order` 三个字段，所以版本号不写进去。
+  - **安装程序的 `@deepseek-ai` junction 目标改为优先共享包集**（真 bug 修复）：原先指向 `<home>\profiles\<profile>\node_modules\@deepseek-ai`，那里只有该 profile 装过的 214 个包；而 Kaz 8.0 的组合需要 `@deepseek-ai/dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `@deepseek-ai/dsh-tool-ask-user`（组合里的一行），两者只存在于共享层 `<home>\profiles\node_modules\@deepseek-ai`（244 个包）。预设先查自己的 `node_modules`，链接会截断向上查找，于是这两行解析失败、预设挂不起来。现在优先共享层、找不到运行时包才回退 profile 层。
 - **7.6.0**：旧插件形态从仓库移除（`KazPlugins/` 与仓库根指向主预设的冗余 `kaz` junction），旧形态源只从 7.5.1 及更早的 git 历史取用；修复 `install-kaz-preset.ps1` 的一个真 bug——`Clear-LinkPath` 在**全新 home**（`<preset>\node_modules` 下尚无 junction）时会执行 `cmd /c rmdir` 到一个不存在的路径，该 stderr 在 `$ErrorActionPreference = 'Stop'` 下变成终止性错误，导致**文件已镜像、两个 junction 未建、退出码 1**的半成品状态；现在该调用被 `try { } catch { }` 包住。
 - **7.6.1**：
   - `ka-whale-memory` 不再做任何上下文注入：guidance / 遗忘指引 / autoLoad 快照注入全部删除，插件只剩六个记忆工具与存储引擎。
@@ -218,7 +227,7 @@ dsh-KazMode/
   - 其余注入记录改用 **schema 合规**的写法（`form: "notice"` + `summary`）：dsh 0.1.5 的 v0→v1 会话迁移只放行 `instructions` / `catalog` / `snapshot` / `notice` / `relay` / `recall` 六个 form，自造值会让整份历史会话读不出来。旧日志修复脚本在 `不入库文件\kaz-form-fix-20260911\fix-session-form.mjs`。
   - 主环境运行时锚点回到**全局 dsh**（`dsh启动.bat` 调用 `%APPDATA%\npm\dsh.cmd` 并按 `EXPECTED_CLI` 门禁）。
 - **7.6.1 之后 · 单版本收窄（2026-09-11 晚）**：三台 home 的运行时回到真实口径（`.dsh` 全局 `0.1.5-rc.2`；`.dsh-test` 本地副本 `0.1.5-rc.2`；`.dsh-clean` 固定 `0.1.1-rc.2` 按设计 `FAIL`）；`$SupportedVersions` 收窄为 `@('0.1.5-rc.2')`，两份指引的 `$supportedDsh` 同步收窄——**rc.1 不再受支持**（回退路径见本节末尾）。
-- **预设形态没有「面板本地版本」**：旧形态那个读 `KazPlugins/kaz-mode/package.json` 的 `version` 并与 GitHub tag 比较的机制随面板退役。预设形态的版本就是仓库的 **git tag / 提交**；改预设请改 `test-kaz/`。
+- **版本号在哪看**：预设形态没有旧形态那种「面板本地版本」——那个读 `KazPlugins/kaz-mode/package.json` 的 `version` 并与 GitHub tag 比较的机制随面板退役。现在有两处，彼此独立：① 预设自己的 `test-kaz/VERSION`（一行 `8.0.0`，随镜像进 `<home>\.agent-presets\kaz\VERSION`）是**手工维护的发布版本号**，发版时改这一行；② 仓库的 **git tag / 提交**仍是可追溯的代码身份。改预设请改 `test-kaz/`。
 - 支持版本**硬编码在 `install-kaz-preset.ps1` 的 `$SupportedVersions`**（当前 `@('0.1.5-rc.2')`）。升级适配 dsh 版本时按这份清单同步，别只改数组：
   1. `install-kaz-preset.ps1` 的 `$SupportedVersions`（**`Get-RuntimeVersion` 的候选顺序不要动**：它决定 `.dsh-clean` 读到自己的 `0.1.1-rc.2` 副本、按预期 `FAIL`）；
   2. 同一文件头部注释里的 supported 列表；
