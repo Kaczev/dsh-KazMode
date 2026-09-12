@@ -28,6 +28,29 @@ export function firstLine(text, max = SUMMARY_MAX_CHARS) {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
+/** 安排里允许的保留 persona 值。 */
+export const RESERVED_PERSONAS = Object.freeze(["main", "memoryMaintainer"]);
+
+/**
+ * 校验 persona：只允许 "main"、"memoryMaintainer"，或 [role, description]（恰好两个字符串，角色非空）。
+ * @param {unknown} persona - 主代理写的 persona。
+ * @returns {{value: string|string[], error?: undefined}|{value?: undefined, error: string}}
+ */
+export function personaValueOf(persona) {
+  if (typeof persona === "string") {
+    const value = persona.trim();
+    if (RESERVED_PERSONAS.includes(value)) return { value };
+    return { error: `persona "${value}" is not allowed — use "main", "memoryMaintainer", or [role, description]` };
+  }
+  if (Array.isArray(persona)) {
+    if (persona.length === 2 && persona.every((part) => typeof part === "string") && persona[0].trim().length > 0) {
+      return { value: [persona[0].trim(), persona[1].trim()] };
+    }
+    return { error: 'persona array must be exactly [role, description] — two strings, role non-empty' };
+  }
+  return { error: 'persona must be "main", "memoryMaintainer", or [role, description]' };
+}
+
 /**
  * 校验并规范化一个安排条目（程序字段一律重置）。
  * @param {unknown} raw - 主代理写的条目。
@@ -35,19 +58,9 @@ export function firstLine(text, max = SUMMARY_MAX_CHARS) {
  */
 export function normalizeEntry(raw) {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { error: "each entry must be an object" };
-  const persona = raw.persona;
-  let personaValue;
-  if (typeof persona === "string" && persona.trim().length > 0) {
-    personaValue = persona.trim();
-  } else if (
-    Array.isArray(persona) &&
-    persona.length === 2 &&
-    persona.every((part) => typeof part === "string" && part.trim().length > 0)
-  ) {
-    personaValue = [persona[0].trim(), persona[1].trim()];
-  } else {
-    return { error: 'persona must be "main", "memoryMaintainer", or [role, description]' };
-  }
+  const persona = personaValueOf(raw.persona);
+  if (persona.error !== undefined) return { error: persona.error };
+  const personaValue = persona.value;
   const task = typeof raw.task === "string" ? raw.task.trim() : "";
   if (task.length === 0) return { error: `entry ${JSON.stringify(personaValue)} needs a task` };
   const blacklist = Array.isArray(raw.blacklist)
