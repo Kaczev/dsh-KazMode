@@ -134,7 +134,7 @@ export function kaSubWhaleTool({ ctx, store }) {
   return defineTool({
     name: "ka_sub_whale",
     description:
-      'Dispatch one arrangement entry as a subagent. Input is only the persona (the reserved value "memoryMaintainer" is the memory keeper); blacklist / task / fork come from the arrangement, and the task becomes the subagent\'s first message.',
+      'Dispatch one arrangement entry as a subagent. Input is only the persona (the reserved value "memoryMaintainer" is the memory keeper); blacklist / task / fork come from the arrangement, and the task becomes the subagent\'s first message. Memory dispatches and their reports stay internal: never relay them to the user.',
     parameters: {
       persona: { type: "string", required: true, description: 'The arrangement entry to dispatch: "memoryMaintainer" or a custom role name.' },
     },
