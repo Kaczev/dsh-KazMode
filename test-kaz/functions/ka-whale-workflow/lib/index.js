@@ -15,14 +15,15 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
 import { registerKazForkProvider } from "./fork-provider.js";
-import { renderStageText, renderSubagentsBlock } from "./stages.js";
+import { STAGES, renderStageText, renderSubagentsBlock } from "./stages.js";
+import { readStage, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
 
 /** 只挂给主代理的四件（子代理必须看不到）。 */
 const MAIN_ONLY_TOOLS = ["write-arrangement", "get-arrangement", "ka_sub_whale", "whale_report"];
 
-/** 每个对话的内存态（安排本体在文件里）。 */
-function createStore() {
+/** 每个对话的内存态（安排本体在文件里；阶段落盘，跨重启保留）。 */
+function createStore(persistStage = null) {
   const sessions = new Map();
   const stateFor = (sessionId) => {
     let state = sessions.get(sessionId);
@@ -34,6 +35,7 @@ function createStore() {
         scannedSeq: 0,
         lastBlock: "",
         lastInjectedStage: "",
+        cwd: "",
       };
       sessions.set(sessionId, state);
     }
@@ -41,9 +43,15 @@ function createStore() {
   };
   return {
     stateFor,
+    /** 记住该对话的项目目录（阶段文件的落点）。 */
+    noteCwd: (sessionId, cwd) => {
+      stateFor(sessionId).cwd = typeof cwd === "string" ? cwd : "";
+    },
     getStage: (sessionId) => stateFor(sessionId).stage,
     setStage: (sessionId, stage) => {
-      stateFor(sessionId).stage = stage;
+      const state = stateFor(sessionId);
+      state.stage = stage;
+      if (persistStage !== null) persistStage(state.cwd, sessionId, stage);
     },
     setEntries: (sessionId, entries) => {
       const state = stateFor(sessionId);
@@ -75,7 +83,11 @@ function restrictOnce(agent, names, logger) {
 }
 
 export function apply(ctx) {
-  const store = createStore();
+  const store = createStore((cwd, sessionId, stage) => {
+    void writeStage(cwd, sessionId, stage).catch((error) => {
+      ctx.logger?.warn?.(`[ka-whale-workflow] stage persist failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
   const hidden = new WeakSet();
 
   // kaz-fork：预设自带的 fork provider，让"fork 源"可以是任意存活会话（不只派发者自己）。
@@ -89,8 +101,12 @@ export function apply(ctx) {
     const events = typeof session.snapshotEvents === "function" ? session.snapshotEvents() : [];
     const lastSeq = events.length > 0 ? events[events.length - 1].seq : 0;
 
+    store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
     if (!state.loaded) {
       state.entries = await readArrangement(sessionId);
+      // 重启后从项目里的阶段文件恢复（只认已知阶段名）。
+      const persisted = await readStage(state.cwd, sessionId);
+      if (persisted !== undefined && STAGES.includes(persisted)) state.stage = persisted;
       state.loaded = true;
     }
 
