@@ -2,19 +2,21 @@
 
 > 为 DeepSeek Harness（dsh）设计的一套 **agent preset（预设）**：**主代理的工作流**——主代理跟用户对接、决定自己做完还是派出去，子代理干活，记忆统一由记忆管家管理。
 >
-> 当前版本 **Kaz 8.0**（从零重写，与旧 kaz 无代码关联）。预设源码（**发布源**）在仓库 `kaz/`，安装 / 更新由仓库根 `install-kaz-preset.ps1` 完成，**只支持 dsh `0.1.5-rc.2`**（主环境 `.dsh` 走全局 `0.1.5-rc.2`，测试环境 `.dsh-test` 用它自己的本地副本 `0.1.5-rc.2`；救援环境 `.dsh-clean` 固定 `0.1.1-rc.2`，按设计过不了闸门）。
+> 当前版本 **Kaz 8.1.0**（从零重写，与旧 kaz 无代码关联）。预设源码（**发布源**）在仓库 `kaz/`，安装 / 更新由仓库根 `install-kaz-preset.ps1` 完成，**只支持 dsh `0.1.5-rc.2`**（主环境 `.dsh` 走全局 `0.1.5-rc.2`，测试环境 `.dsh-test` 用它自己的本地副本 `0.1.5-rc.2`；救援环境 `.dsh-clean` 固定 `0.1.1-rc.2`，按设计过不了闸门）。
 >
 > 旧的「插件形态」（≤ 7.4.x，dsh `0.1.1-rc.2`）自 7.6.0 起不再随仓库发布，见 §五。
 
-## 一、核心特性（Kaz 8.0）
+## 一、核心特性（Kaz 8.1.0）
 
 - **主代理的工作流**：主代理负责听清需求、安排谁来做、对结果负责；能自己干完的自己干，适合交出去的立刻派给子代理（能并行就并行、能复用就复用）。不是无约束多 agent，也不是原生 Plan 模式。
+- **委派默认（8.1.0）**：`idle` 阶段文本先做一次可判定的拆分判断——"只有一个目标、只有主代理能做"的整块工作自己做完；**含独立可验证子部分的工作一律先进 `arrange_agent` 派发**。并显式写明 `Delegation is judged every round, not remembered from last round.`——防的是"开头判断过一次、中途不再重判"。
+- **记忆作用域路由（8.1.0）**：值得留的经验**当场派发**（不等到收尾），且派发时要点名作用域——**机器/环境级事实进 global，项目级事实进 local**；同一个事实能两处都算时取更可复用的那个、不许双写。主代理与子代理**只能查记忆、不能写**（`memory_save` / `memory_update` / `memory_forget` 对它们不可见）；子代理发现值得留的东西写进收尾报告，由主代理转派管家。
 - **三方 persona（全英文）**：主代理（首句 `We are the user's point of contact and the work's arranger: ...`）、记忆管家 memoryMaintainer（固定 persona）、自定义子代理（角色与性格由主代理在派发时现写）。文本收口在 `kaz/functions/kaz-shared/lib/roles.js`。
 - **三角色工具面黑名单**：只有黑名单、没有白名单——黑名单之外剩下什么就是什么，这样外接的工具也能自然进入工具面。
   - 主代理：看不到 `memory_save` / `memory_update` / `memory_forget`（写记忆只由记忆管家做）。
   - 记忆管家：一份点名黑名单（shell / 写文件 / todo / 提问 / 网络 / 派发与工作流工具等），记忆六件与 `read` / `grep` / `glob`、上下文三件照常可用。
   - 子代理：没有默认黑名单；每个子代理的黑名单由主代理派发时写进安排，缺省 = 不屏蔽。
-- **记忆（`ka-whale-memory`）**：文件式、双作用域（global / local）、两类（`context` 内容记忆 / `paths` 路径记忆），**一个记忆一个 JSON**；BM25 检索（中英文分词）；六工具；`name` 就是文件名且全局唯一（跨种类、跨库都不允许重名）。
+- **记忆（`ka-whale-memory`）**：文件式、双作用域（global / local）、两类（`context` 内容记忆 / `paths` 路径记忆），**一个记忆一个 JSON**；BM25 检索（中英文分词）；六工具；`name` 就是文件名且全局唯一（跨种类、跨库都不允许重名）。**作用域判断准则**写在管家 persona 的 `Our habits:` 第三条：机器/环境级 → global，项目级 → local，两处都算时取更可复用的那个、不双写。
 - **上下文（`kaz-context-policy`）**：`context_search`（在会话原始记录里检索，含已被压缩掉的部分；`companion` 可查别的 agent 的记录）、`context_read`（按 seq 读回原文）、`context_compress`（**框选**：`from_seq` / `to_seq` 两端必填，`keep_recent` 决定尾部保留带）；上下文占用达到 50% 时注入压缩提醒 `[ka-context-policy compression-hint]`。
 - **工作流（`ka-whale-workflow`）**：轻量阶段机 `idle ⇄ arrange_agent` + 四工具 `write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`；安排（arrangement）就是派发的账本（`persona` / `blacklist` / `task` / `fork`，外加程序回填的 `id` / `status` / `summary`）；自带 `kaz-fork` provider，支持"fork 主代理或某个存活子代理的历史"起步。
 - **工具面与官方标准预设对齐**，只靠黑名单控制角色可见性（见 §三「刻意不挂」）。
@@ -29,7 +31,7 @@
 
 | 形态 | dsh 版本 | 安装 / 更新方式 | 源 |
 | --- | --- | --- | --- |
-| **预设形态（当前，Kaz 8.0）** | **`0.1.5-rc.2`（唯一受支持版本）** | 运行仓库根 `install-kaz-preset.ps1` | 仓库 `kaz/`（发布源） |
+| **预设形态（当前，Kaz 8.1.0）** | **`0.1.5-rc.2`（唯一受支持版本）** | 运行仓库根 `install-kaz-preset.ps1` | 仓库 `kaz/`（发布源） |
 | 旧插件形态（legacy，≤ 7.4.x） | `0.1.1-rc.2` | 手动复制 + `npm install` + `cordis.patch.yml`（见 §五） | git 历史（≤ 7.5.1）的 `KazPlugins/` |
 
 - 三台 home、三种角色（**单版本 rc.2 世界**）：**主环境 `.dsh`** 的运行时是全局 dsh `0.1.5-rc.2`（`%APPDATA%\npm`）；**测试环境 `.dsh-test`** 用 home 本地副本 `0.1.5-rc.2`（`tools\dsh-cli`）；**救援环境 `.dsh-clean`** 固定 `0.1.1-rc.2`（按设计 `FAIL`）。
@@ -71,7 +73,7 @@
 - **`test-kaz/` ＝ 测试区副本**：junction 直通测试区 `.dsh-test\.agent-presets\kaz`。它是开发/试验用的（**不稳定**），放进仓库只为**回退**（git 历史能回滚），**不是安装源**。
 - 两个目录的 `node_modules\` 都被 `.gitignore` 排除，不入库。
 - 安装程序把源镜像到 `<home>\.agent-presets\kaz`，再在预设的 `node_modules\` 下建两个 junction：`zod` 指回 `<home>\profiles\<profile>\node_modules`，`@deepseek-ai` 指回**同一 home 内的共享运行时包集**（`<home>\profiles\node_modules\@deepseek-ai`；该层没有运行时包时才回退 profile 那一层，见 §2.2）。预设自带的 `functions/*` 之间用相对路径互相引用，因此不需要 `npm install`。
-- 预设根目录的 `VERSION` 文件（一行 `8.0.0`）就是**预设自己的版本号**，随镜像一起进 live 预设目录；它由人手工维护，见 §8.2。
+- 预设根目录的 `VERSION` 文件（一行 `8.1.0`）就是**预设自己的版本号**，随镜像一起进 live 预设目录；它由人手工维护，见 §8.2。
 - ⚠️ **别对测试区跑默认安装**：默认源是发布源（`kaz/`），对 `-DshHome .dsh-test` 跑默认安装会把发布源盖到测试区、冲掉开发副本。要装测试区就用 `-Source test-kaz`。
 - **绝不要**在仓库里运行 `git clean -fdx` 或 `git checkout -f`：`kaz\`、`test-kaz\`、`其它好用的插件\dsh-balance\` 都是仓库 ↔ live 的 junction，这类命令会顺着 junction 写坏 live 预设/插件源。仓库脏了用 `git status` / `git diff` 查看，只手动改需要的文件。
 
@@ -81,7 +83,7 @@
 
 ```
 kaz/                              # 发布源（开发机上 =junction→ 主区 live 预设目录）
-├── VERSION                    # 预设版本号（一行 8.0.0；手工维护，随镜像进 live 预设）
+├── VERSION                    # 预设版本号（一行 8.1.0；手工维护，随镜像进 live 预设）
 ├── preset.yml                 # 预设名与描述（Kaz 模式）
 ├── agent.cordis.yml           # 预设的 Cordis 组合定义（挂哪些行；哪些刻意不挂）
 ├── kaz-system-prompt.mjs      # 系统提示控制器：主代理 persona ← kaz-shared MAIN_PERSONA；摘掉 harness:identity
@@ -128,7 +130,7 @@ dsh-KazMode/
 | 路径 | 说明 |
 | --- | --- |
 | `install-kaz-preset.ps1` | 预设安装程序：版本闸门 → 备份 → `robocopy /MIR` 镜像 → 重建两个 junction → `KAZ-PRESET-INSTALL OK` |
-| `kaz/VERSION` | 预设版本号（一行 `8.0.0`；手工维护） |
+| `kaz/VERSION` | 预设版本号（一行 `8.1.0`；手工维护） |
 | `kaz/preset.yml` | `kaz` 预设的显示名称与描述 |
 | `kaz/agent.cordis.yml` | `kaz` 预设的完整 Cordis 组合定义 |
 | `kaz/kaz-system-prompt.mjs` | 系统提示词 / persona 控制器 |
@@ -206,7 +208,7 @@ dsh-KazMode/
 | 路径 | 说明 |
 | --- | --- |
 | `install-kaz-preset.ps1` | 唯一安装 / 更新 / 卸载入口（Windows，ASCII，PowerShell 5.1 安全） |
-| `kaz/VERSION` | 预设版本号（一行 `8.0.0`；手工维护，来源即仓库这一份） |
+| `kaz/VERSION` | 预设版本号（一行 `8.1.0`；手工维护，来源即仓库这一份） |
 | `kaz/preset.yml` | `kaz` 预设的显示名称与描述 |
 | `kaz/agent.cordis.yml` | `kaz` 预设的完整 Cordis 组合定义 |
 | `kaz/kaz-system-prompt.mjs` | 系统提示词 / persona 控制器 |
@@ -221,8 +223,16 @@ dsh-KazMode/
 
 ### 8.2 发版说明（给未来的我和 agent）
 
+- **Kaz 8.1.0（2026-09-12，行为修正版）**：针对一次真实任务的事后采访（委派缺位、记忆当结尾动作、沉没成本拖长交付）改的三处文本，全部在主代理 persona 与阶段文本里，不动工具面。
+  - **`idle` 阶段文本重写（委派默认化）**：开头由 `Normal stage. On each user message, first judge: should we go to arrange_agent (go when a subagent must be added or adjusted); if not, just finish the work.` 改为——
+    `On each user message, first judge the work: is it one self-contained step that only we can do (talking to the user, the final integration, a decision), or does it contain any part with its own goal that can be verified on its own? Work with parts goes to arrange_agent and gets dispatched; work without parts we finish ourselves. Delegation is judged every round, not remembered from last round.`
+    旧措辞的病是"必须增派（must be added）"门槛太高、且默认动作是"自己做完"；新措辞给的是**可判定的拆分条件**，并显式要求**每轮重判**（治"中途不再重新判断"）。
+  - **记忆派发：`at once` + 点名作用域**：主代理 persona 的那句由 `… we dispatch a memoryMaintainer to record it.` 改为 `… we dispatch a memoryMaintainer to record it at once, naming the scope it belongs in: facts about this machine or environment go to global memory, facts about this project go to local. Only the keeper writes memories; we and our subagents can only search them.`
+  - **作用域判断准则进管家 persona**：`Our habits:` 新增第三条 `Scope: facts about this machine or environment go to global memory (they hold across projects); facts about this project go to local. When a fact fits both, pick the more reusable scope — do not duplicate it into both.`
+  - **子代理只能查、不能写**：子代理 persona 模板收尾句补 `We can search memories but only the keeper writes them: when we find something worth keeping, we say so in that closing message so the main agent can have it recorded.`
+  - 关于"事件触发"：**没有**给记忆加新的强制事件清单。8.1.0 靠 `at once` + 作用域点名把派发从"收尾动作"拉回"发生时就做"，靠权威文本（persona + 阶段注入）承担；如果实测仍然漏派，再考虑加清单。
 - **Kaz 8.0.0（2026-09-12，预设重写，未发 tag）**：从零重写，与旧 kaz 无代码关联。
-  - 三方 persona 全英文；主代理首句 `We are the user's point of contact and the work's arranger: ...`。
+  - 三方 persona 全英文；主代理首句 `We are the user's point of contact and the work's arranger: ...`。记忆派发的触发与作用域路由在 8.1.0 里改过，见上一条。
   - 工具面与官方 `standard` 预设对齐，只靠黑名单控制角色可见性：主代理看不到记忆写三件；记忆管家有一份点名黑名单；子代理黑名单由主代理派发时写。
   - 记忆改为文件式双作用域（global / local × context / paths），一个记忆一个 JSON，`name` 全局唯一且即文件名；BM25 检索（Intl.Segmenter 中英文分词）。
   - 上下文三件：`context_search`（含 `companion` 跨 agent）、`context_read`、`context_compress`（只做框选：`from_seq` / `to_seq` 两端必填，`keep_recent` 管尾部保留带）；≥50% 注入压缩提醒。
@@ -238,7 +248,7 @@ dsh-KazMode/
   - 其余注入记录改用 **schema 合规**的写法（`form: "notice"` + `summary`）：dsh 0.1.5 的 v0→v1 会话迁移只放行 `instructions` / `catalog` / `snapshot` / `notice` / `relay` / `recall` 六个 form，自造值会让整份历史会话读不出来。旧日志修复脚本在 `不入库文件\kaz-form-fix-20260911\fix-session-form.mjs`。
   - 主环境运行时锚点回到**全局 dsh**（`dsh启动.bat` 调用 `%APPDATA%\npm\dsh.cmd` 并按 `EXPECTED_CLI` 门禁）。
 - **7.6.1 之后 · 单版本收窄（2026-09-11 晚）**：三台 home 的运行时回到真实口径（`.dsh` 全局 `0.1.5-rc.2`；`.dsh-test` 本地副本 `0.1.5-rc.2`；`.dsh-clean` 固定 `0.1.1-rc.2` 按设计 `FAIL`）；`$SupportedVersions` 收窄为 `@('0.1.5-rc.2')`，两份指引的 `$supportedDsh` 同步收窄——**rc.1 不再受支持**（回退路径见本节末尾）。
-- **版本号在哪看**：预设形态没有旧形态那种「面板本地版本」——那个读 `KazPlugins/kaz-mode/package.json` 的 `version` 并与 GitHub tag 比较的机制随面板退役。现在有两处，彼此独立：① 预设自己的 `kaz/VERSION`（一行 `8.0.0`，随镜像进 `<home>\.agent-presets\kaz\VERSION`）是**手工维护的发布版本号**，发版时改这一行；② 仓库的 **git tag / 提交**仍是可追溯的代码身份。改预设请改 `kaz/`（发布源）；测试区的开发副本在 `test-kaz/`。
+- **版本号在哪看**：预设形态没有旧形态那种「面板本地版本」——那个读 `KazPlugins/kaz-mode/package.json` 的 `version` 并与 GitHub tag 比较的机制随面板退役。现在有两处，彼此独立：① 预设自己的 `kaz/VERSION`（一行 `8.1.0`，随镜像进 `<home>\.agent-presets\kaz\VERSION`）是**手工维护的发布版本号**，发版时改这一行；② 仓库的 **git tag / 提交**仍是可追溯的代码身份。改预设请改 `kaz/`（发布源）；测试区的开发副本在 `test-kaz/`。
 - 支持版本**硬编码在 `install-kaz-preset.ps1` 的 `$SupportedVersions`**（当前 `@('0.1.5-rc.2')`）。升级适配 dsh 版本时按这份清单同步，别只改数组：
   1. `install-kaz-preset.ps1` 的 `$SupportedVersions`（**`Get-RuntimeVersion` 的候选顺序不要动**：它决定 `.dsh-clean` 读到自己的 `0.1.1-rc.2` 副本、按预期 `FAIL`）；
   2. 同一文件头部注释里的 supported 列表；
