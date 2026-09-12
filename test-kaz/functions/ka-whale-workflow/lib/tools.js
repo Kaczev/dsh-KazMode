@@ -58,6 +58,17 @@ function personaKey(persona) {
   return Array.isArray(persona) ? persona[0] : typeof persona === "string" ? persona : "";
 }
 
+/** persona 的角色名（纯字符串 = 模型只写了角色）。 */
+function roleOf(persona) {
+  if (Array.isArray(persona)) return typeof persona[0] === "string" ? persona[0] : "";
+  return typeof persona === "string" ? persona : "";
+}
+
+/** persona 的性格/行为描述（纯字符串或数组缺第二项 = 空串）。 */
+function descriptionOf(persona) {
+  return Array.isArray(persona) && typeof persona[1] === "string" ? persona[1] : "";
+}
+
 /**
  * 平台"已知工具名"集合：以调用者（主代理）可见的工具面为准，再补上对主代理自己隐身的
  * 写记忆三件（它们对子代理仍然存在）。拿不到工具服务时返回 null（不过滤，保持原样）。
@@ -84,7 +95,7 @@ export function writeArrangementTool({ store }) {
   return defineTool({
     name: "write-arrangement",
     description:
-      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona is "main", "memoryMaintainer", or [role, description]. The plan must contain memoryMaintainer: only it can write memories.',
+      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona is "main", "memoryMaintainer", a bare role name, or [role, description]. The plan must contain memoryMaintainer: only it can write memories.',
     parameters: {
       entries: { type: "array", required: true, items: { type: "json" }, description: "The dispatch plan entries." },
     },
@@ -156,7 +167,8 @@ export function kaSubWhaleTool({ ctx, store }) {
       const entry = entries[index];
       if (entry.persona === "main") return { ...fail('the "main" entry is for the main agent itself; dispatch only subagent entries'), text: "" };
       const isKeeper = entry.persona === "memoryMaintainer";
-      const personaText = isKeeper ? MEMORY_MAINTAINER_PERSONA : renderSubagentPersona(entry.persona[0], entry.persona[1]);
+      const role = roleOf(entry.persona);
+      const personaText = isKeeper ? MEMORY_MAINTAINER_PERSONA : renderSubagentPersona(role, descriptionOf(entry.persona));
       const blacklist = isKeeper
         ? sanitizeBlacklist([...MEMORY_MAINTAINER_BLACKLIST], MEMORY_MAINTAINER_RESERVED)
         : sanitizeBlacklist([...SUBAGENT_DEFAULT_BLACKLIST, ...(Array.isArray(entry.blacklist) ? entry.blacklist : [])]);
@@ -166,7 +178,7 @@ export function kaSubWhaleTool({ ctx, store }) {
       const skipped = known === null ? [] : blacklist.filter((name) => !known.has(name));
       const skippedNote =
         skipped.length > 0 ? ` (blacklist skipped unknown tool${skipped.length > 1 ? "s" : ""}: ${skipped.join(", ")})` : "";
-      const label = isKeeper ? "memoryMaintainer" : entry.persona[0];
+      const label = isKeeper ? "memoryMaintainer" : role;
       const forkTarget = typeof entry.fork === "string" ? entry.fork : "";
       let provider = "spawn";
       let forkSource = "";

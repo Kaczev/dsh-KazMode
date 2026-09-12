@@ -69,8 +69,7 @@ export function renderSubagentPersona(role, description) {
   if (typeof role !== "string" || role.trim().length === 0) {
     throw new TypeError("renderSubagentPersona: role 不能为空");
   }
-  if (typeof description !== "string" || description.trim().length === 0) {
-    throw new TypeError("renderSubagentPersona: description 不能为空");
-  }
-  return `We are the ${role.trim()}.\n\n${description.trim()}\n\nTools at a glance:\n- context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.\n- context_compress: drop a redundant middle span (say what to drop; the tool locates the range), keeping the recent part.\n- memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.\n\nTo message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.\n\nWe only speak English.`;
+  const body = typeof description === "string" && description.trim().length > 0 ? description.trim() : "";
+  const tail = `Tools at a glance:\n- context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.\n- context_compress: drop a redundant middle span (say what to drop; the tool locates the range), keeping the recent part.\n- memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.\n\nTo message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.\n\nWe only speak English.`;
+  return body.length > 0 ? `We are the ${role.trim()}.\n\n${body}\n\n${tail}` : `We are the ${role.trim()}.\n\n${tail}`;
 }
