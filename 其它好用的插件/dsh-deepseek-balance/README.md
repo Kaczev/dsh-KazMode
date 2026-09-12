@@ -17,16 +17,18 @@ DeepSeek 账户余额悬浮挂件 —— 一枚给 **DSH Web UI**（DeepSeek Har
 
 ## 功能
 
-- **实时余额**：浏览器每 **2.5 秒**问一次本地路由，宿主端 **8 秒**才真正打一次 DeepSeek 官网并缓存结果 —— 肉眼看几乎同步，但不会把上游打爆（`/dsh-deepseek-balance/stats` 可以看实际次数）。
+- **实时余额**：浏览器每 **2.5 秒**问一次本地路由，宿主端 **8 秒**才真正打一次 DeepSeek 官网并缓存结果 —— 肉眼看几乎同步，但不会把上游打爆（`/dsh-deepseek-balance/stats` 能看到实际次数）。
+- **卡片只有 150×66**：折线是**背景层**（整卡铺满、半透明、上面压着一层渐隐遮罩），数字直接压在它上面，不再是数字下面单独占一条。
 - **折线虚影**：当前折线之下叠着三层更淡、更高一点的旧迹，像余晖一样拖着走；折线本身是贝塞尔平滑曲线，曲线下方有渐变填充。
 - **颜色表示剧烈程度**：每一段线单独上色，从青灰（几乎没动）→ 绿 → 琥珀 → 橙 → 红（剧烈下跌）。参考尺度取「一次 API 调用量级（¥0.005）」与「余额的 1%」的几何平均，所以 ¥5 和 ¥5000 的账户都读得出轻重。
 - **暴跌会抖动**：单次跌幅越过阈值时，整卡左右抖一下 + 从卡片边缘扩散一圈水波纹，颜色同步变红。
-- **老虎机数字**：每一位数字是一条 0-9 的带子，物理旋转到新值（走环上最短路径、逐位错开落定、落定前有回弹），转得快时会带一点动态模糊。
+- **老虎机数字**：每一位数字是一条 0-9 的带子，物理旋转到新值（走环上最短路径、逐位错开落定、落定前有回弹），转得快时带一点动态模糊。**固定两位小数**，位数不会跳。
 - **自动吸附**：拖到任意位置松手，离哪条边近就吸到哪条边；位置存在 `localStorage`，重启浏览器还在。窗口缩放会被夹回可视区域。
 - **低余额预警**：低于阈值（默认 ¥10）时整卡呼吸式红晕，标题变成「DeepSeek 余额 · 偏低」。
-- **本会话已花 / 还能撑多久**：前者是挂件首次读到余额与当前的差额；后者按最近观测到的消耗速率外推，没在花钱时显示 `—`，不编数字。
-- **悬停采样点**：鼠标在折线上移动会显示竖直参考线和浮层（那一刻的余额、时间、与上一点的差值）。
-- **可收起**：点 `▾` 折成一枚小胶囊（状态点 + 数字），再点 `▴` 展开。
+- **还能撑多久**：按最近观测到的消耗速率外推，没在花钱时显示「采样中…」，不编数字。
+- **悬停即读数**：鼠标在折线上移动，底部那一行**原地**变成那一刻的余额/时间/较上一点的变化（高度固定，不会挤动上面的数字）。
+- **提示一律自绘**：卡片内没有原生 `title`，所有提示都是自己画的一条浮层 —— 系统黑气泡会压在数字上，所以不用。
+- **可收起**：点 `▾` 折成一枚小胶囊（状态点 + 数字），再点 `▴` 展开；数字在两种形态间切换都保持正确。
 - **跟随主题**：全部使用 DSH 的设计变量（`--dsw-*`），亮色/暗色主题自动适配；`prefers-reduced-motion` 下关闭全部动画。
 
 ## API Key 从不进浏览器
@@ -52,7 +54,7 @@ New-Item -ItemType Junction `
 
 # 2. 把插件挂进 profile 的 bundle 列表：
 #    %USERPROFILE%\.dsh\profiles\web\package.json
-#      dependencies 里加   "dsh-deepseek-balance": "file:dsh-deepseek-balance",
+#      dependencies 里加      "dsh-deepseek-balance": "file:dsh-deepseek-balance",
 #      dsh.profile.bundles 里加 "dsh-deepseek-balance"
 
 # 3. 重启 dsh web，浏览器刷新页面
@@ -65,14 +67,16 @@ New-Item -ItemType Junction `
 ## 开发
 
 ```powershell
-node scripts/build.mjs          # src/ → lib/（宿主半直接拷贝，浏览器半套上 module-loader 外壳）
-node scripts/probe.mjs          # 宿主半：Key 解析、真实上游调用、路由、缓存/冷却/并发合并
-node scripts/widget-probe.mjs   # 浏览器半：SSR 渲染、reel/颜色/续航等纯函数、canvas 绘制调用
-node scripts/preview.mjs        # 生成 dev/preview.html（真 CSS + 真绘制函数的五个场景）
-powershell -File scripts/snapshot.ps1   # 无头 Edge 渲染，并读回画布像素判定
-node scripts/live-probe.mjs 3225 30     # 起一个临时 dsh web，统计真实轮询次数
-node scripts/observe-probe.mjs 3300 18  # 端到端：从页面内部回传请求、可见数字、历史条数
+node scripts/build.mjs           # src/ → lib/（宿主半直接拷贝，浏览器半套上 module-loader 外壳）
+node scripts/probe.mjs           # 宿主半：Key 解析、真实上游调用、两条路由、缓存/冷却/并发合并
+node scripts/widget-probe.mjs    # 浏览器半：SSR 渲染、老虎机/配色/续航/抽稀等纯函数、canvas 绘制调用
+node scripts/preview.mjs         # 生成 dev/preview.html（真 CSS + 真绘制函数的五个场景）
+node scripts/collect-preview.mjs # 无头 Edge 渲染该页，并读回画布像素判定（真像素，非示意）
 ```
+
+三层加起来是 `14 + 35 + 6` 项检查，全绿再提交。
+
+`scripts/gui-observe.mjs` 是端到端那一层（起临时 dsh web，从页面内部回传请求次数、可见数字、历史条数），**它需要临时实例的启动 URL 参数，比较脆**：跑不通就先跳过，上面的三层仍然覆盖了逻辑、绘制与宿主的真实调用。
 
 `lib/` 是构建产物，需要提交（用户克隆后无需构建即可用）。
 

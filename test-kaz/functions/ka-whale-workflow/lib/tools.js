@@ -1,6 +1,6 @@
 // ka-whale-workflow —— 工作流四工具（《Kaz8.0设计.md》§3.9）。
-//   write-arrangement  写安排（只在 arrange_agent 阶段）
-//   get-arrangement    查看安排（只读，任何阶段）
+//   write_arrangement  写安排（只在 arrange_agent 阶段）
+//   get_arrangement    查看安排（只读，任何阶段）
 //   ka_sub_whale       按安排派发子代理（含 memoryMaintainer 保留值）
 //   whale_report       推进阶段
 // 文案一律英文。
@@ -93,7 +93,7 @@ function knownToolNames(ctx, agent) {
 
 export function writeArrangementTool({ store }) {
   return defineTool({
-    name: "write-arrangement",
+    name: "write_arrangement",
     description:
       'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", or [role, description] (an array of exactly two non-empty strings); anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
     parameters: {
@@ -104,7 +104,7 @@ export function writeArrangementTool({ store }) {
       const sessionId = sessionIdOf(exec);
       if (sessionId === undefined) return fail("this agent has no session");
       const stage = store.getStage(sessionId);
-      if (stage !== "arrange_agent") return fail(`write-arrangement works only in the arrange_agent stage (current: ${stage})`);
+      if (stage !== "arrange_agent") return fail(`write_arrangement works only in the arrange_agent stage (current: ${stage})`);
       const raw = Array.isArray(args?.entries) ? args.entries : [];
       if (raw.length === 0) return fail("entries must be a non-empty array");
       const previous = await store.loadEntries(sessionId);
@@ -126,7 +126,7 @@ export function writeArrangementTool({ store }) {
 
 export function getArrangementTool({ store }) {
   return defineTool({
-    name: "get-arrangement",
+    name: "get_arrangement",
     description:
       "Read the current conversation's arrangement (including the program-filled id / status / summary). Read-only; usable in any stage.",
     parameters: {
@@ -236,12 +236,18 @@ export function kaSubWhaleTool({ ctx, store }) {
       if (reusableId.length === 0 && busyId.length > 0) {
         return { ...fail(`${label} is still working (subagent ${busyId}); wait for its report before dispatching it again`), text: "" };
       }
+      let reused = false;
       if (reusableId.length > 0 && typeof subagents.sendMessage === "function") {
         try {
           await subagents.sendMessage(exec.agent, reusableId, [{ type: "text", text: entry.task }], { signal: exec.signal });
+          reused = true;
         } catch (error) {
-          return { ...fail(`continue failed: ${reason(error)}${skippedNote}`), text: "" };
+          // 复用一个"已不可达"的子代理（注册表里还留着旧记录，但会话已经没了）
+          // 会永远失败——那时不要卡住整个 persona，改成新开一个可续子代理。
+          ctx.logger?.warn?.(`[ka-whale-workflow] reusing ${reusableId} failed, starting a fresh one: ${reason(error)}`);
         }
+      }
+      if (reused) {
         const continued = await patchEntryAt(sessionCwdOf(exec), sessionId, index, { id: reusableId, status: "running" });
         store.setEntries(sessionId, continued);
         return { ok: true, message: `continued ${label} as ${reusableId} (reused, no new subagent)`, text: `subagent id: ${reusableId}` };

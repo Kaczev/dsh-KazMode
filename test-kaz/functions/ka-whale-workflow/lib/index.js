@@ -20,7 +20,7 @@ import { readStage, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
 
 /** 只挂给主代理的四件（子代理必须看不到）。 */
-const MAIN_ONLY_TOOLS = ["write-arrangement", "get-arrangement", "ka_sub_whale", "whale_report"];
+const MAIN_ONLY_TOOLS = ["write_arrangement", "get_arrangement", "ka_sub_whale", "whale_report"];
 
 /** 每个对话的内存态（安排本体在文件里；阶段落盘，跨重启保留）。 */
 function createStore(persistStage = null) {
@@ -125,7 +125,7 @@ export function apply(ctx) {
   };
 
   // 主代理：用户发消息的那一轮开头、以及阶段切换后（whale_report）各注入一条；
-  // 工具循环的其它步骤、子代理报告都不注入——避免刷屏。（子代理现状用 get-arrangement 看。）
+  // 工具循环的其它步骤、子代理报告都不注入——避免刷屏。（子代理现状用 get_arrangement 看。）
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;

@@ -34,18 +34,29 @@ const PLUGIN_ID = 'dsh-deepseek-balance'
 
 /** How often the widget asks the local route (the host serves a cache). */
 const POLL_MS = 2500
-/** Sparkline capacity, in samples. */
-const HISTORY_LIMIT = 60
+/**
+ * Sparkline capacity, in samples. At one sample per change this is roughly a
+ * quarter hour of history — which is what lets the line show a shape instead of
+ * a flat shelf.
+ */
+const HISTORY_LIMIT = 600
 /** Two samples closer than this collapse into the newest one. */
-const MIN_SAMPLE_GAP_MS = 1200
+const MIN_SAMPLE_GAP_MS = 600
 /** Reel travel time for one digit, before stagger. */
-const REEL_MS = 900
+const REEL_MS = 760
 /** Extra travel added per reel position, so digits settle left to right. */
-const REEL_STAGGER_MS = 110
+const REEL_STAGGER_MS = 95
 /** Reel spin duration. */
-const SPIN_MS = 720
+const SPIN_MS = 560
 /** Reel blur when the value moves faster than this many units per second. */
 const BLUR_VELOCITY = 0.6
+/** Reel glyph box height in px — must match the stylesheet. */
+const REEL_STEP_PX = 24
+/** Rendered card size in px — the fallback before the DOM can be measured. */
+const CARD_WIDTH = 150
+const CARD_HEIGHT = 66
+/** No more than one drawn point per this many pixels: a dense chart is a smear. */
+const MIN_PX_PER_SAMPLE = 5
 /** A single drop worth shaking the card over. */
 const NORMALIZED_VIOLENCE = 0.55
 /** Edge distance, in px, inside which a released card snaps. */
@@ -83,33 +94,60 @@ const CSS = `
 .dsb-card {
   position: relative;
   box-sizing: border-box;
-  width: 236px;
-  padding: 9px 11px 8px;
-  border-radius: 16px;
+  width: 150px;
+  height: 66px;
+  padding: 7px 9px;
+  border-radius: 12px;
+  overflow: hidden;
   border: 1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12));
   background: var(--dsw-alias-bg-overlay, rgba(255, 255, 255, 0.94));
   box-shadow: var(--dsw-elevation-prominent, 0 10px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08));
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
   backdrop-filter: blur(14px) saturate(1.15);
-  overflow: hidden;
-  transition: box-shadow 220ms ease, border-color 220ms ease;
-}
-.dsb-root[data-snapping="true"] .dsb-card {
   transition: box-shadow 220ms ease, border-color 220ms ease;
 }
 .dsb-root[data-dragging="true"] .dsb-card {
   box-shadow: var(--dsw-elevation-prominent, 0 16px 40px rgba(0, 0, 0, 0.26));
 }
-/* A heat wash behind the card that follows the current change intensity. */
-.dsb-card::before {
+/* The chart is the card's backdrop: the line and the heat wash sit under the
+   digits, faded so the number stays the thing you read first. */
+.dsb-backdrop {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.dsb-spark {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0.5;
+}
+/* A soft scrim behind the text, so digits never fight the line for contrast. */
+.dsb-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 90% at 22% 52%, var(--dsw-alias-bg-overlay, rgba(255, 255, 255, 0.94)) 32%, transparent 78%),
+    linear-gradient(180deg, var(--dsw-alias-bg-overlay, rgba(255, 255, 255, 0.94)) 4%, transparent 34%);
+  opacity: 0.72;
+}
+.dsb-scrim::after {
   content: "";
   position: absolute;
-  inset: -40% -20% auto -20%;
-  height: 120%;
-  background: radial-gradient(60% 70% at 82% 0%, var(--dsb-heat-glow), transparent 72%);
-  opacity: 0.9;
-  pointer-events: none;
+  inset: 0;
+  background: radial-gradient(60% 70% at 84% 4%, var(--dsb-heat-glow), transparent 74%);
   transition: background 400ms linear;
+}
+.dsb-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 .dsb-shake { animation: dsb-shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
 @keyframes dsb-shake {
@@ -142,162 +180,180 @@ const CSS = `
 .dsb-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 3px;
+  gap: 4px;
+  flex: none;
 }
 .dsb-dot {
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   flex: none;
   border-radius: 50%;
   background: #f59e0b;
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.16);
   transition: background 200ms ease, box-shadow 200ms ease;
 }
-.dsb-dot[data-state="ok"] { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16); }
-.dsb-dot[data-state="bad"] { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.16); }
-.dsb-dot[data-state="stale"] { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16); }
+.dsb-dot[data-state="ok"] { background: #22c55e; box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.16); }
+.dsb-dot[data-state="bad"] { background: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.16); }
+.dsb-dot[data-state="stale"] { background: #f59e0b; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.16); }
 .dsb-label {
   flex: 1;
   min-width: 0;
-  font-size: 11px;
-  line-height: 16px;
-  letter-spacing: 0.02em;
+  font-size: 9px;
+  line-height: 11px;
+  letter-spacing: 0.03em;
   color: var(--dsw-alias-label-tertiary, #9ca3af);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.dsb-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.dsb-actions { display: flex; align-items: center; gap: 0; flex: none; }
 .dsb-icon {
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--dsw-alias-label-tertiary, #9ca3af);
   font: inherit;
-  font-size: 12px;
+  font-size: 10px;
   line-height: 1;
   cursor: pointer;
 }
 .dsb-icon:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0, 0, 0, 0.06)); color: var(--dsw-alias-label-primary, #1f2328); }
 .dsb-icon[data-spinning="true"] { animation: dsb-rotate 700ms linear infinite; }
 @keyframes dsb-rotate { to { transform: rotate(360deg); } }
-.dsb-collapse { font-size: 13px; }
+.dsb-collapse { font-size: 10px; }
 
 .dsb-value {
   display: flex;
   align-items: flex-end;
-  gap: 5px;
-  margin: 1px 0 2px;
+  gap: 3px;
+  margin: auto 0;
 }
 .dsb-reels {
   display: flex;
   align-items: flex-end;
   font-variant-numeric: tabular-nums;
-  font-size: 26px;
+  font-size: 21px;
   font-weight: 650;
-  line-height: 30px;
+  line-height: 24px;
   letter-spacing: -0.01em;
   color: var(--dsw-alias-label-primary, #1f2328);
-  text-shadow: 0 0 12px var(--dsb-heat-glow);
+  text-shadow: 0 0 8px var(--dsw-alias-bg-overlay, #fff), 0 0 2px var(--dsw-alias-bg-overlay, #fff);
   transition: text-shadow 400ms linear, color 300ms ease;
 }
-.dsb-reel { display: inline-block; height: 30px; overflow: hidden; }
-.dsb-reel-inner { display: block; transform: translate3d(0, 0, 0); backface-visibility: hidden; }
+.dsb-reel { display: inline-block; height: 24px; overflow: hidden; }
+.dsb-reel-inner {
+  display: block;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+  /* The strip is driven straight from rAF: keep it on its own compositor layer
+     so a spin never triggers layout or paint of the rest of the card. */
+  will-change: transform;
+}
 .dsb-reel-inner[data-spin="true"] { filter: blur(0.5px); }
-.dsb-glyph { display: block; height: 30px; text-align: center; font-variant-numeric: tabular-nums; }
-.dsb-glyph-dot { transform: translateY(-3px); }
+.dsb-glyph { display: block; height: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+.dsb-glyph-dot { transform: translateY(-2px); }
 .dsb-currency {
-  padding-bottom: 4px;
-  font-size: 11px;
-  line-height: 14px;
+  padding-bottom: 3px;
+  font-size: 9px;
+  line-height: 11px;
   color: var(--dsw-alias-label-tertiary, #9ca3af);
+  text-shadow: 0 0 6px var(--dsw-alias-bg-overlay, #fff);
 }
 .dsb-delta {
   margin-left: auto;
-  padding-bottom: 3px;
-  font-size: 11px;
-  line-height: 14px;
+  padding-bottom: 2px;
+  font-size: 9px;
+  line-height: 11px;
   font-variant-numeric: tabular-nums;
   color: var(--dsb-heat);
   white-space: nowrap;
+  text-shadow: 0 0 6px var(--dsw-alias-bg-overlay, #fff);
   transition: color 300ms ease;
 }
-.dsb-spark {
-  display: block;
-  width: 214px;
-  height: 42px;
-  margin-top: 2px;
-  border-radius: 8px;
-  cursor: crosshair;
-}
-.dsb-meta {
+.dsb-foot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 5px;
-  padding-top: 5px;
-  border-top: 0.5px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.08));
-  font-size: 10.5px;
-  line-height: 14px;
+  gap: 4px;
+  flex: none;
+  font-size: 9px;
+  line-height: 11px;
   color: var(--dsw-alias-label-tertiary, #9ca3af);
   white-space: nowrap;
 }
-.dsb-meta-item { overflow: hidden; text-overflow: ellipsis; }
-.dsb-meta-value { color: var(--dsw-alias-label-secondary, #6b7280); font-variant-numeric: tabular-nums; }
-.dsb-meta-time { margin-left: auto; flex: none; }
+.dsb-foot-item { display: inline-flex; gap: 2px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dsb-foot-value { color: var(--dsw-alias-label-secondary, #6b7280); font-variant-numeric: tabular-nums; }
+.dsb-foot-time { margin-left: auto; flex: none; }
+/* The hover readout replaces the footer row in place, with a fixed height, so
+   hovering never moves the digits above it. */
+.dsb-readout {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 11px;
+  font-size: 9px;
+  line-height: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-secondary, #6b7280);
+  white-space: nowrap;
+}
+.dsb-readout-value { color: var(--dsw-alias-label-primary, #1f2328); font-weight: 600; }
+.dsb-readout-delta { margin-left: auto; color: var(--dsb-heat); }
+/* Hints float OVER the card instead of pushing its contents. Native title
+   bubbles are deliberately not used anywhere in this widget: they are the
+   browser's black box, and they land on top of the digits. */
+.dsb-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 1;
+  padding: 3px 7px 5px;
+  background: var(--dsw-specific-menu, var(--dsw-alias-bg-overlay, rgba(255, 255, 255, 0.97)));
+  border-bottom: 1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.1));
+  border-radius: inherit;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+  font-size: 9px;
+  line-height: 11px;
+  color: var(--dsw-alias-label-secondary, #6b7280);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
 
 .dsb-msg {
-  margin-top: 2px;
-  font-size: 10.5px;
-  line-height: 15px;
+  margin-top: 1px;
+  font-size: 9px;
+  line-height: 11px;
   color: var(--dsw-alias-label-tertiary, #9ca3af);
   white-space: normal;
   overflow-wrap: anywhere;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .dsb-msg[data-error="true"] { color: #ef4444; }
 
-.dsb-tip {
-  position: absolute;
-  z-index: 2;
-  min-width: 122px;
-  padding: 6px 8px;
-  border-radius: 9px;
-  border: 1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12));
-  background: var(--dsw-specific-menu, var(--dsw-alias-bg-overlay, rgba(255, 255, 255, 0.97)));
-  box-shadow: var(--dsw-elevation-prominent, 0 8px 24px rgba(0, 0, 0, 0.16));
-  font-size: 10.5px;
-  line-height: 15px;
-  color: var(--dsw-alias-label-secondary, #6b7280);
-  pointer-events: none;
-  white-space: nowrap;
-}
-.dsb-tip-row { display: flex; gap: 10px; justify-content: space-between; }
-.dsb-tip-key { color: var(--dsw-alias-label-tertiary, #9ca3af); }
-.dsb-tip-val { color: var(--dsw-alias-label-primary, #1f2328); font-variant-numeric: tabular-nums; }
-
 /* Collapsed pill (click the chevron to fold the card away). */
 .dsb-pill {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   width: auto;
-  padding: 6px 9px 6px 7px;
+  height: auto;
+  padding: 5px 8px 5px 6px;
   cursor: grab;
 }
-.dsb-pill .dsb-reels { font-size: 14px; line-height: 18px; text-shadow: none; }
-.dsb-pill .dsb-reel, .dsb-pill .dsb-glyph { height: 18px; }
-.dsb-pill .dsb-currency { font-size: 10px; padding-bottom: 2px; }
+.dsb-pill .dsb-reels { font-size: 13px; line-height: 17px; text-shadow: none; }
+.dsb-pill .dsb-reel, .dsb-pill .dsb-glyph { height: 17px; }
+.dsb-pill .dsb-currency { font-size: 9.5px; padding-bottom: 2px; }
 `
 
 /** Inject the plugin stylesheet once, tolerating HMR re-materialisation. */
@@ -331,6 +387,33 @@ function reelSteps(from, to) {
   if (delta > 5) delta -= 10
   if (delta < -5) delta += 10
   return delta
+}
+
+/**
+ * Decide how a set of reels should move to a new amount.
+ *
+ * This is the decision the slot machine hinges on, and the one a remount used to
+ * get wrong: reels may only travel when every strip is still the node that was
+ * painted last time. A fresh DOM (the card folded to its pill and back) must
+ * snap, because a strip that has never been positioned sits at translateY(0) —
+ * which is the glyph `0`, and that is exactly the wrong number to show.
+ *
+ * @param {object} input - reel state.
+ * @param {string | null} input.previousText - the amount the strips last showed, null when new.
+ * @param {number[]} input.previousDigits - the digits those strips were left on.
+ * @param {string} input.text - the amount to show now.
+ * @param {number[]} input.nextDigits - the digits of that amount.
+ * @param {boolean[]} input.mounted - whether each strip's DOM node is the painted one.
+ * @param {boolean} input.animate - whether motion is allowed at all.
+ * @returns {{snap: boolean, fresh: boolean, offsets: number[]}} travel per reel, or a snap instruction.
+ */
+function reelPlan({ previousText, previousDigits, text, nextDigits, mounted, animate }) {
+  const fresh = mounted.length !== nextDigits.length || mounted.some((flag) => flag !== true)
+  if (fresh) return { snap: true, fresh: true, offsets: nextDigits.map(() => 0) }
+  const sameShape = previousText !== null && previousText.length === text.length
+  if (!animate || !sameShape) return { snap: true, fresh: false, offsets: nextDigits.map(() => 0) }
+  const offsets = nextDigits.map((digit, index) => reelSteps(previousDigits[index], digit))
+  return { snap: offsets.every((steps) => steps === 0), fresh: false, offsets }
 }
 
 /**
@@ -403,15 +486,36 @@ function colorRamp(intensity) {
 }
 
 /**
- * Human amount: two decimals for the reel, four when the tail still matters.
+ * Human amount: always two decimals — the widget should read as a number, not
+ * as a measurement, and a fraction that changes width makes the reels jump.
  *
  * @param {number} value - parsed balance.
  * @returns {string} formatted amount.
  */
 function formatAmount(value) {
   if (!Number.isFinite(value)) return '—'
-  const fraction = Math.abs(value) < 100 ? 4 : 2
-  return value.toFixed(fraction)
+  return value.toFixed(2)
+}
+
+/**
+ * Shrink a series for drawing.
+ *
+ * Only as many points as the canvas has room for get a bezier: six hundred
+ * samples across 150 px would be a smear, and each pair would cost a curve for
+ * nothing. The newest sample is always kept.
+ *
+ * @param {Array<{t: number, v: number}>} samples - full history, oldest first.
+ * @param {number} width - canvas width in CSS px.
+ * @returns {Array<{t: number, v: number}>} the points to draw.
+ */
+function thinSamples(samples, width) {
+  const room = Math.max(2, Math.floor(width / MIN_PX_PER_SAMPLE))
+  if (samples.length <= room + 1) return samples
+  const out = []
+  for (let index = 0; index <= room; index += 1) {
+    out.push(samples[Math.round(((samples.length - 1) * index) / room)])
+  }
+  return out
 }
 
 /**
@@ -472,11 +576,10 @@ function runwayEstimate(samples, balance, now) {
   return { ratePerHour, hoursLeft: balance / ratePerHour }
 }
 
-/** Compact currency amount for the meta row. */
+/** Compact currency amount for the readout row. */
 function money(value, currency) {
   if (!Number.isFinite(value)) return '—'
-  const digits = Math.abs(value) >= 100 ? 2 : 3
-  return `${currency === 'USD' ? '$' : '¥'}${value.toFixed(digits)}`
+  return `${currency === 'USD' ? '$' : '¥'}${value.toFixed(2)}`
 }
 
 function formatRunway(estimate) {
@@ -546,13 +649,17 @@ function restPositionFor(measure) {
  *
  * Each digit owns a strip of ten glyphs that physically rotates to bring the
  * new value into the window, taking the short way round the loop and settling
- * left reel first. The strip transform is driven straight from rAF — the
- * React value updates once per reel, when the animation lands — so a step
- * never re-renders the whole card.
+ * left reel first. The strip transform is driven straight from rAF — the React
+ * value updates once per reel, when the animation lands — so a step never
+ * re-renders the whole card.
+ *
+ * The DOM survives a remount (folding the card into its pill and back) but this
+ * hook's state does not reset with it, so every paint uses the element it can
+ * see right now and never assumes the node it drew last time is still mounted.
  *
  * @param {string} text - the target formatted amount.
  * @param {boolean} animate - false to snap (first paint, reduced motion).
- * @returns {{ref: (index: number, el: HTMLElement | null) => void, spinning: boolean}} reel binding.
+ * @returns {{bind: (index: number, el: HTMLElement | null) => void, spinning: boolean, blurred: boolean}} reel binding.
  */
 function useReels(text, animate) {
   const elements = useRef([])
@@ -573,37 +680,47 @@ function useReels(text, animate) {
       }
     }
 
+    // Repaint the strips that are mounted NOW. A node the ref callback has not
+    // handed over yet is skipped, not treated as already correct — the old
+    // "skip if falsy" version left a remounted strip at translateY(0), which is
+    // exactly the glyph 0.
     const paint = (positions) => {
       for (let index = 0; index < positions.length; index += 1) {
         const element = elements.current[index]
         if (element === null || element === undefined) continue
         // The strip holds exactly ten glyphs, so the rotation wraps seamlessly.
-        const digit = nextDigits[index]
-        const y = (((digit - positions[index]) % 10) + 10) % 10 * 30
-        element.style.transform = `translate3d(0, ${(-y).toFixed(2)}px, 0)`
+        element.style.transform = `translate3d(0, ${(-positions[index] * REEL_STEP_PX).toFixed(2)}px, 0)`
       }
     }
 
-    const settle = () => {
+    const settle = (fresh = false) => {
       cancel()
       current.text = text
       current.digits = nextDigits
-      paint(nextDigits.map(() => 0))
+      for (const element of elements.current.slice(0, nextDigits.length)) {
+        if (element === null || element === undefined) continue
+        element.style.transition = fresh ? 'none' : ''
+      }
+      paint(nextDigits)
       setSpinning(false)
       setBlurred(false)
     }
 
-    // Reels keep their identity only while the amount keeps its shape; a digit
-    // count change repaints instead of pretending the strips mean the same thing.
-    const sameShape = previousText !== null && previousText.length === text.length
-    const offsets = sameShape
-      ? nextDigits.map((digit, index) => reelSteps(previousDigits[index], digit))
-      : nextDigits.map(() => 0)
+    // Reels keep their identity only while the amount keeps its shape AND the
+    // strips are still the nodes that were painted; anything else snaps.
+    const mounted = elements.current.slice(0, nextDigits.length)
+      .map((element) => element !== null && element !== undefined)
+    const plan = reelPlan({ previousText, previousDigits, text, nextDigits, mounted, animate })
 
-    if (!animate || !sameShape || offsets.every((steps) => steps === 0)) {
-      settle()
+    if (plan.snap) {
+      // A freshly mounted strip must land on its glyph in the same frame, with
+      // no transition: the transform also backs the `transition` in the
+      // stylesheet, so writing it before paint is what avoids a visible roll
+      // from zero when the card is expanded again.
+      settle(plan.fresh)
       return cancel
     }
+    const offsets = plan.offsets
 
     cancel()
     current.text = text
@@ -611,25 +728,16 @@ function useReels(text, animate) {
     setSpinning(true)
     setBlurred(false)
 
-    // The first frame after this effect still holds the previous value, so the
-    // travel starts at exactly the strip position the settled glyph left behind.
-    const startPositions = nextDigits.map(() => Number.NaN)
-    let measured = false
-    let previousPositions = nextDigits.map((digit, index) => digit - offsets[index])
+    // The travel starts from the position the settled strip is really at, read
+    // back from the DOM: entering the target digit plus the signed distance it
+    // still has to travel lands exactly there, with no layout guess.
+    const startPositions = nextDigits.map((digit, index) => digit - offsets[index])
+    let previousPositions = [...startPositions]
+    let blurState = false
     const started = performance.now()
     const longest = REEL_MS + REEL_STAGGER_MS * Math.max(0, nextDigits.length - 1) + SPIN_MS
 
     const tick = (now) => {
-      if (!measured) {
-        for (let index = 0; index < startPositions.length; index += 1) {
-          const element = elements.current[index]
-          startPositions[index] = element === null || element === undefined
-            ? nextDigits[index] - offsets[index]
-            : element.getBoundingClientRect().top / 30
-        }
-        previousPositions = [...startPositions]
-        measured = true
-      }
       const elapsed = now - started
       const positions = nextDigits.map((digit, index) => {
         const from = startPositions[index]
@@ -645,7 +753,13 @@ function useReels(text, animate) {
         travelled += Math.abs(positions[index] - previousPositions[index])
       }
       previousPositions = positions
-      setBlurred(travelled * 60 > BLUR_VELOCITY * 3)
+      // Only touch React when the blur state really flips: a setState per frame
+      // is what made the spin stutter.
+      const nextBlur = travelled * 60 > BLUR_VELOCITY * 3
+      if (nextBlur !== blurState) {
+        blurState = nextBlur
+        setBlurred(nextBlur)
+      }
       paint(positions)
       if (elapsed < longest) {
         current.raf = window.requestAnimationFrame(tick)
@@ -657,6 +771,8 @@ function useReels(text, animate) {
     return cancel
   }, [text, animate])
 
+  // React calls this with null on detach; clearing the slot is what keeps a
+  // stale node from being painted after the card remounts.
   const bind = useCallback((index, element) => {
     elements.current[index] = element
   }, [])
@@ -868,7 +984,6 @@ function drawSpark(canvas, samples, width, height, hoverIndex, phase, scale, acc
 function BalanceWidget(props) {
   void props
   const rootRef = useRef(null)
-  const cardRef = useRef(null)
   const canvasRef = useRef(null)
 
   const initial = useMemo(loadStore, [])
@@ -879,7 +994,7 @@ function BalanceWidget(props) {
   // would still be in its temporal dead zone here.
   const measure = () => {
     const rect = rootRef.current?.getBoundingClientRect()
-    return { width: rect?.width ?? (collapsed ? 130 : 236), height: rect?.height ?? (collapsed ? 32 : 120) }
+    return { width: rect?.width ?? (collapsed ? 110 : CARD_WIDTH), height: rect?.height ?? (collapsed ? 28 : CARD_HEIGHT) }
   }
 
   const clampToViewport = (x, y) => {
@@ -903,6 +1018,8 @@ function BalanceWidget(props) {
   const [message, setMessage] = useState('正在读取余额…')
   const [dragging, setDragging] = useState(false)
   const [hover, setHover] = useState(-1)
+  /** Which chip the pointer is over, for the floating hint instead of a title bubble. */
+  const [hint, setHint] = useState(null)
   const [shake, setShake] = useState(0)
   const [pulse, setPulse] = useState(0)
 
@@ -955,7 +1072,10 @@ function BalanceWidget(props) {
       setStore((state) => {
         const last = state.samples[state.samples.length - 1]
         const now = Date.now()
-        if (last !== undefined && last.v === value && now - last.t < MIN_SAMPLE_GAP_MS * 4) return state
+        // Identical reading: keep the old sample, it carries the earlier time.
+        if (last !== undefined && last.v === value) return state
+        // Two readings closer than the pacing window replace one another, so a
+        // burst of polls cannot flood the chart with near-duplicate points.
         if (last !== undefined && now - last.t < MIN_SAMPLE_GAP_MS) {
           const samples = state.samples.slice(0, -1)
           samples.push({ t: now, v: value })
@@ -1116,10 +1236,13 @@ function BalanceWidget(props) {
   drawRef.current = () => {
     const canvas = canvasRef.current
     if (canvas === null || collapsed) return
-    const width = 214
-    const height = 42
+    // Measure instead of hardcoding: the compact card sizes the chart with CSS.
+    const width = canvas.clientWidth || 150
+    const height = canvas.clientHeight || 34
     const phase = reduced ? 1 : ((performance.now() % 1500) / 1500)
-    drawSpark(canvas, samples, width, height, hover, phase, scale, ramp.line, reduced)
+    // History can hold hundreds of samples; draw only what fits at a legible
+    // density — the ghost trail is about shape, not about every point.
+    drawSpark(canvas, thinSamples(samples, width), width, height, hover, phase, scale, ramp.line, reduced)
   }
 
   useEffect(() => {
@@ -1127,32 +1250,46 @@ function BalanceWidget(props) {
     let frame = 0
     const tick = () => {
       drawRef.current()
-      // Animate continuously only while a pulse/glow is live; otherwise redraw
-      // on a slow cadence so an idle widget is not a permanent rAF load.
-      frame = window.setTimeout(tick, pulse > 0 || spinning ? 16 : 220)
+      // The chart is static between samples: a slow cadence keeps the idle
+      // widget off the compositor instead of burning a frame every 16 ms.
+      frame = window.setTimeout(tick, pulse > 0 ? 32 : 400)
     }
     tick()
     return () => window.clearTimeout(frame)
-  }, [collapsed, pulse, spinning, samples, hover, scale, ramp.line, reduced])
+  }, [collapsed, pulse, samples, hover, scale, ramp.line, reduced])
 
-  // ---- sparkline hover ----------------------------------------------------
+  // ---- hover readout ------------------------------------------------------
 
-  const onSparkMove = useCallback((event) => {
+  /**
+   * Point the readout at the sample nearest a client x/y.
+   *
+   * @param {number} clientX - pointer x in client coordinates.
+   * @param {number} clientY - pointer y in client coordinates.
+   * @returns {boolean} true when the pointer is inside the chart's box.
+   */
+  const pointerToSample = useCallback((clientX, clientY) => {
     const canvas = canvasRef.current
-    if (canvas === null || samples.length < 2) return
+    if (canvas === null) return false
     const rect = canvas.getBoundingClientRect()
-    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1)
+    const inside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+    if (!inside || samples.length < 2) return false
+    const ratio = clamp((clientX - rect.left) / Math.max(1, rect.width), 0, 1)
     setHover(Math.round(ratio * (samples.length - 1)))
+    return true
   }, [samples.length])
 
-  const onSparkLeave = useCallback(() => setHover(-1), [])
+  const onCardMove = useCallback((event) => {
+    if (!pointerToSample(event.clientX, event.clientY)) setHover(-1)
+  }, [pointerToSample])
+
+  const onCardLeave = useCallback(() => {
+    setHover(-1)
+    setHint(null)
+  }, [])
 
   // ---- derived display ----------------------------------------------------
 
   const runway = runwayEstimate(samples, current, Date.now())
-  const sessionSpent = current !== undefined && Number.isFinite(store.startBalance)
-    ? store.startBalance - current
-    : undefined
   const dotState = status === 'ready' ? (payload?.isAvailable === false ? 'bad' : 'ok') : status === 'stale' ? 'stale' : 'bad'
   const hovered = hover >= 0 && hover < samples.length ? samples[hover] : null
   const tipOnLeft = (position.x ?? 0) > window.innerWidth / 2
@@ -1213,17 +1350,21 @@ function BalanceWidget(props) {
         key: 'collapse',
         type: 'button',
         className: 'dsb-icon dsb-collapse',
-        title: collapsed ? '展开余额卡片' : '收起为小胶囊',
         'aria-label': collapsed ? '展开余额卡片' : '收起为小胶囊',
+        onPointerEnter: () => setHint(collapsed ? '展开余额卡片' : '收起为小胶囊'),
+        onPointerLeave: () => setHint(null),
         onClick: () => setCollapsed((value) => !value),
       }, collapsed ? '▴' : '▾'),
       h('button', {
         key: 'refresh',
         type: 'button',
         className: 'dsb-icon',
-        title: '立即刷新余额',
         'aria-label': '立即刷新余额',
         'data-spinning': status === 'loading' ? 'true' : 'false',
+        onPointerEnter: () => setHint(payload?.fetchedAt
+          ? `刷新余额 · 上次成功 ${clockTime(payload.fetchedAt)}`
+          : '刷新余额'),
+        onPointerLeave: () => setHint(null),
         onClick: () => {
           setStatus('loading')
           void refresh()
@@ -1242,8 +1383,9 @@ function BalanceWidget(props) {
       onPointerMove,
       onPointerUp: endDrag,
       onPointerCancel: endDrag,
-      title: current === undefined ? 'DeepSeek 余额' : `${currency} ${amountText}${isLow ? '（偏低）' : ''}`,
-    }, h('div', { ref: cardRef, className: 'dsb-card dsb-pill', style: cardStyle }, [
+      onPointerLeave: onCardLeave,
+      'aria-label': 'DeepSeek 余额挂件',
+    }, h('div', { className: 'dsb-card dsb-pill', style: cardStyle }, [
       h('span', { key: 'dot', className: 'dsb-dot', 'data-state': dotState }),
       h('span', { key: 'reels', className: 'dsb-reels' }, reels),
       h('span', { key: 'cur', className: 'dsb-currency' }, currency),
@@ -1251,8 +1393,9 @@ function BalanceWidget(props) {
         key: 'expand',
         type: 'button',
         className: 'dsb-icon dsb-collapse',
-        title: '展开余额卡片',
         'aria-label': '展开余额卡片',
+        onPointerEnter: () => setHint('展开余额卡片'),
+        onPointerLeave: () => setHint(null),
         onClick: () => setCollapsed(false),
       }, '▴'),
     ]))
@@ -1260,47 +1403,75 @@ function BalanceWidget(props) {
 
   const cardClass = `dsb-card${shake > 0 ? ' dsb-shake' : ''}${pulse > 0 ? ' dsb-pulse' : ''}`
 
-  const meta = h('div', { className: 'dsb-meta' }, [
-    sessionSpent !== undefined
-      ? h('span', { key: 'spent', className: 'dsb-meta-item' }, [
-          h('span', { key: 'k' }, '本次 '),
-          h('span', {
-            key: 'v',
-            className: 'dsb-meta-value',
-            style: sessionSpent > 0 ? { color: 'var(--dsb-heat)' } : undefined,
-          }, sessionSpent > 0 ? `-${money(sessionSpent, currency)}` : `${money(0, currency)}`),
-        ])
-      : null,
-    runway !== null
-      ? h('span', { key: 'runway', className: 'dsb-meta-item', title: `按最近观测的消耗速率 ¥${runway.ratePerHour.toFixed(4)}/小时 估算` }, [
-          h('span', { key: 'k' }, '还能撑 '),
-          h('span', { key: 'v', className: 'dsb-meta-value' }, formatRunway(runway) ?? '—'),
-        ])
-      : null,
-    h('span', { key: 'time', className: 'dsb-meta-time', title: payload?.fetchedAt ? clockTime(payload.fetchedAt) : '' },
-      status === 'ready' ? relativeTime(Date.now() - (payload?.fetchedAt ?? Date.now())) : status === 'stale' ? '数据滞后' : '离线'),
+  // The chart is the card's background layer, so the digits sit on top of it
+  // instead of being pushed around by it.
+  const backdrop = h('div', { key: 'backdrop', className: 'dsb-backdrop' }, [
+    h('canvas', {
+      key: 'spark',
+      ref: canvasRef,
+      className: 'dsb-spark',
+      'aria-label': '余额变化折线',
+    }),
+    h('div', { key: 'scrim', className: 'dsb-scrim' }),
   ])
 
-  const tip = hovered === null ? null : h('div', {
-    className: 'dsb-tip',
-    style: {
-      [tipOnLeft ? 'right' : 'left']: '10px',
-      [tipOnTop ? 'top' : 'bottom']: 'calc(100% - 6px)',
-    },
-  }, [
-    h('div', { key: 'v', className: 'dsb-tip-row' }, [
-      h('span', { key: 'k', className: 'dsb-tip-key' }, '余额'),
-      h('span', { key: 'x', className: 'dsb-tip-val' }, `${currency} ${formatAmount(hovered.v)}`),
-    ]),
-    h('div', { key: 't', className: 'dsb-tip-row' }, [
-      h('span', { key: 'k', className: 'dsb-tip-key' }, '时间'),
-      h('span', { key: 'x', className: 'dsb-tip-val' }, clockTime(hovered.t)),
-    ]),
-    hover > 0 ? h('div', { key: 'd', className: 'dsb-tip-row' }, [
-      h('span', { key: 'k', className: 'dsb-tip-key' }, '较上一点'),
-      h('span', { key: 'x', className: 'dsb-tip-val' }, `${(hovered.v - samples[hover - 1].v) >= 0 ? '+' : ''}${(hovered.v - samples[hover - 1].v).toFixed(4)}`),
-    ]) : null,
+  const foot = h('div', { className: 'dsb-foot' }, [
+    runway !== null
+      ? h('span', {
+        key: 'runway',
+        className: 'dsb-foot-item',
+        onPointerEnter: () => setHint(`按最近观测的消耗速率 ¥${runway.ratePerHour.toFixed(4)}/小时 估算`),
+        onPointerLeave: () => setHint(null),
+      }, [
+        h('span', { key: 'k' }, '还能撑'),
+        h('span', { key: 'v', className: 'dsb-foot-value' }, formatRunway(runway) ?? '—'),
+      ])
+      : h('span', { key: 'idle', className: 'dsb-foot-item' }, '采样中…'),
+    h('span', {
+      key: 'time',
+      className: 'dsb-foot-time',
+      onPointerEnter: () => setHint(payload?.fetchedAt
+        ? `上次成功读取：${clockTime(payload.fetchedAt)}`
+        : '还没有成功读过余额'),
+      onPointerLeave: () => setHint(null),
+    }, status === 'ready'
+      ? relativeTime(Date.now() - (payload?.fetchedAt ?? Date.now()))
+      : status === 'stale' ? '数据滞后' : '离线'),
   ])
+
+  // Over the chart the footer becomes a readout of the pointed-at sample, in
+  // place and at a fixed height, so nothing above it moves.
+  const readout = hovered === null
+    ? foot
+    : h('div', { className: 'dsb-readout' }, [
+      h('span', { key: 'v', className: 'dsb-readout-value' }, formatAmount(hovered.v)),
+      h('span', { key: 't' }, clockTime(hovered.t)),
+      hover > 0
+        ? h('span', { key: 'd', className: 'dsb-readout-delta' },
+          `${hovered.v - samples[hover - 1].v >= 0 ? '+' : ''}${(hovered.v - samples[hover - 1].v).toFixed(2)}`)
+        : null,
+    ])
+
+  const content = h('div', { key: 'content', className: 'dsb-content' }, [
+    head,
+    h('div', { key: 'value', className: 'dsb-value' }, [
+      h('span', { key: 'reels', className: 'dsb-reels' }, reels),
+      h('span', { key: 'cur', className: 'dsb-currency' }, currency),
+      delta !== 0 && status === 'ready'
+        ? h('span', { key: 'delta', className: 'dsb-delta' }, `${delta > 0 ? '+' : ''}${delta.toFixed(2)}`)
+        : null,
+    ]),
+    message !== '' ? h('div', {
+      key: 'msg',
+      className: 'dsb-msg',
+      'data-error': status === 'error' ? 'true' : 'false',
+    }, message) : null,
+    readout,
+  ])
+
+  // A hint is a layer over the card, never a native title bubble: those are
+  // drawn by the browser, unstyleable, and land on the digits.
+  const hintLayer = hint === null ? null : h('div', { key: 'hint', className: 'dsb-hint' }, hint)
 
   return h('div', {
     ref: rootRef,
@@ -1308,36 +1479,16 @@ function BalanceWidget(props) {
     style: rootStyle,
     ...rootDataset,
     onPointerDown,
-    onPointerMove,
+    onPointerMove: (event) => {
+      onPointerMove(event)
+      onCardMove(event)
+    },
     onPointerUp: endDrag,
     onPointerCancel: endDrag,
+    onPointerLeave: onCardLeave,
     'aria-label': 'DeepSeek 账户余额挂件',
   }, [
-    h('div', { key: 'card', ref: cardRef, className: cardClass, style: cardStyle }, [
-      head,
-      h('div', { key: 'value', className: 'dsb-value' }, [
-        h('span', { key: 'reels', className: 'dsb-reels' }, reels),
-        h('span', { key: 'cur', className: 'dsb-currency' }, currency),
-        delta !== 0 && status === 'ready'
-          ? h('span', { key: 'delta', className: 'dsb-delta' }, `${delta > 0 ? '+' : ''}${delta.toFixed(4)}`)
-          : null,      ]),
-      h('canvas', {
-        key: 'spark',
-        ref: canvasRef,
-        className: 'dsb-spark',
-        style: { width: '214px', height: '42px' },
-        onMouseMove: onSparkMove,
-        onMouseLeave: onSparkLeave,
-        'aria-label': '余额变化折线',
-      }),
-      meta,
-      message !== '' ? h('div', {
-        key: 'msg',
-        className: 'dsb-msg',
-        'data-error': status === 'error' ? 'true' : 'false',
-      }, message) : null,
-      tip,
-    ]),
+    h('div', { key: 'card', className: cardClass, style: cardStyle }, [backdrop, content, hintLayer]),
   ])
 }
 

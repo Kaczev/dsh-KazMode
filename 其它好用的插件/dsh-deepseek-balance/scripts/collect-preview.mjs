@@ -86,9 +86,9 @@ try {
     record('the preview page reported its canvas pixels', false, 'no verdict arrived')
   } else {
     const scenes = verdict.scenes ?? []
-    record('every demo scene painted most of its canvas',
-      scenes.length === 5 && scenes.every((scene) => scene.width >= 200),
-      scenes.map((scene) => `${scene.index}:${scene.width}px`).join(' '))
+    record('every demo scene painted its whole canvas',
+      scenes.length === 5 && scenes.every((scene) => scene.width === scene.canvasWidth),
+      scenes.map((scene) => `${scene.index}:${scene.width}/${scene.canvasWidth}px`).join(' '))
     record('the live trace spans the full height (an area gradient, not a flat line)',
       scenes.every((scene) => scene.vertical === 'gradient'),
       scenes.map((scene) => scene.vertical).join(','))

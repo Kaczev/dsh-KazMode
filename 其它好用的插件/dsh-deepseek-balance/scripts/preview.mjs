@@ -40,7 +40,7 @@ function extractConst(name) {
   return match[0]
 }
 
-const constants = ['MIN_VIOLENCE_SCALE', 'BIG_MOVE_FRACTION', 'DIGIT_GLYPHS'].map(extractConst)
+const constants = ['MIN_VIOLENCE_SCALE', 'BIG_MOVE_FRACTION', 'MIN_PX_PER_SAMPLE', 'DIGIT_GLYPHS'].map(extractConst)
 
 const cssMatch = source.match(/const CSS = `([\s\S]*?)`\n/)
 if (cssMatch === null) throw new Error('preview: the CSS template literal moved')
@@ -51,6 +51,7 @@ const painterNames = [
   'function intensityOf(',
   'function colorRamp(',
   'function violenceScale(',
+  'function thinSamples(',
   'function drawSpark(',
 ]
 const painterSource = [...constants, ...painterNames.map((name) => extract(name))].join('\n\n')
@@ -130,7 +131,7 @@ const html = `<!doctype html>
   }
   h1 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
   p.lede { margin: 0 0 22px; font-size: 12px; color: #6b7280; }
-  .stage { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; }
+  .stage { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
   .demo { margin: 0; }
   .demo-cap { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
   .demo-cap b { font-size: 12px; font-weight: 600; }
@@ -158,7 +159,8 @@ function cardHtml(item, index, ramp, isLow) {
   const last = item.samples[item.samples.length - 1];
   const previous = item.samples[item.samples.length - 2];
   const delta = last.v - previous.v;
-  const reels = last.v.toFixed(4).split('').map((char) => (char >= '0' && char <= '9'
+  // Two decimals, exactly as the widget formats it.
+  const reels = last.v.toFixed(2).split('').map((char) => (char >= '0' && char <= '9'
     ? '<span class="dsb-reel" style="width:.62em"><span class="dsb-reel-inner">'
       + DIGITS.map((glyph) => '<span class="dsb-glyph">' + glyph + '</span>').join('') + '</span></span>'
     : '<span class="' + (char === '.' ? 'dsb-glyph-dot' : '') + '">' + char + '</span>')).join('');
@@ -168,20 +170,23 @@ function cardHtml(item, index, ramp, isLow) {
     + '<div class="dsb-root" data-low="' + (isLow ? 'true' : 'false') + '" style="left:0;top:0;position:relative">'
     + '<div class="dsb-card" data-scene="' + index + '" style="--dsb-heat:' + ramp.line
     + ';--dsb-heat-soft:' + ramp.soft + ';--dsb-heat-glow:' + ramp.glow + '">'
+    // The chart is the backdrop; the readout sits on top of it.
+    + '<div class="dsb-backdrop"><canvas class="dsb-spark" data-scene="' + index + '"></canvas>'
+    + '<div class="dsb-scrim"></div></div>'
+    + '<div class="dsb-content">'
     + '<div class="dsb-head"><span class="dsb-dot" data-state="' + (isLow ? 'bad' : 'ok') + '"></span>'
     + '<span class="dsb-label">' + (isLow ? 'DeepSeek 余额 · 偏低' : 'DeepSeek 余额') + '</span>'
     + '<div class="dsb-actions"><button class="dsb-icon dsb-collapse" type="button">▾</button>'
     + '<button class="dsb-icon" type="button">↻</button></div></div>'
     + '<div class="dsb-value"><span class="dsb-reels">' + reels + '</span>'
     + '<span class="dsb-currency">CNY</span>'
-    + (delta !== 0 ? '<span class="dsb-delta">' + (delta > 0 ? '+' : '') + delta.toFixed(4) + '</span>' : '')
+    + (delta !== 0 ? '<span class="dsb-delta">' + (delta > 0 ? '+' : '') + delta.toFixed(2) + '</span>' : '')
     + '</div>'
-    + '<canvas class="dsb-spark" width="214" height="42" data-scene="' + index + '" style="width:214px;height:42px"></canvas>'
-    + '<div class="dsb-meta">'
-    + '<span class="dsb-meta-item"><span>本次 </span><span class="dsb-meta-value">¥' + (index * 0.21 + 0.34).toFixed(3) + '</span></span>'
-    + '<span class="dsb-meta-item"><span>还能撑 </span><span class="dsb-meta-value">' + (index === 0 ? '—' : (3 + index * 1.7).toFixed(1) + ' 天') + '</span></span>'
-    + '<span class="dsb-meta-time">3 秒前</span></div>'
-    + '</div></div></figure>';
+    + '<div class="dsb-foot">'
+    + '<span class="dsb-foot-item"><span>还能撑</span><span class="dsb-foot-value">'
+    + (index === 0 ? '采样中…' : (3 + index * 1.7).toFixed(1) + ' 天') + '</span></span>'
+    + '<span class="dsb-foot-time">3 秒前</span></div>'
+    + '</div></div></div></figure>';
 }
 
 const stage = document.getElementById('stage');
@@ -197,9 +202,12 @@ const scenes = [];
 for (const canvas of document.querySelectorAll('canvas[data-scene]')) {
   const index = Number(canvas.dataset.scene);
   const samples = SCENES[index];
-  // Exactly what the widget does: normalise against the history's own moves.
+  // Exactly what the widget does: normalise against the history's own moves,
+  // and thin the series to the width this card actually has.
   const scale = violenceScale(samples);
-  drawSpark(canvas, samples, 214, 42, -1, 0.35, scale, '#4d6bfe', false);
+  const cssWidth = canvas.clientWidth || 150;
+  const cssHeight = canvas.clientHeight || 34;
+  drawSpark(canvas, thinSamples(samples, cssWidth), cssWidth, cssHeight, -1, 0.35, scale, '#4d6bfe', false);
 
   // Decode what was actually painted: a chart that silently draws nothing, or
   // draws in the wrong colour band, must fail loudly instead of looking fine.

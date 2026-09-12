@@ -18,7 +18,7 @@
 
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
-import { createServer } from 'node:http'
+import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -46,6 +46,8 @@ const record = (name, ok, detail) => {
 }
 
 let latest = null
+/** The app's access token, needed to keep its redirects usable. */
+let accessToken = ''
 
 /** Keep the newest observation; the verdict is made once, after the run. */
 function collect(payload) {
@@ -147,26 +149,55 @@ const server = createServer((req, res) => {
   // Everything else is the real app, with the observer prepended.
   const chunks = []
   req.on('data', (chunk) => chunks.push(chunk))
-  req.on('end', async () => {
-    try {
-      const upstream = await fetch(`http://127.0.0.1:${port + 1}${req.url}`, {
-        method: req.method,
-        headers: { ...req.headers, host: `127.0.0.1:${port + 1}` },
-        body: ['GET', 'HEAD'].includes(req.method ?? 'GET') ? undefined : Buffer.concat(chunks),
-        redirect: 'manual',
-      })
-      const headers = {}
-      upstream.headers.forEach((value, key) => {
-        if (!['content-encoding', 'content-length', 'transfer-encoding', 'connection'].includes(key)) headers[key] = value
-      })
-      let body = Buffer.from(await upstream.arrayBuffer())
-      if ((headers['content-type'] ?? '').includes('text/html')) {
-        body = Buffer.from(body.toString('utf8').replace('<head>', `<head>${OBSERVER}`))
+  req.on('end', () => {
+    const body = ['GET', 'HEAD'].includes(req.method ?? 'GET') ? undefined : Buffer.concat(chunks)
+    // A raw http request, not fetch: fetch would follow the app's own redirect
+    // and drop the access token that lives in the query string.
+    const upstream = httpRequest({
+      host: '127.0.0.1',
+      port: port + 1,
+      method: req.method,
+      path: req.url,
+      headers: { ...req.headers, host: `127.0.0.1:${port + 1}` },
+    }, (upstreamRes) => {
+      const headers = { ...upstreamRes.headers }
+      // A redirect must carry a *single* valid token: appending one to a
+      // Location that already has one produces `?token=&token=`, and the app
+      // answers 401 — so replace rather than append.
+      const location = headers.location
+      if (location !== undefined) {
+        const [beforeHash, hash] = location.split('#')
+        const [path, query = ''] = beforeHash.split('?')
+        const params = new URLSearchParams(query)
+        params.set('token', accessToken)
+        headers.location = `${path}?${params.toString()}${hash === undefined ? '' : `#${hash}`}`
       }
-      res.writeHead(upstream.status, headers).end(body)
-    } catch (error) {
-      res.writeHead(502).end(String(error))
-    }
+      const isHtml = String(headers['content-type'] ?? '').includes('text/html')
+      if (!isHtml) {
+        res.writeHead(upstreamRes.statusCode ?? 502, headers)
+        upstreamRes.pipe(res)
+        return
+      }
+      // HTML: buffer it so the observer script can be injected. Match the head
+      // tag with attributes, not just the bare `<head>`, or the injection
+      // silently does nothing.
+      const parts = []
+      upstreamRes.on('data', (chunk) => parts.push(chunk))
+      upstreamRes.on('end', () => {
+        delete headers['content-length']
+        const original = Buffer.concat(parts).toString('utf8')
+        const injected = original.replace(/<head([^>]*)>/i, `<head$1>${OBSERVER}`)
+        if (injected === original) {
+          console.error(`observe-probe: could not inject the observer into ${original.length} B of HTML`)
+        }
+        res.writeHead(upstreamRes.statusCode ?? 502, headers).end(injected)
+      })
+    })
+    upstream.on('error', () => {
+      res.writeHead(502).end('proxy error')
+    })
+    if (body !== undefined) upstream.write(body)
+    upstream.end()
   })
 })
 
@@ -196,6 +227,7 @@ try {
     else await sleep(400)
   }
   if (token === null) throw new Error('dsh web never printed a URL')
+  accessToken = token
 
   console.log(`observe-probe: app on ${port + 1}, observer proxy on ${port}`)
 

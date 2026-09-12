@@ -16,7 +16,7 @@
   - 子代理：没有默认黑名单；每个子代理的黑名单由主代理派发时写进安排，缺省 = 不屏蔽。
 - **记忆（`ka-whale-memory`）**：文件式、双作用域（global / local）、两类（`context` 内容记忆 / `paths` 路径记忆），**一个记忆一个 JSON**；BM25 检索（中英文分词）；六工具；`name` 就是文件名且全局唯一（跨种类、跨库都不允许重名）。
 - **上下文（`kaz-context-policy`）**：`context_search`（在会话原始记录里检索，含已被压缩掉的部分；`companion` 可查别的 agent 的记录）、`context_read`（按 seq 读回原文）、`context_compress`（**框选**：`from_seq` / `to_seq` 两端必填，`keep_recent` 决定尾部保留带）；上下文占用达到 50% 时注入压缩提醒 `[ka-context-policy compression-hint]`。
-- **工作流（`ka-whale-workflow`）**：轻量阶段机 `idle ⇄ arrange_agent` + 四工具 `write-arrangement` / `get-arrangement` / `ka_sub_whale` / `whale_report`；安排（arrangement）就是派发的账本（`persona` / `blacklist` / `task` / `fork`，外加程序回填的 `id` / `status` / `summary`）；自带 `kaz-fork` provider，支持"fork 主代理或某个存活子代理的历史"起步。
+- **工作流（`ka-whale-workflow`）**：轻量阶段机 `idle ⇄ arrange_agent` + 四工具 `write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`；安排（arrangement）就是派发的账本（`persona` / `blacklist` / `task` / `fork`，外加程序回填的 `id` / `status` / `summary`）；自带 `kaz-fork` provider，支持"fork 主代理或某个存活子代理的历史"起步。
 - **工具面与官方标准预设对齐**，只靠黑名单控制角色可见性（见 §三「刻意不挂」）。
 - **无 UI、无模型采样参数覆盖**：没有面板、开关、提示音、轮次显示；开关就是「选不选这个预设」。
 - **推荐思考强度 high 及以上**，low 容易冒出 "let me" 思维链。
@@ -97,7 +97,9 @@ kaz/                              # 发布源（开发机上 =junction→ 主区
 **角色工具面（黑名单之外剩下什么就是什么）**：
 
 - **主代理**看不到：`memory_save` / `memory_update` / `memory_forget`。
-- **记忆管家**看不到：`pwsh`、`bash`、`write`、`edit`、`todo_write`、`ask_user_question`、`web_search`、`web_fetch`、`job_output` / `job_list` / `job_kill`、`skill`、`present`、`list_agents`、`send_message`、`interrupt_agent`、`ka_sub_whale`、`whale_report`、`write-arrangement`、`get-arrangement`。
+- **记忆管家**看不到：`pwsh`、`write`、`edit`、`todo_write`、`ask_user_question`、`web_search`、`web_fetch`、`job_output` / `job_list` / `job_kill`、`skill`、`present`、`send_message`、`interrupt_agent`、`ka_sub_whale`、`whale_report`、`write_arrangement`。
+  - `bash` 不在这份名单里：Windows 上它**根本没挂**（组合里刻意不挂 `tool-bash`），所以谈不上屏蔽——`MEMORY_MAINTAINER_BLACKLIST` 里没有它，别照抄成"管家看不到 bash"。
+  - 注意**保留集挡不住黑名单也挡不掉**：`list_agents` 与 `get_arrangement` 属于保留集（`RESERVED_TOOLS`），即使写进黑名单也照样可见——管家 persona 的「工具速览」里就明确写了怎么用 `get_arrangement`。管家的**写**工具面则是保留集加了记忆写三件（`MEMORY_MAINTAINER_RESERVED`）。
 - **子代理**：无默认黑名单，由主代理派发时写。
 
 **刻意不挂的行**（不是故障）：`tool-bash`（Windows 用 pwsh）、`command-goal` + `tool-goal`、官方 `tool-subagent` / `tool-subagent-fork`（由 `ka_sub_whale` + `kaz-fork` 取代）、`plan-mode`（`/plan`）、`tool-workflow` + `workflow-worker-thread`、`tool-ralph`。
@@ -224,7 +226,8 @@ dsh-KazMode/
   - 工具面与官方 `standard` 预设对齐，只靠黑名单控制角色可见性：主代理看不到记忆写三件；记忆管家有一份点名黑名单；子代理黑名单由主代理派发时写。
   - 记忆改为文件式双作用域（global / local × context / paths），一个记忆一个 JSON，`name` 全局唯一且即文件名；BM25 检索（Intl.Segmenter 中英文分词）。
   - 上下文三件：`context_search`（含 `companion` 跨 agent）、`context_read`、`context_compress`（只做框选：`from_seq` / `to_seq` 两端必填，`keep_recent` 管尾部保留带）；≥50% 注入压缩提醒。
-  - 工作流：`idle` / `arrange_agent` 阶段机 + `write-arrangement` / `get-arrangement` / `ka_sub_whale` / `whale_report`；安排文件在 `<项目>\.dsh\storages\arrangements\`；自带 `kaz-fork` provider（可 fork 主代理或某个存活子代理的历史）。
+  - 工作流：`idle` / `arrange_agent` 阶段机 + `write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`；安排文件在 `<项目>\.dsh\storages\arrangements\`；自带 `kaz-fork` provider（可 fork 主代理或某个存活子代理的历史）。
+  - **工具名统一用下划线**（2026-09-12）：`write-arrangement` / `get-arrangement` 改名为 `write_arrangement` / `get_arrangement`，与官方口径一致——**模型要调用的工具名用下划线**（如 `list_agents`、`ask_user_question`），**包名 / 插件行 id / 文件名 / 模块子路径用连字符**（如 `@deepseek-ai/dsh-tool-subagent-control`、行 id `tool-subagent-list-agents`、`lib/types/list-agents.js`）。改名要跟重启同步做：跑着的会话系统提示里记的是旧名，改名而不重启会让那一轮调用失败。
   - 刻意不挂：`tool-bash`、goal 两行、官方 `tool-subagent` / `tool-subagent-fork`、`plan-mode`、`tool-workflow` / `workflow-worker-thread`、`tool-ralph`。
   - **新增 `VERSION` 文件**（一行 `8.0.0`）：预设自己的版本号，即 `kaz/VERSION`，随镜像进 live 预设目录（`<home>\.agent-presets\kaz\VERSION`）。**手工维护**——发版时改这一行；安装程序只镜像、不生成、不校验。`preset.yml` 只认 `name` / `description` / `order` 三个字段，所以版本号不写进去。
   - **安装程序的 `@deepseek-ai` junction 目标改为优先共享包集**（真 bug 修复）：原先指向 `<home>\profiles\<profile>\node_modules\@deepseek-ai`，那里只有该 profile 装过的 214 个包；而 Kaz 8.0 的组合需要 `@deepseek-ai/dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `@deepseek-ai/dsh-tool-ask-user`（组合里的一行），两者只存在于共享层 `<home>\profiles\node_modules\@deepseek-ai`（244 个包）。预设先查自己的 `node_modules`，链接会截断向上查找，于是这两行解析失败、预设挂不起来。现在优先共享层、找不到运行时包才回退 profile 层。

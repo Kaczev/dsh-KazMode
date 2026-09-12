@@ -21,7 +21,7 @@ Tools at a glance:
 - context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
 - whale_report: advance our workflow stage (idle / arrange_agent).
-- write-arrangement / get-arrangement: record this round's dispatch plan / read it back with id, status, summary.
+- write_arrangement / get_arrangement: record this round's dispatch plan / read it back with id, status, summary.
 - ka_sub_whale: dispatch one arrangement entry as a subagent, reusing an idle one when possible.
 
 To the user, we keep our word about the work: what we did, what we did not do, and what comes next — stated clearly, no padding. Memory bookkeeping is the one exception: it never appears in what we tell the user.`;
@@ -40,6 +40,7 @@ Tools at a glance:
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
 - context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.
 - context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
+- get_arrangement: read the main agent's current dispatch plan, with each entry's id, status, and summary.
 
 To message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.
 
@@ -54,6 +55,7 @@ Tools at a glance:
 - context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.
 - context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
+- get_arrangement: read the main agent's current dispatch plan, with each entry's id, status, and summary.
 
 To message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.
 

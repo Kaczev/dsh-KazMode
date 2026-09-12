@@ -69,7 +69,7 @@ function loadBundle({ exposePainter = false } = {}) {
   if (exposePainter) {
     source = source.replace('\t\treturn module.exports;',
       '\t\texports.__drawSpark = drawSpark;\n'
-      + '\t\texports.__probe = { clamp, intensityOf, colorRamp, violenceScale, formatAmount, formatRunway, runwayEstimate, glyphPlan };\n'
+      + '\t\texports.__probe = { clamp, intensityOf, colorRamp, violenceScale, formatAmount, formatRunway, runwayEstimate, glyphPlan, thinSamples, reelPlan, reelSteps };\n'
       + '\t\treturn module.exports;')
     if (!source.includes('__drawSpark')) throw new Error('painter exposure failed — the bundle tail changed')
   }
@@ -135,6 +135,11 @@ const { renderToStaticMarkup } = require('react-dom/server')
 const loadingMarkup = renderToStaticMarkup(React.createElement(registered.Component, {}))
 record('renders the card shell', loadingMarkup.includes('dsb-card') && loadingMarkup.includes('dsb-spark'),
   `${loadingMarkup.length} bytes`)
+// A native title bubble is the browser's black box: it covers the digits and
+// cannot be styled, so the widget must never render one.
+record('renders no native title attributes',
+  !/\stitle=/.test(loadingMarkup),
+  'hints are drawn as our own layer')
 record('renders the empty-amount placeholder before data arrives',
   loadingMarkup.includes('dsb-reel') || loadingMarkup.includes('dsb-value'),
   'the reels appear once the first balance lands (verified in the live GUI)')
@@ -149,9 +154,51 @@ record('server render starts in the loading state', seededMarkup.includes('正�
 const pure = loadBundle({ exposePainter: true }).exports.__probe
 record('the probe surface is exposed', pure !== undefined && typeof pure.colorRamp === 'function')
 
-record('amount formatting keeps cents readable',
-  pure.formatAmount(47.05) === '47.0500' && pure.formatAmount(1234.5) === '1234.50',
-  `${pure.formatAmount(47.05)} / ${pure.formatAmount(1234.5)}`)
+record('amount formatting is always two decimals',
+  pure.formatAmount(47.05) === '47.05' && pure.formatAmount(1234.5) === '1234.50'
+    && pure.formatAmount(9) === '9.00' && pure.formatAmount(Number.NaN) === '—',
+  `${pure.formatAmount(47.05)} / ${pure.formatAmount(1234.5)} / ${pure.formatAmount(9)}`)
+
+const longSeries = Array.from({ length: 600 }, (_, index) => ({ t: index * 1000, v: 50 - index * 0.01 }))
+const thinned = pure.thinSamples(longSeries, 150)
+record('a long history is thinned to what the canvas can show',
+  thinned.length === 31 && thinned[thinned.length - 1].v === longSeries[longSeries.length - 1].v,
+  `${longSeries.length} samples → ${thinned.length} points at 150 px (newest kept)`)
+record('a short history is drawn as-is', pure.thinSamples(longSeries.slice(0, 12), 150).length === 12,
+  '12 samples → 12 points')
+
+// The slot machine used to show 0 after the card was folded into its pill and
+// reopened: the remounted strips were never positioned, so every reel sat at
+// translateY(0) — the glyph 0 — while the hook believed it had already drawn.
+const digitsOf = (text) => pure.glyphPlan(text).filter((item) => item.kind === 'reel').map((item) => item.value)
+const amount = digitsOf('44.70')
+record('a remount snaps instead of trusting stale strips',
+  pure.reelPlan({
+    previousText: '44.70', previousDigits: amount, text: '44.70',
+    nextDigits: amount, mounted: amount.map(() => false), animate: true,
+  }).snap === true,
+  'six unmounted strips must repaint, not travel')
+record('a live change still spins',
+  pure.reelPlan({
+    previousText: '44.70', previousDigits: amount, text: '44.71',
+    nextDigits: digitsOf('44.71'), mounted: amount.map(() => true), animate: true,
+  }).snap === false,
+  'same shape, mounted strips → the last reel travels one step')
+record('a digit-count change snaps',
+  pure.reelPlan({
+    previousText: '44.70', previousDigits: amount, text: '104.70',
+    nextDigits: digitsOf('104.70'), mounted: amount.map(() => true), animate: true,
+  }).snap === true,
+  'reels cannot keep identity when the amount grows a digit')
+record('reduced motion never animates',
+  pure.reelPlan({
+    previousText: '44.70', previousDigits: amount, text: '44.71',
+    nextDigits: digitsOf('44.71'), mounted: amount.map(() => true), animate: false,
+  }).snap === true,
+  'prefers-reduced-motion must be honoured')
+record('reel travel takes the short way round the loop',
+  pure.reelSteps(9, 0) === 1 && pure.reelSteps(0, 9) === -1 && pure.reelSteps(3, 3) === 0,
+  `9→0 is ${pure.reelSteps(9, 0)}, 0→9 is ${pure.reelSteps(0, 9)}`)
 
 const plan = pure.glyphPlan('47.0500')
 record('glyph plan splits digits from separators',

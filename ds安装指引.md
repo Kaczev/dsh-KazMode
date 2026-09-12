@@ -157,7 +157,7 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文三件：`context_search` / `context_read` / `context_compress`
-  - 工作流四件：`write-arrangement` / `get-arrangement` / `ka_sub_whale` / `whale_report`
+  - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`
   - 子代理控制三件：`list_agents` / `send_message` / `interrupt_agent`
 - **主代理看不到记忆写三件**（`memory_save` / `memory_update` / `memory_forget`）——这是设计（写记忆交给记忆管家）；**也看不到** `bash`、`get_goal` / `create_goal` / `update_goal`、官方 `subagent` / `subagent_fork`、`plan_mode`、`workflow`、`ralph`（刻意不挂，不是故障）。
 - **注入**：用户每发一条消息会看到 `[ka-whale-workflow idle]` 阶段注入（上下文注入，不是系统提示段）；上下文占用 ≥50% 时会出现 `[ka-context-policy compression-hint]` 提醒。
