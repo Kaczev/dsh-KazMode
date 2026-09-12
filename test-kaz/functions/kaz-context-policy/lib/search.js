@@ -35,7 +35,7 @@ function renderHits(_args, value) {
   const header = value.total > value.hits.length
     ? `showing ${value.hits.length} of ${value.total} matches`
     : `${value.total} match(es)`;
-  const lines = value.hits.map((hit) => `[${hit.from} #${hit.seq} ${hit.label}] ${hit.snippet}`);
+  const lines = value.hits.map((hit, index) => `${index + 1}) [${hit.from} #${hit.seq} ${hit.label}] ${hit.snippet}`);
   return renderText([header, ...lines].join("\n\n"));
 }
 

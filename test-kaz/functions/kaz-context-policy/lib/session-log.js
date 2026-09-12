@@ -120,9 +120,11 @@ export function scoreEntry(text, needle, terms) {
   return { score: weight, exact: false, hits };
 }
 
-/** 取命中处附近的片段（优先原句，其次检索词；都没有就取开头）。 */
+/** 取命中处附近的片段（优先原句，其次检索词；都没有就取开头）。
+ *  返回前压平空白：每条命中恰好一行，避免片段里的换行与引用行被误读成多条命中。 */
 export function snippetOf(text, needle, radius = 200) {
-  const lower = text.toLowerCase();
+  const flat = String(text).replace(/\s+/g, " ").trim();
+  const lower = flat.toLowerCase();
   const exact = String(needle ?? "").trim().toLowerCase();
   let idx = exact.length > 0 ? lower.indexOf(exact) : -1;
   if (idx < 0) {
@@ -131,10 +133,10 @@ export function snippetOf(text, needle, radius = 200) {
       if (idx >= 0) break;
     }
   }
-  if (idx < 0) return text.slice(0, radius * 2);
+  if (idx < 0) return flat.slice(0, radius * 2);
   const start = Math.max(0, idx - radius);
-  const end = Math.min(text.length, idx + radius);
-  return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+  const end = Math.min(flat.length, idx + radius);
+  return `${start > 0 ? "…" : ""}${flat.slice(start, end)}${end < flat.length ? "…" : ""}`;
 }
 
 /**
