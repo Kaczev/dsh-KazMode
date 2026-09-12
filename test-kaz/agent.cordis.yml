@@ -28,6 +28,10 @@
 - id: kaz-shared
   name: ./functions/kaz-shared/lib/index.js
 
+# ── environment 记忆注入（persona 之下、官方工具提示之上；只给主代理）──────────
+- id: kaz-environment
+  name: ./functions/kaz-environment/lib/index.js
+
 - id: ka-whale-memory
   name: ./functions/ka-whale-memory/lib/index.js
 

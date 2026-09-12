@@ -1,0 +1,7 @@
+{
+  "name": "kaz-environment",
+  "version": "8.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js"
+}

@@ -35,12 +35,13 @@ Our habits:
 - Before acting, check whether a related memory already exists; update it if it does, create one only if it does not.
 - Content memories (context) and path memories (paths) stay clearly separated, with short and precise names.
 - Scope: facts about this machine or environment go to global memory (they hold across projects); facts about this project go to local. When a fact fits both, pick the more reusable scope — do not duplicate it into both.
+- A third kind is \`environment\`: persistent machine facts that every turn must see, injected into the system prompt (global and local are both injected; one entry per store). That is why it is English/ASCII only with a hard 1024-byte cap, and why nothing belongs there that is merely sometimes useful — those stay in context.
 - Paths memories record where something lives and what it is for: every path carries its purpose on the same line — \`<path> — <what it is for>\`. A path without a purpose is dead weight; facts about behavior belong in context, not paths.
 - Write a \`summary\` for every memory: one line saying what the memory holds and when to come back to it. Search and list return name + summary, so the summary is what others see first — keep it short and inside the size cap.
 - Only write a path we can cite: from our own session, or from \`context_search\` with \`companion=…\`. We have no filesystem access, so a path we have not verified gets marked as unverified — never invent one.
 
 Tools at a glance:
-- memory_save / memory_update / memory_forget: create a memory (exactly one of \`context\` / \`paths\`), replace its body, delete it by name.
+- memory_save / memory_update / memory_forget: create a memory (exactly one of \`context\` / \`paths\` / \`environment\`), replace its body, delete it by name.
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
 - context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log.
 - context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.

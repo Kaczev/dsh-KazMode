@@ -11,8 +11,9 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { scoreBM25 } from "./bm25.js";
-import { KINDS } from "./paths.js";
+import { DEFAULT_ENVIRONMENT_NAME, KINDS } from "./paths.js";
 import { findByName, listMemories, readMemoryFile, removeMemory, writeMemory } from "./store.js";
+import { readEnvironment, writeEnvironment } from "./environment-store.js";
 
 const ALL_LOCATIONS = ["global", "local"];
 
@@ -21,10 +22,12 @@ const ALL_LOCATIONS = ["global", "local"];
  * 一个英文字母 1 字节，所以同一套上限对中英混写都成立（英文能写更多字）。
  * 依据：summary 每次检索都会随结果返回（memory_search 默认 10 条、memory_list
  * 默认 16 条），所以它必须比正文紧得多；正文只在 memory_detail 打开那一条时才进上下文。
+ * environment 另有一个更紧的上限（1024）且必须纯英文：它会被 `kaz-environment`
+ * 注入**每一次**系统提示（persona 之下、官方工具提示之上），是常驻开销。
  * 超限一律**报错拒绝**，绝不静默截断——截断会让人以为整条存进去了。
  * 只对新写入生效：加限制之前存下的超额条目原样保留。
  */
-export const SIZE_LIMITS = Object.freeze({ name: 64, summary: 128, body: 4096 });
+export const SIZE_LIMITS = Object.freeze({ name: 64, summary: 128, body: 4096, environment: 1024 });
 
 const utf8 = new TextEncoder();
 
@@ -33,12 +36,24 @@ export function byteSize(value) {
   return utf8.encode(typeof value === "string" ? value : "").length;
 }
 
+/** environment 的**英文限制**：只允许 ASCII（0x20–0x7E 可打印字符 + 换行/制表）。
+ *  理由：它会被注入系统提示，且按设计只用英文写——出现任何非 ASCII 字符即拒绝。 */
+export function englishProblem(value) {
+  if (typeof value !== "string") return null;
+  const bad = [...new Set([...value].filter((ch) => ch.codePointAt(0) > 0x7e))].slice(0, 8).join("");
+  return bad.length === 0 ? null : `environment must be written in English (ASCII) only — remove these characters: ${bad}`;
+}
+
 /** 一条记忆的最终字段尺寸；@returns {string|null} 超限时的英文拒绝原因，合规返回 null。 */
 export function sizeProblem(fields) {
+  const byKind =
+    fields.bodyLabel === "environment"
+      ? ["environment", fields.body, SIZE_LIMITS.environment]
+      : [fields.bodyLabel ?? "body", fields.body, SIZE_LIMITS.body];
   const checks = [
     ["name", fields.name, SIZE_LIMITS.name],
     ["summary", fields.summary, SIZE_LIMITS.summary],
-    [fields.bodyLabel ?? "body", fields.body, SIZE_LIMITS.body],
+    byKind,
   ];
   for (const [label, value, limit] of checks) {
     const size = byteSize(value);
@@ -215,7 +230,19 @@ export function memoryDetailTool() {
       const name = String(args.name ?? "").trim();
       if (name.length === 0) return { found: false, body: "" };
       const matches = await findByName(name, cwd);
-      if (matches.length === 0) return { found: false, body: "" };
+      if (matches.length === 0) {
+        // environment 记忆不经记忆工具读取：它只由 kaz-environment 注入系统提示。
+        const environment = (await Promise.all(ALL_LOCATIONS.map((location) => readEnvironment(location, cwd))))
+          .filter((entry) => entry !== null)
+          .find((entry) => entry.name === name);
+        if (environment !== undefined) {
+          return {
+            found: false,
+            body: `failure: "${name}" is an environment memory (${environment.location}) — its content is injected into the system prompt every turn and is not readable through memory tools`,
+          };
+        }
+        return { found: false, body: "" };
+      }
       const body = await bodyOf(matches[0]);
       if (body === null) return { found: false, body: "" };
       return { found: true, body };
@@ -256,12 +283,13 @@ export function memorySaveTool() {
   return defineTool({
     name: "memory_save",
     description:
-      "Save a new memory as its own file. Provide exactly one of `context` (a content memory) or `paths` (a path memory). Names are unique across both kinds and both stores, so an existing name is rejected — use memory_update to replace its body. Size caps (UTF-8 bytes): name 64, summary 128, body 4096 — oversize input is rejected, so summarize rather than paste.",
+      "Save a new memory as its own file. Provide exactly one of `context` (a content memory), `paths` (a path memory) or `environment` (machine/environment facts injected into the system prompt every turn — English only, one per store). Names are unique across both kinds and both stores, so an existing name is rejected — use memory_update to replace its body. Size caps (UTF-8 bytes): name 64, summary 128, body 4096, environment 1024 — oversize input is rejected, so summarize rather than paste.",
     parameters: {
       location: { type: "string", required: true, enum: ["global", "local"], description: "Which store to write: global or local." },
-      name: { type: "string", required: true, description: "Memory name (also its file name); unique across all memories." },
-      context: { type: "string", description: "Content-memory body. Mutually exclusive with `paths`." },
-      paths: { type: "string", description: "Path-memory body. Mutually exclusive with `context`." },
+      name: { type: "string", required: true, description: "Memory name (also its file name); unique across all memories. For an environment memory use `environment`." },
+      context: { type: "string", description: "Content-memory body. Mutually exclusive with `paths` and `environment`." },
+      paths: { type: "string", description: "Path-memory body. Mutually exclusive with `context` and `environment`." },
+      environment: { type: "string", description: "Environment-memory body: machine/environment facts injected into the system prompt every turn. Must be English (ASCII only) and at most 1024 bytes. Mutually exclusive with `context` and `paths`; one per store." },
       summary: { type: "string", description: "Optional one-line summary; indexed by search. Keep it short: it comes back with every search hit." },
       keywords: { type: "array", items: { type: "string" }, description: "Optional keywords; indexed with extra weight by search." },
     },
@@ -272,10 +300,22 @@ export function memorySaveTool() {
       const name = String(args.name ?? "").trim();
       const hasContext = typeof args.context === "string" && args.context.length > 0;
       const hasPaths = typeof args.paths === "string" && args.paths.length > 0;
+      const hasEnvironment = typeof args.environment === "string" && args.environment.length > 0;
       if (location !== "global" && location !== "local") return fail("location must be global or local");
       if (name.length === 0) return fail("name must be a non-empty string");
-      if (hasContext && hasPaths) return fail("context and paths cannot both be given");
-      if (!hasContext && !hasPaths) return fail("give exactly one of context or paths");
+      const given = [hasContext, hasPaths, hasEnvironment].filter(Boolean).length;
+      if (given > 1) return fail("context, paths and environment are mutually exclusive — give exactly one");
+      if (given === 0) return fail("give exactly one of context, paths or environment");
+      if (hasEnvironment) {
+        const problem = englishProblem(args.environment) ?? sizeProblem({ name, body: args.environment, bodyLabel: "environment", summary: "" });
+        if (problem !== null) return fail(problem);
+        const current = await readEnvironment(location, cwd);
+        if (current !== null) {
+          return fail(`the ${location} environment memory already exists (name "${current.name}") — use memory_update to replace its body`);
+        }
+        await writeEnvironment(location, name, args.environment, cwd);
+        return ok(`saved ${location} environment "${name}"`);
+      }
       const kind = hasContext ? "context" : "paths";
       const body = hasContext ? args.context : args.paths;
       const problem = sizeProblem({
@@ -300,11 +340,12 @@ export function memoryUpdateTool() {
   return defineTool({
     name: "memory_update",
     description:
-      "Replace the body of an existing memory. Provide exactly one of `context` or `paths`, matching the memory's kind; its name, kind, and store stay unchanged. Size caps (UTF-8 bytes): summary 128, body 4096 — oversize input is rejected.",
+      "Replace the body of an existing memory. Provide exactly one of `context`, `paths` or `environment`, matching the memory's kind; its name, kind, and store stay unchanged. Size caps (UTF-8 bytes): summary 128, body 4096, environment 1024 — oversize input is rejected.",
     parameters: {
       name: { type: "string", required: true, description: "Exact memory name." },
-      context: { type: "string", description: "New body for a content memory. Mutually exclusive with `paths`." },
-      paths: { type: "string", description: "New body for a path memory. Mutually exclusive with `context`." },
+      context: { type: "string", description: "New body for a content memory. Mutually exclusive with `paths` and `environment`." },
+      paths: { type: "string", description: "New body for a path memory. Mutually exclusive with `context` and `environment`." },
+      environment: { type: "string", description: "New body for the environment memory (injected into the system prompt; English/ASCII only, at most 1024 bytes). Mutually exclusive with `context` and `paths`." },
       summary: { type: "string", description: "Optional new one-line summary; omit to keep the current one." },
       keywords: { type: "array", items: { type: "string" }, description: "Optional new keywords; omit to keep the current ones." },
     },
@@ -314,10 +355,25 @@ export function memoryUpdateTool() {
       const name = String(args.name ?? "").trim();
       const hasContext = typeof args.context === "string" && args.context.length > 0;
       const hasPaths = typeof args.paths === "string" && args.paths.length > 0;
+      const hasEnvironment = typeof args.environment === "string" && args.environment.length > 0;
       if (name.length === 0) return fail("name must be a non-empty string");
-      if (hasContext === hasPaths) return fail("give exactly one of context or paths");
-      const kind = hasContext ? "context" : "paths";
-      const body = hasContext ? args.context : args.paths;
+      const given = [hasContext, hasPaths, hasEnvironment].filter(Boolean).length;
+      if (given !== 1) return fail("give exactly one of context, paths or environment");
+      const kind = hasContext ? "context" : hasPaths ? "paths" : "environment";
+      const body = hasContext ? args.context : hasPaths ? args.paths : args.environment;
+      if (kind === "environment") {
+        const problem = englishProblem(body) ?? sizeProblem({ name, body, bodyLabel: "environment", summary: "" });
+        if (problem !== null) return fail(problem);
+        // environment 每个 location 只有一条：按 name 定位它存在哪个库，再原地替换。
+        const existing = (await Promise.all(ALL_LOCATIONS.map((location) => readEnvironment(location, cwd))))
+          .filter((entry) => entry !== null);
+        const hit = existing.find((entry) => entry.name === name);
+        if (hit === undefined) {
+          return fail(`no environment memory named "${name}" to update — create it with memory_save (kind environment)`);
+        }
+        await writeEnvironment(hit.location, name, body, cwd);
+        return ok(`updated ${hit.location} environment "${name}"`);
+      }
       const matches = await findByName(name, cwd);
       if (matches.length === 0) return fail(`no memory named "${name}" to update`);
       const memory = matches[0];
