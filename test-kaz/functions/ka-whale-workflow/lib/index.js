@@ -1,25 +1,22 @@
-// ka-whale-workflow —— 阶段机、注入与四工具的挂载点（《Kaz8.0设计.md》§3.9 / §五）。
+// ka-whale-workflow —— 阶段机、上下文注入与四工具的挂载点（《Kaz8.0设计.md》§3.9 / §五）。
 //
-// 注入：system-prompt 段 `ka-whale-workflow:stage`，内容由本插件在 assemble 钩子里按
-//       当前阶段重写（`[ka-whale-workflow <stage>]` + 正文；idle 可带"子代理现状"）。
-// 阶段：每个对话一份内存态（idle ⇄ arrange_agent，memory 由收尾保障触发）。
-// 回填：assemble 时扫描新的"子代理完成通知"，把 status / summary 写回安排文件。
+// 注入：阶段文本（`[ka-whale-workflow <stage>]` + 正文）走**上下文注入**——在每个 step 的
+//       `agent/pre-step` 钩子里，作为一条 plugin 消息（form: notice）追加进这一步的上下文；
+//       不是系统提示段。注入时机：每轮第一步、阶段发生变化、idle 的 "Subagents:" 块变化。
+// 阶段：每个对话一份内存态（idle ⇄ arrange_agent；memory 由收尾保障在下一轮开头触发）。
+// 回填：每个 step 扫描新的"子代理完成通知"，把 status / summary 写回安排文件。
 // 子代理看不到工作流四工具（§3.9）：注册表收紧 + 本次请求工具表过滤双通道。
 
 export const name = "ka-whale-workflow";
 
-export const inject = ["tools", "systemPrompt", "subagents"];
+export const inject = ["tools", "subagents"];
 
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
 import { registerKazForkProvider } from "./fork-provider.js";
 import { renderStageText, renderSubagentsBlock } from "./stages.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
-
-const WORKFLOW_SECTION = "ka-whale-workflow:stage";
-
-/** 段顺序：TOOL_GOAL(2400) 与 TOOL_WORKFLOW(2600) 之间。 */
-const WORKFLOW_ORDER = 2500;
 
 /** 只挂给主代理的四件（子代理必须看不到）。 */
 const MAIN_ONLY_TOOLS = ["write-arrangement", "get-arrangement", "ka_sub_whale", "whale_report"];
@@ -30,7 +27,14 @@ function createStore() {
   const stateFor = (sessionId) => {
     let state = sessions.get(sessionId);
     if (state === undefined) {
-      state = { stage: "idle", entries: [], loaded: false, scannedSeq: 0, lastBlock: "" };
+      state = {
+        stage: "idle",
+        entries: [],
+        loaded: false,
+        scannedSeq: 0,
+        lastBlock: "",
+        lastInjectedStage: "",
+      };
       sessions.set(sessionId, state);
     }
     return state;
@@ -77,14 +81,13 @@ export function apply(ctx) {
   // kaz-fork：预设自带的 fork provider，让"fork 源"可以是任意存活会话（不只派发者自己）。
   registerKazForkProvider(ctx, ctx.logger);
 
-  /** 回填完成通知 / 收尾保障 / 组装本轮的注入文本。 */
+  /** 回填新的完成通知，返回本对话的状态（session 不可用时返回 null）。 */
   const refresh = async (session) => {
     const sessionId = session?.id;
-    if (typeof sessionId !== "string" || sessionId.length === 0) return "";
+    if (typeof sessionId !== "string" || sessionId.length === 0) return null;
     const state = store.stateFor(sessionId);
     const events = typeof session.snapshotEvents === "function" ? session.snapshotEvents() : [];
     const lastSeq = events.length > 0 ? events[events.length - 1].seq : 0;
-    const turnEnded = events.length > 0 && events[events.length - 1].type === "turn/end";
 
     if (!state.loaded) {
       state.entries = await readArrangement(sessionId);
@@ -103,9 +106,23 @@ export function apply(ctx) {
       }
       state.scannedSeq = lastSeq;
     }
+    return state;
+  };
 
+  // 主代理：阶段文本作为一条 plugin 消息注入本步上下文（上下文注入，不是系统提示）。
+  ctx.on("agent/pre-step", async (payload, next) => {
+    const decision = await next();
+    if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
+    const agent = payload?.agent;
+    if (agent === undefined || agent === null || typeof agent !== "object") return decision;
+    if (isSubagentAgent(agent)) return decision;
+    const state = await refresh(agent.session);
+    if (state === null) return decision;
+
+    const turnStart = payload?.step === 1;
+    // 收尾保障：上一轮结束时安排里没有 memoryMaintainer，这一轮开头进入 memory 阶段。
     if (
-      turnEnded &&
+      turnStart &&
       state.stage === "idle" &&
       state.entries.length > 0 &&
       !state.entries.some((entry) => entry.persona === "memoryMaintainer")
@@ -114,45 +131,41 @@ export function apply(ctx) {
     }
 
     const block = state.stage === "idle" ? renderSubagentsBlock(state.entries) : "";
-    let blockToShow = "";
-    if (block.length > 0 && block !== state.lastBlock) {
-      blockToShow = block;
-      state.lastBlock = block;
-    }
-    return renderStageText(state.stage, blockToShow);
-  };
+    const blockChanged = block.length > 0 && block !== state.lastBlock;
+    const stageChanged = state.stage !== state.lastInjectedStage;
+    if (!turnStart && !stageChanged && !blockChanged) return decision;
+    if (blockChanged) state.lastBlock = block;
+    state.lastInjectedStage = state.stage;
 
-  ctx.on("system-prompt/assemble", async (assembly, context, next) => {
+    const text = renderStageText(state.stage, blockChanged ? block : "");
+    if (text.length === 0) return decision;
+    decision.messages.push(
+      createUserMessage({
+        content: [{ type: "text", text }],
+        source: {
+          kind: "plugin",
+          plugin: "ka-whale-workflow",
+          form: "notice",
+          summary: `stage:${state.stage}`,
+        },
+      }),
+    );
+    return decision;
+  });
+
+  // 子代理：没有阶段注入；工作流四工具在注册表与本次请求两个层面都挡住。
+  ctx.on("system-prompt/assemble", (assembly, context, next) => {
     const agent = context?.agent;
-    if (agent === undefined || agent === null) return next();
-    if (isSubagentAgent(agent)) {
-      if (!hidden.has(agent)) {
-        hidden.add(agent);
-        restrictOnce(agent, MAIN_ONLY_TOOLS, ctx.logger);
-      }
-      if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.tools)) {
-        assembly.tools = assembly.tools.filter((tool) => !MAIN_ONLY_TOOLS.includes(tool?.name));
-      }
-      return next();
+    if (agent === undefined || agent === null || !isSubagentAgent(agent)) return next();
+    if (!hidden.has(agent)) {
+      hidden.add(agent);
+      restrictOnce(agent, MAIN_ONLY_TOOLS, ctx.logger);
     }
-    const text = await refresh(agent.session);
-    if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.sections)) {
-      assembly.sections = assembly.sections.map((section) =>
-        section !== null && typeof section === "object" && section.name === WORKFLOW_SECTION ? { ...section, text } : section,
-      );
+    if (assembly !== null && typeof assembly === "object" && Array.isArray(assembly.tools)) {
+      assembly.tools = assembly.tools.filter((tool) => !MAIN_ONLY_TOOLS.includes(tool?.name));
     }
     return next();
   });
-
-  ctx.effect(
-    () =>
-      ctx.systemPrompt.section({
-        name: WORKFLOW_SECTION,
-        order: WORKFLOW_ORDER,
-        text: () => "",
-      }),
-    "ka-whale-workflow stage section",
-  );
 
   ctx.tools.register(writeArrangementTool({ store }));
   ctx.tools.register(getArrangementTool({ store }));
