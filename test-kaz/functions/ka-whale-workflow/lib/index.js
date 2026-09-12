@@ -15,7 +15,7 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
 import { registerKazForkProvider } from "./fork-provider.js";
-import { STAGES, renderStageText, renderSubagentsBlock } from "./stages.js";
+import { STAGES, renderStageText } from "./stages.js";
 import { readStage, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
 
@@ -33,7 +33,7 @@ function createStore(persistStage = null) {
         entries: [],
         loaded: false,
         scannedSeq: 0,
-        lastBlock: "",
+        lastInjectedStage: "",
         cwd: "",
       };
       sessions.set(sessionId, state);
@@ -124,25 +124,24 @@ export function apply(ctx) {
     return state;
   };
 
-  // 主代理：只在"用户发消息的那一轮开头"注入阶段文本（上下文注入，不是系统提示）。
-  // 工具循环里的中间步骤、whale_report 切阶段、子代理报告都不注入——避免刷屏。
+  // 主代理：用户发消息的那一轮开头、以及阶段切换后（whale_report）各注入一条；
+  // 工具循环的其它步骤、子代理报告都不注入——避免刷屏。（子代理现状用 get-arrangement 看。）
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
     const agent = payload?.agent;
     if (agent === undefined || agent === null || typeof agent !== "object") return decision;
     if (isSubagentAgent(agent)) return decision;
-    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-    const userTurn = payload?.step === 1 && messages.some((message) => message?.source?.kind === "user");
-    if (!userTurn) return decision;
     const state = await refresh(agent.session);
     if (state === null) return decision;
 
-    const block = state.stage === "idle" ? renderSubagentsBlock(state.entries) : "";
-    const blockChanged = block.length > 0 && block !== state.lastBlock;
-    if (blockChanged) state.lastBlock = block;
+    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+    const userTurn = payload?.step === 1 && messages.some((message) => message?.source?.kind === "user");
+    const stageChanged = state.stage !== state.lastInjectedStage;
+    if (!userTurn && !stageChanged) return decision;
+    state.lastInjectedStage = state.stage;
 
-    const text = renderStageText(state.stage, blockChanged ? block : "");
+    const text = renderStageText(state.stage);
     if (text.length === 0) return decision;
     decision.messages.push(
       createUserMessage({

@@ -1,6 +1,5 @@
 // ka-whale-workflow —— 阶段定义与注入文本（《Kaz8.0设计.md》§5.1）。
-// 注入 = `[ka-whale-workflow <stage>]` 头部 + `canAdvance:[可跳转阶段]` 一行 + 正文；
-//        idle 的正文可再带"子代理现状"块。
+// 注入 = `[ka-whale-workflow <stage>]` 头部 + `canAdvance:[可跳转阶段]` 一行 + 正文。
 // 正文一律英文（模型面文案），逐字来自设计稿。
 
 export const STAGES = Object.freeze(["idle", "arrange_agent"]);
@@ -30,44 +29,11 @@ export function stageAdvanceLine(stage) {
 }
 
 /**
- * 组装某一阶段的注入文本：头部 + canAdvance 行 + 正文（idle 可再带"子代理现状"块）。
+ * 组装某一阶段的注入文本：头部 + canAdvance 行 + 正文。
  * @param {string} stage - 阶段名。
- * @param {string} [subagentsBlock] - idle 可带的"子代理现状"块（无变化时传空串）。
  * @returns {string} 注入文本。
  */
-export function renderStageText(stage, subagentsBlock = "") {
+export function renderStageText(stage) {
   const body = STAGE_BODIES[stage] ?? STAGE_BODIES.idle;
-  const parts = [stageHeader(stage), stageAdvanceLine(stage), body];
-  if (stage === "idle" && typeof subagentsBlock === "string" && subagentsBlock.length > 0) parts.push(subagentsBlock);
-  return parts.join("\n");
-}
-
-/**
- * 把一个安排条目渲染成"子代理现状"里的一行。
- * @param {object} entry - 安排条目。
- * @returns {string|null} 行文本；main 条目或无名条目返回 null。
- */
-export function subagentLine(entry) {
-  const persona = entry?.persona;
-  if (persona === "main") return null;
-  const name = Array.isArray(persona) ? persona[0] : typeof persona === "string" ? persona : "";
-  if (name.length === 0) return null;
-  const status = typeof entry.status === "string" && entry.status.length > 0 ? entry.status : "pending";
-  const taskLine = String(entry.task ?? "").replace(/\s+/g, " ").trim();
-  const summaryLine = String(entry.summary ?? "").replace(/\s+/g, " ").trim();
-  if (status === "done") return `- ${name} [done] result: ${summaryLine || taskLine}`;
-  if (status === "failed") return `- ${name} [failed] ${summaryLine || taskLine}`;
-  if (status === "running") return `- ${name} [running] working on: ${taskLine}`;
-  return `- ${name} [pending] will do: ${taskLine}`;
-}
-
-/** 整块"子代理现状"（没有可报的条目时返回空串）。 */
-export function renderSubagentsBlock(entries) {
-  const lines = [];
-  for (const entry of Array.isArray(entries) ? entries : []) {
-    const line = subagentLine(entry);
-    if (line !== null) lines.push(line);
-  }
-  if (lines.length === 0) return "";
-  return ["Subagents:", ...lines].join("\n");
+  return [stageHeader(stage), stageAdvanceLine(stage), body].join("\n");
 }
