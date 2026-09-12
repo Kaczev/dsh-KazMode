@@ -7,7 +7,7 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { randomUUID } from "node:crypto";
-import { MEMORY_MAINTAINER_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
+import { MAIN_BLACKLIST, MEMORY_MAINTAINER_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
 import { MEMORY_MAINTAINER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
 import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
 import { KAZ_FORK_PROVIDER, noteForkSource } from "./fork-provider.js";
@@ -50,6 +50,28 @@ function sessionIdOf(exec) {
 /** persona 的匹配键：字符串本身，或 [角色, 描述] 的角色名。 */
 function personaKey(persona) {
   return Array.isArray(persona) ? persona[0] : typeof persona === "string" ? persona : "";
+}
+
+/**
+ * 平台"已知工具名"集合：以调用者（主代理）可见的工具面为准，再补上对主代理自己隐身的
+ * 写记忆三件（它们对子代理仍然存在）。拿不到工具服务时返回 null（不过滤，保持原样）。
+ * 平台侧 toolFilter 会在遇到不存在的名字时直接抛错，所以派发前必须先按这个集合过滤。
+ */
+function knownToolNames(ctx, agent) {
+  try {
+    const tools = ctx?.tools ?? ctx?.get?.("tools");
+    if (tools === undefined || tools === null || typeof tools.schemas !== "function") return null;
+    const schemas = tools.schemas(agent);
+    if (!Array.isArray(schemas)) return null;
+    const names = new Set();
+    for (const schema of schemas) {
+      if (schema !== null && typeof schema === "object" && typeof schema.name === "string") names.add(schema.name);
+    }
+    for (const name of MAIN_BLACKLIST) names.add(name);
+    return names;
+  } catch {
+    return null;
+  }
 }
 
 export function writeArrangementTool({ store }) {
@@ -126,6 +148,12 @@ export function kaSubWhaleTool({ ctx, store }) {
       const isKeeper = entry.persona === "memoryMaintainer";
       const personaText = isKeeper ? MEMORY_MAINTAINER_PERSONA : renderSubagentPersona(entry.persona[0], entry.persona[1]);
       const blacklist = isKeeper ? [...MEMORY_MAINTAINER_BLACKLIST] : sanitizeBlacklist(entry.blacklist);
+      // 平台 toolFilter 遇到不存在的工具名会直接抛错：先按"平台已知的工具"过滤，跳过的写进回执。
+      const known = knownToolNames(ctx, exec.agent);
+      const applied = known === null ? blacklist : blacklist.filter((name) => known.has(name));
+      const skipped = known === null ? [] : blacklist.filter((name) => !known.has(name));
+      const skippedNote =
+        skipped.length > 0 ? ` (blacklist skipped unknown tool${skipped.length > 1 ? "s" : ""}: ${skipped.join(", ")})` : "";
       const label = isKeeper ? "memoryMaintainer" : entry.persona[0];
       const forkTarget = typeof entry.fork === "string" ? entry.fork : "";
       let provider = "spawn";
@@ -153,18 +181,18 @@ export function kaSubWhaleTool({ ctx, store }) {
         prompt: [{ type: "text", text: entry.task }],
         parent: exec.agent,
         persona: personaText,
-        ...(blacklist.length > 0 ? { toolFilter: { deny: blacklist } } : {}),
+        ...(applied.length > 0 ? { toolFilter: { deny: applied } } : {}),
       };
       let started;
       try {
         started = await subagents.startContinuable({ provider, label, childId, request, signal: exec.signal });
       } catch (error) {
-        return { ...fail(`dispatch failed: ${reason(error)}${note}`), text: "" };
+        return { ...fail(`dispatch failed: ${reason(error)}${note}${skippedNote}`), text: "" };
       }
       const startedId = started?.childId ?? childId;
       const next = await patchEntryAt(sessionId, index, { id: startedId, status: "running" });
       store.setEntries(sessionId, next);
-      return { ok: true, message: `dispatched ${label} as ${startedId} (${provider})${note}`, text: `subagent id: ${startedId}` };
+      return { ok: true, message: `dispatched ${label} as ${startedId} (${provider})${note}${skippedNote}`, text: `subagent id: ${startedId}` };
     },
   });
 }
