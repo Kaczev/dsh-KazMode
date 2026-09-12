@@ -34,7 +34,6 @@ function createStore(persistStage = null) {
         loaded: false,
         scannedSeq: 0,
         lastBlock: "",
-        lastInjectedStage: "",
         cwd: "",
       };
       sessions.set(sessionId, state);
@@ -125,33 +124,23 @@ export function apply(ctx) {
     return state;
   };
 
-  // 主代理：阶段文本作为一条 plugin 消息注入本步上下文（上下文注入，不是系统提示）。
+  // 主代理：只在"用户发消息的那一轮开头"注入阶段文本（上下文注入，不是系统提示）。
+  // 工具循环里的中间步骤、whale_report 切阶段、子代理报告都不注入——避免刷屏。
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
     const agent = payload?.agent;
     if (agent === undefined || agent === null || typeof agent !== "object") return decision;
     if (isSubagentAgent(agent)) return decision;
+    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+    const userTurn = payload?.step === 1 && messages.some((message) => message?.source?.kind === "user");
+    if (!userTurn) return decision;
     const state = await refresh(agent.session);
     if (state === null) return decision;
 
-    const turnStart = payload?.step === 1;
-    // 收尾保障：上一轮结束时安排里没有 memoryMaintainer，这一轮开头进入 memory 阶段。
-    if (
-      turnStart &&
-      state.stage === "idle" &&
-      state.entries.length > 0 &&
-      !state.entries.some((entry) => entry.persona === "memoryMaintainer")
-    ) {
-      state.stage = "memory";
-    }
-
     const block = state.stage === "idle" ? renderSubagentsBlock(state.entries) : "";
     const blockChanged = block.length > 0 && block !== state.lastBlock;
-    const stageChanged = state.stage !== state.lastInjectedStage;
-    if (!turnStart && !stageChanged && !blockChanged) return decision;
     if (blockChanged) state.lastBlock = block;
-    state.lastInjectedStage = state.stage;
 
     const text = renderStageText(state.stage, blockChanged ? block : "");
     if (text.length === 0) return decision;
@@ -181,6 +170,32 @@ export function apply(ctx) {
       assembly.tools = assembly.tools.filter((tool) => !MAIN_ONLY_TOOLS.includes(tool?.name));
     }
     return next();
+  });
+
+  // 收尾保障：主代理结束一轮（turn/end）时，安排里没有 memoryMaintainer 就进入 memory 阶段，
+  // 并追加一条消息把它唤醒去做安排——不必等用户的下一条消息。
+  ctx.on("session/event", async (session, event) => {
+    if (event === null || typeof event !== "object" || event.type !== "turn/end") return;
+    const sessionId = session?.id;
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
+    const agents = ctx.get("agents");
+    const agent =
+      agents !== undefined && agents !== null && typeof agents.get === "function" ? agents.get(sessionId) : undefined;
+    if (agent === undefined || agent === null || isSubagentAgent(agent)) return;
+    const state = await refresh(session);
+    if (state === null || state.stage !== "idle") return;
+    if (state.entries.length === 0) return;
+    if (state.entries.some((entry) => entry.persona === "memoryMaintainer")) return;
+    store.setStage(sessionId, "memory");
+    const inbox = agent.inbox;
+    if (inbox === undefined || inbox === null || typeof inbox.append !== "function") return;
+    inbox.append(
+      "next-turn",
+      createUserMessage({
+        content: [{ type: "text", text: renderStageText("memory") }],
+        source: { kind: "plugin", plugin: "ka-whale-workflow", form: "notice", summary: "stage:memory" },
+      }),
+    );
   });
 
   ctx.tools.register(writeArrangementTool({ store }));

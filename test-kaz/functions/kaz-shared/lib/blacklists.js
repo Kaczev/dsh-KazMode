@@ -38,6 +38,15 @@ export const RESERVED_TOOLS = Object.freeze([
   "context_read",
 ]);
 
+/** 子代理默认黑名单（§2.3）：不参与编排、不碰工作流；主代理派发时可在其上追加。 */
+export const SUBAGENT_DEFAULT_BLACKLIST = Object.freeze([
+  "send_message",
+  "interrupt_agent",
+  "ka_sub_whale",
+  "write-arrangement",
+  "whale_report",
+]);
+
 /**
  * 清洗一份黑名单：去掉保留集、非字符串、空白与重复项。
  * 子代理与记忆管理员的黑名单在派发前都要过这一道。

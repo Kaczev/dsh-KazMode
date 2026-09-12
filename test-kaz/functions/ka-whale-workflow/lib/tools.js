@@ -7,7 +7,7 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { randomUUID } from "node:crypto";
-import { MAIN_BLACKLIST, MEMORY_MAINTAINER_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
+import { MAIN_BLACKLIST, MEMORY_MAINTAINER_BLACKLIST, SUBAGENT_DEFAULT_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
 import { MEMORY_MAINTAINER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
 import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
 import { KAZ_FORK_PROVIDER, noteForkSource } from "./fork-provider.js";
@@ -147,7 +147,9 @@ export function kaSubWhaleTool({ ctx, store }) {
       if (entry.persona === "main") return { ...fail('the "main" entry is for the main agent itself; dispatch only subagent entries'), text: "" };
       const isKeeper = entry.persona === "memoryMaintainer";
       const personaText = isKeeper ? MEMORY_MAINTAINER_PERSONA : renderSubagentPersona(entry.persona[0], entry.persona[1]);
-      const blacklist = isKeeper ? [...MEMORY_MAINTAINER_BLACKLIST] : sanitizeBlacklist(entry.blacklist);
+      const blacklist = isKeeper
+        ? [...MEMORY_MAINTAINER_BLACKLIST]
+        : sanitizeBlacklist([...SUBAGENT_DEFAULT_BLACKLIST, ...(Array.isArray(entry.blacklist) ? entry.blacklist : [])]);
       // 平台 toolFilter 遇到不存在的工具名会直接抛错：先按"平台已知的工具"过滤，跳过的写进回执。
       const known = knownToolNames(ctx, exec.agent);
       const applied = known === null ? blacklist : blacklist.filter((name) => known.has(name));
@@ -201,7 +203,7 @@ export function whaleReportTool({ store }) {
   return defineTool({
     name: "whale_report",
     description:
-      "Advance the main agent's workflow stage and trigger the new stage's injection. Targets: idle, arrange_agent, memory.",
+      "Advance the main agent's workflow stage. Targets: idle, arrange_agent, memory.",
     parameters: {
       stage: { type: "string", required: true, enum: [...STAGES], description: "Target stage." },
     },
