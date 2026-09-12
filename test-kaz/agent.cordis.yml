@@ -1,14 +1,16 @@
 # kaz 预设（Kaz 8.0 试验）——《Kaz8.0设计.md》的落地组合。
 #
-# 当前阶段：功能 1（persona 层）+ 最小载体。
+# 工具面原则（2026-09-12 定）：与官方标准预设对齐，只靠黑名单控制角色可见性；
+# 只有"我们永久替代掉的"才不挂（官方 subagent / subagent_fork → ka_sub_whale）。
 #   * persona 行给短兜底文本；真实主代理 persona 由 ./kaz-system-prompt.mjs
 #     从 functions/kaz-shared 注入（单一事实源）。
 #   * 系统提示面：只摘掉平台默认的 harness:identity 段（避免看起来像标准模式）；
 #     平台的工具指引、环境说明等段落保留。
-#   * 只挂现在就需要、且已存在的行；工作流工具按功能逐个加入。
+#   * 未挂（替代品或未定）：官方 subagent / subagent_fork、plan-mode（/plan）、
+#     tool-workflow + workflow-worker-thread、tool-ralph——见报告待你确认。
 #   * kaz-shared 的工具面门：主代理黑名单（注册表收紧 + assemble 期过滤工具表）。
-#   * compaction 组带 isolate（compaction realm）：内置压缩 provider 与上下文三件同组，
-#     组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
+#   * compaction 组带 isolate（compaction + toolResultPruner realm）：内置压缩 provider、
+#     上下文三件与官方压缩配套同组，组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
@@ -33,8 +35,13 @@
   name: ./functions/ka-whale-workflow/lib/index.js
 
 # ── shell / 文件系统 ────────────────────────────────────────────────────────
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
 
 - id: tool-fs
   name: '@deepseek-ai/dsh-tool-fs'
@@ -43,6 +50,24 @@
   name: '@deepseek-ai/dsh-tool-fs-search'
   config:
     sampleOverCapGlobResults: false
+
+# ── 后台作业（官方配套：run_in_background 的回收工具）────────────────────────
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── 技能 ────────────────────────────────────────────────────────────────────
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── 目标 ────────────────────────────────────────────────────────────────────
+- id: command-goal
+  name: '@deepseek-ai/dsh-command-goal'
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
 
 # ── 其余模型面对工具 ─────────────────────────────────────────────────────────
 - id: tool-ask-user
@@ -55,6 +80,12 @@
 
 - id: tool-web
   name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: true
+    searchTimeoutMs: 60000
+
+- id: present
+  name: '@deepseek-ai/dsh-tool-present'
 
 # ── 子代理控制（list_agents / send_message / interrupt_agent）────────────────
 - id: tool-subagent-control
@@ -63,12 +94,13 @@
 - id: tool-subagent-list-agents
   name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 
-# ── compaction 组：内置压缩 provider + 上下文三件（同组共享 compaction realm）──
+# ── compaction 组：内置压缩 + 上下文三件 + 官方压缩配套 ──────────────────────
 - id: compaction
   name: cordis:group
   group: true
   isolate:
     compaction: true
+    toolResultPruner: true
   config:
     - id: compaction-basic
       name: '@deepseek-ai/dsh-compaction-basic'
@@ -76,3 +108,12 @@
     - id: kaz-context-policy
       name: ./functions/kaz-context-policy/lib/index.js
 
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
