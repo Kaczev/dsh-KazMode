@@ -39,6 +39,12 @@ function renderHits(_args, value) {
   return renderText([header, ...lines].join("\n\n"));
 }
 
+export function clampInt(value, fallback, min, max) {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+}
+
 /** 当前会话的根（主代理会话）：沿 parentSession 上溯到还能取到的最高一层。 */
 function rootSessionOf(ctx, agent) {
   const sessions = ctx.get("sessions");
@@ -55,7 +61,7 @@ function rootSessionOf(ctx, agent) {
 }
 
 /** companion 名字 → 目标会话：main = 根会话；其余按 id / label 在根的直接子代理里找。 */
-async function resolveCompanion(ctx, agent, name) {
+export async function resolveCompanion(ctx, agent, name) {
   const root = rootSessionOf(ctx, agent);
   if (root === undefined) return { error: "this agent has no session" };
   const wanted = String(name ?? "").trim();
@@ -86,19 +92,30 @@ async function resolveCompanion(ctx, agent, name) {
   return { session, from: typeof match.label === "string" && match.label.length > 0 ? match.label : String(match.id) };
 }
 
+const SEARCH_PARAMS = {
+  query: { type: "string", required: true, description: "Keywords or an exact sentence to find. Surrounding quotes are stripped before matching." },
+  limit: { type: "integer", description: "Maximum number of results (default 20, max 50)." },
+  after_seq: { type: "integer", description: "Only look at records with a sequence number greater than this (default 0 = all)." },
+  chars: { type: "integer", description: "Snippet width per hit in characters (default 400, max 2000)." },
+};
+
+const SEARCH_OPTIONS = (args) => ({
+  limit: clampInt(args?.limit, 20, 1, 50),
+  afterSeq: clampInt(args?.after_seq, 0, 0, Number.MAX_SAFE_INTEGER),
+  radius: Math.round(clampInt(args?.chars, 400, 80, 2000) / 2),
+});
+
 export function contextSearchTool() {
   return defineTool({
     name: "context_search",
     description:
-      "Search the original text of this conversation's log, including parts already compressed out of the current context. Read-only; use it when exact words are needed instead of guessing. Results are ranked (exact phrase first, then keyword coverage, newest first on ties) and report the total match count.",
-    parameters: {
-      query: { type: "string", required: true, description: "Keywords or an exact sentence to find." },
-    },
+      "Search the original text of this conversation's log, including parts already compressed out of the current context. Read-only; use it when exact words are needed instead of guessing. Results are ranked (exact phrase first, then keyword coverage, newest first on ties) and report the total match count; limit/after_seq/chars narrow the scope.",
+    parameters: SEARCH_PARAMS,
     output: { schema: HITS_SCHEMA, render: renderHits },
     async execute(args, exec) {
       const session = exec?.agent?.session;
       if (session === undefined || session === null) return { ok: false, message: "this agent has no session", total: 0, hits: [] };
-      const { hits, total } = searchEntries(entriesOfSession(session), args?.query, { limit: 20 });
+      const { hits, total } = searchEntries(entriesOfSession(session), args?.query, SEARCH_OPTIONS(args));
       return {
         ok: true,
         message: `${total} match(es) in this conversation's log`,
@@ -113,16 +130,16 @@ export function contextSearchFromCompanionTool(ctx) {
   return defineTool({
     name: "context_search_from_companion",
     description:
-      'Search another agent\'s conversation log the same way context_search searches this one: the main agent ("main") or one of its subagents (by id or label). Read-only and cross-session.',
+      'Search another agent\'s conversation log the same way context_search searches this one: the main agent ("main") or one of its subagents (by id or label). Read-only and cross-session; the same limit/after_seq/chars options apply.',
     parameters: {
       companion: { type: "string", required: true, description: 'Whose log to search: "main", or a subagent id or label.' },
-      query: { type: "string", required: true, description: "Keywords or an exact sentence to find." },
+      ...SEARCH_PARAMS,
     },
     output: { schema: HITS_SCHEMA, render: renderHits },
     async execute(args, exec) {
       const resolved = await resolveCompanion(ctx, exec?.agent, args?.companion);
       if (resolved.error !== undefined) return { ok: false, message: resolved.error, total: 0, hits: [] };
-      const { hits, total } = searchEntries(entriesOfSession(resolved.session), args?.query, { limit: 20 });
+      const { hits, total } = searchEntries(entriesOfSession(resolved.session), args?.query, SEARCH_OPTIONS(args));
       return {
         ok: true,
         message: `${total} match(es) in ${resolved.from}'s log`,

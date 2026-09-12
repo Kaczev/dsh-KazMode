@@ -139,13 +139,15 @@ export function snippetOf(text, needle, radius = 200) {
 
 /**
  * 在记录里找 query：原句命中优先，其次按检索词加权；同分新的在前。
+ * @param {object} [options] - limit 条数上限；radius 片段半径；afterSeq 只看 seq 大于它的记录。
  * @returns {{hits: {seq: number, label: string, match: "exact"|"terms", snippet: string}[], total: number}}
  */
-export function searchEntries(entries, query, { limit = 20, radius = 200 } = {}) {
+export function searchEntries(entries, query, { limit = 20, radius = 200, afterSeq = 0 } = {}) {
   const needle = stripQueryQuotes(query).toLowerCase();
   const terms = termsOf(query);
   const scored = [];
   for (const entry of entries) {
+    if (Number.isFinite(afterSeq) && entry.seq <= afterSeq) continue;
     const { score, exact } = scoreEntry(entry.text, needle, terms);
     if (score <= 0) continue;
     scored.push({ entry, score, exact });
@@ -158,4 +160,19 @@ export function searchEntries(entries, query, { limit = 20, radius = 200 } = {})
     snippet: snippetOf(entry.text, needle.length > 0 ? needle : query, radius),
   }));
   return { hits, total: scored.length };
+}
+
+/**
+ * 按序号区间取原文记录（两端含）。不是原文的事件已在建表时跳过。
+ * @param {object[]} entries - entriesOfSession 的结果。
+ * @param {number} from - 起始序号（含）。
+ * @param {number} [to] - 结束序号（含）；缺省 = from。
+ * @returns {object[]} 按 seq 升序的区间记录。
+ */
+export function readEntries(entries, from, to) {
+  const start = Number.isFinite(Number(from)) ? Math.trunc(Number(from)) : 0;
+  const end = Number.isFinite(Number(to)) ? Math.trunc(Number(to)) : start;
+  const lower = Math.min(start, end);
+  const upper = Math.max(start, end);
+  return entries.filter((entry) => entry.seq >= lower && entry.seq <= upper);
 }
