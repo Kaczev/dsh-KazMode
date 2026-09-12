@@ -38,13 +38,16 @@ export const RESERVED_TOOLS = Object.freeze([
   "context_read",
 ]);
 
-/** 子代理默认黑名单（§2.3）：不参与编排、不碰工作流；主代理派发时可在其上追加。 */
+/** 子代理默认黑名单（§2.3）：不参与编排、不碰工作流、不写记忆；主代理派发时可在其上追加。 */
 export const SUBAGENT_DEFAULT_BLACKLIST = Object.freeze([
   "send_message",
   "interrupt_agent",
   "ka_sub_whale",
   "write-arrangement",
   "whale_report",
+  "memory_save",
+  "memory_update",
+  "memory_forget",
 ]);
 
 /**
