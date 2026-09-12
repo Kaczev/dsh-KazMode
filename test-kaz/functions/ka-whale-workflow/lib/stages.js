@@ -1,5 +1,6 @@
 // ka-whale-workflow —— 阶段定义与注入文本（《Kaz8.0设计.md》§5.1）。
-// 注入 = `[ka-whale-workflow <stage>]` 头部 + 正文；idle 的正文可再带"子代理现状"块。
+// 注入 = `[ka-whale-workflow <stage>]` 头部 + `canAdvance:[可跳转阶段]` 一行 + 正文；
+//        idle 的正文可再带"子代理现状"块。
 // 正文一律英文（模型面文案），逐字来自设计稿。
 
 export const STAGES = Object.freeze(["idle", "arrange_agent", "memory"]);
@@ -25,15 +26,21 @@ export function stageHeader(stage) {
   return `[ka-whale-workflow ${stage}]`;
 }
 
+/** 合法跳转行（§5.1 表格的"可跳转"列，模型可见）。 */
+export function stageAdvanceLine(stage) {
+  const targets = LEGAL_TRANSITIONS[stage] ?? [];
+  return `canAdvance:[${targets.join(", ")}]`;
+}
+
 /**
- * 组装某一阶段的注入文本。
+ * 组装某一阶段的注入文本：头部 + canAdvance 行 + 正文（idle 可再带"子代理现状"块）。
  * @param {string} stage - 阶段名。
  * @param {string} [subagentsBlock] - idle 可带的"子代理现状"块（无变化时传空串）。
  * @returns {string} 注入文本。
  */
 export function renderStageText(stage, subagentsBlock = "") {
   const body = STAGE_BODIES[stage] ?? STAGE_BODIES.idle;
-  const parts = [stageHeader(stage), body];
+  const parts = [stageHeader(stage), stageAdvanceLine(stage), body];
   if (stage === "idle" && typeof subagentsBlock === "string" && subagentsBlock.length > 0) parts.push(subagentsBlock);
   return parts.join("\n");
 }
