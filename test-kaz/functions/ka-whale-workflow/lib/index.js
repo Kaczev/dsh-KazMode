@@ -8,10 +8,11 @@
 
 export const name = "ka-whale-workflow";
 
-export const inject = ["tools", "systemPrompt"];
+export const inject = ["tools", "systemPrompt", "subagents"];
 
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
+import { registerKazForkProvider } from "./fork-provider.js";
 import { renderStageText, renderSubagentsBlock } from "./stages.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
 
@@ -72,6 +73,9 @@ function restrictOnce(agent, names, logger) {
 export function apply(ctx) {
   const store = createStore();
   const hidden = new WeakSet();
+
+  // kaz-fork：预设自带的 fork provider，让"fork 源"可以是任意存活会话（不只派发者自己）。
+  registerKazForkProvider(ctx, ctx.logger);
 
   /** 回填完成通知 / 收尾保障 / 组装本轮的注入文本。 */
   const refresh = async (session) => {

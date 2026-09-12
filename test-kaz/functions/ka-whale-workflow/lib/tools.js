@@ -6,9 +6,11 @@
 // 文案一律英文。
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { randomUUID } from "node:crypto";
 import { MEMORY_MAINTAINER_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
 import { MEMORY_MAINTAINER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
 import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
+import { KAZ_FORK_PROVIDER, noteForkSource } from "./fork-provider.js";
 import { LEGAL_TRANSITIONS, STAGES } from "./stages.js";
 
 const RESULT_SCHEMA = {
@@ -127,16 +129,25 @@ export function kaSubWhaleTool({ ctx, store }) {
       const label = isKeeper ? "memoryMaintainer" : entry.persona[0];
       const forkTarget = typeof entry.fork === "string" ? entry.fork : "";
       let provider = "spawn";
+      let forkSource = "";
       let note = "";
-      if (forkTarget === "main") {
-        provider = "fork";
-      } else if (forkTarget.length > 0) {
-        note = ` (fork target "${forkTarget}" is not supported: the platform forks the dispatcher's own log only; started fresh instead — read that history with context_search companion="${forkTarget}")`;
+      if (forkTarget.length > 0) {
+        const agents = ctx.get("agents");
+        const sourceAgent = forkTarget === "main" ? exec.agent : agents?.get?.(forkTarget);
+        if (sourceAgent === undefined || sourceAgent === null) {
+          note = ` (fork target "${forkTarget}" is not a live session; started fresh instead — read that history with context_search companion="${forkTarget}")`;
+        } else {
+          provider = KAZ_FORK_PROVIDER;
+          forkSource = forkTarget === "main" ? "" : forkTarget;
+          note = forkTarget === "main" ? " (forked from your conversation)" : ` (forked from "${forkTarget}")`;
+        }
       }
       const subagents = ctx.get("subagents");
       if (subagents === undefined || typeof subagents.startContinuable !== "function") {
         return { ...fail("the subagent registry is unavailable"), text: "" };
       }
+      const childId = randomUUID();
+      if (provider === KAZ_FORK_PROVIDER) noteForkSource(childId, forkSource);
       const request = {
         label,
         prompt: [{ type: "text", text: entry.task }],
@@ -146,14 +157,14 @@ export function kaSubWhaleTool({ ctx, store }) {
       };
       let started;
       try {
-        started = await subagents.startContinuable({ provider, label, request, signal: exec.signal });
+        started = await subagents.startContinuable({ provider, label, childId, request, signal: exec.signal });
       } catch (error) {
         return { ...fail(`dispatch failed: ${reason(error)}${note}`), text: "" };
       }
-      const childId = started?.childId ?? "";
-      const next = await patchEntryAt(sessionId, index, { id: childId, status: "running" });
+      const startedId = started?.childId ?? childId;
+      const next = await patchEntryAt(sessionId, index, { id: startedId, status: "running" });
       store.setEntries(sessionId, next);
-      return { ok: true, message: `dispatched ${label} as ${childId} (${provider})${note}`, text: `subagent id: ${childId}` };
+      return { ok: true, message: `dispatched ${label} as ${startedId} (${provider})${note}`, text: `subagent id: ${startedId}` };
     },
   });
 }
