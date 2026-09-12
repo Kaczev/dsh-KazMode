@@ -653,16 +653,19 @@ function restPositionFor(measure) {
  * value updates once per reel, when the animation lands — so a step never
  * re-renders the whole card.
  *
- * The DOM survives a remount (folding the card into its pill and back) but this
- * hook's state does not reset with it, so every paint uses the element it can
- * see right now and never assumes the node it drew last time is still mounted.
+ * The DOM is replaced whenever the card folds into its pill and back, while this
+ * hook's state survives. "Do I have an element?" is therefore not the question —
+ * the question is "is the element I have the one I painted?", and a strip that
+ * was never painted sits at translateY(0), which reads as the glyph 0.
  *
  * @param {string} text - the target formatted amount.
  * @param {boolean} animate - false to snap (first paint, reduced motion).
- * @returns {{bind: (index: number, el: HTMLElement | null) => void, spinning: boolean, blurred: boolean}} reel binding.
+ * @returns {{bind: (index: number, el: HTMLElement | null) => void | (() => void), spinning: boolean, blurred: boolean}} reel binding.
  */
 function useReels(text, animate) {
   const elements = useRef([])
+  /** The exact strip nodes the last paint wrote to, by reel index. */
+  const painted = useRef([])
   const state = useRef({ text: null, digits: [], raf: 0 })
   const [spinning, setSpinning] = useState(false)
   const [blurred, setBlurred] = useState(false)
@@ -680,16 +683,16 @@ function useReels(text, animate) {
       }
     }
 
-    // Repaint the strips that are mounted NOW. A node the ref callback has not
-    // handed over yet is skipped, not treated as already correct — the old
-    // "skip if falsy" version left a remounted strip at translateY(0), which is
-    // exactly the glyph 0.
+    // Positions whatever strips the ref callback has handed over, and records
+    // exactly which nodes those were so the next run can tell whether they are
+    // still the same DOM.
     const paint = (positions) => {
       for (let index = 0; index < positions.length; index += 1) {
         const element = elements.current[index]
         if (element === null || element === undefined) continue
         // The strip holds exactly ten glyphs, so the rotation wraps seamlessly.
         element.style.transform = `translate3d(0, ${(-positions[index] * REEL_STEP_PX).toFixed(2)}px, 0)`
+        painted.current[index] = element
       }
     }
 
@@ -706,11 +709,22 @@ function useReels(text, animate) {
       setBlurred(false)
     }
 
-    // Reels keep their identity only while the amount keeps its shape AND the
-    // strips are still the nodes that were painted; anything else snaps.
-    const mounted = elements.current.slice(0, nextDigits.length)
-      .map((element) => element !== null && element !== undefined)
-    const plan = reelPlan({ previousText, previousDigits, text, nextDigits, mounted, animate })
+    // Travel is allowed only when every strip is the very node that was painted
+    // last time: any other node has never been positioned and must be snapped
+    // (and painted with the transition off) or it will show 0.
+    const current0 = elements.current
+    const painted0 = painted.current
+    const sameNodes = nextDigits.length > 0 && current0.length >= nextDigits.length
+      && nextDigits.every((_, index) => current0[index] !== null && current0[index] !== undefined
+        && current0[index] === painted0[index])
+    const plan = reelPlan({
+      previousText,
+      previousDigits,
+      text,
+      nextDigits,
+      mounted: nextDigits.map(() => sameNodes),
+      animate,
+    })
 
     if (plan.snap) {
       // A freshly mounted strip must land on its glyph in the same frame, with
@@ -771,10 +785,27 @@ function useReels(text, animate) {
     return cancel
   }, [text, animate])
 
-  // React calls this with null on detach; clearing the slot is what keeps a
-  // stale node from being painted after the card remounts.
+  // The ref callback keeps its own cleanup hook: React calls it when this exact
+  // node detaches, which is the only moment we know the recorded node is gone.
+  // (Identity is checked anyway, so a cleanup that runs after a newer node was
+  // recorded cannot wipe the good one.)
+  const cleaners = useRef([])
   const bind = useCallback((index, element) => {
+    if (element === null || element === undefined) {
+      elements.current[index] = null
+      if (painted.current[index] !== null && painted.current[index] !== undefined) {
+        // Detached before the cleaner could run: treat as never painted.
+        painted.current[index] = null
+      }
+      return undefined
+    }
     elements.current[index] = element
+    const cleanup = () => {
+      if (elements.current[index] === element) elements.current[index] = null
+      if (painted.current[index] === element) painted.current[index] = null
+    }
+    cleaners.current[index] = cleanup
+    return cleanup
   }, [])
 
   return { bind, spinning, blurred }
@@ -1351,8 +1382,6 @@ function BalanceWidget(props) {
         type: 'button',
         className: 'dsb-icon dsb-collapse',
         'aria-label': collapsed ? '展开余额卡片' : '收起为小胶囊',
-        onPointerEnter: () => setHint(collapsed ? '展开余额卡片' : '收起为小胶囊'),
-        onPointerLeave: () => setHint(null),
         onClick: () => setCollapsed((value) => !value),
       }, collapsed ? '▴' : '▾'),
       h('button', {
@@ -1361,10 +1390,6 @@ function BalanceWidget(props) {
         className: 'dsb-icon',
         'aria-label': '立即刷新余额',
         'data-spinning': status === 'loading' ? 'true' : 'false',
-        onPointerEnter: () => setHint(payload?.fetchedAt
-          ? `刷新余额 · 上次成功 ${clockTime(payload.fetchedAt)}`
-          : '刷新余额'),
-        onPointerLeave: () => setHint(null),
         onClick: () => {
           setStatus('loading')
           void refresh()
@@ -1394,8 +1419,6 @@ function BalanceWidget(props) {
         type: 'button',
         className: 'dsb-icon dsb-collapse',
         'aria-label': '展开余额卡片',
-        onPointerEnter: () => setHint('展开余额卡片'),
-        onPointerLeave: () => setHint(null),
         onClick: () => setCollapsed(false),
       }, '▴'),
     ]))

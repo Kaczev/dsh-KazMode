@@ -178,6 +178,16 @@ record('a remount snaps instead of trusting stale strips',
     nextDigits: amount, mounted: amount.map(() => false), animate: true,
   }).snap === true,
   'six unmounted strips must repaint, not travel')
+// The strip nodes are replaced when the card folds into its pill, so this is
+// the case that actually bit: the hook still holds *an* element, just not the
+// one it painted. Trusting it left a never-positioned strip, i.e. the glyph 0 —
+// the "balance shows 0 after collapsing" report.
+record('replaced strip nodes snap too',
+  pure.reelPlan({
+    previousText: '44.70', previousDigits: amount, text: '44.70',
+    nextDigits: amount, mounted: amount.map((_, index) => index === 0), animate: true,
+  }).snap === true,
+  'only the very node that was painted may travel')
 record('a live change still spins',
   pure.reelPlan({
     previousText: '44.70', previousDigits: amount, text: '44.71',
