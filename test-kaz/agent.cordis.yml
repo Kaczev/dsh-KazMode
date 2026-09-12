@@ -6,8 +6,8 @@
 #     从 functions/kaz-shared 注入（单一事实源）。
 #   * 系统提示面：只摘掉平台默认的 harness:identity 段（避免看起来像标准模式）；
 #     平台的工具指引、环境说明等段落保留。
-#   * 未挂（替代品或未定）：官方 subagent / subagent_fork、plan-mode（/plan）、
-#     tool-workflow + workflow-worker-thread、tool-ralph——见报告待你确认。
+#   * 未挂（替代品或按决定不挂）：官方 subagent / subagent_fork、tool-bash、
+#     command-goal + tool-goal、plan-mode（/plan）、tool-workflow + workflow-worker-thread、tool-ralph。
 #   * kaz-shared 的工具面门：主代理黑名单（注册表收紧 + assemble 期过滤工具表）。
 #   * compaction 组带 isolate（compaction + toolResultPruner realm）：内置压缩 provider、
 #     上下文三件与官方压缩配套同组，组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
@@ -35,10 +35,6 @@
   name: ./functions/ka-whale-workflow/lib/index.js
 
 # ── shell / 文件系统 ────────────────────────────────────────────────────────
-- id: tool-bash
-  name: '@deepseek-ai/dsh-tool-bash'
-  disabled: !!js process.platform === 'win32'
-
 - id: tool-pwsh
   name: '@deepseek-ai/dsh-tool-pwsh'
   disabled: !!js process.platform !== 'win32'
@@ -61,13 +57,6 @@
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
-
-# ── 目标 ────────────────────────────────────────────────────────────────────
-- id: command-goal
-  name: '@deepseek-ai/dsh-command-goal'
-
-- id: tool-goal
-  name: '@deepseek-ai/dsh-tool-goal'
 
 # ── 其余模型面对工具 ─────────────────────────────────────────────────────────
 - id: tool-ask-user
