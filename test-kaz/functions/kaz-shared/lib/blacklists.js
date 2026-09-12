@@ -11,7 +11,6 @@ export const MAIN_BLACKLIST = Object.freeze(["memory_save", "memory_update", "me
 /** 记忆管理子代理黑名单（点名列出）。设计稿 §2.2。 */
 export const MEMORY_MAINTAINER_BLACKLIST = Object.freeze([
   "pwsh",
-  "bash",
   "write",
   "edit",
   "todo_write",
