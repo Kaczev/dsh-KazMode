@@ -1,13 +1,12 @@
 // kaz-context-policy —— 上下文压缩提醒（§四）。
 //
-// 形态：系统提示里的独立一段、只有一行；本会话占用 ≥50% 时出现，压缩后回落即消失。
-// 数据：contextPressure 投影（pressureTokens=最近一次请求的占用；contextWindow=窗口）。
+// 形态：一条 plugin 消息（**上下文注入**，不是系统提示段），只有一行；
+//       在"用户发消息的那一轮开头"注入；占用 ≥50% 才出现，压缩回落后自然不再出现。
+// 数据：contextPressure 投影（pressureTokens = 最近一次请求的占用；contextWindow = 窗口）。
 
-export const HINT_SECTION_NAME = "kaz-context-policy:compression-hint";
+import { createUserMessage } from "@deepseek-ai/dsh-llm";
 
-/** 段落顺序：TOOL_REPORT(2900) 与 TOOLS_SDK(5000) 之间，属于模型面提示。 */
-export const HINT_ORDER = 2950;
-
+/** 注入阈值：占用达到窗口的这个百分比就开始提醒。 */
 export const HINT_THRESHOLD_PERCENT = 50;
 
 /** 读上下文占用；拿不到就返回 null。 */
@@ -27,7 +26,7 @@ export function readPressure(ctx, session) {
   }
 }
 
-/** 达到阈值时的注入原文（英文）；否则空串（空段不渲染）。 */
+/** 达到阈值时的提醒原文（英文）；否则空串。 */
 export function hintText(ctx, session) {
   const pressure = readPressure(ctx, session);
   if (pressure === null || pressure.percent < HINT_THRESHOLD_PERCENT) return "";
@@ -37,15 +36,24 @@ export function hintText(ctx, session) {
   ].join("\n");
 }
 
-/** 注册动态段落：每轮 assemble 时按当前 agent 的占用决定是否注入。 */
-export function installHintSection(ctx) {
-  ctx.effect(
-    () =>
-      ctx.systemPrompt.section({
-        name: HINT_SECTION_NAME,
-        order: HINT_ORDER,
-        text: (context) => hintText(ctx, context?.agent?.session),
+/** 注册上下文注入：用户消息那一轮的开头、且占用 ≥ 阈值时，追加一条提醒消息。 */
+export function installHintInjection(ctx) {
+  ctx.on("agent/pre-step", async (payload, next) => {
+    const decision = await next();
+    if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
+    const agent = payload?.agent;
+    if (agent === undefined || agent === null || typeof agent !== "object") return decision;
+    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+    const userTurn = payload?.step === 1 && messages.some((message) => message?.source?.kind === "user");
+    if (!userTurn) return decision;
+    const text = hintText(ctx, agent.session);
+    if (text.length === 0) return decision;
+    decision.messages.push(
+      createUserMessage({
+        content: [{ type: "text", text }],
+        source: { kind: "plugin", plugin: "kaz-context-policy", form: "notice", summary: "compression-hint" },
       }),
-    "kaz-context-policy compression hint",
-  );
+    );
+    return decision;
+  });
 }
