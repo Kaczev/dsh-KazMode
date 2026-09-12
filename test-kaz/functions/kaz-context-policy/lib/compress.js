@@ -26,10 +26,22 @@ function clampInt(value, fallback, min, max) {
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
-function eventTypeOf(session, seq) {
-  const events = Array.isArray(session?.events) ? session.events : [];
-  for (const event of events) if (event?.seq === seq) return event.type;
-  return undefined;
+/**
+ * 读 surface 节点对应的事件类型（seq → type）。
+ * 注意：平台的 Session 没有 `session.events` 这个属性，必须用 `snapshotEvents()`——
+ * 读错属性会让"跳过头部 system/message"永远失效，压缩区间就会扩到节点 0。
+ */
+function eventTypesOf(session, nodes) {
+  const wanted = new Set();
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (node !== null && typeof node === "object" && typeof node.seq === "number") wanted.add(node.seq);
+  }
+  const types = new Map();
+  const events = typeof session?.snapshotEvents === "function" ? session.snapshotEvents() : [];
+  for (const event of events) {
+    if (event !== null && typeof event === "object" && wanted.has(event.seq)) types.set(event.seq, event.type);
+  }
+  return types;
 }
 
 /**
@@ -86,12 +98,22 @@ export function orderedCandidates(matched, cluster) {
 }
 
 /**
- * 命中簇 → surface 上的安全区间：起点/终点映到最近的 surface 节点，
- * 再向两侧扩到配对平衡的边界；头部 system/message 节点不参与。
+ * 命中簇 → surface 上的安全区间。
+ * 硬约束：区间绝不覆盖开头的 system/message 节点——系统提示词那类只能"恰好针对该节点"
+ * 改写，被一个区间覆盖会被 surface 整段拒绝（整次压缩就白费）。所以先算出"可压下界"
+ * minIdx（跳过头部 system/message 且配对平衡），左扩只允许退到 minIdx 为止。
  * @returns {{startIdx: number, endIdx: number}|null}
  */
 export function pickRange(session, nodes, cluster) {
   if (!Array.isArray(nodes) || nodes.length === 0 || cluster === null) return null;
+  const types = eventTypesOf(session, nodes);
+  const isSystem = (idx) => types.get(nodes[idx].seq) === "system/message";
+
+  // 可压下界：跳过开头的 system/message，并要求该处是配对平衡的切点。
+  let minIdx = 0;
+  while (minIdx < nodes.length && isSystem(minIdx)) minIdx += 1;
+  while (minIdx < nodes.length && !toolPairingBalancedBefore(session, nodes[minIdx].seq)) minIdx += 1;
+
   const firstSeq = cluster.group[0].seq;
   const lastSeq = cluster.group[cluster.group.length - 1].seq;
   let startIdx = -1;
@@ -99,11 +121,18 @@ export function pickRange(session, nodes, cluster) {
   let endIdx = -1;
   for (let i = nodes.length - 1; i >= 0; i -= 1) if (nodes[i].seq >= lastSeq) endIdx = i;
   if (startIdx < 0 || endIdx < 0 || startIdx > endIdx) return null;
-  while (startIdx <= endIdx && eventTypeOf(session, nodes[startIdx].seq) === "system/message") startIdx += 1;
-  while (startIdx > 0 && !toolPairingBalancedBefore(session, nodes[startIdx].seq)) startIdx -= 1;
+
+  if (startIdx < minIdx) startIdx = minIdx;
+  while (startIdx > minIdx && !toolPairingBalancedBefore(session, nodes[startIdx].seq)) startIdx -= 1;
+  while (startIdx <= endIdx && isSystem(startIdx)) startIdx += 1;
+  if (startIdx > endIdx) return null;
   if (!toolPairingBalancedBefore(session, nodes[startIdx].seq)) return null;
+
   while (endIdx + 1 < nodes.length && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx += 1;
   if (!toolPairingBalancedAfter(session, nodes[endIdx].seq)) return null;
+
+  // 区间里不许再出现 system/message（头部已跳过；中间若有，放弃这个候选，交给下一组）。
+  for (let i = startIdx; i <= endIdx; i += 1) if (isSystem(i)) return null;
   return startIdx <= endIdx ? { startIdx, endIdx } : null;
 }
 
