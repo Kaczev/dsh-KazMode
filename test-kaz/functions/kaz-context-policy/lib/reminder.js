@@ -4,7 +4,7 @@
 // 时机：占用 ≥50% 后，每再涨 5 个百分点就注入一次；回落到 50% 以下即停，
 //       之后再涨到 50% 以上会重新开始计数。每个 step 检查一次（工具结果把占用
 //       顶上去也算"涨"）。
-// 内容：附上"建议至少压掉多少 token" = 当前占用 − 45%×窗口；压够就能回到 45% 以下。
+// 内容：附上"建议至少压掉多少 token" = 当前占用 − 30%×窗口；压够就能回到 30% 以下。
 // 数据：contextPressure 投影（pressureTokens = 最近一次请求的占用；contextWindow = 窗口）。
 
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
@@ -16,7 +16,7 @@ export const HINT_THRESHOLD_PERCENT = 50;
 export const HINT_STEP_PERCENT = 5;
 
 /** 建议目标：压到窗口的这个百分比以下。 */
-export const HINT_TARGET_PERCENT = 45;
+export const HINT_TARGET_PERCENT = 30;
 
 /** 每个对话最近一次提醒时的占用百分比（回落到阈值以下就清掉，重新计数）。 */
 const hintedPercent = new Map();
@@ -38,7 +38,7 @@ export function readPressure(ctx, session) {
   }
 }
 
-/** 建议至少压掉多少 token：当前占用 − 45%×窗口。 */
+/** 建议至少压掉多少 token：当前占用 − 30%×窗口。 */
 export function hintNeedTokens(pressure) {
   const need = Math.ceil(pressure.used - (HINT_TARGET_PERCENT / 100) * pressure.window);
   return need > 0 ? need : 0;
