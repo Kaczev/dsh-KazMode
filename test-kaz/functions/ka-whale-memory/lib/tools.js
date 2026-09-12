@@ -55,11 +55,35 @@ async function collectDocs(kinds, locations, cwd) {
     for (const kind of kinds) {
       for (const entry of await listMemories(location, kind, cwd)) {
         const body = await bodyOf(entry);
-        if (body !== null) docs.push({ name: entry.name, text: body });
+        if (body !== null) docs.push({ name: entry.name, text: indexTextOf(entry, body) });
       }
     }
   }
   return docs;
+}
+
+/**
+ * BM25 文档文本：正文 + summary + keywords。keywords 计两遍（轻度加权）——
+ * 显式写下的关键词，比正文里偶然出现的同一个词更值得被检索命中。
+ */
+function indexTextOf(entry, body) {
+  const summary = typeof entry.data?.summary === "string" ? entry.data.summary : "";
+  const keywords = Array.isArray(entry.data?.keywords)
+    ? entry.data.keywords.filter((word) => typeof word === "string" && word.length > 0)
+    : [];
+  const parts = [body];
+  if (summary.length > 0) parts.push(summary);
+  if (keywords.length > 0) {
+    const joined = keywords.join(" ");
+    parts.push(joined, joined);
+  }
+  return parts.join("\n");
+}
+
+/** 排序用的时间：优先文件里的 updatedAt，缺失/非法回退 mtime。 */
+function timeOf(entry) {
+  const parsed = Date.parse(entry.updatedAt);
+  return Number.isFinite(parsed) ? parsed : entry.mtimeMs;
 }
 
 const ok = (message) => ({ ok: true, message });
@@ -97,7 +121,7 @@ export function memorySearchTool() {
   return defineTool({
     name: "memory_search",
     description:
-      "Search memories by BM25 relevance over their bodies; global and local memories are ranked together. Read-only. Returns up to `limit` memory names, most relevant first; open one with memory_detail.",
+      "Search memories by BM25 relevance over their bodies, summaries, and keywords; global and local memories are ranked together. Read-only. Returns up to `limit` memory names, most relevant first; open one with memory_detail.",
     parameters: {
       keywords: { type: "string", required: true, description: "Keywords to search for." },
       kind: { type: "string", enum: ["context", "paths"], description: "Which kind to search; omit to search both." },
@@ -171,7 +195,7 @@ export function memoryListTool() {
       for (const location of locationsOf(args.location)) {
         for (const kind of KINDS) all.push(...(await listMemories(location, kind, cwd)));
       }
-      all.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      all.sort((a, b) => timeOf(b) - timeOf(a));
       return { items: all.slice(0, limit).map((entry) => entry.name) };
     },
     presentCall: (args) => present("List memories", args),
@@ -188,6 +212,8 @@ export function memorySaveTool() {
       name: { type: "string", required: true, description: "Memory name (also its file name); unique across all memories." },
       context: { type: "string", description: "Content-memory body. Mutually exclusive with `paths`." },
       paths: { type: "string", description: "Path-memory body. Mutually exclusive with `context`." },
+      summary: { type: "string", description: "Optional one-line summary; indexed by search." },
+      keywords: { type: "array", items: { type: "string" }, description: "Optional keywords; indexed with extra weight by search." },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
     async execute(args, exec) {
@@ -206,7 +232,7 @@ export function memorySaveTool() {
       if (existing.length > 0) {
         return fail(`"${name}" already exists as ${describe(existing[0])} — use memory_update to replace its body`);
       }
-      await writeMemory(location, kind, name, body, cwd);
+      await writeMemory(location, kind, name, body, cwd, { summary: args.summary, keywords: args.keywords });
       return ok(`saved ${location} ${kind} "${name}"`);
     },
     presentCall: (args) => present("Save memory", args),
@@ -222,6 +248,8 @@ export function memoryUpdateTool() {
       name: { type: "string", required: true, description: "Exact memory name." },
       context: { type: "string", description: "New body for a content memory. Mutually exclusive with `paths`." },
       paths: { type: "string", description: "New body for a path memory. Mutually exclusive with `context`." },
+      summary: { type: "string", description: "Optional new one-line summary; omit to keep the current one." },
+      keywords: { type: "array", items: { type: "string" }, description: "Optional new keywords; omit to keep the current ones." },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
     async execute(args, exec) {
@@ -239,7 +267,10 @@ export function memoryUpdateTool() {
       if (memory.kind !== kind) {
         return fail(`"${name}" is a ${memory.location} ${memory.kind} memory — give the matching body field`);
       }
-      await writeMemory(memory.location, memory.kind, memory.name, body, cwd);
+      const current = await readMemoryFile(memory.file);
+      const summary = typeof args.summary === "string" ? args.summary : typeof current?.summary === "string" ? current.summary : "";
+      const keywords = Array.isArray(args.keywords) ? args.keywords : Array.isArray(current?.keywords) ? current.keywords : [];
+      await writeMemory(memory.location, memory.kind, memory.name, body, cwd, { summary, keywords });
       return ok(`updated ${describe(memory)}`);
     },
     presentCall: (args) => present("Update memory", args),

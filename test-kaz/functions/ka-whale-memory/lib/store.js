@@ -1,7 +1,10 @@
 // ka-whale-memory —— 记忆文件的读写。
 //
-// 每个记忆一个 JSON：内容记忆 { location, name, context }；
-// 路径记忆 { location, name, paths }。写盘用临时文件 + rename（原子替换）。
+// 每个记忆一个 JSON：
+//   内容记忆 { location, name, context, summary?, keywords?, updatedAt }
+//   路径记忆 { location, name, paths,   summary?, keywords?, updatedAt }
+// summary / keywords / updatedAt 是给 BM25 检索与排序用的附属字段（可缺省）。
+// 写盘用临时文件 + rename（原子替换）。
 
 import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,7 +32,9 @@ export async function listMemories(location, kind, cwd) {
     const data = await readMemoryFile(file);
     if (data === null) continue;
     const name = typeof data.name === "string" && data.name.length > 0 ? data.name : entry.slice(0, -5);
-    out.push({ name, kind, location, file, mtimeMs: stat.mtimeMs });
+    const updatedAt =
+      typeof data.updatedAt === "string" && data.updatedAt.length > 0 ? data.updatedAt : new Date(stat.mtimeMs).toISOString();
+    out.push({ name, kind, location, file, mtimeMs: stat.mtimeMs, updatedAt, data });
   }
   return out;
 }
@@ -58,11 +63,41 @@ export async function readMemoryFile(file) {
   }
 }
 
-/** 写一个记忆文件（原子替换）。 */
-export async function writeMemory(location, kind, name, body, cwd) {
+/** keywords 规范化：只留非空字符串，去重保序。 */
+export function normalizeKeywords(value) {
+  const out = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (trimmed.length === 0 || out.includes(trimmed)) continue;
+    out.push(trimmed);
+  }
+  return out;
+}
+
+/**
+ * 写一个记忆文件（原子替换）。
+ * @param {string} location - global / local。
+ * @param {string} kind - context / paths。
+ * @param {string} name - 记忆名。
+ * @param {string} body - 正文。
+ * @param {string} cwd - 项目目录（local 库的根）。
+ * @param {{summary?: string, keywords?: readonly string[]}} [extra] - BM25 附属字段。
+ * @returns {Promise<string>} 写好的文件路径。
+ */
+export async function writeMemory(location, kind, name, body, cwd, extra = {}) {
   const file = memoryFile(location, kind, name, cwd);
   await fs.mkdir(dirname(file), { recursive: true });
-  const data = kind === "context" ? { location, name, context: body } : { location, name, paths: body };
+  const summary = typeof extra.summary === "string" ? extra.summary.trim() : "";
+  const keywords = normalizeKeywords(extra.keywords);
+  const data = {
+    location,
+    name,
+    ...(kind === "context" ? { context: body } : { paths: body }),
+    ...(summary.length > 0 ? { summary } : {}),
+    ...(keywords.length > 0 ? { keywords } : {}),
+    updatedAt: new Date().toISOString(),
+  };
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
   await fs.rename(tmp, file);

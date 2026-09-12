@@ -31,11 +31,22 @@ export const MEMORY_MAINTAINER_BLACKLIST = Object.freeze([
   "get-arrangement",
 ]);
 
-/** 保留集：黑名单挡不掉的工具（§2.2 / §2.3 的"必须保留"）。 */
+/** 保留集（普通子代理）：黑名单挡不掉的工具（§2.3）——上下文三件 + 记忆只读三件。 */
 export const RESERVED_TOOLS = Object.freeze([
   "context_compress",
   "context_search",
   "context_read",
+  "memory_search",
+  "memory_detail",
+  "memory_list",
+]);
+
+/** 保留集（记忆管理员）：上下文三件 + 记忆六件全部（§2.2）——管家要读写记忆。 */
+export const MEMORY_MAINTAINER_RESERVED = Object.freeze([
+  ...RESERVED_TOOLS,
+  "memory_save",
+  "memory_update",
+  "memory_forget",
 ]);
 
 /** 子代理默认黑名单（§2.3）：不参与编排、不碰工作流、不写记忆；主代理派发时可在其上追加。 */
@@ -54,15 +65,16 @@ export const SUBAGENT_DEFAULT_BLACKLIST = Object.freeze([
  * 清洗一份黑名单：去掉保留集、非字符串、空白与重复项。
  * 子代理与记忆管理员的黑名单在派发前都要过这一道。
  * @param {unknown} names - 原始黑名单。
+ * @param {readonly string[]} [reserved] - 保留集（默认普通子代理那套）。
  * @returns {string[]} 清洗后的黑名单。
  */
-export function sanitizeBlacklist(names) {
+export function sanitizeBlacklist(names, reserved = RESERVED_TOOLS) {
   const out = [];
   for (const name of Array.isArray(names) ? names : []) {
     if (typeof name !== "string") continue;
     const trimmed = name.trim();
     if (trimmed.length === 0) continue;
-    if (RESERVED_TOOLS.includes(trimmed)) continue;
+    if (reserved.includes(trimmed)) continue;
     if (!out.includes(trimmed)) out.push(trimmed);
   }
   return out;
