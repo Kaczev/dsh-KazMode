@@ -90,11 +90,15 @@ export function writeArrangementTool({ store }) {
       if (stage !== "arrange_agent") return fail(`write-arrangement works only in the arrange_agent stage (current: ${stage})`);
       const raw = Array.isArray(args?.entries) ? args.entries : [];
       if (raw.length === 0) return fail("entries must be a non-empty array");
+      const previous = await store.loadEntries(sessionId);
       const entries = [];
       for (const item of raw) {
         const { entry, error } = normalizeEntry(item);
         if (error !== undefined) return fail(error);
-        entries.push(entry);
+        // 重写安排时按 persona 保留程序账本字段（id/status/summary）——
+        // 模型每轮都会重写计划，账本不能跟着被清掉。
+        const old = previous.find((prev) => personaKey(prev.persona) === personaKey(entry.persona));
+        entries.push(old === undefined ? entry : { ...entry, id: old.id, status: old.status, summary: old.summary });
       }
       await writeArrangement(sessionId, entries);
       store.setEntries(sessionId, entries);
@@ -176,22 +180,53 @@ export function kaSubWhaleTool({ ctx, store }) {
       if (subagents === undefined || subagents === null) {
         return { ...fail("the subagent registry is unavailable"), text: "" };
       }
-      // 复用：这条已经派发过、且那个子代理还活着 → 把新任务接着说给它，不再新开一个
-      // （注意：它的 persona / 黑名单沿用创建时的那份）。
-      const liveAgents = ctx.get("agents");
-      const existing =
-        typeof entry.id === "string" && entry.id.length > 0 && liveAgents !== undefined && liveAgents !== null && typeof liveAgents.get === "function"
-          ? liveAgents.get(entry.id)
-          : undefined;
-      if (existing !== undefined && existing !== null && typeof subagents.sendMessage === "function") {
+      // 复用（旧 kaz 的强制复用机制）：先在本对话的 continuable 子代理里按 label
+      // （= 角色名）找同角色、且当前不在忙的那个 → 把新任务 sendMessage 给它；
+      // 都在忙就先别派（等它报告）；找不到才新开一个。
+      const agents = ctx.get("agents");
+      const agentOf = (id) =>
+        agents !== undefined && agents !== null && typeof agents.get === "function" ? agents.get(id) : undefined;
+      let reusableId = "";
+      let busyId = "";
+      let enumerated = false;
+      try {
+        if (typeof subagents.listChildren === "function") {
+          const children = await subagents.listChildren(sessionId, exec.signal);
+          enumerated = true;
+          for (const child of Array.isArray(children) ? children : []) {
+            if (child === null || typeof child !== "object") continue;
+            if (child.kind !== "child" || child.mode !== "continuable" || child.label !== label) continue;
+            const live = agentOf(child.id);
+            if (live !== undefined && live !== null && live.status === "running") {
+              if (busyId.length === 0) busyId = child.id;
+              continue;
+            }
+            reusableId = child.id;
+            break;
+          }
+        }
+      } catch (error) {
+        ctx.logger?.debug?.(`[ka-whale-workflow] listChildren failed: ${reason(error)}`);
+      }
+      if (!enumerated && reusableId.length === 0 && typeof entry.id === "string" && entry.id.length > 0) {
+        const live = agentOf(entry.id);
+        if (live !== undefined && live !== null) {
+          if (live.status === "running") busyId = entry.id;
+          else reusableId = entry.id;
+        }
+      }
+      if (reusableId.length === 0 && busyId.length > 0) {
+        return { ...fail(`${label} is still working (subagent ${busyId}); wait for its report before dispatching it again`), text: "" };
+      }
+      if (reusableId.length > 0 && typeof subagents.sendMessage === "function") {
         try {
-          await subagents.sendMessage(exec.agent, entry.id, [{ type: "text", text: entry.task }], { signal: exec.signal });
+          await subagents.sendMessage(exec.agent, reusableId, [{ type: "text", text: entry.task }], { signal: exec.signal });
         } catch (error) {
           return { ...fail(`continue failed: ${reason(error)}${skippedNote}`), text: "" };
         }
-        const continued = await patchEntryAt(sessionId, index, { status: "running" });
+        const continued = await patchEntryAt(sessionId, index, { id: reusableId, status: "running" });
         store.setEntries(sessionId, continued);
-        return { ok: true, message: `continued ${label} as ${entry.id} (reused, no new subagent)`, text: `subagent id: ${entry.id}` };
+        return { ok: true, message: `continued ${label} as ${reusableId} (reused, no new subagent)`, text: `subagent id: ${reusableId}` };
       }
       if (typeof subagents.startContinuable !== "function") {
         return { ...fail("the subagent registry is unavailable"), text: "" };
