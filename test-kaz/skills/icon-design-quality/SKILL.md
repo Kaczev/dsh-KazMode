@@ -1,6 +1,7 @@
 ---
 name: icon-design-quality
 description: Use when drawing or reviewing icons, symbol sets, or pictograms - choosing stroke weight and grid, making icons match each other, sizing a set for 16/24/32px, or when icons look hand-drawn and inconsistent next to each other.
+user-invocable: false
 ---
 
 # Icon design quality

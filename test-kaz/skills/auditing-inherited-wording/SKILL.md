@@ -1,6 +1,7 @@
 ---
 name: auditing-inherited-wording
 description: Use when reviewing wording you or someone else did not originally justify - a persona, a prompt, a skill body, a doc introduction - and when a phrase survives only because it is conventional, familiar, or attributed to an authority; also when a draft keeps an inherited sentence and nobody can say what it prevents.
+user-invocable: false
 ---
 
 # Auditing inherited wording

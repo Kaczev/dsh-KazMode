@@ -1,6 +1,7 @@
 ---
 name: authoring-agent-presets
 description: Use when creating, changing, or validating an agent preset - the directory, its metadata, the composition that decides which plugins one session gets, a persona that replaces the deployment default, a skill that must travel with it, or when a preset does not appear in the picker or mounts but behaves like the default.
+user-invocable: false
 ---
 
 # Authoring agent presets

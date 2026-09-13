@@ -1,6 +1,7 @@
 ---
 name: visual-design-quality
 description: Use when building or reviewing any user-visible interface - pages, components, forms, dashboards, email or document layouts - to make it look deliberate rather than generated, and when a layout is technically working but reads as unfinished or cramped.
+user-invocable: false
 ---
 
 # Visual design quality

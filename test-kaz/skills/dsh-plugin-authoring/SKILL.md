@@ -1,6 +1,7 @@
 ---
 name: dsh-plugin-authoring
 description: Use when writing, changing, wiring, configuring, verifying, or packaging a DeepSeek Harness plugin - a module exporting name/inject/apply, a model-facing tool registered through ctx.tools, a config schema, or a row in an agent preset's agent.cordis.yml - and when the plugin mounts but contributes nothing.
+user-invocable: false
 ---
 
 # Authoring DSH plugins

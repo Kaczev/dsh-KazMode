@@ -1,6 +1,7 @@
 ---
 name: verify-before-claiming-done
 description: Use when about to report work as done, fixed, passing, or verified - before saying a file was written, a command succeeded, a rule is enforced, a bug is gone, or a check passed. It sets what counts as evidence, how to test the artifact that will actually run, and how to report the part that was not verified.
+user-invocable: false
 ---
 
 # Verify Before Claiming Done

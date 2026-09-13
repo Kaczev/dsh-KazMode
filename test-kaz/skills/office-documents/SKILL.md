@@ -1,6 +1,7 @@
 ---
 name: office-documents
 description: Use when producing a file someone will open in Word, Excel, PowerPoint, or a PDF reader - reports, spreadsheets, decks, invoices, exports - to pick the right library, install it on demand, lay the document out properly, and confirm the file actually opens with the content intended.
+user-invocable: false
 ---
 
 # Office documents

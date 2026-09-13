@@ -1,6 +1,7 @@
 ---
 name: planning-with-files
 description: Use when a task will outlive one context window - multi-phase work, long investigations, or anything spanning many tool calls or sessions - to keep the plan, the evidence, and the state on disk instead of in memory, so the work survives compaction and a fresh session can resume it.
+user-invocable: false
 ---
 
 # Planning with files

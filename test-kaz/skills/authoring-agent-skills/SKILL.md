@@ -1,6 +1,7 @@
 ---
 name: authoring-agent-skills
 description: Use when writing, reviewing, or shipping a SKILL.md for an agent runtime - creating a skill, deciding what belongs in a skill versus a persona or memory, making a skill travel with an extension or preset instead of a user skills directory, or diagnosing a skill that does not appear in the catalog.
+user-invocable: false
 ---
 
 # Authoring agent skills

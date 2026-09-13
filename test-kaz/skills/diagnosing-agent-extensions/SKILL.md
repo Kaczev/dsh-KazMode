@@ -1,6 +1,7 @@
 ---
 name: diagnosing-agent-extensions
 description: Use when an agent extension or hook does not do what it should - a prompt contribution appears at the wrong time or not at all, a configuration change has no effect, a plugin mounts but contributes nothing, a counter or tracker misbehaves, or a write lands somewhere you did not intend.
+user-invocable: false
 ---
 
 # Diagnosing agent extensions

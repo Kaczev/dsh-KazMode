@@ -1,6 +1,7 @@
 ---
 name: writing-quality
 description: Use when writing or reviewing prose a person will read - documentation, READMEs, guides, reports, commit messages, release notes, pull request descriptions - to make it useful on first read, and when a draft is accurate but hard to follow, padded, or reads like a transcript.
+user-invocable: false
 ---
 
 # Writing quality

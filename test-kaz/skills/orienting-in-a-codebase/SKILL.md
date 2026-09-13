@@ -1,6 +1,7 @@
 ---
 name: orienting-in-a-codebase
 description: Use when starting work in a repository you do not already know - finding where a capability lives, deciding which layer an edit belongs to, judging which files are authoritative, or when a search returns nothing and you are about to conclude the feature does not exist.
+user-invocable: false
 ---
 
 # Orienting in a codebase
