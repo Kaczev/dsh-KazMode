@@ -25,6 +25,10 @@
 - id: kaz-system-prompt
   name: ./kaz-system-prompt.mjs
 
+# ── 口吻统一：把系统提示词里的第二人称改成"我们"（必须排在 kaz-system-prompt 之后）──
+- id: only-we
+  name: ./functions/only_we/lib/index.js
+
 - id: kaz-shared
   name: ./functions/kaz-shared/lib/index.js
 
