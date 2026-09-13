@@ -54,6 +54,30 @@ A test that cannot fail proves nothing. Before trusting a check:
   comparison trivially false and the whole guard silently inactive. Confirm the guard's own inputs
   are what you assume.
 
+## Take the expected value from the artifact, not from memory
+
+An assertion is only as good as the string you compare against. When you write that string from
+recollection of what the file says, you are testing your memory and reporting the result as a test
+failure - the artifact is right, your expectation is wrong, and the false alarm costs the same
+attention as a real defect.
+
+- **Copy the expected value out of the artifact** - read the file, print the field, quote the line -
+  rather than typing it from what you believe it contains. Every expected value should have an
+  observed source.
+- **Watch the whitespace.** Prose wraps: a sentence you match as one line exists in the file as two
+  lines with indentation between them, so `the harness installs a subset` fails against
+  `the\n  harness installs a subset` even though the text is plainly there. Assert on a short
+  distinctive fragment well inside one line, or normalize whitespace on both sides before comparing,
+  and never conclude "the content is missing" from a failed literal match.
+- **When a check fails, print both sides before touching anything.** The diff between expected and
+  actual is the evidence; without it, "it failed" is a feeling.
+- **Re-read after writing.** An edit that silently changes what you wrote earlier is a real hazard,
+  and the check that catches it is the same one: read the artifact back.
+
+This is the same rule as elsewhere in this skill, aimed at the test rather than the artifact: the
+artifact on disk is the authority, and a failure that exists only in your expectation is not a defect
+in the artifact.
+
 ## When a test fails, suspect the test
 
 A failing check indicts two things: the artifact and the harness. Before changing the artifact,

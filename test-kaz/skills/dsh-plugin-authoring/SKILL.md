@@ -179,6 +179,42 @@ process, then read the feature back from the running system - a tool appears in 
 section appears in the prompt, an injected notice appears in the transcript. Configuration is read
 at mount, so an edit to a live process changes nothing until it restarts.
 
+## Pin a floor, then detect
+
+The host libraries move between releases and an example is only ever written against the version its
+author had. Treat these as **floors known to work**, not as what is installed here, and let the
+runtime report the truth:
+
+| Component | Known-good floor | Why the floor exists |
+|---|---|---|
+| Node | 22 | `process.getBuiltinModule` and other modern builtins are absent before it |
+| `@deepseek-ai/cordis` | 4 | service and effect semantics |
+| `@deepseek-ai/schemastery` | 3 | the validator contract used by `Config` |
+| the `@deepseek-ai/dsh-*` packages | the runtime's own version | the plugin API matches the harness that loads it, not an independent line |
+
+The last row is the one that bites in practice: dsh packages are released together, so a plugin
+written against one harness version can fail on another with a missing method rather than a clear
+error. Match the runtime, and read the version from disk instead of recalling it:
+
+```sh
+node -p "require('@deepseek-ai/dsh-tools/package.json').version"
+node -p "process.version + ' getBuiltinModule=' + typeof process.getBuiltinModule"
+```
+
+Then:
+
+- **Smoke-test before writing a real plugin**: import the module, register one trivial tool or
+  listener, and confirm the registration landed. A missing export or a changed signature shows up in
+  seconds instead of inside a hundred-line plugin.
+- **When an attribute is missing, enumerate the object** (`Object.keys`, `Object.getOwnPropertyNames`
+  on the prototype) or read the installed package's own types - do not fill the gap from memory of an
+  older signature. The installed package is the authority.
+- **Check the peer requirements in `package.json`** before assuming a dependency is available: the
+  harness installs a subset, and a package present in one profile may be absent in another.
+- **Record the versions** in whatever the reader will rerun, so a later failure can be traced to a
+  dependency change rather than to the plugin logic.
+
+
 ## When a plugin mounts but does nothing
 
 - **PENDING, not broken.** A plugin whose `inject` names a service no row provides waits forever and
