@@ -115,7 +115,8 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 **出错处理**：
 - `cannot replace real directory` / `cannot replace non-empty real directory` → `node_modules\@deepseek-ai`（或 `zod`）是真实目录而不是 junction：先备份，再删除该目录，然后重跑本步。
-- `required runtime package missing: ...\node_modules\@deepseek-ai` → 该 profile 的运行时 `@deepseek-ai` 不存在：先修好该 home 的 dsh 运行时，再重跑本步。
+- `runtime scope not found: neither ... nor ... exists` → 共享层 `<home>\profiles\node_modules\@deepseek-ai` 与 profile 层 `<home>\profiles\<profile>\node_modules\@deepseek-ai` 都不存在：该 home 的 dsh 运行时不可用，**停下**，先按官方方式装好 / 修复运行时，再重跑本步；不要继续更新。
+- `required runtime package missing: ...\node_modules\@deepseek-ai` → 选定的那一层在链接那一刻已不存在：把完整错误原样报告给用户，不要自行补建目录。**profile 层缺失本身不再报这个错**——共享层有 `dsh\package.json` 时直接选共享层。
 - `robocopy failed (N)`（`N > 7` 才是错误）/ 目标被占用 / `EPERM` → 让用户关闭正在运行的 `dsh web`，重跑本步；不要管理员强改 ACL，不要强杀进程。
 - `WARN: optional runtime package missing: ...\zod` → 可选 junction 缺失，更新会继续；若运行报 zod 解析失败再补装。
 
@@ -169,7 +170,8 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 | `-AllHomes` 里某个 home 报 `FAIL` | 该 home 的运行时 dsh 不是 `0.1.5-rc.2`：主环境 `.dsh`（全局 `0.1.5-rc.2`）与测试环境 `.dsh-test`（本地副本 `0.1.5-rc.2`）应 `OK`；`.dsh-clean`（`0.1.1-rc.2` 救援环境）报 `FAIL` 属设计如此。**不要**自行用 `-SkipVersionCheck`（唯一例外：用户明确要求回退到 `0.1.5-rc.1`，见第 0 步） |
 | `multiple profiles under ...; pass -ProfileName` | 该 home 有多个 profile：加 `-ProfileName web` |
 | `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续 |
-| `required runtime package missing: ...\@deepseek-ai` | 该 profile 的 `node_modules\@deepseek-ai` 不存在：先修好 dsh 运行时再重跑 |
+| `runtime scope not found: neither ... nor ... exists` | 共享层与 profile 层都不存在：该 home 的 dsh 运行时不可用，停下更新，先修好运行时再重跑 |
+| `required runtime package missing: ...\@deepseek-ai` | 选定的那一层在链接那一刻已不存在：原样报告给用户；profile 层缺失本身不再报此错（共享层有 `dsh\package.json` 就直接选它） |
 | `cannot replace non-empty real directory` | `node_modules\@deepseek-ai`（或 `zod`）是真实目录不是 junction：备份后删除该目录再重跑 |
 | `WARN: optional runtime package missing: ...\zod` | 可选 junction 缺失，更新继续；若运行报 zod 解析失败再补装 |
 | robocopy 报错（退出码 > 7）/ 目标目录多出的文件被删 | `/MIR` 是镜像语义：会删掉 `.agent-presets\kaz` 里多出的文件（`node_modules` 除外）；每次更新前的备份在 `tools\kaz-preset-backup-*`（会累积，可手动清理）；**不要**往预设目录放自定义文件 |

@@ -8,13 +8,20 @@ What it does:
      pass -Source test-kaz to promote the test-area development copy instead)
      into <DshHome>\.agent-presets\kaz, node_modules excluded.
   4. Creates/refreshes the two runtime junctions the preset needs:
-       <preset>\node_modules\@deepseek-ai -> the home's WIDER runtime package tree,
-                                            <DshHome>\profiles\node_modules\@deepseek-ai,
-                                            so rows living only there (dsh-persona,
-                                            dsh-tool-ask-user) stay resolvable; falls
-                                            back to <DshHome>\profiles\<profile>\
-                                            node_modules\@deepseek-ai when that wider
-                                            tree carries no runtime package
+       <preset>\node_modules\@deepseek-ai -> the first of these two trees that
+                                            carries the runtime package dsh\
+                                            package.json:
+                                              <DshHome>\profiles\node_modules\
+                                              @deepseek-ai (the wider tree, which
+                                              also holds rows living only there,
+                                              such as dsh-persona and
+                                              dsh-tool-ask-user), else
+                                              <DshHome>\profiles\<profile>\
+                                              node_modules\@deepseek-ai
+                                            A home with only the wider tree is
+                                            healthy -- dsh boot never creates
+                                            the profile scope -- so it installs
+                                            normally.
        <preset>\node_modules\zod          -> <DshHome>\profiles\<profile>\node_modules\zod
   5. Backs up an existing preset to <DshHome>\tools\kaz-preset-backup-<timestamp>.
 
@@ -33,6 +40,9 @@ Notes:
     rollback override (only for a user-chosen return to 0.1.5-rc.1, which also
     needs the launcher's EXPECTED_CLI set back); normal installs and updates
     must never use it.
+  - The profile's own @deepseek-ai scope is not required: a home whose runtime is
+    reached through <DshHome>\profiles\node_modules\@deepseek-ai only installs
+    fine, because dsh's boot self-heal never creates the profile scope.
   - Never run "git clean -fdx" or "git checkout -f" while kaz or test-kaz is a
     junction to a live preset; those commands would write through it.
 #>
@@ -170,9 +180,8 @@ function Install-OneHome([string]$TargetHome, [string]$WantedProfile) {
   }
 
   $modulesDir = Join-Path $presetDir 'node_modules'
-  $scopeTarget = Join-Path $TargetHome "profiles\$profile\node_modules\@deepseek-ai"
+  $profileScope = Join-Path $TargetHome "profiles\$profile\node_modules\@deepseek-ai"
   $zodTarget = Join-Path $TargetHome "profiles\$profile\node_modules\zod"
-  if (-not (Test-Path $scopeTarget)) { throw "runtime scope not found: $scopeTarget" }
 
   # Which package tree the preset's @deepseek-ai junction must point at.
   #
@@ -185,18 +194,42 @@ function Install-OneHome([string]$TargetHome, [string]$WantedProfile) {
   # <home>\profiles\node_modules\@deepseek-ai beside it -- pointing at the
   # subset makes those rows unresolvable (Kaz 8.0 needs both). Prefer the wider
   # tree when it is a real Node resolution root (it carries the runtime package
-  # itself); otherwise keep the profile scope, so a home without one still
-  # installs exactly as before.
+  # itself); otherwise take the profile layer.
+  #
+  # The profile layer is NOT something dsh creates: dsh boot only heals the
+  # wider <home>\profiles\node_modules and links bundles that sit outside the
+  # dsh installation closure -- and both shipped web bundles (dsh-base,
+  # dsh-web-app) are inside it, so a profile that was auto-initialized and never
+  # had a package manager run inside it legitimately has no profile scope at
+  # all. Its runtime is still complete, because every bundle resolves from the
+  # dsh installation and the installation closure is reached through the wider
+  # tree. So requiring the profile scope would reject a healthy home; the wider
+  # tree is enough to install, and it is the tree the junction should point at
+  # on such a home anyway, exactly as it does on a home that has both.
   $scopeCandidates = @(
     (Join-Path $TargetHome "profiles\node_modules\@deepseek-ai"),
-    $scopeTarget
+    $profileScope
   )
+  $scopeTarget = ''
   foreach ($candidate in $scopeCandidates) {
-    $runtimeMarker = Join-Path $candidate 'dsh\package.json'
-    if (Test-Path $runtimeMarker) {
+    if (Test-Path (Join-Path $candidate 'dsh\package.json')) {
       $scopeTarget = $candidate
       break
     }
+  }
+  if ([string]::IsNullOrEmpty($scopeTarget)) {
+    # No candidate carries the runtime package: accept one that exists only if
+    # the other does not, so a partially installed home still installs and the
+    # downstream required-target check reports the exact path.
+    foreach ($candidate in $scopeCandidates) {
+      if (Test-Path $candidate) {
+        $scopeTarget = $candidate
+        break
+      }
+    }
+  }
+  if ([string]::IsNullOrEmpty($scopeTarget)) {
+    throw "runtime scope not found: neither $($scopeCandidates[0]) nor $($scopeCandidates[1]) exists; install or repair the dsh runtime for this home first"
   }
 
   $links = @(
