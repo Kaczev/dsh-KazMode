@@ -30,7 +30,7 @@ function clampInt(value, fallback, min, max) {
 /**
  * 读 surface 节点的事实：事件类型（seq → type），以及"压缩摘要"节点的 seq 集合。
  * 摘要节点（compaction checkpoint：`source.plugin === "compact"`）带着**新的**大序号插在
- * 被压区间的位置上——它破坏"节点表里序号递增"的假设，而且本身已经是压缩产物、不能再压。
+ * 被压区间的位置上——它破坏"节点表里序号递增"的假设。它**可以**被再次压掉（口径见下）。
  * 注意：平台的 Session 没有 `session.events`，必须用 `snapshotEvents()`。
  */
 function nodeFactsOf(session, nodes) {
@@ -39,14 +39,12 @@ function nodeFactsOf(session, nodes) {
     if (node !== null && typeof node === "object" && typeof node.seq === "number") wanted.add(node.seq);
   }
   const types = new Map();
-  const digests = new Set();
   const events = typeof session?.snapshotEvents === "function" ? session.snapshotEvents() : [];
   for (const event of events) {
     if (event === null || typeof event !== "object" || !wanted.has(event.seq)) continue;
     types.set(event.seq, event.type);
-    if (event.type === "user/message" && event.data?.source?.plugin === "compact") digests.add(event.seq);
   }
-  return { types, digests };
+  return { types };
 }
 
 /** 按 token 预算求尾部保留边界：从尾向前累加到 keepRecent% 所对应的节点下标。 */
@@ -72,19 +70,17 @@ export function retainBoundaryIdx(nodes, windowTokens, keepRecentPercent) {
 
 /**
  * 框选区间：把 [fromSeq, toSeq] 收进可压中段 [起点, 终点]。
- * 起点 = 跳过头部 system/message 后的第一个配对平衡切点；终点 = 尾部保留带之前、
- * 且配对平衡的最后一个节点。两边都必须给（缺一边直接返回 null）：
- * 区间先收进这两点之间，再向内收——起点后移到配对平衡处、终点前移到配对平衡处，
- * 撞上 system/message 就退到它前面。
+ * **只保护两处**：头部 system/message（起点之后才算）与尾部保留带（终点之前才算）；
+ * 两侧落点都必须是配对平衡的切点，且区间内不得出现 system/message。
+ * 已压过的摘要节点**不设保护**——它可以被再次压掉（把摘要换得更紧）。
  * @returns {{startIdx: number, endIdx: number}|null}
  */
 export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
   if (!Array.isArray(nodes) || nodes.length === 0) return null;
   if (!(Number(fromSeq) > 0) || !(Number(toSeq) > 0)) return null;
-  const { types, digests } = nodeFactsOf(session, nodes);
+  const { types } = nodeFactsOf(session, nodes);
   const isSystem = (idx) => types.get(nodes[idx].seq) === "system/message";
-  const isDigest = (idx) => digests.has(nodes[idx].seq);
-  const skip = (idx) => isSystem(idx) || isDigest(idx);
+  const skip = (idx) => isSystem(idx);
   let startIdx = 0;
   while (startIdx < nodes.length && (skip(startIdx) || !toolPairingBalancedBefore(session, nodes[startIdx].seq))) startIdx += 1;
   if (startIdx >= nodes.length) return null;
@@ -92,11 +88,10 @@ export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
   while (endIdx >= startIdx && (skip(endIdx) || !toolPairingBalancedAfter(session, nodes[endIdx].seq))) endIdx -= 1;
   if (endIdx < startIdx) return null;
 
-  // 收进 [fromSeq, toSeq]，再向安全边界内收（摘要节点不参与映射）。
+  // 收进 [fromSeq, toSeq]，再向安全边界内收。
   {
     let idx = -1;
     for (let i = startIdx; i <= endIdx; i += 1) {
-      if (isDigest(i)) continue;
       if (nodes[i].seq >= fromSeq) {
         idx = i;
         break;
@@ -110,7 +105,6 @@ export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
   {
     let idx = -1;
     for (let i = endIdx; i >= startIdx; i -= 1) {
-      if (isDigest(i)) continue;
       if (nodes[i].seq <= toSeq) {
         idx = i;
         break;
@@ -122,10 +116,10 @@ export function foldBand(session, nodes, retainIdx, fromSeq, toSeq) {
     if (endIdx < startIdx) return null;
   }
 
-  // 区间里不许出现 system/message，也不许夹着已经压过的摘要节点：
-  // 撞上就退到它前面最近的平衡切点。
+  // 区间里不许出现 system/message（受保护头部）：撞上就退到它前面最近的平衡切点。
+  // 摘要节点不在此列——允许把已压过的段落再压一次。
   for (let i = startIdx; i <= endIdx; i += 1) {
-    if (skip(i)) {
+    if (isSystem(i)) {
       endIdx = i - 1;
       while (endIdx >= startIdx && !toolPairingBalancedAfter(session, nodes[endIdx].seq)) endIdx -= 1;
       break;
@@ -139,7 +133,7 @@ export function contextCompressTool(ctx) {
   return defineTool({
     name: "context_compress",
     description:
-      "Compress a redundant middle span of this conversation into a summary. Box the span with `from_seq` and `to_seq` — both are required, and they are the `#seq` numbers shown in context_search / context_read output. The span is snapped to safe boundaries and never cuts a tool call/result pair. Only the compactable middle is reachable: the protected head (system messages), the kept-recent tail (keep_recent, default 10%), and spans that were already compacted away cannot be re-compressed. One span per call; call again for another span.",
+      "Compress a redundant middle span of this conversation into a summary. Box the span with `from_seq` and `to_seq` — both are required, and they are the `#seq` numbers shown in context_search / context_read output. The span is snapped to safe boundaries and never cuts a tool call/result pair. Two regions are off limits: the protected head (system messages) and the kept-recent tail (keep_recent, default 10%). Everything between them is foldable, **including spans that were compacted before** — re-folding a summary replaces it with a tighter one. One span per call; call again for another span.",
     parameters: {
       from_seq: { type: "integer", required: true, description: "First seq of the span to fold (the `#seq` shown in context_search / context_read output)." },
       to_seq: { type: "integer", required: true, description: "Last seq of the span to fold (the `#seq` shown in context_search / context_read output)." },
@@ -174,7 +168,7 @@ export function contextCompressTool(ctx) {
       if (chosen === null) {
         return {
           ok: false,
-          message: `nothing foldable inside [${fromSeq} .. ${toSeq}] after safe-boundary snapping — the box may sit inside the protected head, the kept-recent tail, or an already-compacted span`,
+          message: `nothing foldable inside [${fromSeq} .. ${toSeq}] after safe-boundary snapping — the box may sit inside the protected head (system messages) or the kept-recent tail`,
         };
       }
       const startSeq = nodes[chosen.startIdx].seq;
