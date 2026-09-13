@@ -5,8 +5,9 @@ description: Use when writing or reviewing prose a person will read - documentat
 
 # Writing quality
 
-The reader wants to act. Everything below serves one goal: the shortest path from their question to
-the answer, without hiding the parts that are uncertain.
+A reader arrives with a question and leaves either able to act or still searching. Everything below
+serves one goal: the shortest path from their question to the answer, without hiding the parts that
+are uncertain.
 
 ## Lead with the answer
 

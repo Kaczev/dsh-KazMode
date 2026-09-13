@@ -95,8 +95,9 @@ difference between "the file is in my preset" and "the session can see it".
   shipping a row that fails to mount elsewhere.
 - **Do not assume a store, a path, or an environment variable.** Anything the rows need at runtime
   should be discoverable from the session, or set by the person installing it.
-- **Keep the preset self-describing.** Someone reading the directory cold should learn its purpose
-  from `preset.yml` and its contents from the rows, without external notes.
+- **Make the directory answer three questions on its own.** A cold reader should be able to state,
+  from `preset.yml` and the rows alone and without external notes, what the preset is for, which
+  capabilities it mounts, and what it deliberately leaves out.
 
 ## Verify a preset
 

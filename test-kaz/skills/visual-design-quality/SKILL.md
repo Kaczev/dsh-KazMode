@@ -12,13 +12,15 @@ rule below is checkable; none of it needs taste to apply.
 ## Spacing: pick a scale and stay on it
 
 - Choose one unit and use only its multiples: 4px or 8px. Every margin and gap is one of
-  `4 / 8 / 12 / 16 / 24 / 32 / 48 / 64`. A stray `13px` is what makes a layout feel accidental.
+  `4 / 8 / 12 / 16 / 24 / 32 / 48 / 64`. An off-scale value such as `13px` is a number nobody can
+  reproduce from the scale, which is what makes a layout look assembled rather than designed.
 - Space is what groups: put more space *between* groups than *inside* them. If a heading is as close
-  to the previous block as to its own text, the grouping reads wrong even when nothing is misaligned.
+  to the previous block as to its own text, the reader cannot tell which block the heading belongs
+  to - the distances have to disagree for the grouping to be readable.
 - Related controls sit closer to each other than to unrelated ones; a label belongs to its field more
   tightly than to the field above.
-- Use one consistent page margin and one consistent content width. Full-bleed text on a wide screen is
-  the single most common sign of an unstyled layout.
+- Use one consistent page margin and one consistent content width. Text that runs the full width of a
+  wide screen is the most common case of a page with no designed measure.
 
 ## Type: fewer sizes, more contrast between them
 
@@ -48,8 +50,8 @@ rule below is checkable; none of it needs taste to apply.
   next. If three elements compete at the same visual weight, none of them is the answer.
 - One primary action per view. Secondary actions are visually quieter; destructive ones are separated
   from the rest.
-- Align to a shared grid. Pick left edges and keep them: mixed alignment inside a card or a form is
-  the second most common sign of an unstyled layout.
+- Align to a shared grid. Pick left edges and keep them: mixed alignment inside a card or a form
+  leaves a left edge that moves from row to row, which the eye reads as a defect before it can name it.
 - Use whitespace to separate before reaching for a border, and a border before reaching for a shadow.
   Layered shadows with no border, on a plain background, look like a template.
 

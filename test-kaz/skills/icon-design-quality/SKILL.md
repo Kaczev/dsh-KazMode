@@ -32,8 +32,8 @@ weight, corner radius, or optical size disagrees with its neighbours. Design the
 
 - Radius: one corner radius family (e.g. 2px on 24x24) used everywhere that has a corner.
 - Terminals: line caps and joins are all the same - either all round or all butt/square.
-- Detail budget: an icon that needs twelve shapes next to icons made of three looks foreign. Simplify
-  the complex one rather than complicating the rest.
+- Detail budget: an icon that needs twelve shapes next to icons made of three reads as a different
+  drawing style, whatever its grid. Simplify the complex one rather than complicating the rest.
 - Metaphor: one visual language. Do not mix a physical object, a geometric abstraction, and a letter
   in the same row.
 - Optical balance: glyphs of equal pixel size do not look equal. Round shapes need overshoot; dense

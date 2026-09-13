@@ -20,11 +20,12 @@ Do not write one when:
   prompt; duplicating it in a skill creates drift between two copies.
 - It is a fact about this machine or this repository. Those belong in memory, which is searched at
   the moment of need and costs nothing when unused.
-- It is a one-off task. A skill earns its catalog line by recurring.
+- It is a one-off task. A skill occupies a catalog line in every session it is installed in; that cost
+  is only repaid by a task that comes back.
 
-A skill pays for itself only if the description routes correctly. **The description is the whole
-routing decision**: the catalog carries `name` and `description` and nothing else - no body, no
-paths, no tags.
+A skill pays for itself only if the description routes correctly. **The catalog carries `name` and
+`description` and nothing else** - no body, no paths, no tags - so the description is the only thing a
+reader has when deciding whether to load the skill.
 
 ## File format
 
