@@ -110,9 +110,29 @@ PowerShell is a poor text editor, and its failure mode is invisible.
 
 - Each invocation is a fresh process: a working directory, an environment variable, or a variable set
   by one call does not exist in the next. Any setup has to be repeated inside the same call.
-- Modern shell operators - conditional chaining, null-coalescing, and their relatives - may not exist
-  in the older Windows PowerShell that ships with the operating system. Use explicit conditionals.
+- Modern shell operators - conditional chaining (the double-ampersand and double-pipe forms),
+  null-coalescing, and their relatives - may not exist in the older Windows PowerShell that ships
+  with the operating system. Use explicit conditionals. Treat any operator you cannot remember being
+  available as unavailable until the shell runs it.
 - An intermittent "cannot replace file" style failure on long non-ASCII writes is usually transient;
   retry the same operation once before investigating.
 - To measure the environment rather than assume it: ask the shell for its own version, and ask for a
   command's resolved path, instead of reasoning from which shell you think is installed.
+
+## When the shell refuses to parse the command
+
+A parse error means nothing ran. The message points at a line, often not the line you would blame, so
+read the message for the *token* it objected to rather than the line number. Two traps account for
+most of these, and both come from characters that carry meaning inside a string:
+
+- **Do not put a colon immediately after a variable inside a double-quoted string.** The shell reads
+  `<name>:` as a drive-qualified reference and stops with a message about the colon not being followed
+  by a valid variable name. Write the output as separate pieces, or use a formatting operator, or
+  brace the name so the colon cannot attach to it.
+- **Escaping characters inside one shell's string, only to hand the text to another matcher, is
+  fragile.** If a search pattern needs the shell's escape character, the shell may consume it - or
+  veto the whole command - before the matcher ever sees it. Prefer matching a plain substring, or
+  build the text in a way that does not require escaping at all.
+
+General habit: when a command fails to parse, do not retype it with more quoting. Reduce it to the
+smallest piece that still fails, then look at what that piece actually contains.
