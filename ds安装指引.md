@@ -157,7 +157,7 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
 - **口吻**：系统提示词里的第二人称已被 `only_we` 统一改写成 "we/our"——**只改提示词正文，不改工具描述与 schema**，所以工具描述里仍可能出现 "you"，这不是没装好。
 - **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
-  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 12 个技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。
+  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 13 个技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文三件：`context_search` / `context_read` / `context_compress`
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`

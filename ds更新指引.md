@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
 - **不需要** `npm install`：预设只用那两个 junction 解析运行时；`<home>\profiles\<profile>\node_modules` 里的其它内容不会被改。
-- **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `12`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。
+- **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `13`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。
 - 更新别的 home / 多个 home（去掉 `-DryRun` 即可）：
 
 ```powershell
@@ -138,7 +138,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 - **口吻**：系统提示词里的第二人称已被 `only_we` 统一改写成 "we/our"——**只改提示词正文，不改工具描述与 schema**，所以工具描述里仍可能出现 "you"，这不是没装好。
 - **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
-  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 12 个技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。
+  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 13 个技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文三件：`context_search` / `context_read` / `context_compress`
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`
