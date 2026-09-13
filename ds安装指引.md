@@ -65,7 +65,7 @@ Test-Path (Join-Path $repo "kaz\preset.yml")
 
 ## 第 2 步 运行安装程序
 
-安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的两个 junction（`zod` → `<home>\profiles\<profile>\node_modules`；`@deepseek-ai` → **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`，仅当该层没有运行时包时才回退 profile 那一层）→ 打印 `KAZ-PRESET-INSTALL OK`。
+安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的 `@deepseek-ai` junction（→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`，仅当该层没有运行时包时才回退 profile 那一层）→ 打印 `KAZ-PRESET-INSTALL OK`。
 
 > **`@deepseek-ai` 为什么指共享层（别改回 profile 层）**：预设解析插件名时**先看自己的 `node_modules`**，这个链接指向哪一层就决定了哪些包可见；一个指向父目录的链接还会截断向上的查找。profile 那一层（`<home>\profiles\<profile>\node_modules\@deepseek-ai`）可能只有该 profile 装过的子集，而 Kaz 8.0 的组合需要 `dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `dsh-tool-ask-user`（组合里的一行）等**只存在于共享层**的包——指错就直接**预设挂不起来**。以 `linked: ... -> ...` 那行打印的路径为准。
 
@@ -131,10 +131,9 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
 - 报 `no profiles directory under ...` → 该 home 没有 `profiles` 目录，或 profile 里还没有 `node_modules`：这个 home 还没装好 dsh 运行时，**不要**继续装预设。
 - 报 `runtime scope not found: neither ... nor ... exists` → 共享层 `<home>\profiles\node_modules\@deepseek-ai` 与 profile 层 `<home>\profiles\<profile>\node_modules\@deepseek-ai` 都不存在：该 home 的 dsh 运行时不可用，**停下**，先按官方方式装好 / 修复运行时，再重跑安装程序；不要继续装预设。
 - 报 `required runtime package missing: ...\node_modules\@deepseek-ai` → 选定的那一层在链接那一刻已不存在：把完整错误原样报告给用户，不要自行补建目录。**profile 层缺失本身不再报这个错**——共享层有 `dsh\package.json` 时直接选共享层。
-- 报 `cannot replace non-empty real directory: ...\node_modules\@deepseek-ai`（或 `zod`）→ 该位置是**真实目录**而不是 junction：先备份它，再删除该目录，然后重跑安装程序。
+- 报 `cannot replace non-empty real directory: ...\node_modules\@deepseek-ai` → 该位置是**真实目录**而不是 junction：先备份它，再删除该目录，然后重跑安装程序。
 - 报 `preset robocopy failed (N)` / `backup robocopy failed (N)`（`N > 7` 才是错误）→ 目标目录被占用：让用户关闭正在运行的 dsh web，重跑同一条命令。
 - 报权限 / `EPERM` / 文件占用 → 让用户关闭 dsh web 后重试；**不要**用管理员权限强改 ACL，也不要强行杀进程。
-- 报 `WARN: optional runtime package missing: ...\node_modules\zod` → `zod` 是可选 junction，安装会继续；若之后运行报 `zod` 解析失败，再回该 profile 补装 `zod`。
 - 安装成功、但新对话里预设挂不起来（组合里某一行 `names a plugin that cannot be resolved`）→ 先看 `linked: <preset>\node_modules\@deepseek-ai -> ...` 指到哪一层：必须是**共享层** `<home>\profiles\node_modules\@deepseek-ai`。指到 profile 层就重跑当前仓库的安装程序；手工修法是 `cmd /c rmdir "<preset>\node_modules\@deepseek-ai"` 后重建 junction 指向共享层。
 
 > 补充：若目标 home 的 `.agent-presets\kaz` 与仓库源目录（默认 `kaz\`）**本来就是同一个目录**（开发机上主区就是这样），安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——这是正常分支，无需处理。
@@ -252,8 +251,7 @@ Remove-Item (Join-Path $dshHome "storages\kaz-session-states.json") -Force -Erro
 | `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续装 |
 | `runtime scope not found: neither ... nor ... exists` | 共享层与 profile 层都不存在：该 home 的 dsh 运行时不可用，停下装预设，先修好运行时再重跑 |
 | `required runtime package missing: ...\@deepseek-ai` | 选定的那一层在链接那一刻已不存在：原样报告给用户；profile 层缺失本身不再报此错（共享层有 `dsh\package.json` 就直接选它） |
-| `cannot replace non-empty real directory` | `node_modules\@deepseek-ai`（或 `zod`）是真实目录不是 junction：备份后删除该目录再重跑 |
-| `WARN: optional runtime package missing: ...\zod` | 可选 junction 缺失，安装继续；若运行报 zod 解析失败再补装 |
+| `cannot replace non-empty real directory` | `node_modules\@deepseek-ai` 是真实目录不是 junction：备份后删除该目录再重跑 |
 | robocopy 报错（退出码 > 7）/ 目标目录多出的文件被删 | `/MIR` 是镜像语义：会删掉 `.agent-presets\kaz` 里多出的文件（`node_modules` 除外）；备份在 `tools\kaz-preset-backup-*`，不要往预设目录放自定义文件 |
 | 目标目录被占用 / `EPERM` | 让用户关闭 `dsh web` 后重跑；不要管理员强改 ACL，不要强杀进程 |
 | 看到 `KAZ-PRESET-INSTALL OK` 但好像没生效 | 若那次带了 `-DryRun`，OK 只是预演；去掉 `-DryRun` 重跑一次 |

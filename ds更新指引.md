@@ -98,7 +98,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 
 1. 把现有预设备份到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）；
 2. 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）**镜像**到 `<home>\.agent-presets\kaz`（排除 `node_modules`）；
-3. **原地重建**预设 `node_modules` 下的两个 junction：`zod`（可选）→ `<home>\profiles\<profile>\node_modules`；`@deepseek-ai`（必需）→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`（仅当该层没有运行时包时才回退 profile 那一层）。先 `rmdir` 旧链接再新建，幂等；
+3. **原地重建**预设 `node_modules` 下的 `@deepseek-ai` junction（必需）→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`（仅当该层没有运行时包时才回退 profile 那一层）。先 `rmdir` 旧链接再新建，幂等；
 4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
 - **不需要** `npm install`：预设只用那两个 junction 解析运行时；`<home>\profiles\<profile>\node_modules` 里的其它内容不会被改。
@@ -114,11 +114,10 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 - 若目标 home 的 `.agent-presets\kaz` 与仓库源目录（默认 `kaz\`）本来就是同一个目录（开发机上主区就是这样），安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——正常分支。
 
 **出错处理**：
-- `cannot replace real directory` / `cannot replace non-empty real directory` → `node_modules\@deepseek-ai`（或 `zod`）是真实目录而不是 junction：先备份，再删除该目录，然后重跑本步。
+- `cannot replace real directory` / `cannot replace non-empty real directory` → `node_modules\@deepseek-ai` 是真实目录而不是 junction：先备份，再删除该目录，然后重跑本步。
 - `runtime scope not found: neither ... nor ... exists` → 共享层 `<home>\profiles\node_modules\@deepseek-ai` 与 profile 层 `<home>\profiles\<profile>\node_modules\@deepseek-ai` 都不存在：该 home 的 dsh 运行时不可用，**停下**，先按官方方式装好 / 修复运行时，再重跑本步；不要继续更新。
 - `required runtime package missing: ...\node_modules\@deepseek-ai` → 选定的那一层在链接那一刻已不存在：把完整错误原样报告给用户，不要自行补建目录。**profile 层缺失本身不再报这个错**——共享层有 `dsh\package.json` 时直接选共享层。
 - `robocopy failed (N)`（`N > 7` 才是错误）/ 目标被占用 / `EPERM` → 让用户关闭正在运行的 `dsh web`，重跑本步；不要管理员强改 ACL，不要强杀进程。
-- `WARN: optional runtime package missing: ...\zod` → 可选 junction 缺失，更新会继续；若运行报 zod 解析失败再补装。
 
 ## 第 4 步 交给用户收尾（重要）
 
@@ -172,8 +171,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 | `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续 |
 | `runtime scope not found: neither ... nor ... exists` | 共享层与 profile 层都不存在：该 home 的 dsh 运行时不可用，停下更新，先修好运行时再重跑 |
 | `required runtime package missing: ...\@deepseek-ai` | 选定的那一层在链接那一刻已不存在：原样报告给用户；profile 层缺失本身不再报此错（共享层有 `dsh\package.json` 就直接选它） |
-| `cannot replace non-empty real directory` | `node_modules\@deepseek-ai`（或 `zod`）是真实目录不是 junction：备份后删除该目录再重跑 |
-| `WARN: optional runtime package missing: ...\zod` | 可选 junction 缺失，更新继续；若运行报 zod 解析失败再补装 |
+| `cannot replace non-empty real directory` | `node_modules\@deepseek-ai` 是真实目录不是 junction：备份后删除该目录再重跑 |
 | robocopy 报错（退出码 > 7）/ 目标目录多出的文件被删 | `/MIR` 是镜像语义：会删掉 `.agent-presets\kaz` 里多出的文件（`node_modules` 除外）；每次更新前的备份在 `tools\kaz-preset-backup-*`（会累积，可手动清理）；**不要**往预设目录放自定义文件 |
 | junction 建不上 / 权限不足 / `EPERM` | 让用户关闭 `dsh web` 后重跑；用普通权限即可，不要管理员强改 ACL，不要强杀进程 |
 | 看到 `KAZ-PRESET-INSTALL OK` 但好像没生效 | 若那次带了 `-DryRun`，OK 只是预演；去掉 `-DryRun` 重跑一次 |

@@ -22,7 +22,6 @@ What it does:
                                             healthy -- dsh boot never creates
                                             the profile scope -- so it installs
                                             normally.
-       <preset>\node_modules\zod          -> <DshHome>\profiles\<profile>\node_modules\zod
   5. Backs up an existing preset to <DshHome>\tools\kaz-preset-backup-<timestamp>.
 
 Usage:
@@ -181,7 +180,6 @@ function Install-OneHome([string]$TargetHome, [string]$WantedProfile) {
 
   $modulesDir = Join-Path $presetDir 'node_modules'
   $profileScope = Join-Path $TargetHome "profiles\$profile\node_modules\@deepseek-ai"
-  $zodTarget = Join-Path $TargetHome "profiles\$profile\node_modules\zod"
 
   # Which package tree the preset's @deepseek-ai junction must point at.
   #
@@ -233,8 +231,7 @@ function Install-OneHome([string]$TargetHome, [string]$WantedProfile) {
   }
 
   $links = @(
-    @{ Path = (Join-Path $modulesDir '@deepseek-ai'); Target = $scopeTarget; Required = $true },
-    @{ Path = (Join-Path $modulesDir 'zod'); Target = $zodTarget; Required = $false }
+    @{ Path = (Join-Path $modulesDir '@deepseek-ai'); Target = $scopeTarget; Required = $true }
   )
   if (-not $DryRun) { New-Item -ItemType Directory -Force -Path $modulesDir | Out-Null }
   foreach ($link in $links) {
