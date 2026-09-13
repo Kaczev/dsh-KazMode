@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
 - **不需要** `npm install`：预设只用那两个 junction 解析运行时；`<home>\profiles\<profile>\node_modules` 里的其它内容不会被改。
-- **更新后的两项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应打印 `8.0.0`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。
+- **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `12`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。
 - 更新别的 home / 多个 home（去掉 `-DryRun` 即可）：
 
 ```powershell
@@ -134,14 +134,17 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 - 新对话已选中 **Kaz 模式**（`kaz`）。
 - **persona 首句**：`We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.`；用 "We" 思考（ALWAYS REASON AS 'WE'），模型输出全英文。
+- **口吻**：系统提示词里的第二人称已被 `only_we` 统一改写成 "we/our"——**只改提示词正文，不改工具描述与 schema**，所以工具描述里仍可能出现 "you"，这不是没装好。
 - **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
+  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 12 个技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文三件：`context_search` / `context_read` / `context_compress`
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`
   - 子代理控制三件：`list_agents` / `send_message` / `interrupt_agent`
 - **主代理看不到记忆写三件**（`memory_save` / `memory_update` / `memory_forget`）——这是设计（写记忆交给记忆管家）；**也看不到** `bash`、`get_goal` / `create_goal` / `update_goal`、官方 `subagent` / `subagent_fork`、`plan_mode`、`workflow`、`ralph`（刻意不挂，不是故障）。
-- **注入**：用户每发一条消息会看到 `[ka-whale-workflow idle]` 阶段注入（上下文注入，不是系统提示段）；上下文占用 ≥50% 时会出现 `[ka-context-policy compression-hint]` 提醒。
+- **注入**：用户每发一条消息会看到 `[ka-whale-workflow idle]` 阶段注入（上下文注入，不是系统提示段）；上下文占用 ≥50% 时会出现 `[ka-context-policy compression-hint]` 提醒（之后每再涨 5 个点复现一次；第 3 次或停留过久会升级为 `[ka-context-policy compression-hint · ACTION REQUIRED]`）；idle 阶段连续调用观察类工具（`grep`/`glob`/`read`/`pwsh`）满 5 次会注入 `[ka-whale-workflow memory_hint]`；一轮内工具调用总数到 32（之后每 +16）会注入 `[ka-whale-workflow diving-hint]`。
+- **记忆只有两类**：`context`（内容记忆）与 `paths`（路径记忆），没有第三种；`memory_save` / `memory_update` 只接受这两者之一。
 - **数据落盘**：记忆在 `<home>\storages\ka-whale-memory\{context,paths}\`（全局）与 `<项目>\.dsh\storages\ka-whale-memory\{context,paths}\`（项目），一个记忆一个 JSON；安排在 `<项目>\.dsh\storages\arrangements\<sessionId>.json`。
 - **没有** Kaz 面板、没有开关行、没有提示音、没有 round-display 轮次显示。
 

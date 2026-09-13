@@ -15,12 +15,23 @@ import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
 import { registerKazForkProvider } from "./fork-provider.js";
-import { STAGES, renderStageText } from "./stages.js";
+import {
+  STAGES,
+  renderDivingHintText,
+  renderDivingHintTextForSubagent,
+  renderMemoryHintText,
+  renderStageText,
+} from "./stages.js";
 import { readStage, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
+import { noteMemoryHintEvent, shouldHintMemory } from "../../kaz-shared/lib/memory-hint.js";
+import { divingHintStep, noteDivingEvent, shouldHintDiving } from "../../kaz-shared/lib/diving-hint.js";
 
 /** 只挂给主代理的四件（子代理必须看不到）。 */
 const MAIN_ONLY_TOOLS = ["write_arrangement", "get_arrangement", "ka_sub_whale", "whale_report"];
+
+/** 子代理的刹车状态：按 session 分开（子代理的会话不进工作流的会话表）。 */
+const subagentHintStates = new WeakMap();
 
 /** 每个对话的内存态（安排本体在文件里；阶段落盘，跨重启保留）。 */
 function createStore(persistStage = null) {
@@ -35,6 +46,14 @@ function createStore(persistStage = null) {
         scannedSeq: 0,
         lastInjectedStage: "",
         cwd: "",
+        // 记忆提示：连续调用观察工具集的次数，以及本轮（自最近一条用户消息）是否已提示过。
+        streak: 0,
+        roundHinted: false,
+        // 刹车提示：本轮（自最近一条用户消息）的全部工具调用次数，以及已触发到哪个节点。
+        roundToolCalls: 0,
+        divingMilestone: 0,
+        // 是否已经看过这个会话的事件流（首次只看游标、不回放历史，见 refresh）。
+        scannedOnce: false,
       };
       sessions.set(sessionId, state);
     }
@@ -110,9 +129,22 @@ export function apply(ctx) {
     }
 
     if (lastSeq > state.scannedSeq) {
-      for (let i = events.length - 1; i >= 0; i -= 1) {
-        const event = events[i];
-        if (event.seq <= state.scannedSeq) break;
+      if (!state.scannedOnce) {
+        // **首次看到这个会话**：只把游标推到当前末尾，**不数历史**。
+        // 计数器只关心"从现在起"的活动；新进程（重启后）scannedSeq 从 0 开始，
+        // 若在这里回放整段历史，32 次门槛会被历史一次性跨过 —— 表现为"一开局就注入刹车提示"。
+        // 实测踩过：重启后第一次 pre-step 立刻弹提示。
+        state.scannedOnce = true;
+        state.scannedSeq = lastSeq;
+        return state;
+      }
+      // **必须正序**（旧→新）处理：计数器依赖事件先后——倒序会让"用户消息清零"最后执行，
+      // 把刚数好的计数抹掉（同样实测踩过）。结算子代理补丁与顺序无关，正序同样正确。
+      for (const event of events) {
+        if (!(event.seq > state.scannedSeq)) continue;
+        // 提示计数：同一次扫描、同一个"已扫到哪"的守卫，所以每个事件只算一次，天然幂等。
+        noteMemoryHintEvent(state, event);
+        noteDivingEvent(state, event);
         const patch = settlePatchFromNotice(event);
         if (patch === null || patch.childId.length === 0) continue;
         const index = state.entries.findIndex((entry) => entry.id === patch.childId);
@@ -124,6 +156,17 @@ export function apply(ctx) {
     return state;
   };
 
+  /** 取（必要时建）某个子代理会话的刹车状态。会话不可读时返回 null。 */
+  const subagentHintStateFor = (session) => {
+    if (session === undefined || session === null || typeof session !== "object") return null;
+    let hintState = subagentHintStates.get(session);
+    if (hintState === undefined) {
+      hintState = { roundToolCalls: 0, divingMilestone: 0, scannedSeq: 0, scannedOnce: false };
+      subagentHintStates.set(session, hintState);
+    }
+    return hintState;
+  };
+
   // 主代理：用户发消息的那一轮开头、以及阶段切换后（whale_report）各注入一条；
   // 工具循环的其它步骤、子代理报告都不注入——避免刷屏。（子代理现状用 get_arrangement 看。）
   ctx.on("agent/pre-step", async (payload, next) => {
@@ -131,9 +174,78 @@ export function apply(ctx) {
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;
     const agent = payload?.agent;
     if (agent === undefined || agent === null || typeof agent !== "object") return decision;
-    if (isSubagentAgent(agent)) return decision;
+
+    // ── 子代理：只注入刹车提示（阶段文本与记忆提示都不给子代理）。 ──────────────
+    // 子代理也会在一个回合里埋头调用工具几十次，所以同一个门槛对它成立；只是"停下汇报"的
+    // 对象是派发它的主代理，不是用户，所以正文用子代理版（the main agent and hand back）。
+    if (isSubagentAgent(agent)) {
+      const hintState = subagentHintStateFor(agent.session);
+      if (hintState === null) return decision;
+      const events = typeof agent.session?.snapshotEvents === "function" ? agent.session.snapshotEvents() : [];
+      const lastSeq = events.length > 0 ? events[events.length - 1].seq : 0;
+      let shouldHint = false;
+      if (lastSeq > hintState.scannedSeq) {
+        if (!hintState.scannedOnce) {
+          // 同主代理：子代理首次被看到时只看游标，不回放它已发生的工具调用。
+          hintState.scannedOnce = true;
+          hintState.scannedSeq = lastSeq;
+          return decision;
+        }
+        // 同样**正序**：子代理的计数也依赖事件先后（用户消息要先把本轮清零）。
+        for (const event of events) {
+          if (!(event.seq > hintState.scannedSeq)) continue;
+          if (divingHintStep(hintState, event)) shouldHint = true;
+        }
+        hintState.scannedSeq = lastSeq;
+      }
+      if (shouldHint) {
+        decision.messages.push(
+          createUserMessage({
+            content: [{ type: "text", text: renderDivingHintTextForSubagent() }],
+            source: {
+              kind: "plugin",
+              plugin: "ka-whale-workflow",
+              form: "notice",
+              summary: "diving-hint",
+            },
+          }),
+        );
+      }
+      return decision;
+    }
+
     const state = await refresh(agent.session);
     if (state === null) return decision;
+    // 刹车提示：本轮工具调用总数跨过 32，之后每再满 16 各提示一次（见 kaz-shared/lib/diving-hint.js）。
+    if (shouldHintDiving(state)) {
+      decision.messages.push(
+        createUserMessage({
+          content: [{ type: "text", text: renderDivingHintText() }],
+          source: {
+            kind: "plugin",
+            plugin: "ka-whale-workflow",
+            form: "notice",
+            summary: "diving-hint",
+          },
+        }),
+      );
+    }
+
+    // 记忆提示：连续调用观察工具集达阈值、且这一轮还没提示过、且仍在 idle 阶段。
+    // 每轮最多一次；进过 arrange_agent 就清零（见 kaz-shared/lib/memory-hint.js）。
+    if (shouldHintMemory(state)) {
+      decision.messages.push(
+        createUserMessage({
+          content: [{ type: "text", text: renderMemoryHintText() }],
+          source: {
+            kind: "plugin",
+            plugin: "ka-whale-workflow",
+            form: "notice",
+            summary: "memory_hint",
+          },
+        }),
+      );
+    }
 
     const messages = Array.isArray(payload?.messages) ? payload.messages : [];
     const userTurn = payload?.step === 1 && messages.some((message) => message?.source?.kind === "user");

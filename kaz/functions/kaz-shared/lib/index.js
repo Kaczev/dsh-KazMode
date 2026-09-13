@@ -11,7 +11,11 @@
 
 export const name = "kaz-shared";
 
-export const inject = [];
+// `restrictTools()` 会访问 `agent.ctx.tools`；cordis 只为**声明过**的服务绑定访问，
+// 未声明就取会抛 `cannot get property "tools" without inject`——该错误发生在**挂载期**时
+// 会让整个预设挂不起来、会话接不回来（本项目真踩过）。这里访问发生在回调内、级别低一档，
+// 但同样声明掉。
+export const inject = ["tools"];
 
 import { MAIN_BLACKLIST } from "./blacklists.js";
 import { isSubagentAgent } from "./agent-role.js";

@@ -16,6 +16,37 @@ import { findByName, listMemories, readMemoryFile, removeMemory, writeMemory } f
 
 const ALL_LOCATIONS = ["global", "local"];
 
+/**
+ * 字段尺寸上限（UTF-8 **字节**，不是字符数）——字节即"体积"：一个汉字 3 字节、
+ * 一个英文字母 1 字节，所以同一套上限对中英混写都成立（英文能写更多字）。
+ * 依据：summary 每次检索都会随结果返回（memory_search 默认 10 条、memory_list
+ * 默认 16 条），所以它必须比正文紧得多；正文只在 memory_detail 打开那一条时才进上下文。
+ * 超限一律**报错拒绝**，绝不静默截断——截断会让人以为整条存进去了。
+ * 只对新写入生效：加限制之前存下的超额条目原样保留。
+ */
+export const SIZE_LIMITS = Object.freeze({ name: 64, summary: 128, body: 4096 });
+
+const utf8 = new TextEncoder();
+
+/** 文本的 UTF-8 字节数（非字符串按空串计）。 */
+export function byteSize(value) {
+  return utf8.encode(typeof value === "string" ? value : "").length;
+}
+
+/** 一条记忆的最终字段尺寸；@returns {string|null} 超限时的英文拒绝原因，合规返回 null。 */
+export function sizeProblem(fields) {
+  const checks = [
+    ["name", fields.name, SIZE_LIMITS.name],
+    ["summary", fields.summary, SIZE_LIMITS.summary],
+    [fields.bodyLabel ?? "body", fields.body, SIZE_LIMITS.body],
+  ];
+  for (const [label, value, limit] of checks) {
+    const size = byteSize(value);
+    if (size > limit) return `${label} is ${size} bytes (limit ${limit}) — shorten it`;
+  }
+  return null;
+}
+
 const renderText = (value) => [{ type: "text", text: value }];
 
 /** 会话工作目录（local 库的根）：agent 会话 header 的 cwd。 */
@@ -225,13 +256,13 @@ export function memorySaveTool() {
   return defineTool({
     name: "memory_save",
     description:
-      "Save a new memory as its own file. Provide exactly one of `context` (a content memory) or `paths` (a path memory). Names are unique across both kinds and both stores, so an existing name is rejected — use memory_update to replace its body.",
+      "Save a new memory as its own file. Provide exactly one of `context` (a content memory) or `paths` (a path memory). Names are unique across both kinds and both stores, so an existing name is rejected — use memory_update to replace its body. Size caps (UTF-8 bytes): name 64, summary 128, body 4096 — oversize input is rejected, so summarize rather than paste.",
     parameters: {
       location: { type: "string", required: true, enum: ["global", "local"], description: "Which store to write: global or local." },
       name: { type: "string", required: true, description: "Memory name (also its file name); unique across all memories." },
       context: { type: "string", description: "Content-memory body. Mutually exclusive with `paths`." },
       paths: { type: "string", description: "Path-memory body. Mutually exclusive with `context`." },
-      summary: { type: "string", description: "Optional one-line summary; indexed by search." },
+      summary: { type: "string", description: "Optional one-line summary; indexed by search. Keep it short: it comes back with every search hit." },
       keywords: { type: "array", items: { type: "string" }, description: "Optional keywords; indexed with extra weight by search." },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
@@ -247,6 +278,13 @@ export function memorySaveTool() {
       if (!hasContext && !hasPaths) return fail("give exactly one of context or paths");
       const kind = hasContext ? "context" : "paths";
       const body = hasContext ? args.context : args.paths;
+      const problem = sizeProblem({
+        name,
+        body,
+        bodyLabel: kind,
+        summary: typeof args.summary === "string" ? args.summary : "",
+      });
+      if (problem !== null) return fail(problem);
       const existing = await findByName(name, cwd);
       if (existing.length > 0) {
         return fail(`"${name}" already exists as ${describe(existing[0])} — use memory_update to replace its body`);
@@ -262,7 +300,7 @@ export function memoryUpdateTool() {
   return defineTool({
     name: "memory_update",
     description:
-      "Replace the body of an existing memory. Provide exactly one of `context` or `paths`, matching the memory's kind; its name, kind, and store stay unchanged.",
+      "Replace the body of an existing memory. Provide exactly one of `context` or `paths`, matching the memory's kind; its name, kind, and store stay unchanged. Size caps (UTF-8 bytes): summary 128, body 4096 — oversize input is rejected.",
     parameters: {
       name: { type: "string", required: true, description: "Exact memory name." },
       context: { type: "string", description: "New body for a content memory. Mutually exclusive with `paths`." },
@@ -289,6 +327,9 @@ export function memoryUpdateTool() {
       const current = await readMemoryFile(memory.file);
       const summary = typeof args.summary === "string" ? args.summary : typeof current?.summary === "string" ? current.summary : "";
       const keywords = Array.isArray(args.keywords) ? args.keywords : Array.isArray(current?.keywords) ? current.keywords : [];
+      // 校验的是"改完之后"的结果：name 不能改，summary 省略即沿用旧值。
+      const problem = sizeProblem({ name: memory.name, body, bodyLabel: memory.kind, summary });
+      if (problem !== null) return fail(problem);
       await writeMemory(memory.location, memory.kind, memory.name, body, cwd, { summary, keywords });
       return ok(`updated ${describe(memory)}`);
     },
