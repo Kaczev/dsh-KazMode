@@ -67,7 +67,7 @@ Test-Path (Join-Path $repo "kaz\preset.yml")
 
 安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的 `@deepseek-ai` junction（→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`，仅当该层没有运行时包时才回退 profile 那一层）→ 打印 `KAZ-PRESET-INSTALL OK`。
 
-> **`@deepseek-ai` 为什么指共享层（别改回 profile 层）**：预设解析插件名时**先看自己的 `node_modules`**，这个链接指向哪一层就决定了哪些包可见；一个指向父目录的链接还会截断向上的查找。profile 那一层（`<home>\profiles\<profile>\node_modules\@deepseek-ai`）可能只有该 profile 装过的子集，而 Kaz 8.0 的组合需要 `dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `dsh-tool-ask-user`（组合里的一行）等**只存在于共享层**的包——指错就直接**预设挂不起来**。以 `linked: ... -> ...` 那行打印的路径为准。
+> **`@deepseek-ai` 为什么指共享层（别改回 profile 层）**：预设解析插件名时**先看自己的 `node_modules`**，这个链接指向哪一层就决定了哪些包可见；一个指向父目录的链接还会截断向上的查找。profile 那一层（`<home>\profiles\<profile>\node_modules\@deepseek-ai`）可能只有该 profile 装过的子集，而 Kaz 的组合需要 `dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `dsh-tool-ask-user`（组合里的一行）等**只存在于共享层**的包——指错就直接**预设挂不起来**。以 `linked: ... -> ...` 那行打印的路径为准。
 
 **2.1 单 home（最常见：装到默认 `%USERPROFILE%\.dsh`）**
 
@@ -86,7 +86,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome
 **2.3 预演（`-DryRun`，不写入）**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -DryRun
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -ProfileName web -DryRun
 ```
 
 - `-DryRun` 只校验闸门 / profile / 源路径，并打印"会做什么"（`would refresh link` / `would link`），**不备份、不复制、不建 junction**。
@@ -99,10 +99,11 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 ```
 
 - 扫描 `%USERPROFILE%\.dsh*` 中**含 `profiles` 目录**的 home，逐个安装，最后打印 `--- summary ---` 与逐行 `OK` / `FAIL` 汇总。
-- **预期结果**（本机示例）：
-  - `.dsh`（主环境，闸门落到**全局 `0.1.5-rc.2`**，打印的也是全局那条路径）→ 应 `OK`。
-  - `.dsh-test`（测试环境，本地副本 `0.1.5-rc.2`）→ 应 `OK`。
-  - `.dsh-clean`（救援环境，仍是 dsh `0.1.1-rc.2`）→ `FAIL` 属预期——它保留旧运行时当最后防线。
+- **预期结果**（本机示例，2026-09-14 实测）：
+  - `.dsh`（主环境，闸门落到**全局 `0.1.5-rc.2`**，打印的也是全局那条路径）→ `OK`。
+  - `.dsh-clean`（救援环境；它的 `tools\dsh-cli` 副本与启动器的 `EXPECTED_CLI` **都已升到 `0.1.5-rc.2`**，不再是 `0.1.1-rc.2`）→ 实测 `OK`。**如果你本意是让救援环境留在旧运行时当最后防线，那这个前提已经不成立了**——需要单独处理，不要以为它会自动 `FAIL`。
+  - `.dsh-test`（测试环境，本地副本 `0.1.5-rc.2`）→ 实测 **`FAIL`**，原因是 `multiple profiles under …: headless, web; pass -ProfileName`（它有 `headless` 与 `web` 两个 profile，`-AllHomes` 无法替你选）。**它 `FAIL` 与版本无关**——想让它过就在汇总表里给该 home 指定 `-ProfileName web`。
+- **一句话**：`-AllHomes` 的 `FAIL` 行**不都是版本问题**——多 profile 的 home 也会 `FAIL`，看错误文字再判断。
 - 想让某个 home 跳过版本闸门：`-SkipVersionCheck`。指引要求你**不要**自行使用它——**唯一例外**是用户明确要求把运行时回退到 `0.1.5-rc.1`：那时按第 0 步的说明加它，并提醒用户同时把该 home 启动器的 `EXPECTED_CLI` 改回 `0.1.5-rc.1`；除此之外不得自行使用。
 
 **2.5 指定预设源（`-Source`，一般不需要）**
@@ -113,7 +114,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Source 
 
 - 默认 `-Source` 就是脚本旁边的 `kaz`（发布源），正常安装**不要**传这个参数。（`test-kaz\` 是测试区开发副本、不稳定，只有维护者把测试区成果推广到主区时才显式传它。）
 
-**成功标志**：输出 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`，并打印 `linked: ...` 两行 junction。
+**成功标志**：输出 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`，并打印 **一行** `linked: ... -> ...`（预设 `node_modules\@deepseek-ai` → 同 home 的共享层）。只有一行——本文件下面几处（第 68 / 70 / 122 / 137 行）说的都是这同一个 junction；写"两行"是旧的错记。
 
 **成功后的两项核对**（各一条命令，看输出即可）：
 
@@ -149,14 +150,14 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
 
 ## 第 4 步 自查（用户重启后，让用户按现象回报）
 
-> Kaz 8.0 是**主代理的工作流预设**：没有面板、没有插件开关、没有提示音。下面现象对不上，就说明没装好或没选预设。
+> Kaz 是**主代理的工作流预设**：没有面板、没有插件开关、没有提示音。下面现象对不上，就说明没装好或没选预设。
 
 - 新对话已选中 **Kaz 模式**（`kaz`）。
 - **persona 首句**：`We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.`；用 "We" 思考（ALWAYS REASON AS 'WE'），模型输出全英文。
 - **口吻**：系统提示词里的第二人称已被 `only_we` 统一改写成 "we/our"——**只改提示词正文，不改工具描述与 schema**，所以工具描述里仍可能出现 "you"，这不是没装好。
 - **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
-  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 **18 个**技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。**注意主代理与子代理看到的份数不同**：5 份编排类技能（`building-something-new` / `working-from-a-plan` / `repairing-something-broken` / `reviewing-someone-elses-work` / `moving-or-upgrading-a-thing`）只给主代理看，子代理的目录里少这 5 份是**正确的**，不是没装好。
+  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 **18 个**技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是**没有自带技能**的旧版（实测：`8.2.2` 时是 12 份，18 份从 `8.2.7` 才开始）。**注意主代理与子代理看到的份数不同**：5 份编排类技能（`building-something-new` / `working-from-a-plan` / `repairing-something-broken` / `reviewing-someone-elses-work` / `moving-or-upgrading-a-thing`）只给主代理看，子代理的目录里少这 5 份是**正确的**，不是没装好。
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文四件：`context_search` / `context_read` / `context_hotspots` / `context_compress`（`context_hotspots` 先告诉你哪个节点最占地方，再决定压哪段）
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`

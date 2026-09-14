@@ -80,7 +80,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DryRun
 - 要预演别的 home / 多个 home / 指定 profile：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -DryRun
+powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -ProfileName web -DryRun
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHomes -DryRun
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -ProfileName web -DryRun
 ```
@@ -110,11 +110,12 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHomes
 ```
 
-- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期**：`.dsh`（主环境，闸门读到全局 `0.1.5-rc.2`）与 `.dsh-test`（本地副本 `0.1.5-rc.2`）报 `OK`；`.dsh-clean`（救援环境，仍是 dsh `0.1.1-rc.2`）报 `FAIL` 属预期——它保留旧运行时当最后防线。
+- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期（2026-09-14 实测）**：`.dsh`（主环境，闸门读到全局 `0.1.5-rc.2`）报 `OK`；`.dsh-clean` 也报 `OK`——它的 `tools\dsh-cli` 副本与启动器 `EXPECTED_CLI` **都已升到 `0.1.5-rc.2`**，不再是 `0.1.1-rc.2`（若你本意是让它留在旧运行时当最后防线，这个前提已经失效，要单独处理，别指望它 `FAIL`）；`.dsh-test` 实测 **`FAIL`**，原因是 `multiple profiles under …: headless, web; pass -ProfileName`，**与版本无关**——它有 `headless` 与 `web` 两个 profile。
+- **`FAIL` 行不都是版本问题**：多 profile 的 home 也会 `FAIL`。看错误文字再判断，不要一律当成闸门没通过。
 - 若目标 home 的 `.agent-presets\kaz` 与仓库源目录（默认 `kaz\`）本来就是同一个目录（开发机上主区就是这样），安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——正常分支。
 
 **出错处理**：
-- `cannot replace real directory` / `cannot replace non-empty real directory` → `node_modules\@deepseek-ai` 是真实目录而不是 junction：先备份，再删除该目录，然后重跑本步。
+- `cannot replace non-empty real directory`（旧版脚本还可能打印 `cannot replace real directory`）→ `node_modules\@deepseek-ai` 是真实目录而不是 junction：先备份，再删除该目录，然后重跑本步。
 - `runtime scope not found: neither ... nor ... exists` → 共享层 `<home>\profiles\node_modules\@deepseek-ai` 与 profile 层 `<home>\profiles\<profile>\node_modules\@deepseek-ai` 都不存在：该 home 的 dsh 运行时不可用，**停下**，先按官方方式装好 / 修复运行时，再重跑本步；不要继续更新。
 - `required runtime package missing: ...\node_modules\@deepseek-ai` → 选定的那一层在链接那一刻已不存在：把完整错误原样报告给用户，不要自行补建目录。**profile 层缺失本身不再报这个错**——共享层有 `dsh\package.json` 时直接选共享层。
 - `robocopy failed (N)`（`N > 7` 才是错误）/ 目标被占用 / `EPERM` → 让用户关闭正在运行的 `dsh web`，重跑本步；不要管理员强改 ACL，不要强杀进程。
@@ -130,14 +131,14 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 ## 第 5 步 自查（用户重启后，让用户按现象回报）
 
-> Kaz 8.0 是**主代理的工作流预设**：没有面板、没有插件开关、没有提示音。下面现象对不上，就说明没更新到位或没选预设。
+> Kaz 是**主代理的工作流预设**：没有面板、没有插件开关、没有提示音。下面现象对不上，就说明没更新到位或没选预设。
 
 - 新对话已选中 **Kaz 模式**（`kaz`）。
 - **persona 首句**：`We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.`；用 "We" 思考（ALWAYS REASON AS 'WE'），模型输出全英文。
 - **口吻**：系统提示词里的第二人称已被 `only_we` 统一改写成 "we/our"——**只改提示词正文，不改工具描述与 schema**，所以工具描述里仍可能出现 "you"，这不是没装好。
 - **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
-  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 **18 个**技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。**注意主代理与子代理看到的份数不同**：5 份编排类技能（`building-something-new` / `working-from-a-plan` / `repairing-something-broken` / `reviewing-someone-elses-work` / `moving-or-upgrading-a-thing`）只给主代理看，子代理的目录里少这 5 份是**正确的**，不是没装好。
+  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 **18 个**技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是**没有自带技能**的旧版（实测：`8.2.2` 时是 12 份，18 份从 `8.2.7` 才开始）。**注意主代理与子代理看到的份数不同**：5 份编排类技能（`building-something-new` / `working-from-a-plan` / `repairing-something-broken` / `reviewing-someone-elses-work` / `moving-or-upgrading-a-thing`）只给主代理看，子代理的目录里少这 5 份是**正确的**，不是没装好。
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文四件：`context_search` / `context_read` / `context_hotspots` / `context_compress`（`context_hotspots` 先告诉你哪个节点最占地方，再决定压哪段）
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`
