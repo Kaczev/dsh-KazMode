@@ -220,11 +220,15 @@ Then:
 ## When a plugin mounts but does nothing
 
 - **PENDING, not broken.** A plugin whose `inject` names a service no row provides waits forever and
-  reports nothing. Check the fiber state before debugging the plugin's logic.
+  contributes nothing. A session may offer you no way to enumerate mounted components, so read what
+  you can: a tool that is absent from your tool face, a prompt section that never appears, a catalog
+  entry that is missing. Those tell you the contribution did not land - "I could not see the
+  component" is not "it is pending", so do not report a cause you cannot distinguish.
 - **An unresolvable specifier is logged, not thrown.** At boot that log can be lost before any
   exporter is attached, so a row that silently does nothing usually means the name is misspelled or
   the package is not installed.
 - **An `apply` that throws fails the load loudly**, and an invalid `config` fails it before `apply`.
-  Both surface as a failed fiber, not a partial mount.
+  Both fail the mount rather than half-mounting it, and where the deployment reports preset state the
+  reason appears there - so "it did not mount" is knowable, not something to guess at.
 - **Read back through the same seam the model sees.** Loading the module yourself proves the code
   parses; only the running system proves the row mounted and the contribution landed.
