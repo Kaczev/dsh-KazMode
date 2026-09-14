@@ -61,6 +61,7 @@ export const SUBAGENT_DEFAULT_BLACKLIST = Object.freeze([
   "memory_save",
   "memory_update",
   "memory_forget",
+  "ask_user_question"
 ]);
 
 /**
