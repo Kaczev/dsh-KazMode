@@ -1,0 +1,7 @@
+{
+  "name": "skill-visibility",
+  "version": "8.2.5",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js"
+}

@@ -65,8 +65,17 @@
 # `with (loaderCtx) { eval(expr) }`：`baseUrl`/`process`/`globalThis` 可达，
 # 但 `__dirname`/`require`/`module` 不可达——别写那三个）。
 # 不能省成相对路径 `./skills`：customSkillDirs 走 path.resolve()，按进程 CWD 解析。
-- id: skill-filesystem
-  name: '@deepseek-ai/dsh-skill-filesystem'
+#
+# ── 技能可见性门禁：子代理看不到主代理专用的技能 ─────────────────────────────
+# 这一行是**本文件里唯一的 skill provider 注册**（`customSkillDirs` 也只在它身上出现一次）：
+# 官方 skill-filesystem 被 ./functions/skill-visibility 就地包装后注册，两者合成一个 provider。
+# 为什么不能像早先那样"再挂一行官方 provider、让本地那行用同名顶掉它"：providers 是按名字
+# 唯一的表，**同一层同名注册直接抛错**（后果是整份预设挂载失败：a skill provider named
+# "filesystem" is already registered in this scope），既没有 shadow，也没有"后注册者顶掉
+# 先注册者"这回事。注册表又没有减法 API，所以过滤只能与注册合并成一处——多挂一行官方
+# provider 就必然相撞。名单与理由见 functions/kaz-shared/lib/skill-visibility.js。
+- id: skill-visibility
+  name: ./functions/skill-visibility/lib/index.js
   config:
     customSkillDirs:
       - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"

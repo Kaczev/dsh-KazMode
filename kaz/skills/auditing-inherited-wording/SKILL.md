@@ -62,9 +62,16 @@ Name the source, because the source is the reason nobody looked:
    language. Correcting a false attribution is a finding, not a nitpick.
 4. **Rewrite as an observable, or delete.** The replacement names a failure mode or a checkable action:
    "keep the style consistent" becomes "one corner radius everywhere"; "be transparent" becomes "say
-   which checks were run and which were not".
-5. **Search for the same phrase elsewhere.** Inherited wording travels in families - if one file has it,
-   sibling files usually do too, and those need the same pass.
+   which checks were run and which were not". **The replacement must not be longer than the sentence it
+   replaces** - unless it is longer because it now names the checkable actions that were implicit,
+   which is the one growth worth paying for. Longer and vaguer is the failure. If you cannot say it
+   shorter and it names nothing checkable, delete the original and report the gap - a gap the reader
+   can see beats a rule that grew a paragraph.
+5. **Report the family, fix at most two.** Inherited wording travels in families - if one file has it,
+   sibling files usually do too. Fix one or two occurrences: the ones where the wording constrains
+   behaviour. Name the other files, but put them in the report as a list rather than starting another
+   round of edits. The cap is on changing other files: within the document you were asked to audit,
+   finish the job.
 
 ## Why the author cannot do this alone
 

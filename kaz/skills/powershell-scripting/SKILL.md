@@ -10,16 +10,31 @@ PowerShell fails quietly. It can exit 0 while producing mojibake, write a file w
 encoding, or split your arguments without complaining. Treat "the command succeeded" as a claim to
 be checked, not a result.
 
-## Non-negotiable: read the output back
+**This file describes Windows PowerShell 5.1**, and every encoding, operator, and escaping rule below
+is specific to it. A tool named `pwsh`, a shortcut, or a task runner is not evidence that PowerShell 7
+is what runs - ask the shell, first, before you write anything:
+
+```powershell
+$PSVersionTable.PSVersion   # 5.1.x = Windows PowerShell; 6+ = PowerShell Core
+$PSVersionTable.PSEdition   # Desktop = 5.1; Core = 6+
+```
+
+If the answer is not 5.1, treat the rules below as questions, not answers: PowerShell 6+ changed the
+default encoding and added the operators 5.1 lacks.
+
+## Read the output back when it can be wrong
 
 Exit status is not evidence that text was written or read correctly. A script that mangles every
-non-ASCII character in a file can still exit 0 and print nothing.
+non-ASCII character in a file can still exit 0 and print nothing. But not every write needs a
+verification round:
 
-- After writing or transforming text, **read the text back** and compare it to what you intended.
-- When something "worked but looks wrong", print the actual value before theorising. Byte counts,
-  line counts, and the first characters of the result are cheap and decisive.
-- A command that prints fewer lines than you expect has told you something; do not move on because
-  the exit code was fine.
+- Read the text back when the write was **non-ASCII**, when a **parser or another tool consumes the
+  file**, or when the **exit code was 0 but the output looks wrong**.
+- A byte count, a line count, or the first characters of the result is enough; those are cheap and
+  decisive. Do not re-read a whole file you just wrote, and never re-read one whose content is still
+  in context.
+- Print the actual value before theorising. A command that prints fewer lines than you expect has
+  told you something.
 
 ## Encoding: three different rules, one habit
 
@@ -34,11 +49,14 @@ BOM with some commands and not others, and different consumers tolerate differen
 
 Practical consequences:
 
-- `Set-Content -Encoding UTF8` writes **with** a BOM. Do not use it for data files, for anything a
-  parser reads, or for a `git commit -F` message file.
+- `Set-Content -Encoding UTF8` writes **with** a BOM in 5.1; PowerShell 6 and later write no BOM for
+  the same spelling. Never use it for data files, for anything a parser reads, or for a
+  `git commit -F` message file, and check the bytes rather than trusting the spelling.
 - To write without a BOM, use the framework API explicitly rather than a cmdlet's shorthand.
 - To read non-ASCII text reliably, pass the encoding explicitly. A bare `Get-Content` decodes with
-  the system ANSI code page, so UTF-8 Chinese or accented text arrives as mojibake.
+  the system ANSI code page, so UTF-8 Chinese or accented text arrives as mojibake. That trap is the
+  cmdlet's alone: the .NET file API defaults to UTF-8, so a script that switches to it has left this
+  trap behind - and entered a different one if the input was genuinely ANSI.
 - When reading a `.ps1` you generated, keep it pure ASCII if you can: that removes the BOM question
   entirely and is the cheapest fix.
 - Keep one script's filename in **one variable** from creation to execution. A typo between where you
@@ -47,9 +65,12 @@ Practical consequences:
 
 ## Move multi-line content through files, not arguments
 
-A multi-line string passed directly to a native command is split on whitespace by the shell before
-the program sees it. The command then receives fragments of your text as separate arguments and
-usually fails with a message about one of the fragments.
+On 5.1 the shell does **not** split it: the value arrives as one argv element, newlines and spaces
+intact, and node, python and `git commit -m` all receive it whole. What breaks is something else -
+`cmd.exe` truncates at the first newline, and a program that re-splits its own arguments will split
+yours. So the failure is real but the mechanism is not the shell's, and a diagnosis built on "the
+shell split my argument" will look in the wrong place. Passing a file removes the whole question,
+which is why it is the safer habit for a commit message or a request body.
 
 - For a commit message, a request body, or any multi-line argument: write the text to a file and
   pass the file.
@@ -76,8 +97,11 @@ PowerShell is a poor text editor, and its failure mode is invisible.
 
 ## Files, links, and junctions
 
-- **To read link metadata, ask for it.** Inspecting an item's link type or target requires the
-  forced variant of `Get-Item`; without it you get a plain item and no link information.
+- **To read link metadata, just ask for it.** `Get-Item` populates `LinkType` and `Target` on a
+  junction or symlink with or without `-Force`. `-Force` governs whether a **hidden** item is
+  returned at all - for a plain hidden directory, without it you get no item rather than an item
+  without metadata. A hidden *junction* is the exception: the attribute sits on its target, not on
+  the reparse point, so the link itself is still returned.
 - A link target may be an array. Take the first element and normalise it to a full path before
   comparing paths; also trim trailing separators on both sides before an equality test.
 - **To remove a link, delete the link, not the tree.** A recursive delete that follows a link can
@@ -110,10 +134,11 @@ PowerShell is a poor text editor, and its failure mode is invisible.
 
 - Each invocation is a fresh process: a working directory, an environment variable, or a variable set
   by one call does not exist in the next. Any setup has to be repeated inside the same call.
-- Modern shell operators - conditional chaining (the double-ampersand and double-pipe forms),
-  null-coalescing, and their relatives - may not exist in the older Windows PowerShell that ships
-  with the operating system. Use explicit conditionals. Treat any operator you cannot remember being
-  available as unavailable until the shell runs it.
+- Windows PowerShell 5.1 has **no** conditional chaining (the double-ampersand and double-pipe forms),
+  **no** null-coalescing operator or its assigning form, and **no** ternary. They do not exist there
+  and they fail at **parse** time - so nothing in the command runs, and `$LASTEXITCODE` still holds
+  whatever the previous native call left in it. Use explicit conditionals and `if`/`else`. Confirm the
+  shell's version before assuming an operator is available at all.
 - An intermittent "cannot replace file" style failure on long non-ASCII writes is usually transient;
   retry the same operation once before investigating.
 - To measure the environment rather than assume it: ask the shell for its own version, and ask for a

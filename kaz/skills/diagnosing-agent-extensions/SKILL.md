@@ -16,8 +16,11 @@ Do not debug behaviour until you know the extension is mounted and its contribut
 
 - A plugin whose declared dependencies are not all provided can sit in a **pending** state
   indefinitely. It reports nothing, contributes nothing, and looks identical to a plugin that was
-  never added. Enumerate the loaded fibers and their states; pending is the single most common
-  explanation for "nothing happens".
+  never added. Enumerate the fibers where the host exposes a way to do it; where it does not, the
+  evidence you have is what the running session shows you - the skill catalog or prompt section you
+  can read back, and your own tool schemas. A tool that is absent from your face was either never
+  mounted or is pending, and you cannot tell those apart from inside: say which one you cannot rule
+  out instead of guessing. **"I could not see the fiber" is not "it is pending".**
 - A contribution that registered can still be absent from what the model sees, because a filter ran
   after registration. Compare what you registered against what the consumer actually received, not
   against what you passed in.
@@ -31,10 +34,13 @@ The most common false conclusion in extension work is "my change did nothing" wh
 correct and simply has not been read yet.
 
 - **Configuration is read when the component mounts.** Editing a config file under a running process
-  changes nothing until that component is re-read: restart, or trigger the reload the host offers.
-- **Prompt text and personas are assembled when the process starts.** An edit to injected text is
+  changes nothing until that component is re-read: restart, or trigger a reload if the host exposes
+  one to you - and from inside a session it often does not, so a restart may be the only lever you
+  actually hold.
+- **Prompt text is mostly assembled from values captured at registration**, so an edit to it is
   invisible in the running process - including in the very session that made the edit. A restart is
-  part of the change, not an optimisation.
+  part of the change, not an optimisation. The seam is not uniformly cold, though: some contributors
+  reconcile live, so check which kind you are editing before concluding that an edit did nothing.
 - **A file swap is not a reload.** Writing a new file where a component was already loaded leaves
   the loaded copy in place.
 
@@ -66,7 +72,9 @@ hostile in debugging. Know which failures are quiet here:
 - unresolved module specifier - logged, component absent
 - unmet declared dependency - pending forever, no error
 - a listener that throws - caught and logged by the dispatcher, so the rest of the pipeline proceeds
-- an empty contribution - omitted entirely rather than rendered as empty
+- an empty contribution - usually omitted rather than rendered as empty, though a contribution type
+  may deliberately render an envelope with an instruction in it, so an empty-looking section is not
+  proof that nothing registered
 
 Each is silent at the call site. When behaviour is missing, check these before reading the logic.
 

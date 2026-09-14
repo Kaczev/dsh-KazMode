@@ -145,8 +145,9 @@ A host-plane row goes in the deployment's patch file; an agent-plane row goes in
   counts as removal plus addition and remounts the plugin.
 - `name` is a module specifier. Inside a composition, the base URL is **the composition file's own
   directory**: a relative specifier resolves against the preset directory, a bare package name
-  against the harness installation, an absolute path becomes a file URL. A `--patch` overlay is the
-  exception and must use an absolute path.
+  against the harness installation, an absolute path becomes a file URL. A `--patch` overlay anchors
+  differently: a relative name there is resolved **beside the patch file**, not against the process
+  working directory.
 - `config:` passes the row's configuration. A later layer **replaces the whole value** rather than
   deep-merging, so an overriding row must restate every key it needs.
 - `disabled: true` keeps the row but skips mounting it.

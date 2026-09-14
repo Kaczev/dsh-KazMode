@@ -61,7 +61,25 @@ export const SUBAGENT_DEFAULT_BLACKLIST = Object.freeze([
   "memory_save",
   "memory_update",
   "memory_forget",
+  "ask_user_question"
 ]);
+
+/**
+ * 同时在**运行**的直系子代理上限。**限制的是"此刻有几个在跑"，不是"计划里写几条"**——
+ * 主代理可以错开时间派：先派 3 个，等回来再派下一批，计划写多少条都不受这条约束。
+ *
+ * 口径（与实现逐字一致，别写成"活着/live"）：数的是活体注册表里 status === "running" 的孩子。
+ * 已加载但停在两步之间的（idle）**不占名额**——那种可以直接 send_message 接着用。
+ *
+ * 执行点：`kaSubWhaleTool.execute` 在"复用不成、准备新开"之前数一次；
+ * 数满即拒绝并说明原因。复用（把任务交给一个已有的空闲孩子）**不算新增，不受此限**。
+ * 说明文字在 kaz-shared/lib/roles.js（MAIN_PERSONA）与 ka-whale-workflow/lib/stages.js。
+ */
+export const MAX_CONCURRENT_SUBAGENTS = 5;
+
+/** 上限的模型面理由（工具拒绝时原样回给模型，避免它只知道被拒、不知道为什么）。 */
+export const CONCURRENCY_CAP_REASON =
+  `at most ${MAX_CONCURRENT_SUBAGENTS} subagents may be RUNNING at once: each report you have to hold at the same time costs attention, and past a handful the parallel round stops being cheaper than doing the work in sequence. A subagent that is loaded but between turns is not running and does not use a slot - send it a message instead of starting another. Queue the rest and dispatch them as the running ones settle.`;
 
 /**
  * 清洗一份黑名单：去掉保留集、非字符串、空白与重复项。
