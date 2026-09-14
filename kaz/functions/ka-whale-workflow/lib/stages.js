@@ -40,9 +40,51 @@ export function renderMemoryHintText() {
 /** "刹车"提示的注入头：一轮里工具调用太多时出现（见 kaz-shared/lib/diving-hint.js）。 */
 export const DIVING_HINT_HEADER = "[ka-whale-workflow diving-hint]";
 
-/** "刹车"提示正文（模型面文案，英文）。 */
+/**
+ * "刹车"提示的检查清单。每轮工具调用到阈值时注入，用来把"还在埋头做"拉回"该不该停"。
+ *
+ * 这几条之所以是问句而不是命令：它们要能在**任何**处境下被读一遍，
+ * 而大部分处境下答案都是"否"。写成命令（"停下来汇报"）就会在不需要停的时候也叫停，
+ * 提示本身变成噪音；写成问句，只有真出问题时才起作用。
+ */
+export const DIVING_HINT_CHECKS = Object.freeze([
+  "Have we encountered any unsolvable problems?",
+  "Have we been on the same step for too many rounds?",
+  "Do we need to load any skills?",
+  "Do we need to compress or fold some context to reduce noise?",
+  "Are we on the wrong track and need to rethink entirely?",
+]);
+
+/**
+ * "刹车"提示正文（主代理版，模型面文案，英文）。
+ *
+ * 两条与角色相关的提问插在中间：
+ *   - 汇报对象是**用户**（主代理是对话的对外一侧）；
+ *   - "该不该派子代理"是主代理独有的杠杆，子代理没有派发权。
+ */
 export const DIVING_HINT_BODY =
-  "Have we encountered any unsolvable problems? Has it been too long? Do we need to report to the users?";
+  DIVING_HINT_CHECKS.slice(0, 2).join(" ") +
+  " Do we need to report to the users?" +
+  " Should we arrange some subagents?" +
+  " " +
+  DIVING_HINT_CHECKS.slice(2).join(" ");
+
+/**
+ * "刹车"提示正文（子代理版）。
+ *
+ * 同一套检查清单，换两处：
+ *   - 汇报对象是**主代理**（子代理不对用户说话），并明说 hand back——
+ *     子代理一交回就结束，没有后续。
+ *   - 没有"派子代理"这一问（子代理无派发权），换成**升级**：
+ *     把"该不该拆、该不该请主代理加人"提出来交给主代理决定。
+ */
+export const DIVING_HINT_BODY_SUBAGENT =
+  DIVING_HINT_CHECKS.slice(0, 2).join(" ") +
+  " Do we need to report to the main agent and hand back?" +
+  " Is the task too much for one agent," +
+  " should it be split, or should we ask the main agent for more subagents?" +
+  " " +
+  DIVING_HINT_CHECKS.slice(2).join(" ");
 
 /**
  * "刹车"提示的完整注入文本：头部 + 正文。
@@ -54,17 +96,10 @@ export function renderDivingHintText() {
 }
 
 /**
- * 子代理版的刹车提示正文。
- *
- * 只改一处措辞：子代理不是对用户说话，它的汇报对象是**派发它的主代理**（见三方 persona：
- * "To message the main agent, we put it in our closing message and end our turn"）。
- * 说得再紧一点（"hand back"），因为子代理一交回就结束了，没有后续。
- */
-export const DIVING_HINT_BODY_SUBAGENT =
-  "Have we encountered any unsolvable problems? Has it been too long? Do we need to report to the main agent and hand back?";
-
-/**
  * 子代理版刹车提示的完整注入文本。
+ *
+ * 注入头与主代理版**相同**（所有者定案）：两者在日志里都归为 diving-hint 一类，
+ * 靠正文里的措辞区分角色，不靠头。
  * @returns {string} 注入文本。
  */
 export function renderDivingHintTextForSubagent() {
