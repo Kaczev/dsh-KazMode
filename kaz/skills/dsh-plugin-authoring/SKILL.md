@@ -228,7 +228,8 @@ Then:
   exporter is attached, so a row that silently does nothing usually means the name is misspelled or
   the package is not installed.
 - **An `apply` that throws fails the load loudly**, and an invalid `config` fails it before `apply`.
-  Both fail the mount rather than half-mounting it, and where the deployment reports preset state the
-  reason appears there - so "it did not mount" is knowable, not something to guess at.
+  Both fail the mount rather than half-mounting it, and the refusal names the rows that did not
+  activate - distinguishing `never started` from `waiting for <service>`. That message is the one
+  mount diagnosis available, though it arrives at whoever attempted the mount, which may not be you.
 - **Read back through the same seam the model sees.** Loading the module yourself proves the code
   parses; only the running system proves the row mounted and the contribution landed.
