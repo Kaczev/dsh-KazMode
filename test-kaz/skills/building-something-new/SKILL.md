@@ -57,7 +57,8 @@ is not a fill. Everything outside the brackets is the boundary that makes the ro
 `blacklist` is **enforced**, not a suggestion: a denied tool is absent from the subagent's tool face,
 and calling it errors. The `deny` filter also rejects unknown names outright, so only real tool names
 go here. Treat these lists as a starting point — add names when the task needs narrower hands, drop
-names when the role genuinely needs to write or run something. An empty list gives the full toolset.
+names when the role genuinely needs to write or run something, and remember that `pwsh` can do
+everything `write` and `edit` can: a read-only role that keeps `pwsh` is not read-only. An empty list adds nothing back. Nine tools are denied to every subagent we dispatch regardless: send_message, interrupt_agent, ka_sub_whale, write_arrangement, whale_report, the three memory-write tools, and ask_user_question. Write a list of what is additionally forbidden - a role that must not write is a role you must deny writing.
 
 A `task` is required for every entry. Write it as: the ask, the artifact or path it works on, what
 counts as done, and — for reviewing roles — **what material this role must not receive**.

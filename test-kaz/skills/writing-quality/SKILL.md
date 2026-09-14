@@ -37,8 +37,7 @@ are uncertain.
   configuration must be updated" says nothing; "set `port` in `config.yml`" does.
 - Active voice with a stated actor, unless the actor genuinely does not matter.
 - One instruction per sentence, in the order the reader will perform it.
-- Delete the wind-up: "It is important to note that", "In order to", "As we can see", "Basically".
-  The sentence is always better without them.
+- Delete the wind-up phrases: they change no part of what the reader does.
 - Hedge only where uncertainty is real, and then say what would remove it. A confident claim about
   something unverified is worse than a stated gap.
 
@@ -63,12 +62,18 @@ the path is the content, and it should be told in order.
 - Where a claim rests on something you observed, name what you observed. Where you did not verify it,
   say so - that is a feature of the document, not an admission.
 
-## Revise in this order
+## Revise once, then check once
 
-1. **Cut.** Delete anything that does not change what the reader does. Expect to lose a fifth.
-2. **Reorder.** Answer first, then support; steps in execution order. This fixes more than rewriting.
+1. **Reorder.** Answer first, then support; steps in execution order. Fixing order replaces most
+   rewriting.
+2. **Cut.** Delete anything that does not change what the reader does - then delete the wind-up
+   phrases ("It is important to note that", "In order to"): the sentence is better without them.
 3. **Tighten.** One idea per paragraph, one instruction per sentence, concrete nouns.
-4. **Check the edges.** Does the opening sentence state the point? Does the closing sentence say what
-   happens next, or just trail off? Would a stranger know what to do after reading only the headings?
-5. **Read it as the reader.** If you are the author, you cannot skip this: the first sentence that
-   makes you re-read is a defect in the text, not in you.
+
+Then one finishing check, asking exactly one question: reading only the first sentence of each
+paragraph, does a stranger get the argument? Fix the first sentence that fails; do not re-read the
+whole draft again.
+
+A second revision needs a reason: the artifact is a README, a release note, a guide, or something a
+stranger acts on without you. A commit message, a status line, and an answer in this conversation get
+one pass and are then done.

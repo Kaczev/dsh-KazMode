@@ -59,6 +59,8 @@ function readBySubagent(options) {
   if (scope === undefined || scope === null || typeof scope !== "object") return false;
   // scope 可能是 Agent（有 session）或预设 standing key（无 session）。
   // isSubagentAgent 对两者都安全：读不到判据就返回 false（按主代理处理）。
+  // 实测确认（2026-09-14）：主代理的 session.header **没有 origin 字段**，靠 delegationDepth: 0
+  // 识别；子代理才有 origin: "subagent" + parentSession。所以探测只能靠多信号，不能只看 origin。
   return isSubagentAgent(scope);
 }
 

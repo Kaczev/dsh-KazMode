@@ -51,9 +51,12 @@ description: Use when ... - the situation, the symptoms, the phrasings a request
   simply does not exist, with no error at the call site.
 - Optional keys: `whenToUse`, `metadata`, `disable-model-invocation`, `user-invocable`. The last two
   default to true. Use the kebab-case spellings; camelCase variants are rejected.
-- Some runtimes bound the description length and omit an entry's description entirely when the
-  catalog overflows rather than truncating it. Keep it to one sentence that a stranger could match a
-  request against. Follow the local spec's number when one exists.
+- The model-facing catalog is a projection with exactly two fields, `name` and `description`, and the
+  description is **truncated** when it overflows - cut and marked with a literal `...`, never dropped.
+  The limit is a configured number (`catalogDescriptionMaxLength`, 500 by default), so keep to one
+  sentence a stranger could match a request against and check the number rather than assuming it.
+- `whenToUse` is registered but **does not reach the model catalog**: writing it adds nothing the model
+  can match on. Put the trigger condition in `description`, where the model actually reads it.
 
 The body is Markdown for the model. Open with a `# Title` and a short orientation paragraph, then one
 concern per `##` section; two heading levels are enough. State exact commands, real paths, and short
@@ -96,6 +99,13 @@ that loads the extension:
       - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
 ```
 
+One caveat if you are adding this to a preset that already ships skills: providers are unique **by
+name**, so adding the official `filesystem` provider beside an existing one of the same name fails the
+whole mount rather than overriding it. That is why a preset may instead ship its own provider row (Kaz
+mounts a `skill-visibility` row wrapping the official one) and why the row above may not exist by that
+name in the preset you are editing - look at what is mounted rather than assuming this recipe is
+already there.
+
 Three traps, all of them silent:
 
 - **Compute an absolute path in the composition.** A plugin's own config goes through
@@ -134,6 +144,9 @@ line: a skill can appear in the catalog and still fail to load its body.
   rather than the string you wrote.
 - **Catalog not rebuilt.** Adding or editing a skill file refreshes the catalog in a live session - the
   change appears without a restart, so a skill missing from the catalog was not discovered at all.
+  That is the default, not a law: the provider's `watch` option (on by default, and able to follow
+  symlinks) is what makes it true, so a deployment that turns it off gets the opposite behaviour and
+  needs a restart.
   A *newly configured root* is different: the provider is configured when the process mounts, so a
   change to `customSkillDirs` needs a restart before the new root is scanned.
 - **Name collision.** A nearer root wins outright, so a same-named skill in the project's own skills

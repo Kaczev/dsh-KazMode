@@ -23,4 +23,10 @@
  * 判断依据只有一条：**这个技能是在教"怎么编排多个代理/多个角色"，还是在教"怎么干这类活"？**
  * 前者进列表，后者不进。
  */
-export const MAIN_AGENT_ONLY_SKILLS = Object.freeze(["building-something-new"]);
+export const MAIN_AGENT_ONLY_SKILLS = Object.freeze([
+  "building-something-new",
+  "working-from-a-plan",
+  "repairing-something-broken",
+  "reviewing-someone-elses-work",
+  "moving-or-upgrading-a-thing",
+]);

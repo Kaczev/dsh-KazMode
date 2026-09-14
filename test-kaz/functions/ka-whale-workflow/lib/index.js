@@ -9,7 +9,7 @@
 
 export const name = "ka-whale-workflow";
 
-export const inject = ["tools", "subagents"];
+export const inject = ["tools", "subagents", "agents"];
 
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";

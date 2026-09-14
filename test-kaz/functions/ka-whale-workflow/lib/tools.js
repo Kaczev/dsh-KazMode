@@ -7,7 +7,7 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { randomUUID } from "node:crypto";
-import { MAIN_BLACKLIST, MEMORY_MAINTAINER_BLACKLIST, MEMORY_MAINTAINER_RESERVED, SUBAGENT_DEFAULT_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
+import { CONCURRENCY_CAP_REASON, MAIN_BLACKLIST, MAX_CONCURRENT_SUBAGENTS, MEMORY_MAINTAINER_BLACKLIST, MEMORY_MAINTAINER_RESERVED, SUBAGENT_DEFAULT_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
 import { MEMORY_MAINTAINER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
 import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
 import { KAZ_FORK_PROVIDER, noteForkSource } from "./fork-provider.js";
@@ -67,6 +67,57 @@ function roleOf(persona) {
 /** persona 的性格/行为描述（纯字符串或数组缺第二项 = 空串）。 */
 function descriptionOf(persona) {
   return Array.isArray(persona) && typeof persona[1] === "string" ? persona[1] : "";
+}
+
+/**
+ * 此刻**同时运行**的直系子代理个数。
+ *
+ * 数的是状态，不是计划条数：主代理可以错开时间派，所以上限约束的是"同一时间有几个在跑"，
+ * 而不是安排文件里写了几条。子代理这一回合结束后活体注册表转为 idle/ready，
+ * 所以"跑完一个就腾出一个名额"是自动的，不需要主代理再确认一次。
+ *
+ * 口径：只数 status === "running" 的孩子，**不是"存在几个孩子"**——已加载但停在两步之间的
+ * （idle）不占名额，那种可以直接 send_message 接着用。
+ *
+ * 数据源是活体 Agent 注册表（`ctx.agents`）——`list_agents` 判 running 用的也是它；
+ * `subagents.listChildren` 只负责枚举，它自己不带状态。
+ *
+ * 已知的窄误差：顺序是**先枚举、再查状态**，而刚派出去的孩子可能还没进枚举结果，
+ * 所以同一轮里连派两次时第一个会漏计一次（不是"查到了但状态是临时的 idle"）——那就是 6 个。
+ * 宁可少算一次，也不要因为一个永远不回填的账本条目把名额永久卡死。
+ *
+ * 已知的**大口子**（审查实测出来的，别当成小事）：枚举本身失败时返回 0，等于这次派发**放过了上限**。
+ * 触发条件至少有三种——`listChildren` 抛错（平台侧缺 sessionProjections / sessions / sessionQuery
+ * 任一服务时就会抛）、`ctx.agents` 拿不到活体注册表、孩子不是以 kind === "child" 的行被枚举出来
+ * （例如返回成 diagnostic 行）。下面那条 warn 日志就是为此存在的；选失败放行而不是失败拒绝，
+ * 是因为后者会让一次平台改动把整个派发通道卡死。
+ *
+ * @param {object} ctx - 插件上下文。
+ * @param {string} sessionId - 主代理的会话 id（子代理挂在它下面）。
+ * @param {AbortSignal} [signal] - 调用信号。
+ * @returns {Promise<number>} 同时运行的直系子代理个数；数不到时返回 0。
+ */
+async function liveSubagentCount(ctx, sessionId, signal) {
+  const subagents = ctx?.subagents ?? ctx?.get?.("subagents");
+  const agents = ctx?.agents ?? ctx?.get?.("agents");
+  try {
+    if (subagents === null || subagents === undefined || typeof subagents.listChildren !== "function") return 0;
+    const children = await subagents.listChildren(sessionId, signal);
+    if (!Array.isArray(children)) return 0;
+    let count = 0;
+    for (const child of children) {
+      if (child === null || typeof child !== "object" || child.kind !== "child") continue;
+      const live = typeof agents?.get === "function" ? agents.get(child.id) : undefined;
+      if (live !== undefined && live !== null && live.status === "running") count += 1;
+    }
+    return count;
+  } catch (error) {
+    // 失败方向是"什么都不在跑"，也就是**这次派发放过上限**。这是有意选的：
+    // 反过来选（数不到就拒绝）会让一次平台改动把整个派发通道卡死。
+    // 但它是静的——所以这里用 warn 而不是 debug：上限被绕过了，日志里要留痕。
+    ctx?.logger?.warn?.(`[ka-whale-workflow] liveSubagentCount: enumeration failed, the concurrency cap did not apply to this dispatch: ${reason(error)}`);
+    return 0;
+  }
 }
 
 /**
@@ -251,6 +302,17 @@ export function kaSubWhaleTool({ ctx, store }) {
         const continued = await patchEntryAt(sessionCwdOf(exec), sessionId, index, { id: reusableId, status: "running" });
         store.setEntries(sessionId, continued);
         return { ok: true, message: `continued ${label} as ${reusableId} (reused, no new subagent)`, text: `subagent id: ${reusableId}` };
+      }
+      // 复用不成 → 准备新开一个：先数"此刻同时活着几个"。上限见
+      // kaz-shared/lib/blacklists.js（MAX_CONCURRENT_SUBAGENTS）——限的是同时运行数，不是计划条数。
+      const liveNow = await liveSubagentCount(ctx, sessionId, exec.signal);
+      if (liveNow >= MAX_CONCURRENT_SUBAGENTS) {
+        return {
+          ...fail(
+            `${liveNow} subagents are already running (cap ${MAX_CONCURRENT_SUBAGENTS}); ${CONCURRENCY_CAP_REASON} ${label} has not been dispatched.`,
+          ),
+          text: "",
+        };
       }
       if (typeof subagents.startContinuable !== "function") {
         return { ...fail("the subagent registry is unavailable"), text: "" };

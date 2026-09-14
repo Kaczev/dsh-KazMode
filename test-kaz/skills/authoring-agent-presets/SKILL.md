@@ -20,8 +20,11 @@ below is about making a preset that mounts on someone else's machine, not just y
 ```
 
 Placement decides who sees it. A preset directory may be shipped with the deployment, kept in the
-user's preset root, or kept inside a project; the roster reports each preset's real path, so take the
-path you are editing from there rather than assuming. Never edit a shipped preset in place - an
+user's preset root, or kept inside a project. A roster row read from outside the host is **path-free by
+design** - it carries an id, a trust, a name, a description, whether the preset is the default, and a
+`broken` reason when it cannot compose - so the composition's location stays the host's own and you
+take the path you are editing from the home you are working in, not from the roster. Never edit a
+shipped preset in place - an
 upgrade overwrites it. To change what a shipped preset does, copy its composition into a new preset
 directory and edit the copy.
 
@@ -52,8 +55,9 @@ Rules that decide whether a preset works:
 - **`id` is a stable identity.** Without it a row gets a generated id on every read, so any edit to
   the file counts as remove-plus-add and remounts the plugin. Always set it.
 - **`name` resolves against the composition's own directory.** A relative specifier is a file beside
-  the composition; a bare package name resolves from the harness installation. A `--patch` overlay is
-  the exception and must use an absolute path.
+  the composition; a bare package name resolves from the harness installation. A `--patch` overlay may
+  use a relative name too - it is anchored beside the patch file, not against the process working
+  directory - so the two anchoring rules are different and worth stating explicitly.
 - **`config:` replaces the whole value per layer.** When you override a row, restate every key it
   needs; dropping one does not merge, it removes.
 - **`disabled: !!js <expression>`** is allowed on a row, and evaluated against the loader context at
@@ -63,8 +67,9 @@ Rules that decide whether a preset works:
 - **A plugin's own relative config path does not resolve against the preset.** Plugins that call
   `path.resolve()` anchor on the process working directory. Compute an absolute path in the
   composition, as the skills row above does.
-- **Group with `isolate`** when a group publishes a service; otherwise a second session mounting the
-  same preset collides on a process-global registration.
+- **Group with `isolate`** when a group publishes a service. The failure is a refused mount, not a
+  silent collision: a row publishing a process-global service is rejected with an error naming the
+  leaked services and telling you to use an `isolate` realm or move the row to the host composition.
 
 ## The persona
 
@@ -75,9 +80,11 @@ text it does not want. Two things worth knowing before writing one:
   runs, but the registered section is restored as the only one. That is how a preset ships a
   fixed-prompt agent with exactly one tool. Use it deliberately - the trade is total control for the
   loss of every other contribution, including tool guidance.
-- Prompt contributions are **assembled when the process starts**. An edit to a persona or any injected
-  text is invisible in a running session, including the session that made the edit. A restart is part
-  of the change.
+- Prompt contributions are **assembled per step**, inside the agent loop. Most text is captured at
+  registration, so an edit to a persona prefix is invisible in a running session, including the session
+  that made the edit, and a restart is part of the change. But the seam is not uniformly cold: at least
+  one contributor reconciles live, so a workspace-instruction file can be picked up while the process
+  runs. Know which kind you are editing before you tell the reader to restart.
 
 Cross-check the persona against what the preset actually mounts: a persona that promises capabilities
 its rows do not provide is the most common way a preset feels broken.

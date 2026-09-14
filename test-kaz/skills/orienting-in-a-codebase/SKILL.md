@@ -46,10 +46,11 @@ A search that returns nothing is the easiest way to reach a false conclusion.
 
 Before editing, trace a single real invocation from the entry point to the effect:
 
-```sh
-# find the registration, then follow outward
-grep -rn "<capability-name>" <source-dirs>
-# then confirm which of those files is actually loaded
+```
+# find the registration, then follow outward - use the dedicated grep tool, not shell grep:
+# a shell pattern needs quoting, and an unbounded shell grep in a large tree floods the context
+grep: "<capability-name>"        # paths: <source-dirs>, include: *.<ext>
+# then read the hits and confirm which of those files is actually loaded
 ```
 
 Reading one complete path teaches more than skimming ten files, and it is the only way to see the
@@ -62,7 +63,9 @@ Match the evidence to the ecosystem:
 - Call the public interface and read its output.
 - Read back the artifact the consumer reads, not the value you handed to the writer.
 - If a build, install, or deployment step exists, the source tree is not the artifact.
-- If the process loads code at startup, editing files changes nothing until it restarts.
+- If the process loads code at startup, editing files changes nothing until it restarts - and a
+  watcher can be the branch that makes the opposite true, so check whether one is configured rather
+  than assuming either way.
 
 State which of these you did. In an unfamiliar repository, an unverified assumption about the
 toolchain is indistinguishable from a bug.
