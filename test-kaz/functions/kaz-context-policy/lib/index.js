@@ -1,6 +1,7 @@
-// kaz-context-policy —— 上下文三件与压缩提醒的挂载点。
+// kaz-context-policy —— 上下文四件与压缩提醒的挂载点。
 //
-//   context_compress              按内容定位、一次压一段（§3.7）
+//   context_compress              按内容定位、一次压一段或删一段（§3.7）
+//   context_hotspots              看当前上下文里最占地方的节点（先看再压）
 //   context_search                查会话原文（§3.8；带 companion 可查别人的）
 //   context_read                  按序号取完整原文、供取证（§3.8.5）
 //   compression-hint              占用 ≥50% 时，在用户消息那一轮开头注入一条提醒（§四）
@@ -9,6 +10,7 @@
 // 这样 ctx.compaction / ctx.tokenMeter 都能在同组解析到。
 
 import { contextCompressTool } from "./compress.js";
+import { contextHotspotsTool } from "./hotspots.js";
 import { contextReadTool } from "./read.js";
 import { installHintInjection } from "./reminder.js";
 import { contextSearchTool } from "./search.js";
@@ -19,6 +21,7 @@ export const inject = ["tools"];
 
 export function apply(ctx) {
   ctx.tools.register(contextSearchTool(ctx));
+  ctx.tools.register(contextHotspotsTool(ctx));
   ctx.tools.register(contextCompressTool(ctx));
   ctx.tools.register(contextReadTool(ctx));
   installHintInjection(ctx);

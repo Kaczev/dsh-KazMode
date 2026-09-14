@@ -3,7 +3,7 @@
 // 规则：
 //   * 黑名单里的工具不出现在该角色模型的工具面上；调用即报错。
 //   * 只有黑名单，没有白名单——黑名单之外剩下什么就是什么。
-//   * 保留集（RESERVED_TOOLS）是"任何黑名单都挡不掉"的名单：上下文三件 + 记忆只读三件 +
+//   * 保留集（RESERVED_TOOLS）是"任何黑名单都挡不掉"的名单：上下文四件 + 记忆只读三件 +
 //     list_agents + get_arrangement。所以管家虽然黑名单里有东西，仍看得见 get_arrangement。
 
 /** 主代理黑名单：写记忆三件不可见（写操作全部交给 memoryMaintainer）。设计稿 §2.1。 */
@@ -30,8 +30,9 @@ export const MEMORY_MAINTAINER_BLACKLIST = Object.freeze([
   "write_arrangement",
 ]);
 
-/** 保留集（普通子代理）：黑名单挡不掉的工具（§2.3）——上下文三件 + 记忆只读三件 + list_agents + get_arrangement。 */
+/** 保留集（普通子代理）：黑名单挡不掉的工具（§2.3）——上下文四件 + 记忆只读三件 + list_agents + get_arrangement。 */
 export const RESERVED_TOOLS = Object.freeze([
+  "context_hotspots",
   "context_compress",
   "context_search",
   "context_read",
@@ -42,7 +43,7 @@ export const RESERVED_TOOLS = Object.freeze([
   "get_arrangement",
 ]);
 
-/** 保留集（记忆管理员）：上下文三件 + 记忆六件全部（§2.2）——管家要读写记忆。 */
+/** 保留集（记忆管理员）：上下文四件 + 记忆六件全部（§2.2）——管家要读写记忆。 */
 export const MEMORY_MAINTAINER_RESERVED = Object.freeze([
   ...RESERVED_TOOLS,
   "memory_save",

@@ -158,7 +158,7 @@ Get-Content "$env:USERPROFILE\.dsh\.agent-presets\kaz\VERSION"                  
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
   - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 13 个技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是 8.2.2 之前的旧版。
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
-  - 上下文三件：`context_search` / `context_read` / `context_compress`
+  - 上下文四件：`context_search` / `context_read` / `context_hotspots` / `context_compress`（`context_hotspots` 先告诉你哪个节点最占地方，再决定压哪段）
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`
   - 子代理控制三件：`list_agents` / `send_message` / `interrupt_agent`
 - **主代理看不到记忆写三件**（`memory_save` / `memory_update` / `memory_forget`）——这是设计（写记忆交给记忆管家）；**也看不到** `bash`、`get_goal` / `create_goal` / `update_goal`、官方 `subagent` / `subagent_fork`、`plan_mode`、`workflow`、`ralph`（刻意不挂，不是故障）。

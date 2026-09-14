@@ -10,7 +10,7 @@
 #     command-goal + tool-goal、plan-mode（/plan）、tool-workflow + workflow-worker-thread、tool-ralph。
 #   * kaz-shared 的工具面门：主代理黑名单（注册表收紧 + assemble 期过滤工具表）。
 #   * compaction 组带 isolate（compaction + toolResultPruner realm）：内置压缩 provider、
-#     上下文三件与官方压缩配套同组，组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
+#     上下文四件与官方压缩配套同组，组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
 
 - id: persona
   name: '@deepseek-ai/dsh-persona'
@@ -99,7 +99,7 @@
 - id: tool-subagent-list-agents
   name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
 
-# ── compaction 组：内置压缩 + 上下文三件 + 官方压缩配套 ──────────────────────
+# ── compaction 组：内置压缩 + 上下文四件 + 官方压缩配套 ──────────────────────
 - id: compaction
   name: cordis:group
   group: true
