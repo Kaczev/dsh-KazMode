@@ -10,7 +10,7 @@
 > 5. 全程不要向用户提问，除非出现本文件未覆盖的错误。
 > 6. 目标机器是 Windows + PowerShell。
 >
-> **版本要求**：Kaz 预设形态**只支持 dsh `0.1.5-rc.2`**（第 0 步硬校验；不符合就停）。主环境 `.dsh` 的运行时是全局 `0.1.5-rc.2`，测试环境 `.dsh-test` 是它自己的本地副本 `0.1.5-rc.2`，救援环境 `.dsh-clean` 固定 `0.1.1-rc.2`（按设计过不了闸门）。
+> **版本要求**：Kaz 预设形态**只支持 dsh `0.1.5-rc.2`**（第 0 步硬校验；不符合就停）。主环境 `.dsh` 的运行时是全局 `0.1.5-rc.2`，测试环境 `.dsh-test` 是它自己的本地副本 `0.1.5-rc.2`，干净环境 `.dsh-clean` 是**一个空白的 dsh**（不装 Kaz，用来对照"最干净、最不会出意外"的基线），运行时同样是 `0.1.5-rc.2`。
 > **旧插件形态用户**（dsh `0.1.1-rc.2`，还装着 `KazPlugins` + `cordis.patch.yml` 插件的）：先看 `ds安装指引.md` 的**附录 A** 做迁移清理，升级 dsh 后再按本文件更新。
 
 ---
@@ -49,7 +49,7 @@ if ($supportedDsh -notcontains $dshVer) {
 
 > 本版 Kaz 是 DSH agent preset（预设形态），**只支持 dsh `0.1.5-rc.2`**，检测到本机运行时版本不在支持列表内。请先把 dsh 升级到 `0.1.5-rc.2` 再更新；旧插件形态请先按 `ds安装指引.md` 附录 A 迁移。若用户明确要求把运行时**回退到 `0.1.5-rc.1`**：安装 / 更新必须显式加 `-SkipVersionCheck`，并且要把该 home 启动器的 `EXPECTED_CLI` 一起改回 `0.1.5-rc.1`，否则启动器开屏就拒绝启动——回退不是受支持状态，只能由用户决定。
 
-> **三台 home 的闸门读到的都是自己的真实版本（已无「残留副本遮蔽」现象）**：第 0 步 / 第 3 步的候选顺序先读 `<home>\tools\dsh-cli\...`，再读 `<home>\profiles\<profile>\node_modules\@deepseek-ai\dsh\...`，最后读全局 `%APPDATA%\npm`，取第一个存在者即停。主环境 `.dsh` 前两个候选都不存在（那份 rc.1 残留副本已删除），读到**全局 `0.1.5-rc.2`**；`.dsh-test` 读到自己的本地副本 `0.1.5-rc.2`；`.dsh-clean` 读到自己保留的 `0.1.1-rc.2`，按预期 `FAIL`。**看打印出来的路径判断闸门读的是哪一份**。
+> **三台 home 的闸门读到的都是自己的真实版本（已无「残留副本遮蔽」现象）**：第 0 步 / 第 3 步的候选顺序先读 `<home>\tools\dsh-cli\...`，再读 `<home>\profiles\<profile>\node_modules\@deepseek-ai\dsh\...`，最后读全局 `%APPDATA%\npm`，取第一个存在者即停。主环境 `.dsh` 前两个候选都不存在（那份 rc.1 残留副本已删除），读到**全局 `0.1.5-rc.2`**；`.dsh-test` 读到自己的本地副本 `0.1.5-rc.2`；`.dsh-clean` 读到自己 `tools\dsh-cli` 的 `0.1.5-rc.2`（**它是空白 dsh，已随其它 home 一起升到受支持版本**，所以同样 `PASS`）。**看打印出来的路径判断闸门读的是哪一份**。
 
 > 若你要更新的是非默认 home，第 0 步仍按默认 `%USERPROFILE%\.dsh` 预检；目标 home 的真实闸门由第 3 步的安装程序执行。
 
@@ -110,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHomes
 ```
 
-- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期（2026-09-14 实测）**：`.dsh`（主环境，闸门读到全局 `0.1.5-rc.2`）报 `OK`；`.dsh-clean` 也报 `OK`——它的 `tools\dsh-cli` 副本与启动器 `EXPECTED_CLI` **都已升到 `0.1.5-rc.2`**，不再是 `0.1.1-rc.2`（若你本意是让它留在旧运行时当最后防线，这个前提已经失效，要单独处理，别指望它 `FAIL`）；`.dsh-test` 实测 **`FAIL`**，原因是 `multiple profiles under …: headless, web; pass -ProfileName`，**与版本无关**——它有 `headless` 与 `web` 两个 profile。
+- `-AllHomes` 会扫描 `%USERPROFILE%\.dsh*` 中含 `profiles` 的 home，逐 home 安装并打印 `--- summary ---` 与逐行 `OK` / `FAIL`。**预期（2026-09-14 实测）**：`.dsh`（主环境，闸门读到全局 `0.1.5-rc.2`）报 `OK`；`.dsh-clean`（**空白 dsh**，不装 Kaz，运行时 `0.1.5-rc.2`）也报 `OK`；`.dsh-test` 实测 **`FAIL`**，原因是 `multiple profiles under …: headless, web; pass -ProfileName`，**与版本无关**——它有 `headless` 与 `web` 两个 profile。
 - **`FAIL` 行不都是版本问题**：多 profile 的 home 也会 `FAIL`。看错误文字再判断，不要一律当成闸门没通过。
 - 若目标 home 的 `.agent-presets\kaz` 与仓库源目录（默认 `kaz\`）本来就是同一个目录（开发机上主区就是这样），安装程序会打印 `source and target are the same directory; skip file copy`，只重建 junction——正常分支。
 
@@ -167,7 +167,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 | 现象 | 处理 |
 | --- | --- |
 | 第 0 步 / 预演 / 正式运行报 `VERSION GATE: FAIL` | 目标 home 的运行时不是 `0.1.5-rc.2`：**停止**，按第 0 步的说明转告用户；旧形态先走 `ds安装指引.md` 附录 A。**不要**自行用 `-SkipVersionCheck`；唯一例外是用户明确要求回退到 `0.1.5-rc.1`（那时按第 0 步的说明加它，并提醒用户同步启动器的 `EXPECTED_CLI`） |
-| `-AllHomes` 里某个 home 报 `FAIL` | 该 home 的运行时 dsh 不是 `0.1.5-rc.2`：主环境 `.dsh`（全局 `0.1.5-rc.2`）与测试环境 `.dsh-test`（本地副本 `0.1.5-rc.2`）应 `OK`；`.dsh-clean`（`0.1.1-rc.2` 救援环境）报 `FAIL` 属设计如此。**不要**自行用 `-SkipVersionCheck`（唯一例外：用户明确要求回退到 `0.1.5-rc.1`，见第 0 步） |
+| `-AllHomes` 里某个 home 报 `FAIL` | **先看错误文字**：版本不符只是原因之一，多 profile 的 home 会因 `pass -ProfileName` 报 `FAIL`（本机 `.dsh-test` 就是这样，与版本无关）。本机三台 home 运行时都是 `0.1.5-rc.2`，`.dsh-clean` 是空白 dsh、预期 `OK`。**不要**自行用 `-SkipVersionCheck`（唯一例外：用户明确要求回退到 `0.1.5-rc.1`，见第 0 步） |
 | `multiple profiles under ...; pass -ProfileName` | 该 home 有多个 profile：加 `-ProfileName web` |
 | `no profiles directory under ...` | 该 home 没有可用的 profile（没装好 dsh 运行时）：不要继续 |
 | `runtime scope not found: neither ... nor ... exists` | 共享层与 profile 层都不存在：该 home 的 dsh 运行时不可用，停下更新，先修好运行时再重跑 |
