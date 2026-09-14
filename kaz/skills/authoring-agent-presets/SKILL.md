@@ -114,8 +114,11 @@ Mount the preset and read the result back from the running session:
 1. Confirm the preset is listed at all - a directory in the wrong root, or a malformed metadata file,
    simply does not appear.
 2. Confirm it **mounts**. A row that cannot resolve its specifier is logged, not thrown, and a row
-   waiting on a service nobody provides stays pending forever with no error at the call site. Enumerate
-   the loaded fibers rather than assuming.
+   waiting on a service nobody provides stays pending forever, contributing nothing. Read the state
+   the host exposes rather than assuming: a preset that cannot compose carries a `broken` reason on its
+   roster row, and from inside a session the contribution itself is the evidence - a tool in the tool
+   face, a section in the prompt, an entry in the skill catalog. When a session offers no way to read
+   mount state, say which part you could not establish instead of guessing at the cause.
 3. Confirm the persona took effect and the expected prompt contributions are present.
 4. Exercise one capability per row that matters: call a tool, load a shipped skill, trigger a prompt
    contribution, and check the output arrives.
