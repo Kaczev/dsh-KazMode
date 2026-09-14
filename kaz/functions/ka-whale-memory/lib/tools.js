@@ -23,8 +23,31 @@ const ALL_LOCATIONS = ["global", "local"];
  * 默认 16 条），所以它必须比正文紧得多；正文只在 memory_detail 打开那一条时才进上下文。
  * 超限一律**报错拒绝**，绝不静默截断——截断会让人以为整条存进去了。
  * 只对新写入生效：加限制之前存下的超额条目原样保留。
+ *
+ * ⚠ **公布值与真实门禁是两个数**（别当成 bug 去"修正"，这是有意设计）：
+ *   - `SIZE_LIMITS`（这份）是**公布值**，写在 memory_save / memory_update 的工具描述里，
+ *     也是超限报错里报出来的数——**模型看到的、以及它照着优化的，都是这个**。
+ *   - `GATE_LIMITS` 是**真实门禁**，为公布值的 1.2 倍。
+ * 动因（实测）：写入者常"超一点点"，而为抹掉这一点点会**反复重写好几轮**（每次都要重算
+ * 字节数、改措辞、再试）。留出 20% 余量后，这类轻微超限一次过；同时因为描述没变，
+ * 模型的目标仍然是紧的，不会反过来把记忆写胖。
+ * 报错也报**公布值**：若错误信息说 "limit 4096" 而实际放到 4915，那是自相矛盾，
+ * 会让人以为门禁坏了。两者差值就是"缓冲区"，不对外表达。
  */
 export const SIZE_LIMITS = Object.freeze({ name: 64, summary: 128, body: 4096 });
+
+/**
+ * 真实门禁 = 公布值 × 该系数。改动这里等于改"缓冲垫厚度"；
+ * 想改对外口径请改 SIZE_LIMITS（并同步两份工具描述里的数字）。
+ */
+export const SIZE_LIMIT_SLACK = 1.2;
+
+/** 真实门禁（字节）。写入校验用这个，报错文案报 SIZE_LIMITS。 */
+export const GATE_LIMITS = Object.freeze({
+  name: Math.round(SIZE_LIMITS.name * SIZE_LIMIT_SLACK),
+  summary: Math.round(SIZE_LIMITS.summary * SIZE_LIMIT_SLACK),
+  body: Math.round(SIZE_LIMITS.body * SIZE_LIMIT_SLACK),
+});
 
 const utf8 = new TextEncoder();
 
@@ -33,16 +56,21 @@ export function byteSize(value) {
   return utf8.encode(typeof value === "string" ? value : "").length;
 }
 
-/** 一条记忆的最终字段尺寸；@returns {string|null} 超限时的英文拒绝原因，合规返回 null。 */
+/**
+ * 一条记忆的最终字段尺寸。
+ * 判定用 GATE_LIMITS（真实门禁，带 20% 缓冲），**报错文案报 SIZE_LIMITS（公布值）**——
+ * 理由见文件上方 SIZE_LIMITS 的说明：报出来的数必须与工具描述里的数一致。
+ * @returns {string|null} 超限时的英文拒绝原因，合规返回 null。
+ */
 export function sizeProblem(fields) {
   const checks = [
-    ["name", fields.name, SIZE_LIMITS.name],
-    ["summary", fields.summary, SIZE_LIMITS.summary],
-    [fields.bodyLabel ?? "body", fields.body, SIZE_LIMITS.body],
+    ["name", fields.name, SIZE_LIMITS.name, GATE_LIMITS.name],
+    ["summary", fields.summary, SIZE_LIMITS.summary, GATE_LIMITS.summary],
+    [fields.bodyLabel ?? "body", fields.body, SIZE_LIMITS.body, GATE_LIMITS.body],
   ];
-  for (const [label, value, limit] of checks) {
+  for (const [label, value, advertised, gate] of checks) {
     const size = byteSize(value);
-    if (size > limit) return `${label} is ${size} bytes (limit ${limit}) — shorten it`;
+    if (size > gate) return `${label} is ${size} bytes (limit ${advertised}) — shorten it`;
   }
   return null;
 }
