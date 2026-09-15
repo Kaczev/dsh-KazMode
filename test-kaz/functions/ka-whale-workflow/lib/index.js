@@ -58,6 +58,8 @@ function createStore(persistStage = null) {
         // self-check 的轮次计数：**跨重启存活**（见 stage-store 的 __rounds）。
         // 由 `agent/inbox/claimed` 监听器 +1 —— 那个时刻在 assemble 之前，所以当轮就能生效。
         rounds: 0,
+        // 是否已经把落盘计数并进来（跨重启恢复只做一次，见 refresh 的加载分支）。
+        roundsRestored: false,
         selfCheckEntered: false,
       };
       sessions.set(sessionId, state);
@@ -184,11 +186,19 @@ export function apply(ctx) {
     store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
     if (!state.loaded) {
       state.entries = await readArrangement(state.cwd, sessionId);
-      // 轮次计数恢复：**只增不减**。count 在 claim 监听器里已经 +1，磁盘那份还是旧的；
-      // 无条件覆盖会把同一轮刚数好的值盖回去（实测踩过）。
+      // 轮次计数恢复：**以盘上那份为准，不设条件**。
+      // 原先写成"只在盘上值更大时才采用"是错的标准：进程刚重启时内存是 0，
+      // 而 claim 监听器已把当轮算成 1，于是 1 > 3 不成立、恢复被跳过 ——
+      // 表现为**重启后第一条真人消息被吞掉**（实测：重启后数了 3 条，盘上还是 3，第 8 轮没进）。
+      // 正确的语义是"总轮数 = 盘上已计的 + 内存里本轮已计的"。
       const marks = await readRoundMarks(state.cwd);
       const persistedRounds = marks[sessionId]?.count;
-      if (typeof persistedRounds === "number" && persistedRounds > state.rounds) state.rounds = persistedRounds;
+      // **只在加载时加一次**：之后每步 refresh 都再加一次就会越滚越大（state.loaded 已 true，
+      // 但显式记一个标记，读代码的人不必依赖那个间接条件）。
+      if (!state.roundsRestored && typeof persistedRounds === "number" && persistedRounds > 0) {
+        state.rounds = persistedRounds + (Number.isFinite(state.rounds) ? state.rounds : 0);
+        state.roundsRestored = true;
+      }
       // **阶段不从磁盘恢复**（除 arrange_agent 外）。"这一轮该进哪个阶段"由 entranceFor 按轮次算，
       // 而磁盘天然比内存旧一拍——恢复它就会把刚算好的 self-check 拉回 idle。
       // 只有 arrange_agent 是模型轮内跳的、必须跨重启留住，所以只认它。
@@ -284,6 +294,11 @@ export function apply(ctx) {
 
     const state = await refresh(agent.session);
     if (state === null) return decision;
+    // 本回合的会话 id **必须在这里取**：下面"重算阶段 + 落盘 + 记账"三处（第 322/325/327 行）
+    // 用的是这个处理函数自己的作用域，而 `sessionId` 只声明在 claim 监听器和 refresh 内部，
+    // 两者都不在这里可见（曾经在这三处直接引用它 → 每一步都 `sessionId is not defined`，整轮失败）。
+    // refresh 返回非 null 已经保证它是非空字符串（refresh 开头就是这么判的），所以这里无需再判。
+    const sessionId = agent.session?.id;
     // 刹车提示：本轮工具调用总数跨过 32，之后每再满 16 各提示一次（见 kaz-shared/lib/diving-hint.js）。
     if (shouldHintDiving(state)) {
       decision.messages.push(
@@ -317,14 +332,19 @@ export function apply(ctx) {
 
     const messages = Array.isArray(payload?.messages) ? payload.messages : [];
     const userTurn = payload?.step === 1 && messages.some((message) => message?.source?.kind === "user");
-    // 阶段在**注入点**重新算一次，而不是读一个可能被别处覆盖的 state.stage。
-    // 这是唯一稳定的一步：claim 刚数完当轮消息（assemble 之前），而这里正是"这一刻注入什么"。
-    const stage = entranceFor(sessionId, state.rounds);
-    if (state.stage !== stage) {
-      state.stage = stage;
-      store.setStage(sessionId, stage);
-      await writeStage(state.cwd, sessionId, stage);
-      noteEffectiveStage(sessionId, stage);
+    // 阶段**只在回合开头算一次**（`userTurn` 就是"真人消息的第一步"）。
+    //
+    // 为什么不能每一步都算：模型在 self-check 里用 whale_report 跳到 idle 之后，
+    // 若这里再算一次，同一个 4n 轮次又会算出 self-check —— 把刚跳出去的阶段按回去，
+    // 于是**整轮都出不来**（实测踩过）。回合开头算一次，模型轮内的跳转才作数。
+    if (userTurn) {
+      const stage = entranceFor(sessionId, state.rounds);
+      if (state.stage !== stage) {
+        state.stage = stage;
+        store.setStage(sessionId, stage);
+        await writeStage(state.cwd, sessionId, stage);
+        noteEffectiveStage(sessionId, stage);
+      }
     }
     const stageChanged = state.stage !== state.lastInjectedStage;
     if (!userTurn && !stageChanged) return decision;
