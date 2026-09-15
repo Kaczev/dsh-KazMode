@@ -340,7 +340,7 @@ export function kaSubWhaleTool({ ctx, store }) {
   });
 }
 
-export function whaleReportTool({ store }) {
+export function whaleReportTool({ store, noteStage }) {
   return defineTool({
     name: "whale_report",
     description:
@@ -368,6 +368,9 @@ export function whaleReportTool({ store }) {
         return fail(`cannot go from ${current} to ${target}; legal from ${current}: ${LEGAL_TRANSITIONS[current].join(", ")}`);
       }
       store.setStage(sessionId, target);
+      // **立即广播**：guard（kaz-shared 的调用时刻否决）读的就是这份值。
+      // 少了这句，从 self-check 跳出后本轮剩下的步骤仍被拒（实测踩过）。
+      noteStage?.(sessionId, target);
       // 记一笔"模型本轮自己选过阶段"：本轮内不再自动进入 self-check，
       // 否则刚从 self-check 跳出的 idle 会被下一轮计算按回去（实测整轮出不来）。
       store.markModelStageChoice?.(sessionId);

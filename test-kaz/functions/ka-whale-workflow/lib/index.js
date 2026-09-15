@@ -356,12 +356,16 @@ export function apply(ctx) {
     // 于是**整轮都出不来**（实测踩过）。回合开头算一次，模型轮内的跳转才作数。
     if (userTurn) {
       const stage = entranceFor(sessionId, state.rounds);
+      // **每次真人回合都广播**，即使阶段没变。
+      // 这一句是补的线：whale_report 跳出 self-check 后，guard 读的是这份广播值；
+      // 原先只在"阶段变化"时广播，于是跳出后 guard 仍读到 self-check、本轮剩下的步骤全被锁
+      // （实测踩过：连着三版都是这个位置被拒）。
       if (state.stage !== stage) {
         state.stage = stage;
         store.setStage(sessionId, stage);
         await writeStage(state.cwd, sessionId, stage);
-        noteEffectiveStage(sessionId, stage);
       }
+      noteEffectiveStage(sessionId, state.stage);
     }
     const stageChanged = state.stage !== state.lastInjectedStage;
     if (!userTurn && !stageChanged) return decision;
@@ -400,5 +404,5 @@ export function apply(ctx) {
   ctx.tools.register(writeArrangementTool({ store }));
   ctx.tools.register(getArrangementTool({ store }));
   ctx.tools.register(kaSubWhaleTool({ ctx, store }));
-  ctx.tools.register(whaleReportTool({ store }));
+  ctx.tools.register(whaleReportTool({ store, noteStage: noteEffectiveStage }));
 }
