@@ -30,4 +30,5 @@ export const MAIN_AGENT_ONLY_SKILLS = Object.freeze([
   "repairing-something-broken",
   "reviewing-someone-elses-work",
   "moving-or-upgrading-a-thing",
+  "getting-unstuck",
 ]);
