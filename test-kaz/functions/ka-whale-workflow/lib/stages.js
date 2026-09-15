@@ -114,13 +114,33 @@ export function renderMemoryHintText() {
 export const DIVING_HINT_HEADER = "[ka-whale-workflow diving-hint]";
 
 /**
+ * 唯一一条**每轮都不一样**的文案占位符。
+ *
+ * 清单本身是冻结字面量，而"已经耗了多久"必须在**注入那一刻**才知道，所以那条先写成模板、
+ * 由 `elapsedCheck()` 在渲染时替换。占位符做成导出常量是为了让"替换得对不对"能被直接比对
+ * （误写一个字符就会原样漏进提示，而漏一个占位符是**看不出来**的）。
+ */
+export const ELAPSED_PLACEHOLDER = "{{elapsed}}";
+
+/** "已经耗了多久"那一条的模板，排在清单**最前面**（它的位置由 `elapsedFirst()` 认，不靠下标）。 */
+const ELAPSED_STATEMENT_TEMPLATE = `This round has been running for ${ELAPSED_PLACEHOLDER}.`;
+
+/**
  * "刹车"提示的检查清单。每轮工具调用到阈值时注入，用来把"还在埋头做"拉回"该不该停"。
  *
- * 这几条之所以是问句而不是命令：它们要能在**任何**处境下被读一遍，
+ * 第 1 条是**陈述句**（"这一轮已经跑了 23 分钟"），刻意排在最前面：它报的是一个模型自己
+ * 看不见的事实——它数得清自己调了多少次工具，却感觉不到过了多久，而"拖太久"正是这条提示
+ * 要拦的东西。把事实摆在开头，后面那串问句才有由头，读起来也才像一段话。
+ *
+ * 其余几条之所以是问句而不是命令：它们要能在**任何**处境下被读一遍，
  * 而大部分处境下答案都是"否"。写成命令（"停下来汇报"）就会在不需要停的时候也叫停，
  * 提示本身变成噪音；写成问句，只有真出问题时才起作用。
+ *
+ * **位置只由这张清单决定**：所有输出都从它派生（见 elapsedFirst / remainingChecks），
+ * 角色提问则统一挂在耗时那句之后。所以调整顺序 = 挪这里的行，不用去改任何下标。
  */
 export const DIVING_HINT_CHECKS = Object.freeze([
+  ELAPSED_STATEMENT_TEMPLATE,
   "Have we encountered any unsolvable problems?",
   "Have we been on the same step for too many rounds?",
   "Do we need to load any skills?",
@@ -129,43 +149,93 @@ export const DIVING_HINT_CHECKS = Object.freeze([
 ]);
 
 /**
- * "刹车"提示正文（主代理版，模型面文案，英文）。
+ * 把耗时填进模板，得到那一条陈述句。
  *
- * 两条与角色相关的提问插在中间：
- *   - 汇报对象是**用户**（主代理是对话的对外一侧）；
- *   - "该不该派子代理"是主代理独有的杠杆，子代理没有派发权。
+ * **起点未知**（拿不到本轮那条用户消息的时刻）时说的是"不知道，但已经拖了很久"：
+ * 宁可给出一个诚实的模糊说法，也不能把 `undefined` 填进提示里——那句话是给模型读的，
+ * 一个 `undefined` 会让整条提示显得像坏掉了，而它本该传达的"停下来看看"就丢了。
+ *
+ * 模板里找不到占位符时**原样返回文本**：宁可漏一个数字，也不能把一句话悄悄抹掉。
+ * @param {string|undefined} elapsed - 已格式化好的时长（如 "23 minutes"），未知时 undefined。
+ * @returns {string} 填好的句子。
  */
-export const DIVING_HINT_BODY =
-  DIVING_HINT_CHECKS.slice(0, 2).join(" ") +
-  " Do we need to report to the users?" +
-  " Should we arrange some subagents?" +
-  " " +
-  DIVING_HINT_CHECKS.slice(2).join(" ");
+function elapsedCheck(elapsed) {
+  const text = typeof elapsed === "string" && elapsed.trim().length > 0 ? elapsed : "a while now";
+  return ELAPSED_STATEMENT_TEMPLATE.replace(ELAPSED_PLACEHOLDER, text);
+}
+
+/** 填好的耗时陈述句（正文的第一句）。 */
+function elapsedFirst(elapsed) {
+  return elapsedCheck(elapsed);
+}
+
+/**
+ * 除耗时那句之外的全部检查项（按清单顺序）。
+ *
+ * 靠**认出那条模板**把它取出来，而不是靠某个下标：下标会随清单增删而错位，
+ * 而这类错位不会报错，只会悄悄少一句或多一句（原先那个 `ROLE_QUESTIONS_AT` 就是这个隐患）。
+ */
+function remainingChecks() {
+  return DIVING_HINT_CHECKS.filter((item) => item !== ELAPSED_STATEMENT_TEMPLATE);
+}
+
+/**
+ * 主代理独有的两条提问：汇报对象是**用户**（主代理是对话的对外一侧），
+ * "该不该派子代理"是主代理独有的杠杆，子代理没有派发权。
+ */
+function roleQuestionsForMain() {
+  return ["Do we need to report to the users?", "Should we arrange some subagents?"];
+}
+
+/**
+ * 子代理版换的两处：汇报对象是**主代理**（子代理不对用户说话），并明说 hand back——
+ * 子代理一交回就结束，没有后续；没有"派子代理"这一问（子代理无派发权），换成**升级**，
+ * 把"该不该拆、该不该请主代理加人"提出来交给主代理决定。
+ */
+function roleQuestionsForSubagent() {
+  return [
+    "Do we need to report to the main agent and hand back?",
+    "Is the task too much for one agent, should it be split, or should we ask the main agent for more subagents?",
+  ];
+}
+
+/**
+ * 正文的通用组装：**耗时那句在最前** + 角色提问 + 剩下的检查项。
+ * 两个版本共用这一段，所以两者的差别只剩 `questions` 一处。
+ * @param {string|undefined} elapsed - 已格式化好的本轮耗时；省略时按"未知"渲染。
+ * @param {string} questions - 该角色自己那两条提问（已拼成一句）。
+ * @returns {string} 正文。
+ */
+function composeDivingHintBody(elapsed, questions) {
+  return [elapsedFirst(elapsed), questions, remainingChecks().join(" ")].join(" ");
+}
+
+/**
+ * "刹车"提示正文（主代理版，模型面文案，英文）。
+ * @param {string} elapsed - 已格式化好的本轮耗时；省略时按"未知"渲染。
+ * @returns {string} 正文。
+ */
+export function divingHintBody(elapsed) {
+  return composeDivingHintBody(elapsed, roleQuestionsForMain().join(" "));
+}
 
 /**
  * "刹车"提示正文（子代理版）。
- *
- * 同一套检查清单，换两处：
- *   - 汇报对象是**主代理**（子代理不对用户说话），并明说 hand back——
- *     子代理一交回就结束，没有后续。
- *   - 没有"派子代理"这一问（子代理无派发权），换成**升级**：
- *     把"该不该拆、该不该请主代理加人"提出来交给主代理决定。
+ * @param {string} elapsed - 已格式化好的本轮耗时；省略时按"未知"渲染。
+ * @returns {string} 正文。
  */
-export const DIVING_HINT_BODY_SUBAGENT =
-  DIVING_HINT_CHECKS.slice(0, 2).join(" ") +
-  " Do we need to report to the main agent and hand back?" +
-  " Is the task too much for one agent," +
-  " should it be split, or should we ask the main agent for more subagents?" +
-  " " +
-  DIVING_HINT_CHECKS.slice(2).join(" ");
+export function divingHintBodyForSubagent(elapsed) {
+  return composeDivingHintBody(elapsed, roleQuestionsForSubagent().join(" "));
+}
 
 /**
  * "刹车"提示的完整注入文本：头部 + 正文。
  * 触发点：一轮内第 32 次工具调用，之后每再满 16 次。
+ * @param {string} elapsed - 已格式化好的本轮耗时；省略时按"未知"渲染。
  * @returns {string} 注入文本。
  */
-export function renderDivingHintText() {
-  return [DIVING_HINT_HEADER, DIVING_HINT_BODY].join("\n");
+export function renderDivingHintText(elapsed) {
+  return [DIVING_HINT_HEADER, divingHintBody(elapsed)].join("\n");
 }
 
 /**
@@ -173,10 +243,11 @@ export function renderDivingHintText() {
  *
  * 注入头与主代理版**相同**（所有者定案）：两者在日志里都归为 diving-hint 一类，
  * 靠正文里的措辞区分角色，不靠头。
+ * @param {string} elapsed - 已格式化好的本轮耗时；省略时按"未知"渲染。
  * @returns {string} 注入文本。
  */
-export function renderDivingHintTextForSubagent() {
-  return [DIVING_HINT_HEADER, DIVING_HINT_BODY_SUBAGENT].join("\n");
+export function renderDivingHintTextForSubagent(elapsed) {
+  return [DIVING_HINT_HEADER, divingHintBodyForSubagent(elapsed)].join("\n");
 }
 
 /** 合法跳转行（§5.1 表格的"可跳转"列，模型可见）。 */

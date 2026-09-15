@@ -26,7 +26,7 @@ import {
 import { readRoundMarks, readStage, writeRoundMark, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
 import { noteMemoryHintEvent, shouldHintMemory } from "../../kaz-shared/lib/memory-hint.js";
-import { divingHintStep, noteDivingEvent, shouldHintDiving } from "../../kaz-shared/lib/diving-hint.js";
+import { divingHintStep, formatElapsedDuration, lastRoundStartAt, noteDivingEvent, shouldHintDiving } from "../../kaz-shared/lib/diving-hint.js";
 
 /** 只挂给主代理的四件（子代理必须看不到）。导出是为了让"谁拿到工作流工具"这件事可被引用与核对。 */
 export const MAIN_ONLY_TOOLS = ["write_arrangement", "get_arrangement", "ka_sub_whale", "whale_report"];
@@ -50,9 +50,11 @@ function createStore(persistStage = null) {
         // 记忆提示：连续调用观察工具集的次数，以及本轮（自最近一条用户消息）是否已提示过。
         streak: 0,
         roundHinted: false,
-        // 刹车提示：本轮（自最近一条用户消息）的全部工具调用次数，以及已触发到哪个节点。
+        // 刹车提示：本轮（自最近一条用户消息）的全部工具调用次数、已触发到哪个节点，
+        // 以及本轮的起点时刻（提示正文要报"这一轮耗了多久"，起点由 noteDivingEvent 记下）。
         roundToolCalls: 0,
         divingMilestone: 0,
+        roundStartedAt: 0,
         // 是否已经看过这个会话的事件流（首次只看游标、不回放历史，见 refresh）。
         scannedOnce: false,
         // self-check 的轮次计数：**跨重启存活**（见 stage-store 的 __rounds）。
@@ -265,6 +267,14 @@ export function apply(ctx) {
         // 计数器只关心"从现在起"的活动；新进程（重启后）scannedSeq 从 0 开始，
         // 若在这里回放整段历史，32 次门槛会被历史一次性跨过 —— 表现为"一开局就注入刹车提示"。
         // 实测踩过：重启后第一次 pre-step 立刻弹提示。
+        //
+        // **但本轮起点要在这里补读一次**：新会话的 `user/message` 是**这一步跑完才**追加的
+        // （dsh-agent-loop：pre-step 在 append 之前），所以第一次扫描发生在第二步——
+        // 那一步推游标时正好把这条起点**跨过去**，`noteDivingEvent` 永远见不到它，
+        // 表现就是"开新对话的第一轮，刹车提示报不出耗时"（实测：报的是兜底的 a while now）。
+        // 起点是**事实**、不进计数器，所以单独读一次；`roundToolCalls` 照旧保持 0，
+        // 上面那条"不回放历史"的规矩一点没动。
+        state.roundStartedAt = lastRoundStartAt(events);
         state.scannedOnce = true;
         state.scannedSeq = lastSeq;
         return state;
@@ -287,12 +297,37 @@ export function apply(ctx) {
     return state;
   };
 
+  /**
+   * 这一轮**到此为止已经耗了多久**，喂给刹车提示正文。
+   *
+   * 起点由 `noteDivingEvent` 在扫到本轮那条用户消息时记下（事件自带 `time`）。
+   * 取不到（0）就返回 undefined，由渲染层说"未知"——提示照发，一个字都不少。
+   *
+   * 注意**不能用 `payload.step` 之类去推**：那数的是"这一步"，而提示要说的是"这一轮"。
+   * @param {object} state - 会话状态或子代理的刹车状态。
+   * @returns {string|undefined} 如 "23 minutes"；起点未知时 undefined。
+   */
+  const elapsedFor = (state) => {
+    const startedAt = state?.roundStartedAt;
+    if (!(Number.isFinite(startedAt) && startedAt > 0)) return undefined;
+    return formatElapsedDuration(Date.now() - startedAt);
+  };
+
   /** 取（必要时建）某个子代理会话的刹车状态。会话不可读时返回 null。 */
   const subagentHintStateFor = (session) => {
     if (session === undefined || session === null || typeof session !== "object") return null;
     let hintState = subagentHintStates.get(session);
     if (hintState === undefined) {
-      hintState = { roundToolCalls: 0, divingMilestone: 0, scannedSeq: 0, scannedOnce: false };
+      // 起点在这里读一次：子代理的计数不回放历史（见下面那段注释），所以它的
+      // `noteDivingEvent` 见不到开头那条用户消息，不先读一次就会永远报"未知"。
+      const events = typeof session.snapshotEvents === "function" ? session.snapshotEvents() : [];
+      hintState = {
+        roundToolCalls: 0,
+        divingMilestone: 0,
+        roundStartedAt: lastRoundStartAt(events),
+        scannedSeq: 0,
+        scannedOnce: false,
+      };
       subagentHintStates.set(session, hintState);
     }
     return hintState;
@@ -332,7 +367,7 @@ export function apply(ctx) {
       if (shouldHint) {
         decision.messages.push(
           createUserMessage({
-            content: [{ type: "text", text: renderDivingHintTextForSubagent() }],
+            content: [{ type: "text", text: renderDivingHintTextForSubagent(elapsedFor(hintState)) }],
             source: {
               kind: "plugin",
               plugin: "ka-whale-workflow",
@@ -356,7 +391,7 @@ export function apply(ctx) {
     if (shouldHintDiving(state)) {
       decision.messages.push(
         createUserMessage({
-          content: [{ type: "text", text: renderDivingHintText() }],
+          content: [{ type: "text", text: renderDivingHintText(elapsedFor(state)) }],
           source: {
             kind: "plugin",
             plugin: "ka-whale-workflow",

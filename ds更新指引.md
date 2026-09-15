@@ -144,7 +144,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`
   - 子代理控制三件：`list_agents` / `send_message` / `interrupt_agent`
 - **主代理看不到记忆写三件**（`memory_save` / `memory_update` / `memory_forget`）——这是设计（写记忆交给记忆管家）；**也看不到** `bash`、`get_goal` / `create_goal` / `update_goal`、官方 `subagent` / `subagent_fork`、`plan_mode`、`workflow`、`ralph`（刻意不挂，不是故障）。
-- **注入**：用户每发一条消息会看到 `[ka-whale-workflow idle]` 阶段注入（上下文注入，不是系统提示段）；上下文占用 ≥50% 时会出现 `[ka-context-policy compression-hint]` 提醒（之后每再涨 5 个点复现一次；第 3 次或停留过久会升级为 `[ka-context-policy compression-hint · ACTION REQUIRED]`）；idle 阶段连续调用观察类工具（`grep`/`glob`/`read`/`pwsh`）满 5 次会注入 `[ka-whale-workflow memory_hint]`；一轮内工具调用总数到 32（之后每 +16）会注入 `[ka-whale-workflow diving-hint]`。
+- **注入**：用户每发一条消息会看到 `[ka-whale-workflow idle]` 阶段注入（上下文注入，不是系统提示段）；上下文占用 ≥50% 时会出现 `[ka-context-policy compression-hint]` 提醒（之后每再涨 5 个点复现一次；第 3 次或停留过久会升级为 `[ka-context-policy compression-hint · ACTION REQUIRED]`）；idle 阶段连续调用观察类工具（`grep`/`glob`/`read`/`pwsh`）满 5 次会注入 `[ka-whale-workflow memory_hint]`；一旦一轮内工具调用总数到 32（之后每 +16）就会注入 `[ka-whale-workflow diving-hint]`，这条提示**同时报出本轮已经耗了多久**（从本轮那条用户消息算起，如 `This round has been running for 23 minutes.`）。
 - **记忆只有两类**：`context`（内容记忆）与 `paths`（路径记忆），没有第三种；`memory_save` / `memory_update` 只接受这两者之一。
 - **数据落盘**：记忆在 `<home>\storages\ka-whale-memory\{context,paths}\`（全局）与 `<项目>\.dsh\storages\ka-whale-memory\{context,paths}\`（项目），一个记忆一个 JSON；安排在 `<项目>\.dsh\storages\arrangements\<sessionId>.json`。
 - **没有** Kaz 面板、没有开关行、没有提示音、没有 round-display 轮次显示。

@@ -2,6 +2,7 @@
 //
 // 目的：主代理在一个回合里埋头调用工具太久（一轮内总数跨过 32，之后每再满 16），
 // 就该停下来问自己：是不是卡住了、是不是拖太久了、要不要向用户汇报。
+// 正文另报**本轮已经耗了多久**，起点由下面的 noteDivingEvent 记下（`roundStartedAt`）。
 // 提示文本由 ka-whale-workflow 在 agent/pre-step 里注入（`[ka-whale-workflow diving-hint]`）。
 //
 // 与 memory-hint.js 的分工：那条数的是"**连续**调用观察工具集"（侦察后要不要存记忆），
@@ -28,14 +29,19 @@ export function divingMilestonesReached(calls) {
   return out;
 }
 
-/** 本轮开始：用户消息重置计数与已触发节点。 */
+/** 本轮开始：用户消息重置计数、已触发节点与起点时刻。 */
 function isRoundStart(event) {
   return event?.type === "user/message" && event?.data?.source?.kind === "user";
 }
 
 /**
  * 把一个会话事件计入本轮的工具调用总数。
- * @param {object} state - 会话状态（就地修改 roundToolCalls / divingMilestone）。
+ *
+ * 顺带记下**本轮起点**（`state.roundStartedAt`，Unix 毫秒）：提示正文要报"这一轮已经耗了多久"，
+ * 而这个时间点只有这条用户消息知道（事件自带 `time`，见 dsh-session 的 SessionEvent），
+ * 所以在这里顺手存下，不去别处再找一遍。
+ *
+ * @param {object} state - 会话状态（就地修改 roundToolCalls / divingMilestone / roundStartedAt）。
  * @param {object} event - 一个会话事件。
  * @returns {void}
  */
@@ -44,6 +50,7 @@ export function noteDivingEvent(state, event) {
   if (isRoundStart(event)) {
     state.roundToolCalls = 0;
     state.divingMilestone = 0;
+    state.roundStartedAt = Number.isFinite(event.time) ? event.time : 0;
     return;
   }
   if (event.type === "tool/call") state.roundToolCalls += 1;
@@ -75,7 +82,7 @@ export function shouldHintDiving(state) {
  * 子代理专用状态上的合并入口：把事件计入、再判断是否该提示。
  *
  * 子代理的会话状态自己保管（不经过工作流的会话表），所以这里提供"一步到位"的辅助，
- * 让调用方只需要一个 `{ roundToolCalls, divingMilestone }` 形状的对象。
+ * 让调用方只需要一个 `{ roundToolCalls, divingMilestone, roundStartedAt }` 形状的对象。
  *
  * @param {object} state - 子代理的刹车状态（就地修改）。
  * @param {object} event - 一个会话事件。
@@ -84,4 +91,49 @@ export function shouldHintDiving(state) {
 export function divingHintStep(state, event) {
   noteDivingEvent(state, event);
   return shouldHintDiving(state);
+}
+
+/**
+ * 事件流里**最近一条**用户消息的时刻（Unix 毫秒）。找不到返回 0。
+ *
+ * 专供子代理建状态时用：子代理的计数是"首次看到就只推游标、不回放历史"（否则它一上来
+ * 就把整段历史跨过门槛），于是 `noteDivingEvent` 永远见不到那条起点的用户消息，
+ * 耗时就只剩"未知"这一种结果。起点属于**事实**、不属于计数，所以单独读一次：
+ * 倒着扫到第一条 `user/message` 就停，代价是一次短扫描、一次成型。
+ *
+ * @param {readonly object[]} events - 会话事件（正序）。
+ * @returns {number} Unix 毫秒，找不到时为 0。
+ */
+export function lastRoundStartAt(events) {
+  if (!Array.isArray(events)) return 0;
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (isRoundStart(event)) return Number.isFinite(event.time) ? event.time : 0;
+  }
+  return 0;
+}
+
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+
+/** 毫秒数到最接近的整单位（末尾为 0 时收成单数，如 "1 hour" 而不是 "1 hours"）。 */
+function unit(value, word) {
+  return `${value} ${word}${value === 1 ? "" : "s"}`;
+}
+
+/**
+ * 把耗时说成人话（提示正文的那一条陈述句用）。
+ *
+ * 精度刻意**粗**：这条提示要回答的是"我是不是拖太久了"，不是"我拖了多久零几秒"——
+ * 报成"23 minutes"就够了，报成"23 minutes 41 seconds"既占地方又给人一个假精确的锚。
+ * 所以不足一分钟只说秒，一小时以内只说分钟，超过一小时只说小时。
+ *
+ * @param {number} ms - 已过去的毫秒数。
+ * @returns {string} 英文时长，如 "less than a minute" / "23 minutes" / "1 hour"。
+ */
+export function formatElapsedDuration(ms) {
+  const safe = Number.isFinite(ms) && ms > 0 ? ms : 0;
+  if (safe < MINUTE_MS) return "less than a minute";
+  if (safe < HOUR_MS) return unit(Math.round(safe / MINUTE_MS), "minute");
+  return unit(Math.round(safe / HOUR_MS), "hour");
 }
