@@ -13,9 +13,17 @@ export const STAGE_BODIES = Object.freeze({
     "Self-check stage. While we are here, whale_report is the only tool that works — anything else fails. Its `reflection` argument is required here: write the self-check into it, at most 1024 bytes. These findings are not a deliverable: they are not reported to the user, and they do not go into anyone's closing message. Answer them for ourselves, briefly and honestly — Have we kept to the system prompt and to what the injected context tells us? Have we loaded the skills this situation actually needs? Have we arranged subagents where that would work better? Once back in idle, should we fold noise away with context_compress or delete? What have we got wrong? Where do we actually stand? What do we do next? Then report the stage those answers point to.",
 });
 
-/** 可跳转关系（§5.1 表格的"可跳转"列）。self-check 由程序在第 4n 轮自动进入，返回时两个方向都要留。 */
+/**
+ * 可跳转关系（§5.1 表格的"可跳转"列）。
+ *
+ * **self-check 不在任何阶段的"可跳转"里**（所有者 2026-09-14 定案）：它是**程序自动进入**的
+ * 阶段——第 4n 轮由 index.js 直接 setStage，不走 whale_report。所以：
+ *   * 模型**不能**用 whale_report 主动进 self-check（`idle` 的可跳转只有 arrange_agent）；
+ *   * 但**必须能出来**（whale_report 从 self-check 回 idle / arrange_agent），否则就锁死了。
+ * 把 self-check 写进某个阶段的跳转表等于把这条自动流程交回给模型，与设计相反。
+ */
 export const LEGAL_TRANSITIONS = Object.freeze({
-  idle: Object.freeze(["arrange_agent", "self-check"]),
+  idle: Object.freeze(["arrange_agent"]),
   arrange_agent: Object.freeze(["idle"]),
   "self-check": Object.freeze(["idle", "arrange_agent"]),
 });

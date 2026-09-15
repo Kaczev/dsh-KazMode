@@ -28,8 +28,8 @@ import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTo
 import { noteMemoryHintEvent, shouldHintMemory } from "../../kaz-shared/lib/memory-hint.js";
 import { divingHintStep, noteDivingEvent, shouldHintDiving } from "../../kaz-shared/lib/diving-hint.js";
 
-/** 只挂给主代理的四件（子代理必须看不到）。 */
-const MAIN_ONLY_TOOLS = ["write_arrangement", "get_arrangement", "ka_sub_whale", "whale_report"];
+/** 只挂给主代理的四件（子代理必须看不到）。导出是为了让"谁拿到工作流工具"这件事可被引用与核对。 */
+export const MAIN_ONLY_TOOLS = ["write_arrangement", "get_arrangement", "ka_sub_whale", "whale_report"];
 
 /** 子代理的刹车状态：按 session 分开（子代理的会话不进工作流的会话表）。 */
 const subagentHintStates = new WeakMap();
