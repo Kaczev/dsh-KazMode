@@ -56,11 +56,9 @@ function createStore(persistStage = null) {
         divingMilestone: 0,
         // 是否已经看过这个会话的事件流（首次只看游标、不回放历史，见 refresh）。
         scannedOnce: false,
-        // self-check 的轮次计数：**计数跨重启存活**（见 stage-store 的 __rounds）。
-        // `roundMarkSeq` 是"最后数过的那条用户消息的 seq"，落盘；`null` = 这个会话从没有过标记。
+        // self-check 的轮次计数：**跨重启存活**（见 stage-store 的 __rounds）。
+        // 由 `agent/inbox/claimed` 监听器 +1 —— 那个时刻在 assemble 之前，所以当轮就能生效。
         rounds: 0,
-        lastRoundSeq: 0,
-        roundMarkSeq: null,
         selfCheckEntered: false,
       };
       sessions.set(sessionId, state);
@@ -119,6 +117,42 @@ export function apply(ctx) {
   // kaz-fork：预设自带的 fork provider，让"fork 源"可以是任意存活会话（不只派发者自己）。
   registerKazForkProvider(ctx, ctx.logger);
 
+  /**
+   * self-check 的**轮次计数**与**自动进入**。
+   *
+   * 为什么必须挂在这里，而不是 pre-step、也不是数事件流：
+   * 循环里每步的顺序是 `inbox.claim()` → `systemPrompt.assemble()` → `agent/pre-step` 瀑布
+   * （dsh-agent-loop：889-894）。也就是说 ——
+   *   * 在 pre-step 里改阶段，只影响**下一步**的工具表（本步的工具表已经算完了）；
+   *   * 而 `user/message` 事件要等这一步跑完才 append（同文件：1028），
+   *     所以从事件流里数，永远少数当轮这一条 —— 表现为"第 4 轮不触发、第 5 轮才触发"。
+   * `agent/inbox/claimed` 在 claim() 里同步发出（同文件：107），**在 assemble 之前**，
+   * 且负载带 agent（fused dispatcher），所以这里是"当轮消息已知、工具表还没生成"的唯一时刻。
+   */
+  ctx.on("agent/inbox/claimed", async (payload) => {
+    const agent = payload?.agent;
+    const message = payload?.message;
+    if (agent === undefined || agent === null || isSubagentAgent(agent)) return;
+    // 只数**真人**消息：插件自己注入的阶段文本/提示走 inbox，但它们的 source.kind 是 "plugin"。
+    if (message?.source?.kind !== "user") return;
+    const session = agent.session;
+    const sessionId = session?.id;
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
+    const state = store.stateFor(sessionId);
+    store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
+    state.rounds = (Number.isFinite(state.rounds) ? state.rounds : 0) + 1;
+    // 落盘：跨重启存活。存"数到第几条"，不是计数本身。
+    await writeRoundMark(state.cwd, sessionId, state.rounds);
+    if (state.stage === "idle" && !state.selfCheckEntered && shouldEnterSelfCheck(state.rounds)) {
+      state.selfCheckEntered = true;
+      store.setStage(sessionId, "self-check");
+      await writeStage(state.cwd, sessionId, "self-check");
+      ctx.logger?.debug?.(`[ka-whale-workflow] self-check entered at round ${state.rounds}`);
+    }
+    // 广播"本回合对外的阶段"：kaz-shared 按它装配工具面，两条路径用同一次判断。
+    noteEffectiveStage(sessionId, state.stage);
+  });
+
   /** 回填新的完成通知，返回本对话的状态（session 不可用时返回 null）。 */
   const refresh = async (session) => {
     const sessionId = session?.id;
@@ -133,11 +167,10 @@ export function apply(ctx) {
       // 重启后从项目里的阶段文件恢复（只认已知阶段名）。
       const persisted = await readStage(state.cwd, sessionId);
       if (persisted !== undefined && STAGES.includes(persisted)) state.stage = persisted;
-      // 轮次标记也恢复：**计数必须跨重启存活**，否则重启后开头几条消息被吞掉不计，
+      // 轮次计数也恢复：**必须跨重启存活**，否则重启后开头几条消息被吞掉不计，
       // 表现为"永远到不了第 4 轮"（开发期重启很勤，实测就是这样）。
-      // `null` 表示这个会话从没有过标记（首次见到）——那时不数历史，只记下起点。
       const marks = await readRoundMarks(state.cwd);
-      state.roundMarkSeq = typeof marks[sessionId]?.lastRoundSeq === "number" ? marks[sessionId].lastRoundSeq : null;
+      if (typeof marks[sessionId]?.count === "number") state.rounds = marks[sessionId].count;
       state.loaded = true;
     }
 
@@ -149,61 +182,23 @@ export function apply(ctx) {
         // 实测踩过：重启后第一次 pre-step 立刻弹提示。
         state.scannedOnce = true;
         state.scannedSeq = lastSeq;
-        // 没有标记的会话（第一次跑这套逻辑）从这里起算：记下当前最后一条用户消息，之后只数新的。
-        if (state.roundMarkSeq === null) {
-          let latestUserSeq = 0;
-          for (const event of events) {
-            if (event?.type === "user/message" && event?.data?.source?.kind === "user") latestUserSeq = event.seq;
-          }
-          if (latestUserSeq > 0) {
-            state.roundMarkSeq = latestUserSeq;
-            await writeRoundMark(state.cwd, sessionId, latestUserSeq);
-          }
-        }
         return state;
       }
-      // **必须正序**（旧→新）处理：计数器依赖事件先后——倒序会让"用户消息清零"最后执行，
-      // 把刚数好的计数抹掉（同样实测踩过）。结算子代理补丁与顺序无关，正序同样正确。
-      // `self-check` 自动进入之后、模型报出新阶段之前的这几步：只数轮次，不重放整段历史。
-      const fromSeq = state.scannedOnce ? state.scannedSeq : state.roundMarkSeq ?? 0;
-      let counted = 0;
+      // 提示计数与子代理结算：**必须正序**（旧→新）——计数器依赖事件先后。
+      // 轮次计数不在这里：它由 agent/inbox/claimed 监听器做（那个时刻在 assemble 之前，
+      // 见下面的监听器注释）。事件流里数会晚一轮，因为当前这条消息要等这一步跑完才 append。
       for (const event of events) {
-        if (!(event.seq > fromSeq)) continue;
-        // 提示计数：守卫按"已扫到哪"，但它只在真正扫过时推进（见下），所以这里用两个不同起点。
-        if (event.seq > state.scannedSeq) {
-          noteMemoryHintEvent(state, event);
-          noteDivingEvent(state, event);
-        }
-        // 轮次计数（self-check 的相位）：只数**真人**的用户消息。
-        // 子代理完成通知是 source.kind === "subagent-settled"，自然不计数——这正是设计要的语义。
-        if (event?.type === "user/message" && event?.data?.source?.kind === "user") {
-          state.rounds += 1;
-          state.lastRoundSeq = event.seq;
-          state.roundMarkSeq = event.seq;
-          state.selfCheckEntered = false;
-          counted += 1;
-        }
+        if (!(event.seq > state.scannedSeq)) continue;
+        noteMemoryHintEvent(state, event);
+        noteDivingEvent(state, event);
         const patch = settlePatchFromNotice(event);
         if (patch === null || patch.childId.length === 0) continue;
         const index = state.entries.findIndex((entry) => entry.id === patch.childId);
         if (index < 0) continue;
         state.entries = await patchEntryAt(state.cwd, sessionId, index, { status: patch.status, summary: patch.summary });
       }
-      if (counted > 0) await writeRoundMark(state.cwd, sessionId, state.roundMarkSeq);
       state.scannedSeq = lastSeq;
     }
-
-    // self-check 自动进入：第 4n 轮、且此刻还在 idle（说明这一轮还没进过）。
-    // 放在 refresh 里而不是 pre-step 钩子里，是为了让"进入"与"注入"用同一份状态，顺序不依赖钩子调用时机。
-    if (state.stage === "idle" && !state.selfCheckEntered && shouldEnterSelfCheck(state.rounds)) {
-      state.selfCheckEntered = true;
-      store.setStage(sessionId, "self-check");
-      await writeStage(state.cwd, sessionId, "self-check");
-    }
-    // 把**本回合对外的阶段**广播给 kaz-shared：工具面按它装配。
-    // 这样自动进入的**那一步**工具面就已经是 self-check 的（只剩 whale_report），
-    // 不再需要多花一个回合手动调 whale_report 才进去。
-    noteEffectiveStage(sessionId, state.stage);
     return state;
   };
 

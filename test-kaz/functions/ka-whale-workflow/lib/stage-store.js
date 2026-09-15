@@ -105,8 +105,8 @@ export async function readRoundMarks(cwd) {
     if (marks === null || typeof marks !== "object" || Array.isArray(marks)) return {};
     const out = {};
     for (const [key, value] of Object.entries(marks)) {
-      const seq = value?.lastRoundSeq;
-      if (typeof seq === "number" && Number.isFinite(seq)) out[key] = { lastRoundSeq: seq };
+      const count = value?.count;
+      if (typeof count === "number" && Number.isFinite(count)) out[key] = { count };
     }
     return out;
   } catch {
@@ -114,21 +114,21 @@ export async function readRoundMarks(cwd) {
   }
 }
 
-/** 写入某个对话的轮次标记（读—改—写）。缺失时不动文件，返回 false。 */
-export async function writeRoundMark(cwd, sessionId, lastRoundSeq) {
+/**
+ * 写入某个对话的**轮次计数**（读—改—写）。缺失时不动文件，返回 false。
+ *
+ * 存的是"第几条真人用户消息"，不是"最后数过的 seq"：
+ * 计数由 `agent/inbox/claimed` 在**当轮、assemble 之前** +1，所以不需要靠事件流重建。
+ * 旧数据里的 `lastRoundSeq` 读不到了没关系——那种会话会从当前这一条重新起算（顶多错一轮）。
+ */
+export async function writeRoundMark(cwd, sessionId, count) {
   if (typeof cwd !== "string" || cwd.length === 0) return false;
   if (typeof sessionId !== "string" || sessionId.length === 0) return false;
-  if (typeof lastRoundSeq !== "number" || !Number.isFinite(lastRoundSeq)) return false;
+  if (typeof count !== "number" || !Number.isFinite(count)) return false;
   const file = stageFile(cwd);
-  let parsed;
-  try {
-    parsed = JSON.parse(await readFile(file, "utf8"));
-  } catch {
-    parsed = undefined;
-  }
-  const all = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  const all = await readRaw(cwd);
   const marks = all.__rounds !== null && typeof all.__rounds === "object" && !Array.isArray(all.__rounds) ? all.__rounds : {};
-  marks[sessionId] = { lastRoundSeq };
+  marks[sessionId] = { count };
   all.__rounds = marks;
   await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;

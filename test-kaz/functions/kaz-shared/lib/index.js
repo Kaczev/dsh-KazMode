@@ -99,6 +99,38 @@ export function apply(ctx) {
 
   ctx.on("agent/created", (payload) => applyOnce(payload?.agent));
 
+  /**
+   * self-check 的**调用时刻锁**。
+   *
+   * 为什么不能只靠过滤工具表：循环里 `assemble()` 在 `agent/pre-step` **之前**（dsh-agent-loop:889-894），
+   * 所以本步的工具表在本步的阶段决定之前就已经冻结 —— 无论怎么广播阶段，**进入 self-check 的那一步**
+   * 的工具表里仍有别的工具（实测：那时 pwsh 照样跑得起来）。
+   *
+   * `tools.guard` 是**分发前**求值的否决（dsh-tools：ToolGuard = exec => reason | undefined，
+   * 在 `tools/pre-execute` 之后），所以它读到的阶段一定是最新的，与装配时机无关。
+   * 通过 `agent.ctx` 注册 → 只对该 agent 生效；`guard()` 返回解除用的 disposer。
+   */
+  const guardInstalled = new WeakSet();
+  const installSelfCheckGuard = (agent) => {
+    if (agent === undefined || agent === null) return;
+    if (isSubagentAgent(agent)) return;
+    if (guardInstalled.has(agent)) return;
+    const tools = agent?.ctx?.tools;
+    if (tools === undefined || tools === null || typeof tools.guard !== "function") {
+      ctx.logger?.warn?.("[kaz-shared] tools.guard unavailable; self-check lock not enforced");
+      return;
+    }
+    guardInstalled.add(agent);
+    tools.guard((execution) => {
+      const stage = effectiveStages.get(agent.session?.id) ?? readStageSync(agent.session);
+      if (stage !== "self-check") return undefined;
+      const called = execution?.name;
+      if (typeof called === "string" && SELF_CHECK_TOOLS.includes(called)) return undefined;
+      return `self-check: ${SELF_CHECK_ONLY_TOOL} is the only tool that works in this stage`;
+    });
+  };
+  ctx.on("agent/created", (payload) => installSelfCheckGuard(payload?.agent));
+
   ctx.on("system-prompt/assemble", (assembly, context, next) => {
     const agent = context?.agent;
     if (agent === undefined || agent === null || isSubagentAgent(agent)) return next();
