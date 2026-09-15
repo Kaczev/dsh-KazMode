@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
 - **不需要** `npm install`：预设只用那两个 junction 解析运行时；`<home>\profiles\<profile>\node_modules` 里的其它内容不会被改。
-- **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `18`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。
+- **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `19`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。**改技能集时这一处最容易漏**：本文件与安装指引各有一处数字，而这一处是**命令**、不是正文，改的时候容易只看见正文那句——两次都漏在这行。
 - 更新别的 home / 多个 home（去掉 `-DryRun` 即可）：
 
 ```powershell
