@@ -60,6 +60,9 @@ function createStore(persistStage = null) {
         rounds: 0,
         // 是否已经把落盘计数并进来（跨重启恢复只做一次，见 refresh 的加载分支）。
         roundsRestored: false,
+        // 模型本轮是否自己选过阶段（whale_report）。选过则本轮不再自动进入 self-check，
+        // 否则跳出去的 idle 会被下一轮计算按回去 —— 实测整轮出不来。
+        modelChoseStage: false,
         selfCheckEntered: false,
       };
       sessions.set(sessionId, state);
@@ -82,6 +85,14 @@ function createStore(persistStage = null) {
       const state = stateFor(sessionId);
       state.entries = entries;
       state.loaded = true;
+    },
+    /**
+     * 记下"模型本轮自己选过阶段"。
+     * 由 whale_report 调用；下一轮开头在 claim 监听器里清零。
+     * 用途：本轮内不再自动进入 self-check，否则模型跳出的 idle 会被按回去。
+     */
+    markModelStageChoice: (sessionId) => {
+      stateFor(sessionId).modelChoseStage = true;
     },
     loadEntries: async (sessionId) => {
       const state = stateFor(sessionId);
@@ -143,7 +154,12 @@ export function apply(ctx) {
    */
   const entranceFor = (sessionId, rounds) => {
     const state = store.stateFor(sessionId);
-    if (shouldEnterSelfCheck(rounds) && state.stage !== "arrange_agent") {
+    // **模型本轮自己选过阶段，就尊重它**——本轮不再自动进入。
+    // 只在 self-check 里鲸报了 idle 后必须豁免，否则下一轮计算又把它按回 self-check
+    // （实测踩过：整轮只剩 whale_report，出不去）。豁免的是"模型的选择"，不是某个具体阶段名——
+    // 原先只写 `!== "arrange_agent"`，于是跳 idle 不在豁免里。
+    if (state.modelChoseStage === true) return state.stage;
+    if (shouldEnterSelfCheck(rounds)) {
       if (!state.selfCheckEntered) {
         state.selfCheckEntered = true;
         ctx.logger?.debug?.(`[ka-whale-workflow] self-check entered at round ${rounds}`);
@@ -166,6 +182,8 @@ export function apply(ctx) {
     store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
     state.rounds = (Number.isFinite(state.rounds) ? state.rounds : 0) + 1;
     state.selfCheckEntered = false;
+    // 新的一轮开始：**清掉"模型本轮选过阶段"**——那一笔只在本轮内有效。
+    state.modelChoseStage = false;
     // 落盘：跨重启存活，存"数到第几条"。
     await writeRoundMark(state.cwd, sessionId, state.rounds);
     // 决定这一轮的阶段，并**立刻**写进去：注入点、工具面、磁盘从此同一个值。
@@ -202,8 +220,7 @@ export function apply(ctx) {
       // **阶段不从磁盘恢复**（除 arrange_agent 外）。"这一轮该进哪个阶段"由 entranceFor 按轮次算，
       // 而磁盘天然比内存旧一拍——恢复它就会把刚算好的 self-check 拉回 idle。
       // 只有 arrange_agent 是模型轮内跳的、必须跨重启留住，所以只认它。
-      state.stage = (await readStage(state.cwd, sessionId)) === "arrange_agent" ? "arrange_agent" : entranceFor(sessionId, state.rounds);
-      state.loaded = true;
+      state.stage = (await readStage(state.cwd, sessionId)) === "arrange_agent" ? "arrange_agent" : entranceFor(sessionId, state.rounds);      state.loaded = true;
     }
 
     if (lastSeq > state.scannedSeq) {

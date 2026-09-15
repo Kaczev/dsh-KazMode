@@ -368,6 +368,9 @@ export function whaleReportTool({ store }) {
         return fail(`cannot go from ${current} to ${target}; legal from ${current}: ${LEGAL_TRANSITIONS[current].join(", ")}`);
       }
       store.setStage(sessionId, target);
+      // 记一笔"模型本轮自己选过阶段"：本轮内不再自动进入 self-check，
+      // 否则刚从 self-check 跳出的 idle 会被下一轮计算按回去（实测整轮出不来）。
+      store.markModelStageChoice?.(sessionId);
       return ok(`stage: ${target}`);
     },
   });
