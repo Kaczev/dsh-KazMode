@@ -13,6 +13,7 @@ export const inject = ["tools", "subagents", "agents"];
 
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";
+import { noteEffectiveStage } from "../../kaz-shared/lib/index.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
 import { registerKazForkProvider } from "./fork-provider.js";
 import {
@@ -199,6 +200,10 @@ export function apply(ctx) {
       store.setStage(sessionId, "self-check");
       await writeStage(state.cwd, sessionId, "self-check");
     }
+    // 把**本回合对外的阶段**广播给 kaz-shared：工具面按它装配。
+    // 这样自动进入的**那一步**工具面就已经是 self-check 的（只剩 whale_report），
+    // 不再需要多花一个回合手动调 whale_report 才进去。
+    noteEffectiveStage(sessionId, state.stage);
     return state;
   };
 

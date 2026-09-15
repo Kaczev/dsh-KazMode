@@ -35,6 +35,28 @@ import { SELF_CHECK_ONLY_TOOL } from "../../ka-whale-workflow/lib/stages.js";
  */
 const SELF_CHECK_TOOLS = Object.freeze([SELF_CHECK_ONLY_TOOL]);
 
+/**
+ * 本回合生效的阶段（按会话记）。
+ *
+ * 为什么需要它：工具面在**每一步开头**装配，而阶段切换发生在同一步的 `agent/pre-step` 里。
+ * 如果两边各自去读阶段文件，就会出现"注入显示 self-check、工具面还是旧的"这种错位回合——
+ * 实测踩过：自动进入的那一回合拿不到 self-check 的工具面，于是多花一整个回合手动调
+ * whale_report 才真正进去（用户数出来就是"差一轮"）。
+ * 所以改成**在 pre-step 定一次**（ka-whale-workflow 算完后广播），装配工具面时用同一个值。
+ */
+const effectiveStages = new Map();
+
+/**
+ * 由 ka-whale-workflow 在 pre-step 里调用：记下**本回合**对外的阶段。
+ * @param {string} sessionId - 会话 id。
+ * @param {string} stage - 阶段名。
+ */
+export function noteEffectiveStage(sessionId, stage) {
+  if (typeof sessionId !== "string" || sessionId.length === 0) return;
+  if (typeof stage !== "string" || stage.length === 0) return;
+  effectiveStages.set(sessionId, stage);
+}
+
 /** 已经收紧过的 agent（每个 agent 只做一次注册表级收紧）。 */
 const appliedAgents = new WeakSet();
 
@@ -80,8 +102,12 @@ export function apply(ctx) {
   ctx.on("system-prompt/assemble", (assembly, context, next) => {
     const agent = context?.agent;
     if (agent === undefined || agent === null || isSubagentAgent(agent)) return next();
-    // 当前阶段决定这一请求的工具面。读的是阶段文件（同步），读不到按"不在特殊阶段"处理。
-    const stage = readStageSync(agent.session);
+    // 当前阶段决定这一请求的工具面：**优先用 pre-step 定下的"本回合阶段"**，
+    // 读不到才退回阶段文件（首次装配、或 pre-step 还没跑过）。
+    // 两边用同一次判断，才不会出现"注入是新阶段、工具面是旧阶段"的错位回合。
+    const sessionId = agent.session?.id;
+    const remembered = typeof sessionId === "string" ? effectiveStages.get(sessionId) : undefined;
+    const stage = remembered ?? readStageSync(agent.session);
     // 注册表级收紧只在**不在 self-check** 时做：进 self-check 前它是正确的，
     // 而 self-check 里要的是"只剩一件"，那由下面的请求级过滤负责。
     if (stage !== "self-check") applyOnce(agent);
