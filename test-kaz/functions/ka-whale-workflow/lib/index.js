@@ -58,10 +58,15 @@ function createStore(persistStage = null) {
         // self-check 的轮次计数：**跨重启存活**（见 stage-store 的 __rounds）。
         // 由 `agent/inbox/claimed` 监听器 +1 —— 那个时刻在 assemble 之前，所以当轮就能生效。
         rounds: 0,
-        // 是否已经把落盘计数并进来（跨重启恢复只做一次，见 refresh 的加载分支）。
+        // 是否已经把落盘计数并进来（跨重启恢复只做一次，见 store.loadRoundBaseline）。
         roundsRestored: false,
         // 模型本轮是否自己选过阶段（whale_report）。选过则本轮不再自动进入 self-check，
         // 否则跳出去的 idle 会被下一轮计算按回去 —— 实测整轮出不来。
+        //
+        // 由 whale_report 置位，由 pre-step 在**每个新回合的第一步**（`payload.step === 1`，
+        // 就在本回合那次阶段计算之后）清零（见那里的注释）：模型是轮中途才选的，
+        // 所以从选定到下一次阶段计算之间都必须看得见它，
+        // 才挡得住"按轮次重算又把阶段按回去"。
         modelChoseStage: false,
         selfCheckEntered: false,
       };
@@ -88,7 +93,8 @@ function createStore(persistStage = null) {
     },
     /**
      * 记下"模型本轮自己选过阶段"。
-     * 由 whale_report 调用；下一轮开头在 claim 监听器里清零。
+     * 由 whale_report 调用；由 `agent/pre-step` 在**每个新回合的第一步**（`payload.step === 1`，
+     * 就在本回合那次阶段计算之后）清零——**不在 claim 监听器里清**（见那里的注释）。
      * 用途：本轮内不再自动进入 self-check，否则模型跳出的 idle 会被按回去。
      */
     markModelStageChoice: (sessionId) => {
@@ -101,6 +107,30 @@ function createStore(persistStage = null) {
         state.loaded = true;
       }
       return state.entries;
+    },
+    /**
+     * 把**落盘的轮次总数**并进内存计数，**每个会话只做一次**。
+     *
+     * 必须发生在"本会话的第一次 +1 之前"（见 claim 监听器），而不是在 +1 之后补：
+     * 本轮一旦落过盘，盘上的值就是**本轮自己写的**，此时再加一次等于把这一条消息数两遍
+     * ——实测就是这样，文件里记成 1、3、4…，self-check 落在第 3 条真人消息上而不是第 4 条。
+     *
+     * 计数是**单调累加的绝对总数**，所以恢复的语义是"以盘上那份为起点接着数"，
+     * 不是"内存 +1 之后再并一次盘上值"。`state.rounds` 非 0 说明本会话已经在数，那就不动它。
+     * @param {string} sessionId - 会话 id。
+     * @returns {Promise<number>} 本次加载后的计数。
+     */
+    loadRoundBaseline: async (sessionId) => {
+      const state = stateFor(sessionId);
+      if (state.roundsRestored) return state.rounds;
+      // 先立标记：本次读盘期间若有第二次调用，不能重复并入。
+      state.roundsRestored = true;
+      if (!(Number.isFinite(state.rounds) && state.rounds > 0)) {
+        const marks = await readRoundMarks(state.cwd);
+        const persisted = marks[sessionId]?.count;
+        if (typeof persisted === "number" && Number.isFinite(persisted) && persisted > 0) state.rounds = persisted;
+      }
+      return state.rounds;
     },
   };
 }
@@ -180,16 +210,31 @@ export function apply(ctx) {
     if (typeof sessionId !== "string" || sessionId.length === 0) return;
     const state = store.stateFor(sessionId);
     store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
-    state.rounds = (Number.isFinite(state.rounds) ? state.rounds : 0) + 1;
-    state.selfCheckEntered = false;
-    // 新的一轮开始：**清掉"模型本轮选过阶段"**——那一笔只在本轮内有效。
-    state.modelChoseStage = false;
-    // 落盘：跨重启存活，存"数到第几条"。
-    await writeRoundMark(state.cwd, sessionId, state.rounds);
+    // 先并入盘上的总数，**再** +1：顺序反了就是把这一条消息数两遍（见 loadRoundBaseline）。
+    // 落盘本身失败不拦这一轮：本轮照旧决定并广播阶段，只是这一笔计数没写下去。
+    try {
+      await store.loadRoundBaseline(sessionId);
+      state.rounds = (Number.isFinite(state.rounds) ? state.rounds : 0) + 1;
+      state.selfCheckEntered = false;
+      // 落盘：跨重启存活，存"数到第几条"。
+      await writeRoundMark(state.cwd, sessionId, state.rounds);
+    } catch (error) {
+      ctx.logger?.warn?.(
+        `[ka-whale-workflow] round mark persist failed (count ${state.rounds}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     // 决定这一轮的阶段，并**立刻**写进去：注入点、工具面、磁盘从此同一个值。
     const stage = entranceFor(sessionId, state.rounds);
     store.setStage(sessionId, stage);
-    await writeStage(state.cwd, sessionId, stage);
+    // 阶段写盘失败只丢这一笔持久化，不该连"已经决定的阶段"和广播一起丢掉：
+    // 少了广播，kaz-shared 的工具面门禁会拿着上一轮的值，本轮的阶段对工具面就不生效。
+    try {
+      await writeStage(state.cwd, sessionId, stage);
+    } catch (error) {
+      ctx.logger?.warn?.(
+        `[ka-whale-workflow] stage persist failed (stage ${stage}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     noteEffectiveStage(sessionId, stage);
   });
 
@@ -204,23 +249,14 @@ export function apply(ctx) {
     store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
     if (!state.loaded) {
       state.entries = await readArrangement(state.cwd, sessionId);
-      // 轮次计数恢复：**以盘上那份为准，不设条件**。
-      // 原先写成"只在盘上值更大时才采用"是错的标准：进程刚重启时内存是 0，
-      // 而 claim 监听器已把当轮算成 1，于是 1 > 3 不成立、恢复被跳过 ——
-      // 表现为**重启后第一条真人消息被吞掉**（实测：重启后数了 3 条，盘上还是 3，第 8 轮没进）。
-      // 正确的语义是"总轮数 = 盘上已计的 + 内存里本轮已计的"。
-      const marks = await readRoundMarks(state.cwd);
-      const persistedRounds = marks[sessionId]?.count;
-      // **只在加载时加一次**：之后每步 refresh 都再加一次就会越滚越大（state.loaded 已 true，
-      // 但显式记一个标记，读代码的人不必依赖那个间接条件）。
-      if (!state.roundsRestored && typeof persistedRounds === "number" && persistedRounds > 0) {
-        state.rounds = persistedRounds + (Number.isFinite(state.rounds) ? state.rounds : 0);
-        state.roundsRestored = true;
-      }
+      // 轮次计数**不在这里恢复**：它由 claim 监听器在"本会话第一次 +1 之前"并入一次
+      // （见 store.loadRoundBaseline）。放在这里恢复是把加载推迟到 +1 之后——那时盘上
+      // 已经是本轮自己写的值，再加一次就把同一条消息数了两遍（实测：self-check 落在第 3 条）。
+      state.loaded = true;
       // **阶段不从磁盘恢复**（除 arrange_agent 外）。"这一轮该进哪个阶段"由 entranceFor 按轮次算，
       // 而磁盘天然比内存旧一拍——恢复它就会把刚算好的 self-check 拉回 idle。
       // 只有 arrange_agent 是模型轮内跳的、必须跨重启留住，所以只认它。
-      state.stage = (await readStage(state.cwd, sessionId)) === "arrange_agent" ? "arrange_agent" : entranceFor(sessionId, state.rounds);      state.loaded = true;
+      state.stage = (await readStage(state.cwd, sessionId)) === "arrange_agent" ? "arrange_agent" : entranceFor(sessionId, state.rounds);
     }
 
     if (lastSeq > state.scannedSeq) {
@@ -311,9 +347,9 @@ export function apply(ctx) {
 
     const state = await refresh(agent.session);
     if (state === null) return decision;
-    // 本回合的会话 id **必须在这里取**：下面"重算阶段 + 落盘 + 记账"三处（第 322/325/327 行）
-    // 用的是这个处理函数自己的作用域，而 `sessionId` 只声明在 claim 监听器和 refresh 内部，
-    // 两者都不在这里可见（曾经在这三处直接引用它 → 每一步都 `sessionId is not defined`，整轮失败）。
+    // 本回合的会话 id **必须在这里取**：下面"重算阶段 + 落盘 + 记账"那几处用的是这个处理函数
+    // 自己的作用域，而 `sessionId` 只声明在 claim 监听器和 refresh 内部，两者都不在这里可见
+    // （曾经在那几处直接引用它 → 每一步都 `sessionId is not defined`，整轮失败）。
     // refresh 返回非 null 已经保证它是非空字符串（refresh 开头就是这么判的），所以这里无需再判。
     const sessionId = agent.session?.id;
     // 刹车提示：本轮工具调用总数跨过 32，之后每再满 16 各提示一次（见 kaz-shared/lib/diving-hint.js）。
@@ -363,10 +399,35 @@ export function apply(ctx) {
       if (state.stage !== stage) {
         state.stage = stage;
         store.setStage(sessionId, stage);
-        await writeStage(state.cwd, sessionId, stage);
+        // 与 claim 监听器里那笔阶段写**同等对待**：写盘失败只丢这一笔持久化。
+        // 这笔写是被 pre-step 直接 await 的，抛出去就**整个 step 失败**；而阶段本身已经定
+        // 下来、也记在内存里，广播照样发得出去——没理由让磁盘上的一次 IO 把这一步拦掉。
+        try {
+          await writeStage(state.cwd, sessionId, stage);
+        } catch (error) {
+          ctx.logger?.warn?.(
+            `[ka-whale-workflow] stage persist failed (stage ${stage}): ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
       noteEffectiveStage(sessionId, state.stage);
     }
+    // **"模型本轮自己选过阶段"的清零**：判据是"这是新回合的第一步"（`payload.step === 1`），
+    // **不是** `userTurn`；位置在上面那次阶段计算**之后**，所以那次计算还看得见模型的选择。
+    //
+    // 为什么不能只挂在 userTurn 里：userTurn 要求 `payload.step === 1` **且**这一步的消息里
+    // 有 `source.kind === "user"`。起手不是真人消息的回合（插件提示、子代理完成通知等）同样
+    // 走到 step 1，却进不了 userTurn——那种回合不清零，flag 就一直为真，entranceFor 每次都
+    // 原样返回 state.stage，**轮次规则被永久压住**（再也回不到按 4n 轮进 self-check）。
+    //
+    // 为什么不能挪去 claim 监听器：模型是在**本轮中途**（whale_report，pre-step 之后）才选的，
+    // 而下一轮的 claim 与 pre-step 都会再算一次阶段——claim 里提前清零就等于那次重算看不见
+    // 模型的选择，它会按轮次把阶段按回 idle/self-check，模型刚跳出去的一轮立刻被按回去
+    // （实测：第 4 轮里 whale_report 跳 arrange_agent，第 5 轮的注入又变回 idle）。
+    // 放在这里，豁免正好覆盖"从模型选定到下一次阶段计算"这一段；而每个回合的第一步必然经过
+    // 这个处理函数（子代理在前面就返回；decision 不是 enter 时这一步压根不跑），
+    // 所以"每个新回合都会清零"是有保证的。
+    if (payload?.step === 1) state.modelChoseStage = false;
     const stageChanged = state.stage !== state.lastInjectedStage;
     if (!userTurn && !stageChanged) return decision;
     state.lastInjectedStage = state.stage;

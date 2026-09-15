@@ -4,17 +4,17 @@
 // 结构：{ "<对话id>": "<阶段>", … }——一个对话一个键，不拆成多个 json。
 // 写回走"读—改—临时文件—改名"，避免写一半留下坏文件。
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-/** 阶段文件路径：项目目录下的 .dsh/storages/workflow_stages.json。 */
-export function stageFile(cwd) {
+/** 阶段文件路径：项目目录下的 .dsh/storages/workflow_stages.json。**只在本文件里用**，不对外导出。 */
+function stageFile(cwd) {
   return join(String(cwd ?? ""), ".dsh", "storages", "workflow_stages.json");
 }
 
-/** 读取整张阶段表（文件缺失/损坏时按空表处理）。 */
-export async function readStages(cwd) {
+/** 读取整张阶段表（文件缺失/损坏时按空表处理）。**只在本文件里用**（writeStage 走 readRaw），不对外导出。 */
+async function readStages(cwd) {
   try {
     const parsed = JSON.parse(await readFile(stageFile(cwd), "utf8"));
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
@@ -136,6 +136,37 @@ async function renameWithRetry(from, to) {
 }
 
 /**
+ * 原子替换那一步之外的另一半：**失败时不许把临时文件留在目录里**。
+ *
+ * 实测证据（本次修复的起因）：项目 storages 目录里躺着
+ * `workflow_stages.json.25332.1789449198249.tmp`——`.pid.毫秒.tmp` 这个形状正是
+ * "临时名还只由 pid+毫秒拼成"那一版留下的（现在加了进程内递增序号，见 tmpPathFor），
+ * 而它的内容 `__rounds.count = 1` 与正式文件当时的计数不一致：一次"临时文件写完了、
+ * 改名没落下去"的写死在了半路，改名失败的那个写，把临时文件永远留在了那里。
+ *
+ * 现在 rename 撞上瞬时占用会重试（见 renameWithRetry），但重试**耗尽**时错误照样抛给调用方，
+ * 抛之前必须把临时文件删掉：
+ *   * 目标文件没被改过（改名没发生），所以"删临时文件"不会丢任何已落盘的数据；
+ *   * 临时文件名本次写专用（pid+毫秒+序号），删它碰不到别的写；
+ *   * 留着它没有任何用——这个文件**永远不会被读**（读的都是正式文件），只会越攒越多，
+ *     而且它是一份**和正式文件矛盾的旧内容**，下次有人排查时会像这次一样被它误导。
+ * 删掉之后，一次失败的写留下的状态是"目标文件原样 + 调用方收到异常"。**唯一的例外是删除本身
+ * 失败**：下面的 `rm` 带 force 且吞掉错误、也不记日志，那时临时文件会留在目录里——正是上面那种
+ * 残留，而且是**静默**留下的（下次只能靠翻目录发现，不会出现在日志里）。这里刻意不把它升级成
+ * 错误：删不掉一个临时文件，没道理让调用方收到的是"删除失败"而不是原来那个写失败。
+ */
+async function writeJsonAtomically(file, text) {
+  const tmp = tmpPathFor(file);
+  try {
+    await writeFile(tmp, text, "utf8");
+    await renameWithRetry(tmp, file);
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+/**
  * 写入某个对话的阶段（读—改—写）。cwd/sessionId 缺失时不动文件，返回 false。
  *
  * 注意：**必须保留本对话之外的键**。这个文件里还住着 `__rounds`（轮次标记），而
@@ -151,9 +182,7 @@ export async function writeStage(cwd, sessionId, stage) {
     const all = await readRaw(cwd);
     all[sessionId] = String(stage);
     await mkdir(dirname(file), { recursive: true });
-    const tmp = tmpPathFor(file);
-    await writeFile(tmp, `${JSON.stringify(all, null, 2)}\n`, "utf8");
-    await renameWithRetry(tmp, file);
+    await writeJsonAtomically(file, `${JSON.stringify(all, null, 2)}\n`);
     return true;
   });
 }
@@ -169,14 +198,17 @@ async function readRaw(cwd) {
 }
 
 /**
- * 轮次账本的**落盘**部分：`{ "<对话id>": { lastRoundSeq } }`。
+ * 轮次账本的**落盘**部分：`{ "<对话id>": { count } }`——字段名就是 `count`，
+ * 与 writeRoundMark 写进去的那个键同名（读的就是 `value?.count`，见下面那行）。
  *
  * 为什么必须落盘：self-check 的相位是"每 4 轮一次"，而计数器原先只活在内存里——
  * 进程一重启就归零，于是**开头几条消息被吞掉不计**。开发期重启很勤，表现为"永远到不了第 4 轮"。
- * 落盘后跨重启存活：重启后从"上次数到的那条用户消息"之后接着数，不重数、也不丢。
+ * 落盘后跨重启存活：重启后接着数，不重数、也不丢。
  *
- * 存的是**最后数过的那条用户消息的 seq**，不是计数本身——计数可以由事件流重建，
- * 而"数到哪了"必须在事件流之外记着，否则重启会把同一批消息再数一遍或漏数。
+ * 存的是**"第几条真人用户消息"这个计数本身**，不是"最后数过的那条消息的 seq"：
+ * 计数由 `agent/inbox/claimed` 在**当轮、assemble 之前** +1（见 writeRoundMark 的说明），
+ * 所以它不需要靠事件流重建——重启后由 index.js 用盘上的 count **替换**内存计数即可
+ * （`state.rounds = persisted`，见 loadRoundBaseline），不是把两者相加。
  */
 export async function readRoundMarks(cwd) {
   try {
@@ -213,9 +245,7 @@ export async function writeRoundMark(cwd, sessionId, count) {
     marks[sessionId] = { count };
     all.__rounds = marks;
     await mkdir(dirname(file), { recursive: true });
-    const tmp = tmpPathFor(file);
-    await writeFile(tmp, `${JSON.stringify(all, null, 2)}\n`, "utf8");
-    await renameWithRetry(tmp, file);
+    await writeJsonAtomically(file, `${JSON.stringify(all, null, 2)}\n`);
     return true;
   });
 }

@@ -58,10 +58,16 @@ function personaKey(persona) {
   return Array.isArray(persona) ? persona[0] : typeof persona === "string" ? persona : "";
 }
 
-/** persona 的角色名（纯字符串 = 模型只写了角色）。 */
+/**
+ * persona 的角色名（纯字符串 = 模型只写了角色）。
+ *
+ * 它就是 personaKey 再收一道"必须是字符串"，不是另一份实现：匹配键只跟字符串比
+ * （`=== wanted`），而角色名会当 label / 人格渲染的入参一路传下去，非字符串会漏到下游。
+ * 写成调用 personaKey 是为了让这一点只写一遍——两份并排的 Array.isArray 链迟早会各自漂移。
+ */
 function roleOf(persona) {
-  if (Array.isArray(persona)) return typeof persona[0] === "string" ? persona[0] : "";
-  return typeof persona === "string" ? persona : "";
+  const key = personaKey(persona);
+  return typeof key === "string" ? key : "";
 }
 
 /** persona 的性格/行为描述（纯字符串或数组缺第二项 = 空串）。 */
@@ -364,7 +370,11 @@ export function whaleReportTool({ store, noteStage }) {
         const problem = reflectionProblem(args?.reflection);
         if (problem !== null) return fail(problem);
       }
-      if (target !== current && !LEGAL_TRANSITIONS[current].includes(target)) {
+      // **同阶段也算非法**：`target === current` 不是"推进"，以前它从这里溜过去，于是
+      // 在 self-check 里报 self-check（或 idle 里报 idle）会回一句 `success: stage: …`——
+      // 一次什么都没变的调用被报成成功，还顺手广播/记了一笔"模型选过阶段"。
+      // 判据只有一张表（LEGAL_TRANSITIONS），同阶段不在任何一张表的"可跳转"里，所以不特判。
+      if (!LEGAL_TRANSITIONS[current].includes(target)) {
         return fail(`cannot go from ${current} to ${target}; legal from ${current}: ${LEGAL_TRANSITIONS[current].join(", ")}`);
       }
       store.setStage(sessionId, target);
