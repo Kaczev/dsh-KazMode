@@ -23,7 +23,7 @@ import {
   renderStageText,
   shouldEnterSelfCheck,
 } from "./stages.js";
-import { readStage, writeStage } from "./stage-store.js";
+import { readRoundMarks, readStage, writeRoundMark, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
 import { noteMemoryHintEvent, shouldHintMemory } from "../../kaz-shared/lib/memory-hint.js";
 import { divingHintStep, noteDivingEvent, shouldHintDiving } from "../../kaz-shared/lib/diving-hint.js";
@@ -55,10 +55,11 @@ function createStore(persistStage = null) {
         divingMilestone: 0,
         // 是否已经看过这个会话的事件流（首次只看游标、不回放历史，见 refresh）。
         scannedOnce: false,
-        // self-check 的轮次计数：**从本次部署起算**——首次看到会话只推游标、不回放历史，
-        // 所以历史用户消息天然不计入，第一条新用户消息才是第 1 轮。
+        // self-check 的轮次计数：**计数跨重启存活**（见 stage-store 的 __rounds）。
+        // `roundMarkSeq` 是"最后数过的那条用户消息的 seq"，落盘；`null` = 这个会话从没有过标记。
         rounds: 0,
         lastRoundSeq: 0,
+        roundMarkSeq: null,
         selfCheckEntered: false,
       };
       sessions.set(sessionId, state);
@@ -131,6 +132,11 @@ export function apply(ctx) {
       // 重启后从项目里的阶段文件恢复（只认已知阶段名）。
       const persisted = await readStage(state.cwd, sessionId);
       if (persisted !== undefined && STAGES.includes(persisted)) state.stage = persisted;
+      // 轮次标记也恢复：**计数必须跨重启存活**，否则重启后开头几条消息被吞掉不计，
+      // 表现为"永远到不了第 4 轮"（开发期重启很勤，实测就是这样）。
+      // `null` 表示这个会话从没有过标记（首次见到）——那时不数历史，只记下起点。
+      const marks = await readRoundMarks(state.cwd);
+      state.roundMarkSeq = typeof marks[sessionId]?.lastRoundSeq === "number" ? marks[sessionId].lastRoundSeq : null;
       state.loaded = true;
     }
 
@@ -142,21 +148,39 @@ export function apply(ctx) {
         // 实测踩过：重启后第一次 pre-step 立刻弹提示。
         state.scannedOnce = true;
         state.scannedSeq = lastSeq;
+        // 没有标记的会话（第一次跑这套逻辑）从这里起算：记下当前最后一条用户消息，之后只数新的。
+        if (state.roundMarkSeq === null) {
+          let latestUserSeq = 0;
+          for (const event of events) {
+            if (event?.type === "user/message" && event?.data?.source?.kind === "user") latestUserSeq = event.seq;
+          }
+          if (latestUserSeq > 0) {
+            state.roundMarkSeq = latestUserSeq;
+            await writeRoundMark(state.cwd, sessionId, latestUserSeq);
+          }
+        }
         return state;
       }
       // **必须正序**（旧→新）处理：计数器依赖事件先后——倒序会让"用户消息清零"最后执行，
       // 把刚数好的计数抹掉（同样实测踩过）。结算子代理补丁与顺序无关，正序同样正确。
+      // `self-check` 自动进入之后、模型报出新阶段之前的这几步：只数轮次，不重放整段历史。
+      const fromSeq = state.scannedOnce ? state.scannedSeq : state.roundMarkSeq ?? 0;
+      let counted = 0;
       for (const event of events) {
-        if (!(event.seq > state.scannedSeq)) continue;
-        // 提示计数：同一次扫描、同一个"已扫到哪"的守卫，所以每个事件只算一次，天然幂等。
-        noteMemoryHintEvent(state, event);
-        noteDivingEvent(state, event);
+        if (!(event.seq > fromSeq)) continue;
+        // 提示计数：守卫按"已扫到哪"，但它只在真正扫过时推进（见下），所以这里用两个不同起点。
+        if (event.seq > state.scannedSeq) {
+          noteMemoryHintEvent(state, event);
+          noteDivingEvent(state, event);
+        }
         // 轮次计数（self-check 的相位）：只数**真人**的用户消息。
         // 子代理完成通知是 source.kind === "subagent-settled"，自然不计数——这正是设计要的语义。
         if (event?.type === "user/message" && event?.data?.source?.kind === "user") {
           state.rounds += 1;
           state.lastRoundSeq = event.seq;
+          state.roundMarkSeq = event.seq;
           state.selfCheckEntered = false;
+          counted += 1;
         }
         const patch = settlePatchFromNotice(event);
         if (patch === null || patch.childId.length === 0) continue;
@@ -164,6 +188,7 @@ export function apply(ctx) {
         if (index < 0) continue;
         state.entries = await patchEntryAt(state.cwd, sessionId, index, { status: patch.status, summary: patch.summary });
       }
+      if (counted > 0) await writeRoundMark(state.cwd, sessionId, state.roundMarkSeq);
       state.scannedSeq = lastSeq;
     }
 
