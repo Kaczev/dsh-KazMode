@@ -17,7 +17,6 @@ import { noteEffectiveStage } from "../../kaz-shared/lib/index.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
 import { registerKazForkProvider } from "./fork-provider.js";
 import {
-  STAGES,
   renderDivingHintText,
   renderDivingHintTextForSubagent,
   renderMemoryHintText,
@@ -129,6 +128,29 @@ export function apply(ctx) {
    * `agent/inbox/claimed` 在 claim() 里同步发出（同文件：107），**在 assemble 之前**，
    * 且负载带 agent（fused dispatcher），所以这里是"当轮消息已知、工具表还没生成"的唯一时刻。
    */
+  /**
+   * 第 n 个真人回合该进哪个阶段。**唯一**决定入口的地方。
+   *
+   * 为什么要有一个函数：判断原先散在两处（claim 监听器 + refresh 里的持久化恢复），
+   * 两边对"该不该进 self-check"各有一套理解，又被 refresh 用磁盘旧值盖回去 ——
+   * 表现为"第 4 轮注入显示 idle、self-check 迟一步才出现"（实测踩了好几轮）。
+   * 现在：注入点、工具面、落盘都从这一个判断取值。
+   *
+   * 规则：4n 轮进 self-check；其余回合是 idle。
+   * arrange_agent 是模型在**轮内**自己跳的（whale_report），不在这里决定，也不被这里覆盖。
+   */
+  const entranceFor = (sessionId, rounds) => {
+    const state = store.stateFor(sessionId);
+    if (shouldEnterSelfCheck(rounds) && state.stage !== "arrange_agent") {
+      if (!state.selfCheckEntered) {
+        state.selfCheckEntered = true;
+        ctx.logger?.debug?.(`[ka-whale-workflow] self-check entered at round ${rounds}`);
+      }
+      return "self-check";
+    }
+    return "idle";
+  };
+
   ctx.on("agent/inbox/claimed", async (payload) => {
     const agent = payload?.agent;
     const message = payload?.message;
@@ -141,16 +163,14 @@ export function apply(ctx) {
     const state = store.stateFor(sessionId);
     store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
     state.rounds = (Number.isFinite(state.rounds) ? state.rounds : 0) + 1;
-    // 落盘：跨重启存活。存"数到第几条"，不是计数本身。
+    state.selfCheckEntered = false;
+    // 落盘：跨重启存活，存"数到第几条"。
     await writeRoundMark(state.cwd, sessionId, state.rounds);
-    if (state.stage === "idle" && !state.selfCheckEntered && shouldEnterSelfCheck(state.rounds)) {
-      state.selfCheckEntered = true;
-      store.setStage(sessionId, "self-check");
-      await writeStage(state.cwd, sessionId, "self-check");
-      ctx.logger?.debug?.(`[ka-whale-workflow] self-check entered at round ${state.rounds}`);
-    }
-    // 广播"本回合对外的阶段"：kaz-shared 按它装配工具面，两条路径用同一次判断。
-    noteEffectiveStage(sessionId, state.stage);
+    // 决定这一轮的阶段，并**立刻**写进去：注入点、工具面、磁盘从此同一个值。
+    const stage = entranceFor(sessionId, state.rounds);
+    store.setStage(sessionId, stage);
+    await writeStage(state.cwd, sessionId, stage);
+    noteEffectiveStage(sessionId, stage);
   });
 
   /** 回填新的完成通知，返回本对话的状态（session 不可用时返回 null）。 */
@@ -164,18 +184,15 @@ export function apply(ctx) {
     store.noteCwd(sessionId, typeof session?.header?.cwd === "string" ? session.header.cwd : "");
     if (!state.loaded) {
       state.entries = await readArrangement(state.cwd, sessionId);
-      // 重启后从项目里的阶段文件恢复（只认已知阶段名）。
-      const persisted = await readStage(state.cwd, sessionId);
-      // **只从磁盘恢复 idle**：self-check / arrange_agent 由程序决定，不能被磁盘上的旧值拉回去。
-      // 实测踩过：claim 里刚进 self-check，refresh 又按磁盘把人拉回 idle ——
-      // 表现为"第 4 轮注入显示 idle，self-check 迟一步才出现"。
-      if (persisted === "idle") state.stage = "idle";
-      // 轮次计数恢复：**只增不减**。
-      // count 在 claim 监听器里已经 +1 了，而磁盘上那份还是旧的——若无条件覆盖，
-      // 同一轮里就被盖回旧值（实测踩过：注入显示 idle、而计数其实已经到点了）。
+      // 轮次计数恢复：**只增不减**。count 在 claim 监听器里已经 +1，磁盘那份还是旧的；
+      // 无条件覆盖会把同一轮刚数好的值盖回去（实测踩过）。
       const marks = await readRoundMarks(state.cwd);
       const persistedRounds = marks[sessionId]?.count;
       if (typeof persistedRounds === "number" && persistedRounds > state.rounds) state.rounds = persistedRounds;
+      // **阶段不从磁盘恢复**（除 arrange_agent 外）。"这一轮该进哪个阶段"由 entranceFor 按轮次算，
+      // 而磁盘天然比内存旧一拍——恢复它就会把刚算好的 self-check 拉回 idle。
+      // 只有 arrange_agent 是模型轮内跳的、必须跨重启留住，所以只认它。
+      state.stage = (await readStage(state.cwd, sessionId)) === "arrange_agent" ? "arrange_agent" : entranceFor(sessionId, state.rounds);
       state.loaded = true;
     }
 
@@ -300,6 +317,15 @@ export function apply(ctx) {
 
     const messages = Array.isArray(payload?.messages) ? payload.messages : [];
     const userTurn = payload?.step === 1 && messages.some((message) => message?.source?.kind === "user");
+    // 阶段在**注入点**重新算一次，而不是读一个可能被别处覆盖的 state.stage。
+    // 这是唯一稳定的一步：claim 刚数完当轮消息（assemble 之前），而这里正是"这一刻注入什么"。
+    const stage = entranceFor(sessionId, state.rounds);
+    if (state.stage !== stage) {
+      state.stage = stage;
+      store.setStage(sessionId, stage);
+      await writeStage(state.cwd, sessionId, stage);
+      noteEffectiveStage(sessionId, stage);
+    }
     const stageChanged = state.stage !== state.lastInjectedStage;
     if (!userTurn && !stageChanged) return decision;
     state.lastInjectedStage = state.stage;
