@@ -166,11 +166,16 @@ export function apply(ctx) {
       state.entries = await readArrangement(state.cwd, sessionId);
       // 重启后从项目里的阶段文件恢复（只认已知阶段名）。
       const persisted = await readStage(state.cwd, sessionId);
-      if (persisted !== undefined && STAGES.includes(persisted)) state.stage = persisted;
-      // 轮次计数也恢复：**必须跨重启存活**，否则重启后开头几条消息被吞掉不计，
-      // 表现为"永远到不了第 4 轮"（开发期重启很勤，实测就是这样）。
+      // **只从磁盘恢复 idle**：self-check / arrange_agent 由程序决定，不能被磁盘上的旧值拉回去。
+      // 实测踩过：claim 里刚进 self-check，refresh 又按磁盘把人拉回 idle ——
+      // 表现为"第 4 轮注入显示 idle，self-check 迟一步才出现"。
+      if (persisted === "idle") state.stage = "idle";
+      // 轮次计数恢复：**只增不减**。
+      // count 在 claim 监听器里已经 +1 了，而磁盘上那份还是旧的——若无条件覆盖，
+      // 同一轮里就被盖回旧值（实测踩过：注入显示 idle、而计数其实已经到点了）。
       const marks = await readRoundMarks(state.cwd);
-      if (typeof marks[sessionId]?.count === "number") state.rounds = marks[sessionId].count;
+      const persistedRounds = marks[sessionId]?.count;
+      if (typeof persistedRounds === "number" && persistedRounds > state.rounds) state.rounds = persistedRounds;
       state.loaded = true;
     }
 
