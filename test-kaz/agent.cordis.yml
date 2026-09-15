@@ -9,6 +9,8 @@
 #   * 未挂（替代品或按决定不挂）：官方 subagent / subagent_fork、tool-bash、
 #     command-goal + tool-goal、plan-mode（/plan）、tool-workflow + workflow-worker-thread、tool-ralph。
 #   * kaz-shared 的工具面门：主代理黑名单（注册表收紧 + assemble 期过滤工具表）。
+#     同一处还按**当前阶段**过滤：self-check 阶段工具面只剩 whale_report（见 stages.js 的
+#     SELF_CHECK_ONLY_TOOL），那一阶段调别的工具一律报错；阶段从阶段文件同步读。
 #   * compaction 组带 isolate（compaction + toolResultPruner realm）：内置压缩 provider、
 #     上下文四件与官方压缩配套同组，组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
 

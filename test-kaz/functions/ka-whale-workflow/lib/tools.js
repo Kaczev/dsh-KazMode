@@ -11,7 +11,7 @@ import { CONCURRENCY_CAP_REASON, MAIN_BLACKLIST, MAX_CONCURRENT_SUBAGENTS, MEMOR
 import { MEMORY_MAINTAINER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
 import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
 import { KAZ_FORK_PROVIDER, noteForkSource } from "./fork-provider.js";
-import { LEGAL_TRANSITIONS, STAGES } from "./stages.js";
+import { LEGAL_TRANSITIONS, REFLECTION_ADVERTISED_BYTES, STAGES, reflectionProblem } from "./stages.js";
 
 const RESULT_SCHEMA = {
   type: "object",
@@ -344,9 +344,13 @@ export function whaleReportTool({ store }) {
   return defineTool({
     name: "whale_report",
     description:
-      "Advance the main agent's workflow stage. Targets: idle, arrange_agent.",
+      "Advance the main agent's workflow stage. Targets: idle, arrange_agent, self-check. While the current stage is self-check this is the only tool that works, and `reflection` is then required: a short written self-check, at most 1024 bytes. Reflection findings are internal — they are not reported to the user.",
     parameters: {
       stage: { type: "string", required: true, enum: [...STAGES], description: "Target stage." },
+      reflection: {
+        type: "string",
+        description: `Required while the current stage is self-check, ignored otherwise: a brief reflection, at most ${REFLECTION_ADVERTISED_BYTES} bytes. It is not a deliverable — do not paste it into your reply to the user.`,
+      },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
     async execute(args, exec) {
@@ -355,6 +359,11 @@ export function whaleReportTool({ store }) {
       const target = String(args?.stage ?? "").trim();
       if (!STAGES.includes(target)) return fail(`unknown stage "${target}"; known stages: ${STAGES.join(", ")}`);
       const current = store.getStage(sessionId);
+      // 反思门禁：只在**离开 self-check 时**强制。其它阶段传了也不看（避免把普通阶段推进变成写小作文）。
+      if (current === "self-check") {
+        const problem = reflectionProblem(args?.reflection);
+        if (problem !== null) return fail(problem);
+      }
       if (target !== current && !LEGAL_TRANSITIONS[current].includes(target)) {
         return fail(`cannot go from ${current} to ${target}; legal from ${current}: ${LEGAL_TRANSITIONS[current].join(", ")}`);
       }
