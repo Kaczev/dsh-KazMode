@@ -21,6 +21,7 @@ import {
   renderDivingHintTextForSubagent,
   renderMemoryHintText,
   renderStageText,
+  shouldEnterSelfCheck,
 } from "./stages.js";
 import { readStage, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
@@ -54,6 +55,11 @@ function createStore(persistStage = null) {
         divingMilestone: 0,
         // 是否已经看过这个会话的事件流（首次只看游标、不回放历史，见 refresh）。
         scannedOnce: false,
+        // self-check 的轮次计数：**从本次部署起算**——首次看到会话只推游标、不回放历史，
+        // 所以历史用户消息天然不计入，第一条新用户消息才是第 1 轮。
+        rounds: 0,
+        lastRoundSeq: 0,
+        selfCheckEntered: false,
       };
       sessions.set(sessionId, state);
     }
@@ -145,6 +151,13 @@ export function apply(ctx) {
         // 提示计数：同一次扫描、同一个"已扫到哪"的守卫，所以每个事件只算一次，天然幂等。
         noteMemoryHintEvent(state, event);
         noteDivingEvent(state, event);
+        // 轮次计数（self-check 的相位）：只数**真人**的用户消息。
+        // 子代理完成通知是 source.kind === "subagent-settled"，自然不计数——这正是设计要的语义。
+        if (event?.type === "user/message" && event?.data?.source?.kind === "user") {
+          state.rounds += 1;
+          state.lastRoundSeq = event.seq;
+          state.selfCheckEntered = false;
+        }
         const patch = settlePatchFromNotice(event);
         if (patch === null || patch.childId.length === 0) continue;
         const index = state.entries.findIndex((entry) => entry.id === patch.childId);
@@ -152,6 +165,14 @@ export function apply(ctx) {
         state.entries = await patchEntryAt(state.cwd, sessionId, index, { status: patch.status, summary: patch.summary });
       }
       state.scannedSeq = lastSeq;
+    }
+
+    // self-check 自动进入：第 4n 轮、且此刻还在 idle（说明这一轮还没进过）。
+    // 放在 refresh 里而不是 pre-step 钩子里，是为了让"进入"与"注入"用同一份状态，顺序不依赖钩子调用时机。
+    if (state.stage === "idle" && !state.selfCheckEntered && shouldEnterSelfCheck(state.rounds)) {
+      state.selfCheckEntered = true;
+      store.setStage(sessionId, "self-check");
+      await writeStage(state.cwd, sessionId, "self-check");
     }
     return state;
   };

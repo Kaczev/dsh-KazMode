@@ -5,6 +5,7 @@
 // 写回走"读—改—临时文件—改名"，避免写一半留下坏文件。
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 /** 阶段文件路径：项目目录下的 .dsh/storages/workflow_stages.json。 */
@@ -24,6 +25,27 @@ export async function readStages(cwd) {
     return out;
   } catch {
     return {};
+  }
+}
+
+/**
+ * 同步读某个对话的阶段。**只给"每次 system-prompt 装配都要问一次"的调用方用**
+ * （工具面门禁），所以刻意用同步 IO：异步在这里会让装配多等一个微任务，
+ * 而且要处理并发。读不到就返回 ""（按"不在任何特殊阶段"处理）。
+ * @param {object} session - 会话（需要有 header.cwd 与 id）。
+ * @returns {string} 阶段名，读不到时返回空串。
+ */
+export function readStageSync(session) {
+  const cwd = session?.header?.cwd;
+  const sessionId = session?.id;
+  if (typeof cwd !== "string" || cwd.length === 0) return "";
+  if (typeof sessionId !== "string" || sessionId.length === 0) return "";
+  try {
+    const parsed = JSON.parse(readFileSync(stageFile(cwd), "utf8"));
+    const value = parsed?.[sessionId];
+    return typeof value === "string" ? value : "";
+  } catch {
+    return "";
   }
 }
 
