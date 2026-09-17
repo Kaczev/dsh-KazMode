@@ -10,6 +10,7 @@
 //   memory_forget  按名字删除一条记忆
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { clampInt } from "../../kaz-shared/lib/clamp-int.js";
 import { scoreBM25 } from "./bm25.js";
 import { KINDS } from "./paths.js";
 import { findByName, listMemories, readMemoryFile, removeMemory, writeMemory } from "./store.js";
@@ -89,12 +90,6 @@ function locationsOf(value) {
 
 function kindsOf(value) {
   return value === "context" || value === "paths" ? [value] : [...KINDS];
-}
-
-function clampInt(value, fallback, min, max) {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
 /** 把一处记忆说成人话：`global context "名称"`。 */

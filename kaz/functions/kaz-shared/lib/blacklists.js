@@ -4,7 +4,9 @@
 //   * 黑名单里的工具不出现在该角色模型的工具面上；调用即报错。
 //   * 只有黑名单，没有白名单——黑名单之外剩下什么就是什么。
 //   * 保留集（RESERVED_TOOLS）是"任何黑名单都挡不掉"的名单：上下文四件 + 记忆只读三件 +
-//     list_agents + get_arrangement。所以管家虽然黑名单里有东西，仍看得见 get_arrangement。
+//     list_agents + get_arrangement。保留集只在黑名单这一道口子上说话——它决定黑名单**挡不掉**
+//     什么，不决定该角色**收得到**什么。谁看得见某件工具由别处决定：get_arrangement 只挂给主代理
+//     （ka-whale-workflow/lib/index.js 的 MAIN_ONLY_TOOLS），所以任何子代理都收不到它。
 
 /** 主代理黑名单：写记忆三件不可见（写操作全部交给 memoryMaintainer）。设计稿 §2.1。 */
 export const MAIN_BLACKLIST = Object.freeze(["memory_save", "memory_update", "memory_forget"]);
@@ -43,7 +45,9 @@ export const RESERVED_TOOLS = Object.freeze([
   "get_arrangement",
 ]);
 
-/** 保留集（记忆管理员）：上下文四件 + 记忆六件全部（§2.2）——管家要读写记忆。 */
+/**
+ * 保留集（记忆管理子代理）：上下文四件 + 记忆六件全部（§2.2）——管家要读写记忆，也要能看安排。
+ */
 export const MEMORY_MAINTAINER_RESERVED = Object.freeze([
   ...RESERVED_TOOLS,
   "memory_save",
@@ -63,6 +67,32 @@ export const SUBAGENT_DEFAULT_BLACKLIST = Object.freeze([
   "memory_forget",
   "ask_user_question"
 ]);
+
+/**
+ * AI slop 清理子代理黑名单：在普通子代理默认之上，再挡掉"替主代理做决定"的两件——
+ * 直接问用户、以及把某个东西交给用户看。它的活是只读地查、必要时改、然后回报；
+ * 要不要问用户、要不要出面交付，是主代理的事。写类工具（read / glob / grep / pwsh / write / edit）
+ * 有意**不挡**：它必须能读整份文件、能跑项目的检查与探针、能在证明得动的前提下动手改。
+ */
+export const SLOP_CLEANER_BLACKLIST = Object.freeze([
+  ...SUBAGENT_DEFAULT_BLACKLIST,
+  "present",
+]);
+
+/**
+ * 保留集（AI slop 清理子代理）：与普通子代理的 RESERVED_TOOLS 同一套名字。
+ *
+ * 保留集的含义是"任何黑名单都不许把这几件从该角色手里挡掉"，**不是**"该角色一定收得到这几件"：
+ * 它只在黑名单这一道口子上说了算——该角色的黑名单减去保留集，再减去平台不认识的工具名
+ * （`tools.js` 派发时现算）——而角色最终拿到什么，还取决于别处挂不挂它。保留集本身既不发工具，
+ * 也不收工具。**本文件就是让这个区别显形的地方**——`get_arrangement` 不在 SUBAGENT_DEFAULT_BLACKLIST
+ * 里（SLOP_CLEANER_BLACKLIST 是它加一件 `present`），所以它在清理者的生效黑名单里从来不出现：
+ * 这个集合里有没有它，黑名单算出来完全一样。
+ *
+ * 清理者与普通子代理共用这一套，不另列一份。`tools.js` 里清理者有**自己的分支**（`isCleaner`
+ * 那一路），用的就是这个常量。
+ */
+export const SLOP_CLEANER_RESERVED = Object.freeze([...RESERVED_TOOLS]);
 
 /**
  * 同时在**运行**的直系子代理上限。**限制的是"此刻有几个在跑"，不是"计划里写几条"**——

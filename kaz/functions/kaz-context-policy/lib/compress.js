@@ -20,6 +20,7 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { createSystemMessage } from "@deepseek-ai/dsh-llm";
 import { toolPairingBalancedAfter, toolPairingBalancedBefore } from "@deepseek-ai/dsh-compaction";
+import { clampInt } from "../../kaz-shared/lib/clamp-int.js";
 import { readPressure } from "./reminder.js";
 
 /** 默认保留带：从尾部往前保留的节点个数。 */
@@ -92,15 +93,13 @@ export function deleteSpan(session, shadowedSeqs) {
   return event.seq;
 }
 
-function clampInt(value, fallback, min, max) {  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
-}
-
 /**
- * 读 surface 节点的事实：事件类型（seq → type），以及"压缩摘要"节点的 seq 集合。
- * 摘要节点（compaction checkpoint：`source.plugin === "compact"`）带着**新的**大序号插在
- * 被压区间的位置上——它破坏"节点表里序号递增"的假设。它**可以**被再次压掉（口径见下）。
+ * 读 surface 节点的事实：每个节点的**事件类型**（seq → type），只对传进来的这批节点查。
+ * 唯一用途是认出 `system/message`（受保护，不能进可折区间）——它在这一点上把摘要节点
+ * （compaction checkpoint）与真正的头部 system 消息当成同一种东西，这是有意的：摘要节点
+ * **可以**被再次压掉，不设保护（口径见 foldBand）。
+ * 摘要节点带着**新的**大序号插在被压区间的位置上，所以它破坏"节点表里序号递增"的假设；
+ * 这里按 seq 取值，不做任何顺序假设。
  * 注意：平台的 Session 没有 `session.events`，必须用 `snapshotEvents()`。
  */
 function nodeFactsOf(session, nodes) {

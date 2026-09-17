@@ -102,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
 
 - **不需要** `npm install`：预设只用那两个 junction 解析运行时；`<home>\profiles\<profile>\node_modules` 里的其它内容不会被改。
-- **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `19`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。**改技能集时这一处最容易漏**：本文件与安装指引各有一处数字，而这一处是**命令**、不是正文，改的时候容易只看见正文那句——两次都漏在这行。
+- **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `16`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。**改技能集时这一处最容易漏**：本文件与安装指引各有一处数字，而这一处是**命令**、不是正文，改的时候容易只看见正文那句——两次都漏在这行。
 - 更新别的 home / 多个 home（去掉 `-DryRun` 即可）：
 
 ```powershell
@@ -138,7 +138,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 - **口吻**：系统提示词里的第二人称已被 `only_we` 统一改写成 "we/our"——**只改提示词正文，不改工具描述与 schema**，所以工具描述里仍可能出现 "you"，这不是没装好。
 - **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
-  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 **19 个**技能（如 `planning-with-files`、`verify-before-claiming-done`、`writing-quality`）；一个都没有 = 预设置的镜像源是**没有自带技能**的旧版（实测：`8.2.2` 时是 12 份，18 份从 `8.2.7` 才开始，`8.3.1` 起 19 份）。**注意主代理与子代理看到的份数不同**：6 份编排类技能（`building-something-new` / `working-from-a-plan` / `repairing-something-broken` / `reviewing-someone-elses-work` / `moving-or-upgrading-a-thing` / `getting-unstuck`）只给主代理看，子代理的目录里少这 6 份是**正确的**，不是没装好。**加/减技能时要同时改这里**——名单在 `functions/kaz-shared/lib/skill-visibility.js`，而本文件与安装指引各有一处数字，改少了会把装好的环境判成坏的。
+  - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 **16 个**技能（如 `planning-with-files`、`cleaning-up-slop`、`kaz-dispatch`）；一个都没有 = 预设置的镜像源是**没有自带技能**的旧版（实测：`8.2.2` 时 12 份、`8.2.7` 起 18 份、`8.3.1` 起 19 份；`8.3.14` 合并到 14 份，`8.7.0` 起 16 份）。**注意主代理与子代理看到的份数不同**：9 份编排类技能（`building-something-new` / `working-from-a-plan` / `repairing-something-broken` / `reviewing-someone-elses-work` / `moving-or-upgrading-a-thing` / `getting-unstuck` / `orienting-in-a-codebase` / `cleaning-up-slop` / `kaz-dispatch`）只给主代理看，子代理的目录里少这 9 份是**正确的**，不是没装好。**加/减技能时要同时改这里**——名单在 `functions/kaz-shared/lib/skill-visibility.js`，而本文件与安装指引各有一处数字，改少了会把装好的环境判成坏的。
   - 记忆只读三件：`memory_search` / `memory_detail` / `memory_list`
   - 上下文四件：`context_search` / `context_read` / `context_hotspots` / `context_compress`（`context_hotspots` 先告诉你哪个节点最占地方，再决定压哪段）
   - 工作流四件：`write_arrangement` / `get_arrangement` / `ka_sub_whale` / `whale_report`

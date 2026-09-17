@@ -29,10 +29,13 @@ export function firstLine(text, max = SUMMARY_MAX_CHARS) {
 }
 
 /** 安排里允许的保留 persona 值。 */
-export const RESERVED_PERSONAS = Object.freeze(["main", "memoryMaintainer"]);
+export const RESERVED_PERSONAS = Object.freeze(["main", "memoryMaintainer", "slopCleaner"]);
+
+/** 工具面写死、因而条目上的黑名单无效的保留角色（派发点按角色分支固定发给平台）。 */
+export const PERSONAS_WITH_FIXED_TOOL_FACE = Object.freeze(["memoryMaintainer", "slopCleaner"]);
 
 /**
- * 校验 persona：只允许 "main"、"memoryMaintainer"，或 [role, description]（恰好两个非空字符串）。
+ * 校验 persona：只允许 "main"、"memoryMaintainer"、"slopCleaner"，或 [role, description]（恰好两个非空字符串）。
  * @param {unknown} persona - 主代理写的 persona。
  * @returns {{value: string|string[], error?: undefined}|{value?: undefined, error: string}}
  */
@@ -40,7 +43,7 @@ export function personaValueOf(persona) {
   if (typeof persona === "string") {
     const value = persona.trim();
     if (RESERVED_PERSONAS.includes(value)) return { value };
-    return { error: `persona "${value}" is not allowed — use "main", "memoryMaintainer", or [role, description]` };
+    return { error: `persona "${value}" is not allowed — use "main", "memoryMaintainer", "slopCleaner", or [role, description]` };
   }
   if (Array.isArray(persona)) {
     if (persona.length === 2 && persona.every((part) => typeof part === "string" && part.trim().length > 0)) {
@@ -48,7 +51,7 @@ export function personaValueOf(persona) {
     }
     return { error: 'persona array must be exactly [role, description] — two non-empty strings' };
   }
-  return { error: 'persona must be "main", "memoryMaintainer", or [role, description]' };
+  return { error: 'persona must be "main", "memoryMaintainer", "slopCleaner", or [role, description]' };
 }
 
 /**
@@ -66,6 +69,13 @@ export function normalizeEntry(raw) {
   const blacklist = Array.isArray(raw.blacklist)
     ? raw.blacklist.filter((name) => typeof name === "string" && name.trim().length > 0).map((name) => name.trim())
     : [];
+  // 保留角色的工具面是固定的（写死在派发点的分支里），条目上写的黑名单不会生效。静默忽略等于
+  // 让写的人以为自己收窄了权限——这里直接拒掉并说清原因（2026-09-17 验证者实测：条目黑名单被忽略）。
+  if (blacklist.length > 0 && PERSONAS_WITH_FIXED_TOOL_FACE.includes(typeof personaValue === "string" ? personaValue : "")) {
+    return {
+      error: `persona "${personaValue}" has a fixed tool face: a blacklist on this entry would be ignored, so it is rejected instead. Drop the blacklist field, or use [role, description] if you need to narrow a subagent's tools.`,
+    };
+  }
   const fork = typeof raw.fork === "string" && raw.fork.trim().length > 0 ? raw.fork.trim() : "";
   return {
     entry: {

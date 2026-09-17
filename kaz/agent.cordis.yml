@@ -11,6 +11,8 @@
 #   * kaz-shared 的工具面门：主代理黑名单（注册表收紧 + assemble 期过滤工具表）。
 #     同一处还按**当前阶段**过滤：self-check 阶段工具面只剩 whale_report（见 stages.js 的
 #     SELF_CHECK_ONLY_TOOL），那一阶段调别的工具一律报错；阶段从阶段文件同步读。
+#     注意这一门只管**工具面**；技能可见性不在 kaz-shared 里，它由 skill-visibility 包装
+#     官方 provider 时过滤（见下面技能可见性门禁那一段）。
 #   * compaction 组带 isolate（compaction + toolResultPruner realm）：内置压缩 provider、
 #     上下文四件与官方压缩配套同组，组内才能解析到同一个 ctx.compaction / ctx.tokenMeter。
 
@@ -69,7 +71,7 @@
 # 不能省成相对路径 `./skills`：customSkillDirs 走 path.resolve()，按进程 CWD 解析。
 #
 # ── 技能可见性门禁：子代理看不到主代理专用的技能 ─────────────────────────────
-# 这一行是**本文件里唯一的 skill provider 注册**（`customSkillDirs` 也只在它身上出现一次）：
+# 这一行是**本文件里唯一的 skill provider 注册**，`customSkillDirs` 也只在它身上出现：
 # 官方 skill-filesystem 被 ./functions/skill-visibility 就地包装后注册，两者合成一个 provider。
 # 为什么不能像早先那样"再挂一行官方 provider、让本地那行用同名顶掉它"：providers 是按名字
 # 唯一的表，**同一层同名注册直接抛错**（后果是整份预设挂载失败：a skill provider named

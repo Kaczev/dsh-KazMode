@@ -36,19 +36,17 @@ direction itself is now suspect. When condition 2 is met, the next move is not a
 third layer: it is a look for another direction.
 
 **For the main agent.** This file is registered main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js` - subagents are not meant to see it (the gate fails
-open, so if one does read it: the role blocks below are inputs to `write_arrangement`, not text
-addressed to it, and they describe roles the main agent creates, not roles that exist in this
-session).
+`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
+`write_arrangement`, not text addressed to anyone.
 
 ## Before any role is dispatched: write the failure ledger
 
 Nothing in this file works without it, and skipping it is the usual way this file fails.
 
-Write the ledger into the `task` of **each** entry we dispatch. A dispatched role can read the whole
-arrangement - `get_arrangement` is in every subagent's reserved tool set - so text placed in one
-entry's `persona` description is readable by the other role too. That is why the task field is the
-channel, and why what goes in it is chosen deliberately.
+Write the ledger into the `task` of **each** entry we dispatch. A dispatched role does not see the
+main agent's plan: `get_arrangement` is main-agent-only. What it does have is `list_agents`, so a
+role can see which other agents are running. That is why the task field is the channel, and why what
+goes in it is chosen deliberately.
 
 Record, for every direction that is **dead**:
 
@@ -152,12 +150,5 @@ indistinguishable from work, and costs the same.
 
 ## Dispatching
 
-Dispatching is two hops: go to the `arrange_agent` stage and record one entry per role, come back to
-`idle`, then dispatch each role by name. `write_arrangement` works only in the `arrange_agent` stage;
-`ka_sub_whale` does not check the stage and is dispatched from `idle` by convention. The plan must
-also carry the `memoryMaintainer` entry - the stage text says so every turn, and only that role can
-write memories.
-
-**`write_arrangement` replaces the whole plan.** A role not re-listed this round is gone, and a live
-subagent with that name is no longer addressable through the arrangement. Two entries that share a
-role name are the same entry, and only the first is ever dispatchable - **names must differ**.
+The dispatching mechanics are the same for every work type; they are in `kaz-dispatch`. What follows
+is only what this work type adds.

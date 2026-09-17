@@ -7,10 +7,9 @@ user-invocable: false
 One work type: the target is not ours to design — it is fixed by a source, a version, or a rule. The
 work is doing it completely and being able to show that it is complete.
 
-**For the main agent.** This file is registered as main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js`, so subagents should not see it at all. If one does: the role
-blocks below are inputs to `write_arrangement`, not text addressed to it, and they describe roles
-the main agent creates — not roles that exist in this session.
+**For the main agent.** This file is registered main-agent-only in
+`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
+`write_arrangement`, not text addressed to anyone.
 
 ## Workflow
 
@@ -40,17 +39,8 @@ decides who does what and what counts as done.
    closing message with the verdict** - the arrangement ledger keeps only its first line, truncated
    at 200 characters.
 
-Dispatching is two hops: go to the `arrange_agent` stage and record one entry per role, come back to
-`idle`, then dispatch each role by name. `write_arrangement` works only in the `arrange_agent` stage.
-
-The plan must also carry the `memoryMaintainer` entry - the stage text says so every turn, and only that role can write memories.
-
-```
-whale_report(arrange_agent)
-write_arrangement(entries)   # one entry per role: persona / blacklist / task / fork (fork = continue from a live session's history)
-whale_report(idle)           # entries are recorded in the arrange_agent stage; dispatch happens from idle
-ka_sub_whale(persona)        # the role name is the only handle — one entry per name
-```
+The dispatching mechanics are the same for every work type; they are in `kaz-dispatch`. What follows
+is only what this work type adds.
 
 ## Our work
 
@@ -82,8 +72,7 @@ regardless: send_message, interrupt_agent, ka_sub_whale, write_arrangement, whal
 memory-write tools, and ask_user_question. Write a list of what is *additionally* forbidden — a role
 that must not write is a role you must deny writing.
 
-The role is a two-element array `[role, description]` — exactly two non-empty strings. A `task` is
-required for every entry and is hard-checked: an empty one is rejected.
+A `task` is required for every entry and is hard-checked: an empty one is rejected.
 
 An entry to copy:
 

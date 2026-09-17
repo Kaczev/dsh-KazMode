@@ -31,4 +31,13 @@ export const MAIN_AGENT_ONLY_SKILLS = Object.freeze([
   "reviewing-someone-elses-work",
   "moving-or-upgrading-a-thing",
   "getting-unstuck",
+  // 与“这类活怎么干”相对的那一类：它讲的是主代理怎么判定“成了”、权威在哪一层——
+  // 子代理只负责交回证据，不裁这个问题。
+  "orienting-in-a-codebase",
+  // 同上：这份讲的是主代理什么时候派清理者、派的时候要给哪五项、拿到报告之后怎么复核——
+  // 清理者自己带的是固定 persona 里的作业纪律，读这份只会把它当成写给自己的指令。
+  "cleaning-up-slop",
+  // 同上：这份是**派发机制本身**（两跳、条目形状、保留值、可见性门禁），只有主代理需要；
+  // 漏登记不会报错，只会静默放给每一个子代理。
+  "kaz-dispatch",
 ]);
