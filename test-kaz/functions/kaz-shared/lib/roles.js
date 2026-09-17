@@ -147,9 +147,12 @@ We only speak ENGLISH.`;
  * @returns {string} 完整 persona 文本。
  */
 export function fillSubagentPersona(template, role, body) {
+  // 替换用**函数**而不是字符串：`String.prototype.replace` 会把替换文本里的 `$&`、`$'`、`` $` ``
+  // 当成替换模式解释，于是角色名里出现 `$&`（例如 "We are $& the checker"）会把模板的占位符
+  // 原文塞进 persona。函数形式不做模式解释。（2026-09-17 验证者实测；0d6c8a8 起就存在。）
   const filled = template
-    .replace("{role written by the main agent}", role)
-    .replace("{this role's character and behavior: what it cares about, how it judges, what its reports look like}", body);
+    .replace("{role written by the main agent}", () => role)
+    .replace("{this role's character and behavior: what it cares about, how it judges, what its reports look like}", () => body);
   return body.length > 0 ? filled : filled.replace(/\r?\n\s*\r?\n\s*\r?\n/g, "\n\n");
 }
 

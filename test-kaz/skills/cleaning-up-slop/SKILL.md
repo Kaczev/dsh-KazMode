@@ -89,11 +89,12 @@ with its own evidence, never inside a cleanup diff.
 **The dispatcher's own rules**, which decide whether the dispatch happens at all:
 
 - Write the entry as the reserved value `persona: "slopCleaner"`, exactly, as a bare string. An array
-  form like `["slopCleaner", "…"]` is accepted by the arrangement validator but does not reach the
-  cleaner's persona or its blacklist — it gets a generic subagent under a cleaner's name. If the
-  reserved value is wrong, the dispatch is wrong and nothing else here matters.
-- A blacklist written on a reserved entry is ignored: the cleaner's tool face is fixed. Do not try to
-  widen or narrow it per dispatch.
+  form like `["slopCleaner", "…"]` also reaches the cleaner (the dispatcher keys on the role name, so
+  the array's first element counts), but write the bare string anyway: it is what the validator, this
+  file and the dispatcher all agree on, and a reader cannot tell the two apart later.
+- The cleaner's tool face is fixed by the reserved value, so a `blacklist` written on its entry does
+  nothing — and the validator now rejects such an entry rather than ignoring it silently. Do not try
+  to widen or narrow the tool face per dispatch.
 - The plan must still carry its `memoryMaintainer` entry — `write_arrangement` replaces the whole plan,
   so writing this dispatch drops every entry not restated in the same call.
 - Dispatching does not create a new role each time: the reuse key is the persona name, so a second

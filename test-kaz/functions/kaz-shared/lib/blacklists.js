@@ -80,11 +80,13 @@ export const SLOP_CLEANER_BLACKLIST = Object.freeze([
 /**
  * 保留集（AI slop 清理子代理）：**不含 `get_arrangement`**。
  *
- * 与普通子代理不同，它看不到主代理的安排。为什么单独一套而不是直接引用 RESERVED_TOOLS（2026-09-17
- * 验证者实测）：它事实上没有 `get_arrangement`——派发只把记忆管理员推到管家保留集，清理者走的是
- * 通用分支，而通用分支用的是 `sanitizeBlacklist(names, RESERVED_TOOLS)`、不覆盖平台面。
- * 早先这里写 `= RESERVED_TOOLS`，等于注释宣称它有这件工具而没有；注释与事实相反，正是本轮主题。
- * 这个常量因此表示"清理者**不准**被挡掉的工具"，不是"它一定看得见"。
+ * 为什么单独一套而不是直接引用 RESERVED_TOOLS：清理者事实上看不到主代理的安排。`tools.js` 里
+ * 清理者有**自己的分支**（`isCleaner` 那一路），用的是这个常量；而 `get_arrangement` 是主代理与
+ * 管家的东西，没有传给清理者。早先这里写 `= RESERVED_TOOLS`，等于注释宣称它有这件工具而没有——
+ * 注释与事实相反，正是本轮主题。
+ *
+ * 这个常量的**含义**要说清：它表示"清理者拥有、因而黑名单不许把它挡掉"的工具，不是"它一定看得见"。
+ * 派发时真正生效的黑名单是 SLOP_CLEANER_BLACKLIST 减去保留集，逐字发给平台。
  */
 export const SLOP_CLEANER_RESERVED = Object.freeze(RESERVED_TOOLS.filter((name) => name !== "get_arrangement"));
 
