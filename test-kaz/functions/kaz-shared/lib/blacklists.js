@@ -43,7 +43,9 @@ export const RESERVED_TOOLS = Object.freeze([
   "get_arrangement",
 ]);
 
-/** 保留集（记忆管理员）：上下文四件 + 记忆六件全部（§2.2）——管家要读写记忆。 */
+/**
+ * 保留集（记忆管理子代理）：上下文四件 + 记忆六件全部（§2.2）——管家要读写记忆，也要能看安排。
+ */
 export const MEMORY_MAINTAINER_RESERVED = Object.freeze([
   ...RESERVED_TOOLS,
   "memory_save",
@@ -75,8 +77,16 @@ export const SLOP_CLEANER_BLACKLIST = Object.freeze([
   "present",
 ]);
 
-/** 保留集（AI slop 清理子代理）：与普通子代理同一份——它要能压上下文、查原文、查记忆、看安排。 */
-export const SLOP_CLEANER_RESERVED = RESERVED_TOOLS;
+/**
+ * 保留集（AI slop 清理子代理）：**不含 `get_arrangement`**。
+ *
+ * 与普通子代理不同，它看不到主代理的安排。为什么单独一套而不是直接引用 RESERVED_TOOLS（2026-09-17
+ * 验证者实测）：它事实上没有 `get_arrangement`——派发只把记忆管理员推到管家保留集，清理者走的是
+ * 通用分支，而通用分支用的是 `sanitizeBlacklist(names, RESERVED_TOOLS)`、不覆盖平台面。
+ * 早先这里写 `= RESERVED_TOOLS`，等于注释宣称它有这件工具而没有；注释与事实相反，正是本轮主题。
+ * 这个常量因此表示"清理者**不准**被挡掉的工具"，不是"它一定看得见"。
+ */
+export const SLOP_CLEANER_RESERVED = Object.freeze(RESERVED_TOOLS.filter((name) => name !== "get_arrangement"));
 
 /**
  * 同时在**运行**的直系子代理上限。**限制的是"此刻有几个在跑"，不是"计划里写几条"**——

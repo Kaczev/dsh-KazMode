@@ -222,9 +222,14 @@ export function kaSubWhaleTool({ ctx, store }) {
       const index = entries.findIndex((entry) => personaKey(entry.persona) === wanted);
       if (index < 0) return { ...fail(`no arrangement entry with persona "${wanted}"`), text: "" };
       const entry = entries[index];
-      if (entry.persona === "main") return { ...fail('the "main" entry is for the main agent itself; dispatch only subagent entries'), text: "" };
-      const isKeeper = entry.persona === "memoryMaintainer";
-      const isCleaner = entry.persona === "slopCleaner";
+      if (personaKey(entry.persona) === "main") return { ...fail('the "main" entry is for the main agent itself; dispatch only subagent entries'), text: "" };
+      // 两个保留角色按**匹配键**判定，不是按整个 persona 值：数组形式的 ["slopCleaner", …] 也合法
+      // （arrangement.js 只校验 [role, description] 两个非空字符串），而 personaKey 对数组取的是角色名。
+      // 早先这里比的是 `entry.persona === "memoryMaintainer"`，于是数组形式会带着保留值当复用键、
+      // 却拿到通用 persona 与通用黑名单——名字是管家或清理者，待遇不是（2026-09-17 验证者实测）。
+      const personaName = personaKey(entry.persona);
+      const isKeeper = personaName === "memoryMaintainer";
+      const isCleaner = personaName === "slopCleaner";
       const role = roleOf(entry.persona);
       const personaText = isKeeper
         ? MEMORY_MAINTAINER_PERSONA

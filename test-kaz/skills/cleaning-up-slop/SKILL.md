@@ -1,6 +1,6 @@
 ---
 name: cleaning-up-slop
-description: Use when code carries noise that was generated rather than decided - code kept alive behind a condition that never fires, comments narrating what the code used to be, commented-out code, exports or helpers with no consumer, layers built for one caller - and when the user asks to clean up, de-slop, or condense a codebase. Also use before answering "that is done" about a cleanup. Not for moving or renaming many things (that is moving-or-upgrading-a-thing), not for fixing one broken behaviour (that is repairing-something-broken), and not for reviewing a subagent's report (that is reviewing-someone-elses-work).
+description: Use when code carries noise that was generated rather than decided - code kept alive behind a condition that never fires, comments narrating what the code used to be, commented-out code, exports or helpers with no consumer, layers built for one caller - and when the user asks to clean up, de-slop or condense a codebase. Not for moving many things (moving-or-upgrading-a-thing) or fixing one broken behaviour (repairing-something-broken).
 user-invocable: false
 ---
 
@@ -85,6 +85,23 @@ absolutely, including error types and timing; a change with no proof is reverted
 pre-existing code is removed only after one thought about why it is there; and anything that is a
 real fix — a latent bug, a drifted duplicate, merging two behaviours — belongs in a separate change
 with its own evidence, never inside a cleanup diff.
+
+**The dispatcher's own rules**, which decide whether the dispatch happens at all:
+
+- Write the entry as the reserved value `persona: "slopCleaner"`, exactly, as a bare string. An array
+  form like `["slopCleaner", "…"]` is accepted by the arrangement validator but does not reach the
+  cleaner's persona or its blacklist — it gets a generic subagent under a cleaner's name. If the
+  reserved value is wrong, the dispatch is wrong and nothing else here matters.
+- A blacklist written on a reserved entry is ignored: the cleaner's tool face is fixed. Do not try to
+  widen or narrow it per dispatch.
+- The plan must still carry its `memoryMaintainer` entry — `write_arrangement` replaces the whole plan,
+  so writing this dispatch drops every entry not restated in the same call.
+- Dispatching does not create a new role each time: the reuse key is the persona name, so a second
+  `slopCleaner` dispatch in the same conversation continues the cleaner that is already loaded with
+  the right context. Queue the work rather than expecting fresh eyes.
+- To check the cleaner's work, dispatch a **different** name (a `[role, description]` pair is fine)
+  and never `fork` from the cleaner: forking or re-dispatching `slopCleaner` hands the verification to
+  the agent that produced the findings, which is the one reviewer that cannot be independent.
 
 Template, to adapt rather than paste:
 
