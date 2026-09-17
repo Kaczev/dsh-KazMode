@@ -104,13 +104,28 @@ with its own evidence, never inside a cleanup diff.
   and never `fork` from the cleaner: forking or re-dispatching `slopCleaner` hands the verification to
   the agent that produced the findings, which is the one reviewer that cannot be independent.
 
-Template, to adapt rather than paste:
+Two templates. Adapt them; do not paste one over the other's job.
+
+Audit, the default — the cleaner may not change code:
 
 > Audit `<paths>` for `<classes from the table>` and change nothing. For each finding give
 > `path:line — class — why it costs the reader — the evidence you ran — safe to fix — how you would
 > prove it`. Exclude `<dirty files>`. Where a fix cannot be proven with `<the command>`, say so and
-> leave the code. Report what you removed if you were authorised to remove, what you only found, what
-> you refused to touch, and what you did not verify.
+> leave the code. Report what you only found, what you refused to touch and why, and what you did not
+> verify.
+
+Apply, only when the user has actually asked for the code to change. **The permission has to be a word
+in this task text** — the cleaner will not read it out of the mood of your sentence, and a task text
+that never grants it lands on audit-and-report no matter how it is phrased:
+
+> **You may change code.** Apply `<the class, one class only>` in `<paths>`, and prove each change with
+> `<the check>`, run before and after. If a change cannot be proven with `<the check>`, revert it and
+> report it instead of keeping it. One class per pass; anything else you find is a finding, not a fix.
+> Report what you removed, what you only found, what you refused to touch, and what you did not verify.
+
+Do not spell the permission with a hedge — `clean up what you think is safe` is not a grant, and the
+cleaner is built to read it as the absence of one. If you are not sure the code should change, dispatch
+the audit form first and let the user pick from its findings.
 
 ## After the report
 
