@@ -40,6 +40,24 @@ const RESULT_SCHEMA = {
 const RESULT_RENDER = (_args, value) => [{ type: "text", text: value.ok ? `success: ${value.message}` : `failure: ${value.message}` }];
 
 /**
+ * 占用后缀：`; context usage ~N%`。
+ *
+ * **必须在折完之后才调用**——它的数就是界面（输入框旁那个环）上的数：
+ * 环与这里读的是同一个 `contextPressure` 投影、同一个公式
+ * （`min(100, round((projectedTokens ?? pressureTokens) / contextWindow * 100))`）。
+ * 而压缩的替换事件会把被压区间的影子价在**同一个调用里**折掉
+ * （`compaction/summary` 记价、紧随的 `surface replace` 折成
+ * `estimateMessage(摘要) − shadowedTokenCount`），所以折**前**读到的百分比是压缩前的占用，
+ * 与环正好差这一次压缩——这正是"工具报的百分比和环对不上"的根源。
+ * 拿不到投影就返回空串（与原先一样：没有数就不写这一句）。
+ * @param {{percent: number}|null} pressure - 读完之后的占用。
+ * @returns {string} 可以拼在成功消息尾部的后缀。
+ */
+function usageSuffix(pressure) {
+  return pressure === null ? "" : `; context usage ~${pressure.percent}%`;
+}
+
+/**
  * 取当前 turn / step：替换事件（system/message）需要这两个字段，而工具的 exec 里没有。
  * 从事件流尾部往前找最近一条 `step/start`（其次 `turn/start`）——工具调用必然发生在
  * 一个已经开始的 step 之内，所以这条一定存在。
@@ -275,7 +293,6 @@ export function contextCompressTool(ctx) {
       const nodes = measurement?.nodes;
       if (!Array.isArray(nodes) || nodes.length === 0) return { ok: false, message: "the token meter reported no surface nodes" };
       // 保留带 = 从尾部往前数的 keep_recent 个节点（按节点计数，与窗口大小无关）。
-      const pressure = readPressure(ctx, session);
       const retainIdx = retainBoundaryIdx(nodes, keepRecent);
       const chosen = foldBand(session, nodes, retainIdx, fromSeq, toSeq);
       if (chosen === null) {
@@ -295,7 +312,6 @@ export function contextCompressTool(ctx) {
       const endSeq = nodes[chosen.endIdx].seq;
       const shadowedSeqs = nodes.slice(chosen.startIdx, chosen.endIdx + 1).map((node) => node.seq);
       const spanTokens = nodes.slice(chosen.startIdx, chosen.endIdx + 1).reduce((sum, node) => sum + (Number(node?.tokens) || 0), 0);
-      const usage = pressure === null ? "" : `; context usage ~${pressure.percent}%`;
 
       if (args?.delete === true) {
         let deletedSeq;
@@ -307,7 +323,7 @@ export function contextCompressTool(ctx) {
         }
         return {
           ok: true,
-          message: `deleted seq ${startSeq}-${endSeq} (${shadowedSeqs.length} node(s), ~${spanTokens} tokens) — replaced by an empty placeholder (seq ${deletedSeq}), so it is out of view from here on. The record still holds the original text: use context_search / context_read with those seqs to read it back${usage}`,
+          message: `deleted seq ${startSeq}-${endSeq} (${shadowedSeqs.length} node(s), ~${spanTokens} tokens) — replaced by an empty placeholder (seq ${deletedSeq}), so it is out of view from here on. The record still holds the original text: use context_search / context_read with those seqs to read it back${usageSuffix(readPressure(ctx, session))}`,
         };
       }
 
@@ -322,7 +338,7 @@ export function contextCompressTool(ctx) {
             : message;
         return { ok: false, message: reason };
       }
-      return { ok: true, message: `compressed seq ${startSeq}-${endSeq} (~${spanTokens} tokens)${usage}` };
+      return { ok: true, message: `compressed seq ${startSeq}-${endSeq} (~${spanTokens} tokens)${usageSuffix(readPressure(ctx, session))}` };
     },
   });
 }
