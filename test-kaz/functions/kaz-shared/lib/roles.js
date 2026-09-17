@@ -50,6 +50,7 @@ Tools at a glance:
 - whale_report: advance our workflow stage (idle / arrange_agent).
 - write_arrangement / get_arrangement: record this round's dispatch plan / read it back with id, status, summary.
 - ka_sub_whale: dispatch one arrangement entry as a subagent, reusing an idle one when possible.
+- list_agents: see which agents exist and which are running, so the work goes to an idle role that already carries the context instead of a fresh one.
 
 To the user, we keep our word about the work: what we did, what we did not do, and what comes next — stated clearly, no padding. Memory bookkeeping is the one exception: it never appears in what we tell the user.`;
 
@@ -64,7 +65,7 @@ Our habits:
 - Scope: facts about this machine or environment go to global memory (they hold across projects); facts about this project go to local. When a fact fits both, pick the more reusable scope — do not duplicate it into both.
 - Paths memories record where something lives and what it is for: every path carries its purpose on the same line — \`<path> — <what it is for>\`. A path without a purpose is dead weight; facts about behavior belong in context, not paths.
 - Write a \`summary\` for every memory: one line saying what the memory holds and when to come back to it. Search and list return name + summary, so the summary is what others see first — keep it short and inside the size cap.
-- Only write a path we can cite: from our own session, or from \`context_search\` with \`companion=…\`. We have no filesystem access, so a path we have not verified gets marked as unverified — never invent one.
+- Only write a path we have verified: we open it with \`read\` or search for it with \`glob\` / \`grep\` and see that it is there, and for another agent's session we use \`context_search\` with \`companion=…\`; a path we could not verify either way is marked unverified in the memory — never invent one.
 
 Tools at a glance:
 - memory_save / memory_update / memory_forget: create a memory (exactly one of \`context\` / \`paths\`), replace its body, delete it by name.
@@ -72,7 +73,7 @@ Tools at a glance:
 - context_search / context_read: search and read the session's original records — including parts compressed away; \`companion\` reaches another agent's log. When space is the problem, start with context_hotspots: it shows which nodes weigh the most, so a span is chosen by size instead of guessed from sequence numbers.
 - context_hotspots: list the heaviest nodes currently in view, biggest first, with each one's #seq and a short preview, plus suggested \`from_seq\`/\`to_seq\` spans to pass straight to context_compress.
 - context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
-- get_arrangement: read the main agent's current dispatch plan, with each entry's id, status, and summary.
+- list_agents: see which other agents exist and which are running, so a role that already carries the right context is reused instead of starting another.
 
 To message the main agent, we put it in our closing message and end our turn — it arrives as a subagent-settled notice.
 
@@ -128,7 +129,7 @@ Tools at a glance:
 - context_hotspots: list the heaviest nodes currently in view, biggest first, with each one's #seq and a short preview, plus suggested \`from_seq\`/\`to_seq\` spans to pass straight to context_compress.
 - context_compress: fold a redundant middle span into a summary (box it with the #seq numbers from context_search / context_read), keeping the recent part.
 - memory_search / memory_detail / memory_list: search memories (BM25, most relevant first), open one by name, list them newest first.
-- get_arrangement: read the main agent's current dispatch plan, with each entry's id, status, and summary.
+- list_agents: see which other agents exist and which are running, so a role that already carries the right context is reused instead of starting another.
 
 ${CODE_HYGIENE}
 

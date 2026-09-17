@@ -334,7 +334,8 @@ export function apply(ctx) {
   };
 
   // 主代理：用户发消息的那一轮开头、以及阶段切换后（whale_report）各注入一条；
-  // 工具循环的其它步骤、子代理报告都不注入——避免刷屏。（子代理现状用 get_arrangement 看。）
+  // 工具循环的其它步骤、子代理报告都不注入——避免刷屏。（子代理此刻的状态用 list_agents 看：
+  // 它读的是活体注册表；安排里的 status 只在子代理结算通知到达时才回填。）
   ctx.on("agent/pre-step", async (payload, next) => {
     const decision = await next();
     if (decision === null || typeof decision !== "object" || decision.kind !== "enter") return decision;

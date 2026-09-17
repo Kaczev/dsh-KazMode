@@ -4,7 +4,9 @@
 //   * 黑名单里的工具不出现在该角色模型的工具面上；调用即报错。
 //   * 只有黑名单，没有白名单——黑名单之外剩下什么就是什么。
 //   * 保留集（RESERVED_TOOLS）是"任何黑名单都挡不掉"的名单：上下文四件 + 记忆只读三件 +
-//     list_agents + get_arrangement。所以管家虽然黑名单里有东西，仍看得见 get_arrangement。
+//     list_agents + get_arrangement。保留集只在黑名单这一道口子上说话——它决定黑名单**挡不掉**
+//     什么，不决定该角色**收得到**什么。谁看得见某件工具由别处决定：get_arrangement 只挂给主代理
+//     （ka-whale-workflow/lib/index.js 的 MAIN_ONLY_TOOLS），所以任何子代理都收不到它。
 
 /** 主代理黑名单：写记忆三件不可见（写操作全部交给 memoryMaintainer）。设计稿 §2.1。 */
 export const MAIN_BLACKLIST = Object.freeze(["memory_save", "memory_update", "memory_forget"]);

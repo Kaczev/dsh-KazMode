@@ -43,11 +43,10 @@ third layer: it is a look for another direction.
 
 Nothing in this file works without it, and skipping it is the usual way this file fails.
 
-Write the ledger into the `task` of **each** entry we dispatch. A dispatched role can read the whole
-arrangement - `get_arrangement` is in every subagent's reserved tool set, so a role can see which
-other subagents exist - so text placed in one
-entry's `persona` description is readable by the other role too. That is why the task field is the
-channel, and why what goes in it is chosen deliberately.
+Write the ledger into the `task` of **each** entry we dispatch. A dispatched role does not see the
+main agent's plan: `get_arrangement` is main-agent-only. What it does have is `list_agents`, so a
+role can see which other agents are running. That is why the task field is the channel, and why what
+goes in it is chosen deliberately.
 
 Record, for every direction that is **dead**:
 
