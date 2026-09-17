@@ -163,11 +163,8 @@ export function fillSubagentPersona(template, role, body) {
 
 /**
  * 按 §1.3 格式生成一个子代理的 persona：角色第一句 + 性格行为描述 + 固定末句。
- * 末句**只有一份**：`SUBAGENT_PERSONA_TEMPLATE`，本函数从它渲染。
- *
- * 2026-09-17 收拢前的状态：末句有两份，导出模板（2248 字）与函数内的内联副本（1658 字），
- * 内容不同，而**实际发出去的是内联那份**——它比模板少 `get_arrangement` 一行与"记忆只读、
- * 值得留的在回执里说"两句。收拢到模板 = 把缺的那三处补回去。用户定：模板为唯一来源。
+ * 末句**只有一份**，就是 `SUBAGENT_PERSONA_TEMPLATE`：本函数只从它渲染，
+ * 不另写内联副本——两份末句会各自漂移，而实际发出去的是被改的那一份。
  *
  * @param {string} role - 主代理写的角色（第三人称身份）。
  * @param {string} description - 这个角色的性格、行为描述。

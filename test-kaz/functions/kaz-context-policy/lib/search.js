@@ -3,6 +3,7 @@
 // 文案一律英文；检索按得分排序（原句命中优先、其次检索词加权、同分新的在前），并回报总数。
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { clampInt } from "../../kaz-shared/lib/clamp-int.js";
 import { entriesOfSession, searchEntries } from "./session-log.js";
 
 const renderText = (value) => [{ type: "text", text: value }];
@@ -37,12 +38,6 @@ function renderHits(_args, value) {
     : `${value.total} match(es)`;
   const lines = value.hits.map((hit, index) => `${index + 1}) [${hit.from} #${hit.seq} ${hit.label}] ${hit.snippet}`);
   return renderText([header, ...lines].join("\n\n"));
-}
-
-export function clampInt(value, fallback, min, max) {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
 /** 当前会话的根（主代理会话）：沿 parentSession 上溯到还能取到的最高一层。 */

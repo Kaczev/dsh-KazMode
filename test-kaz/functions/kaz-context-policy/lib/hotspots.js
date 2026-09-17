@@ -20,6 +20,7 @@
 // 而不是只删一个节点）。
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { clampInt } from "../../kaz-shared/lib/clamp-int.js";
 
 /** 默认显示多少个最重的节点。 */
 export const DEFAULT_TOP_N = 8;
@@ -38,12 +39,6 @@ const RESULT_SCHEMA = {
 };
 
 const RESULT_RENDER = (_args, value) => [{ type: "text", text: value.text }];
-
-function clampInt(value, fallback, min, max) {
-  const n = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
-}
 
 /** 一条消息里能当预览用的纯文本（拼接所有 text 块）。 */
 function previewOf(event) {

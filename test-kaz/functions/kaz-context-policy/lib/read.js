@@ -5,7 +5,7 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { entriesOfSession, readEntries } from "./session-log.js";
-import { clampInt, resolveCompanion } from "./search.js";
+import { resolveCompanion } from "./search.js";
 
 export const READ_MAX_CHARS = 20000;
 
