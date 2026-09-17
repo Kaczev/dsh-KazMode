@@ -135,7 +135,7 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -AllHome
 
 - 新对话已选中 **Kaz 模式**（`kaz`）。
 - **persona 首句**：`We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.`；用 "We" 思考（ALWAYS REASON AS 'WE'），模型输出全英文。
-- **口吻**：系统提示词里的第二人称已被 `only_we` 统一改写成 "we/our"——**只改提示词正文，不改工具描述与 schema**，所以工具描述里仍可能出现 "you"，这不是没装好。
+- **口吻**：Kaz 自己的段落（persona、技能正文）本来就是 "we/our" 第一人称；平台段落与工具描述是平台原文（"you" / "your"），预设不改写它们——所以看到 "you" 不是没装好。
 - **主代理工具面**（与官方标准预设对齐；完整清单以 `kaz/agent.cordis.yml` 与 `kaz-shared` 的黑名单为准）：
   - 基础：`pwsh` / `read` / `read_image` / `write` / `edit` / `glob` / `grep` / `todo_write` / `ask_user_question` / `web_search` / `web_fetch` / `present` / `skill` / `job_list` / `job_output` / `job_kill`
   - **技能**：`skill` 工具的目录里除官方技能外，还应看到 Kaz 自带的 **16 个**技能（如 `planning-with-files`、`cleaning-up-slop`、`kaz-dispatch`）；一个都没有 = 预设置的镜像源是**没有自带技能**的旧版（实测：`8.2.2` 时 12 份、`8.2.7` 起 18 份、`8.3.1` 起 19 份；`8.3.14` 合并到 14 份，`8.7.0` 起 16 份）。**注意主代理与子代理看到的份数不同**：9 份编排类技能（`building-something-new` / `working-from-a-plan` / `repairing-something-broken` / `reviewing-someone-elses-work` / `moving-or-upgrading-a-thing` / `getting-unstuck` / `orienting-in-a-codebase` / `cleaning-up-slop` / `kaz-dispatch`）只给主代理看，子代理的目录里少这 9 份是**正确的**，不是没装好。**加/减技能时要同时改这里**——名单在 `functions/kaz-shared/lib/skill-visibility.js`，而本文件与安装指引各有一处数字，改少了会把装好的环境判成坏的。
