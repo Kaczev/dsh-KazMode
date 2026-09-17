@@ -42,9 +42,24 @@ generated it?** The classes, with the symptom we look for:
 | stale claim | a comment, count, or reference the code no longer matches |
 
 **A branch that never fires is the expensive one**: no dead-code tool reports it, because the code is
-still referenced. Where the class can be decided mechanically, decide it mechanically before spending a
-subagent — a grep for consumers, a constant-condition check, a count derived from the tree rather than
-written down.
+still referenced. Where a class can be decided mechanically, decide it mechanically before spending a
+subagent — a constant-condition check, a count derived from the tree rather than written down, a grep
+for consumers — but read the consumer class honestly in this repository:
+
+**"No consumer inside this tree" is rarely the same as "unused".** Every module here is part of a
+preset, so a name it exports sits on an entry-point surface whose consumers are outside the tree by
+construction: `test-kaz/node_modules` is empty and both `kaz/` and `test-kaz/` are junctions to
+installed preset directories elsewhere on the machine. A search therefore settles a class-3 finding in
+one direction only — when the name is module-private (no `export`, not reachable from a composition
+row) or when a *call site* for the helper exists elsewhere in the tree. For an exported name, the
+honest verdict is `unproven`, and the finding is that it cannot be shown to have a consumer rather
+than that it has none. The first audit of this tree hit this on every exported helper it found, which
+is why every class-3 item came back unproven.
+
+The distinction that makes the class still worth hunting: it is not a stale export that costs the
+reader, it is a helper that *looks live* — a named function nothing reaches while the same work is
+done inline nearby. Search for the identifier as a call, not just as a word, and look for the inline
+copy; that pair is provable from inside the tree.
 
 **Not slop**, and a report that flags these is noise: the repository's own conventions, validation at a
 trust boundary, deliberate non-ASCII, an ugly but load-bearing line, a comment whose subject is a real
