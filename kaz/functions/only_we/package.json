@@ -1,7 +1,0 @@
-{
-  "name": "only-we",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "main": "lib/index.js"
-}
