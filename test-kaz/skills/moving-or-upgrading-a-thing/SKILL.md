@@ -40,17 +40,11 @@ decides who does what and what counts as done.
    closing message with the verdict** - the arrangement ledger keeps only its first line, truncated
    at 200 characters.
 
-Dispatching is two hops: go to the `arrange_agent` stage and record one entry per role, come back to
-`idle`, then dispatch each role by name. `write_arrangement` works only in the `arrange_agent` stage.
-
-The plan must also carry the `memoryMaintainer` entry - the stage text says so every turn, and only that role can write memories.
-
-```
-whale_report(arrange_agent)
-write_arrangement(entries)   # one entry per role: persona / blacklist / task / fork (fork = continue from a live session's history)
-whale_report(idle)           # entries are recorded in the arrange_agent stage; dispatch happens from idle
-ka_sub_whale(persona)        # the role name is the only handle — one entry per name
-```
+The dispatching mechanics are the same for every work type - the two hops, the `write_arrangement` call
+shape, the `memoryMaintainer` entry, the rule that `write_arrangement` replaces the whole plan each round,
+and the rule that entries sharing a role name collapse into one - so they are written once, in the shared
+tail of `repairing-something-broken`. Read that tail before dispatching; what is below is only what this
+work type adds.
 
 ## Our work
 

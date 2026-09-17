@@ -19,18 +19,13 @@ addressed to a subagent. A subagent that reads this file is not any of these rol
 5. Assemble and verify against step 1 yourself.
 6. Report what was verified and what was not.
 
-Dispatching is three steps, in this order:
+The dispatching mechanics are the same for every work type - the two hops, the `write_arrangement` call
+shape, the `memoryMaintainer` entry, the rule that `write_arrangement` replaces the whole plan each round,
+and the rule that entries sharing a role name collapse into one - so they are written once, in the shared
+tail of `repairing-something-broken`. Read that tail before dispatching.
 
-```
-whale_report(arrange_agent)
-write_arrangement(entries)   # one entry per role: persona / blacklist / task / fork
-whale_report(idle)
-ka_sub_whale(persona)        # the role name is the only handle — one entry per name
-```
-
-`write_arrangement` works only in the `arrange_agent` stage. Two entries that share a role name are
-the same entry, and only the first is ever dispatchable — **names must differ**, so two proposers
-are e.g. `proposer-a` and `proposer-b`.
+What follows in this file is only what this work type adds. Two proposers are e.g. `proposer-a` and
+`proposer-b`.
 
 ## Our work
 
@@ -55,8 +50,9 @@ Text in `<angle brackets>` is ours to fill in: name the concrete thing, not the 
 is not a fill. Everything outside the brackets is the boundary that makes the role useful; keep it.
 
 `blacklist` is **enforced**, not a suggestion: a denied tool is absent from the subagent's tool face,
-and calling it errors. The `deny` filter also rejects unknown names outright, so only real tool names
-go here. Treat these lists as a starting point — add names when the task needs narrower hands, drop
+and calling it errors. Names in the reserved set are dropped silently, and unknown names are skipped
+with a note in the dispatch receipt — so write only real tool names, and read the receipt once. Treat
+these lists as a starting point — add names when the task needs narrower hands, drop
 names when the role genuinely needs to write or run something, and remember that `pwsh` can do
 everything `write` and `edit` can: a read-only role that keeps `pwsh` is not read-only. An empty list adds nothing back. Nine tools are denied to every subagent we dispatch regardless: send_message, interrupt_agent, ka_sub_whale, write_arrangement, whale_report, the three memory-write tools, and ask_user_question. Write a list of what is additionally forbidden - a role that must not write is a role you must deny writing.
 

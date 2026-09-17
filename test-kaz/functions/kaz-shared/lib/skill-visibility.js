@@ -31,4 +31,7 @@ export const MAIN_AGENT_ONLY_SKILLS = Object.freeze([
   "reviewing-someone-elses-work",
   "moving-or-upgrading-a-thing",
   "getting-unstuck",
+  // 与“这类活怎么干”相对的那一类：它讲的是主代理怎么判定“成了”、权威在哪一层——
+  // 子代理只负责交回证据，不裁这个问题。
+  "orienting-in-a-codebase",
 ]);

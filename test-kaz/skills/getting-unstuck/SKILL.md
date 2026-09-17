@@ -152,12 +152,8 @@ indistinguishable from work, and costs the same.
 
 ## Dispatching
 
-Dispatching is two hops: go to the `arrange_agent` stage and record one entry per role, come back to
-`idle`, then dispatch each role by name. `write_arrangement` works only in the `arrange_agent` stage;
-`ka_sub_whale` does not check the stage and is dispatched from `idle` by convention. The plan must
-also carry the `memoryMaintainer` entry - the stage text says so every turn, and only that role can
-write memories.
-
-**`write_arrangement` replaces the whole plan.** A role not re-listed this round is gone, and a live
-subagent with that name is no longer addressable through the arrangement. Two entries that share a
-role name are the same entry, and only the first is ever dispatchable - **names must differ**.
+The dispatching mechanics are the same for every work type - the two hops, the `write_arrangement`
+call shape, the `memoryMaintainer` entry, the rule that `write_arrangement` replaces the whole plan,
+and the rule that entries sharing a role name collapse into one - so they are written once, in the
+shared tail of `repairing-something-broken`. Read that tail before dispatching; what is above is only
+what this work type adds.
