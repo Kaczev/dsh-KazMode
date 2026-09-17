@@ -65,6 +65,20 @@ export const SUBAGENT_DEFAULT_BLACKLIST = Object.freeze([
 ]);
 
 /**
+ * AI slop 清理子代理黑名单：在普通子代理默认之上，再挡掉"替主代理做决定"的两件——
+ * 直接问用户、以及把某个东西交给用户看。它的活是只读地查、必要时改、然后回报；
+ * 要不要问用户、要不要出面交付，是主代理的事。写类工具（read / glob / grep / pwsh / write / edit）
+ * 有意**不挡**：它必须能读整份文件、能跑项目的检查与探针、能在证明得动的前提下动手改。
+ */
+export const SLOP_CLEANER_BLACKLIST = Object.freeze([
+  ...SUBAGENT_DEFAULT_BLACKLIST,
+  "present",
+]);
+
+/** 保留集（AI slop 清理子代理）：与普通子代理同一份——它要能压上下文、查原文、查记忆、看安排。 */
+export const SLOP_CLEANER_RESERVED = RESERVED_TOOLS;
+
+/**
  * 同时在**运行**的直系子代理上限。**限制的是"此刻有几个在跑"，不是"计划里写几条"**——
  * 主代理可以错开时间派：先派 3 个，等回来再派下一批，计划写多少条都不受这条约束。
  *

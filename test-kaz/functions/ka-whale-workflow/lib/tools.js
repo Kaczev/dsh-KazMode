@@ -1,14 +1,14 @@
 // ka-whale-workflow —— 工作流四工具（《Kaz8.0设计.md》§3.9）。
 //   write_arrangement  写安排（只在 arrange_agent 阶段）
 //   get_arrangement    查看安排（只读，任何阶段）
-//   ka_sub_whale       按安排派发子代理（含 memoryMaintainer 保留值）
+//   ka_sub_whale       按安排派发子代理（含 memoryMaintainer 与 slopCleaner 两个保留值）
 //   whale_report       推进阶段
 // 文案一律英文。
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { randomUUID } from "node:crypto";
-import { CONCURRENCY_CAP_REASON, MAIN_BLACKLIST, MAX_CONCURRENT_SUBAGENTS, MEMORY_MAINTAINER_BLACKLIST, MEMORY_MAINTAINER_RESERVED, SUBAGENT_DEFAULT_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
-import { MEMORY_MAINTAINER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
+import { CONCURRENCY_CAP_REASON, MAIN_BLACKLIST, MAX_CONCURRENT_SUBAGENTS, MEMORY_MAINTAINER_BLACKLIST, MEMORY_MAINTAINER_RESERVED, SLOP_CLEANER_BLACKLIST, SLOP_CLEANER_RESERVED, SUBAGENT_DEFAULT_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
+import { MEMORY_MAINTAINER_PERSONA, SLOP_CLEANER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
 import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
 import { KAZ_FORK_PROVIDER, noteForkSource } from "./fork-provider.js";
 import { LEGAL_TRANSITIONS, REFLECTION_ADVERTISED_BYTES, STAGES, reflectionProblem } from "./stages.js";
@@ -152,7 +152,7 @@ export function writeArrangementTool({ store }) {
   return defineTool({
     name: "write_arrangement",
     description:
-      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", or [role, description] (an array of exactly two non-empty strings); anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
+      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", "slopCleaner", or [role, description] (an array of exactly two non-empty strings); anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
     parameters: {
       entries: { type: "array", required: true, items: { type: "json" }, description: "The dispatch plan entries." },
     },
@@ -208,9 +208,9 @@ export function kaSubWhaleTool({ ctx, store }) {
   return defineTool({
     name: "ka_sub_whale",
     description:
-      'Dispatch one arrangement entry as a subagent. Input is only the persona (the reserved value "memoryMaintainer" is the memory keeper); blacklist / task / fork come from the arrangement, and the task becomes the subagent\'s first message. Memory dispatches and their reports stay internal: never relay them to the user.',
+      'Dispatch one arrangement entry as a subagent. Input is only the persona (the reserved values are "memoryMaintainer" for the memory keeper and "slopCleaner" for the AI-slop cleaner); blacklist / task / fork come from the arrangement, and the task becomes the subagent\'s first message. Memory dispatches and their reports stay internal: never relay them to the user.',
     parameters: {
-      persona: { type: "string", required: true, description: 'The arrangement entry to dispatch: "memoryMaintainer" or a custom role name.' },
+      persona: { type: "string", required: true, description: 'The arrangement entry to dispatch: "memoryMaintainer", "slopCleaner", or a custom role name.' },
     },
     output: { schema: TEXT_SCHEMA, render: TEXT_RENDER },
     async execute(args, exec) {
@@ -224,18 +224,25 @@ export function kaSubWhaleTool({ ctx, store }) {
       const entry = entries[index];
       if (entry.persona === "main") return { ...fail('the "main" entry is for the main agent itself; dispatch only subagent entries'), text: "" };
       const isKeeper = entry.persona === "memoryMaintainer";
+      const isCleaner = entry.persona === "slopCleaner";
       const role = roleOf(entry.persona);
-      const personaText = isKeeper ? MEMORY_MAINTAINER_PERSONA : renderSubagentPersona(role, descriptionOf(entry.persona));
+      const personaText = isKeeper
+        ? MEMORY_MAINTAINER_PERSONA
+        : isCleaner
+          ? SLOP_CLEANER_PERSONA
+          : renderSubagentPersona(role, descriptionOf(entry.persona));
       const blacklist = isKeeper
         ? sanitizeBlacklist([...MEMORY_MAINTAINER_BLACKLIST], MEMORY_MAINTAINER_RESERVED)
-        : sanitizeBlacklist([...SUBAGENT_DEFAULT_BLACKLIST, ...(Array.isArray(entry.blacklist) ? entry.blacklist : [])]);
+        : isCleaner
+          ? sanitizeBlacklist([...SLOP_CLEANER_BLACKLIST], SLOP_CLEANER_RESERVED)
+          : sanitizeBlacklist([...SUBAGENT_DEFAULT_BLACKLIST, ...(Array.isArray(entry.blacklist) ? entry.blacklist : [])]);
       // 平台 toolFilter 遇到不存在的工具名会直接抛错：先按"平台已知的工具"过滤，跳过的写进回执。
       const known = knownToolNames(ctx, exec.agent);
       const applied = known === null ? blacklist : blacklist.filter((name) => known.has(name));
       const skipped = known === null ? [] : blacklist.filter((name) => !known.has(name));
       const skippedNote =
         skipped.length > 0 ? ` (blacklist skipped unknown tool${skipped.length > 1 ? "s" : ""}: ${skipped.join(", ")})` : "";
-      const label = isKeeper ? "memoryMaintainer" : role;
+      const label = isKeeper ? "memoryMaintainer" : isCleaner ? "slopCleaner" : role;
       const forkTarget = typeof entry.fork === "string" ? entry.fork : "";
       let provider = "spawn";
       let forkSource = "";

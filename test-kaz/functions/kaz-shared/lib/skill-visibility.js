@@ -34,4 +34,7 @@ export const MAIN_AGENT_ONLY_SKILLS = Object.freeze([
   // 与“这类活怎么干”相对的那一类：它讲的是主代理怎么判定“成了”、权威在哪一层——
   // 子代理只负责交回证据，不裁这个问题。
   "orienting-in-a-codebase",
+  // 同上：这份讲的是主代理什么时候派清理者、派的时候要给哪五项、拿到报告之后怎么复核——
+  // 清理者自己带的是固定 persona 里的作业纪律，读这份只会把它当成写给自己的指令。
+  "cleaning-up-slop",
 ]);

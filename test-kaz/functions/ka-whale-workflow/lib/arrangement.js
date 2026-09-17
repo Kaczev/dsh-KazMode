@@ -29,10 +29,10 @@ export function firstLine(text, max = SUMMARY_MAX_CHARS) {
 }
 
 /** 安排里允许的保留 persona 值。 */
-export const RESERVED_PERSONAS = Object.freeze(["main", "memoryMaintainer"]);
+export const RESERVED_PERSONAS = Object.freeze(["main", "memoryMaintainer", "slopCleaner"]);
 
 /**
- * 校验 persona：只允许 "main"、"memoryMaintainer"，或 [role, description]（恰好两个非空字符串）。
+ * 校验 persona：只允许 "main"、"memoryMaintainer"、"slopCleaner"，或 [role, description]（恰好两个非空字符串）。
  * @param {unknown} persona - 主代理写的 persona。
  * @returns {{value: string|string[], error?: undefined}|{value?: undefined, error: string}}
  */
@@ -40,7 +40,7 @@ export function personaValueOf(persona) {
   if (typeof persona === "string") {
     const value = persona.trim();
     if (RESERVED_PERSONAS.includes(value)) return { value };
-    return { error: `persona "${value}" is not allowed — use "main", "memoryMaintainer", or [role, description]` };
+    return { error: `persona "${value}" is not allowed — use "main", "memoryMaintainer", "slopCleaner", or [role, description]` };
   }
   if (Array.isArray(persona)) {
     if (persona.length === 2 && persona.every((part) => typeof part === "string" && part.trim().length > 0)) {
@@ -48,7 +48,7 @@ export function personaValueOf(persona) {
     }
     return { error: 'persona array must be exactly [role, description] — two non-empty strings' };
   }
-  return { error: 'persona must be "main", "memoryMaintainer", or [role, description]' };
+  return { error: 'persona must be "main", "memoryMaintainer", "slopCleaner", or [role, description]' };
 }
 
 /**
