@@ -78,17 +78,19 @@ export const SLOP_CLEANER_BLACKLIST = Object.freeze([
 ]);
 
 /**
- * 保留集（AI slop 清理子代理）：**不含 `get_arrangement`**。
+ * 保留集（AI slop 清理子代理）：与普通子代理的 RESERVED_TOOLS 同一套名字。
  *
- * 为什么单独一套而不是直接引用 RESERVED_TOOLS：清理者事实上看不到主代理的安排。`tools.js` 里
- * 清理者有**自己的分支**（`isCleaner` 那一路），用的是这个常量；而 `get_arrangement` 是主代理与
- * 管家的东西，没有传给清理者。早先这里写 `= RESERVED_TOOLS`，等于注释宣称它有这件工具而没有——
- * 注释与事实相反，正是本轮主题。
+ * 保留集的含义是"任何黑名单都不许把这几件从该角色手里挡掉"，**不是**"该角色一定收得到这几件"：
+ * 它只在黑名单这一道口子上说了算——该角色的黑名单减去保留集，再减去平台不认识的工具名
+ * （`tools.js` 派发时现算）——而角色最终拿到什么，还取决于别处挂不挂它。保留集本身既不发工具，
+ * 也不收工具。**本文件就是让这个区别显形的地方**——`get_arrangement` 不在 SUBAGENT_DEFAULT_BLACKLIST
+ * 里（SLOP_CLEANER_BLACKLIST 是它加一件 `present`），所以它在清理者的生效黑名单里从来不出现：
+ * 这个集合里有没有它，黑名单算出来完全一样。
  *
- * 这个常量的**含义**要说清：它表示"清理者拥有、因而黑名单不许把它挡掉"的工具，不是"它一定看得见"。
- * 派发时真正生效的黑名单是 SLOP_CLEANER_BLACKLIST 减去保留集，逐字发给平台。
+ * 清理者与普通子代理共用这一套，不另列一份。`tools.js` 里清理者有**自己的分支**（`isCleaner`
+ * 那一路），用的就是这个常量。
  */
-export const SLOP_CLEANER_RESERVED = Object.freeze(RESERVED_TOOLS.filter((name) => name !== "get_arrangement"));
+export const SLOP_CLEANER_RESERVED = Object.freeze([...RESERVED_TOOLS]);
 
 /**
  * 同时在**运行**的直系子代理上限。**限制的是"此刻有几个在跑"，不是"计划里写几条"**——

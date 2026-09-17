@@ -6,8 +6,9 @@ user-invocable: false
 
 One work type: creating something that does not exist yet, where the shape is still open.
 
-**For the main agent.** The role blocks below are inputs to `write_arrangement`, not text
-addressed to a subagent. A subagent that reads this file is not any of these roles.
+**For the main agent.** This file is registered main-agent-only in
+`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
+`write_arrangement`, not text addressed to anyone.
 
 ## Workflow
 
@@ -19,13 +20,8 @@ addressed to a subagent. A subagent that reads this file is not any of these rol
 5. Assemble and verify against step 1 yourself.
 6. Report what was verified and what was not.
 
-The dispatching mechanics are the same for every work type - the two hops, the `write_arrangement` call
-shape, the `memoryMaintainer` entry, the rule that `write_arrangement` replaces the whole plan each round,
-and the rule that entries sharing a role name collapse into one - so they are written once, in the shared
-tail of `repairing-something-broken`. Read that tail before dispatching.
-
-What follows in this file is only what this work type adds. Two proposers are e.g. `proposer-a` and
-`proposer-b`.
+The dispatching mechanics are the same for every work type; they are in `kaz-dispatch`. What follows
+is only what this work type adds: two proposers are e.g. `proposer-a` and `proposer-b`.
 
 ## Our work
 
@@ -43,8 +39,9 @@ can be checked on their own. Steps 1 and 5 stay with us either way.
 ## Subagents
 
 Each entry is a persona we record with `write_arrangement` and then dispatch by its role name with
-`ka_sub_whale`: a role, a behaviour description, and a tool blacklist. The platform appends the tool
-list, the way results come back, and the language rule — do not repeat any of that here.
+`ka_sub_whale`: a role, a behaviour description, and a tool blacklist. The preset appends the tool
+list, the way results come back, and the language rule (`kaz-shared/lib/roles.js`) — do not repeat
+any of that here.
 
 Text in `<angle brackets>` is ours to fill in: name the concrete thing, not the category — a pronoun
 is not a fill. Everything outside the brackets is the boundary that makes the role useful; keep it.

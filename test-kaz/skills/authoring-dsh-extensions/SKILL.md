@@ -174,7 +174,7 @@ onto `decision.messages`; that is how per-step notices are delivered without tou
 
 ### Register a model-facing tool
 
-- `name` - kebab-free snake_case by convention. Every shipped tool uses it (`read`, `web_search`,
+- `name` - kebab-free snake_case by convention. The shipped tools use it (`read`, `web_search`,
   `todo_write`), and PTC bindings address a plain name as `tools.<name>(args)`, so a hyphenated name
   needs subscript access instead. The registry enforces no name grammar; `run_code` is reserved.
 - `description` - what the model reads to decide whether to call it. Write it for that decision.

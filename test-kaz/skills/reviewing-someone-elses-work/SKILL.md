@@ -7,10 +7,9 @@ user-invocable: false
 One work type: judging an artifact we did not make. The work is establishing what is actually true
 about it, not forming an impression of it.
 
-**For the main agent.** This file is registered as main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js`, so subagents should not see it at all. If one does: the role
-blocks below are inputs to `write_arrangement`, not text addressed to it, and they describe roles
-the main agent creates — not roles that exist in this session.
+**For the main agent.** This file is registered main-agent-only in
+`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
+`write_arrangement`, not text addressed to anyone.
 
 ## Workflow
 
@@ -27,11 +26,8 @@ the main agent creates — not roles that exist in this session.
 7. Accept or reject; do not fix during the review. Fixing while judging destroys the record of what
    was wrong.
 
-The dispatching mechanics are the same for every work type - the two hops, the `write_arrangement` call
-shape, the `memoryMaintainer` entry, the rule that `write_arrangement` replaces the whole plan each round,
-and the rule that entries sharing a role name collapse into one - so they are written once, in the shared
-tail of `repairing-something-broken`. Read that tail before dispatching; what is below is only what this
-work type adds.
+The dispatching mechanics are the same for every work type; they are in `kaz-dispatch`. What follows
+is only what this work type adds.
 
 ## Our work
 
@@ -63,8 +59,7 @@ and calling it errors. Names in the reserved set are dropped silently, and unkno
 with a note in the dispatch receipt — so write only real tool names, and read the receipt once.
 Treat these lists as a starting point. An empty list adds nothing back. Nine tools are denied to every subagent we dispatch regardless: send_message, interrupt_agent, ka_sub_whale, write_arrangement, whale_report, the three memory-write tools, and ask_user_question. Write a list of what is additionally forbidden - a role that must not write is a role you must deny writing.
 
-The role is a two-element array `[role, description]` — exactly two non-empty strings. A `task` is
-required for every entry and is hard-checked: an empty one is rejected.
+A `task` is required for every entry and is hard-checked: an empty one is rejected.
 
 **Name the artifact's location in every task** — a path the role can `read`, or the text pasted into
 the task itself. A reviewer that cannot open the artifact will answer "not verified" to everything,

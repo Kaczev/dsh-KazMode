@@ -7,10 +7,9 @@ user-invocable: false
 One work type: carrying out a plan that already exists. What to do is settled; the work is doing it
 without drifting from it, and noticing when the plan itself is what is broken.
 
-**For the main agent.** This file is registered as main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js`, so subagents should not see it at all. If one does: the role
-blocks below are inputs to `write_arrangement`, not text addressed to it, and they describe roles
-the main agent creates — not roles that exist in this session.
+**For the main agent.** This file is registered main-agent-only in
+`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
+`write_arrangement`, not text addressed to anyone.
 
 ## Workflow
 
@@ -37,11 +36,8 @@ closing message and does not write the plan files itself.
 Name the plan's location in every task: a plan file path, a document, or "see the message above" — a
 role that cannot open the plan cannot check it.
 
-The dispatching mechanics are the same for every work type - the two hops, the `write_arrangement` call
-shape, the `memoryMaintainer` entry, the rule that `write_arrangement` replaces the whole plan each round,
-and the rule that entries sharing a role name collapse into one - so they are written once, in the shared
-tail of `repairing-something-broken`. Read that tail before dispatching; what is below is only what this
-work type adds.
+The dispatching mechanics are the same for every work type; they are in `kaz-dispatch`. What follows
+is only what this work type adds.
 
 ## Our work
 
@@ -74,8 +70,7 @@ with a note in the dispatch receipt — so write only real tool names, and read 
 these lists as a starting point — add names when the task needs narrower hands, drop names when the
 role genuinely needs to write or run something. An empty list adds nothing back. Nine tools are denied to every subagent we dispatch regardless: send_message, interrupt_agent, ka_sub_whale, write_arrangement, whale_report, the three memory-write tools, and ask_user_question. Write a list of what is additionally forbidden - a role that must not write is a role you must deny writing.
 
-The role is a two-element array `[role, description]` — exactly two non-empty strings. A `task` is
-required for every entry and is hard-checked: an empty one is rejected. Write it as: the step or
+A `task` is required for every entry and is hard-checked: an empty one is rejected. Write it as: the step or
 question, the plan section it belongs to, what counts as done, and — for checking roles — **what the
 role must not be told**. That last instruction is for the dispatcher, not the dispatched.
 

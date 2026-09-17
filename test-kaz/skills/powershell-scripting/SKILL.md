@@ -26,11 +26,11 @@ $PSHOME                        # also tells you how it was installed - see the u
 | `Core` / 7.x | The rules in this file apply as written. |
 | `Desktop` / 5.1.x | Read the upgrade section first. The differences below are listed per rule. |
 
-- A tool named `pwsh`, a shortcut, or a task runner is not evidence that 7 is what runs. In this
-  session the harness's own shell runs 7, but a caller that caches its shell path can keep running
+- A tool named `pwsh`, a shortcut, or a task runner is not evidence that 7 is what runs. The harness's
+  own shell normally runs 7, but a caller that caches its shell path can keep running
   5.1 long after 7 is installed - which is exactly why you ask rather than assume.
-- **PowerShell 7 does not replace Windows PowerShell 5.1.** They install side by side: on this
-  machine `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` is still present and still
+- **PowerShell 7 does not replace Windows PowerShell 5.1.** They install side by side: on Windows
+  `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` is still present and still
   reports 5.1. Never propose removing 5.1, and never report it as removed.
 
 ## Upgrade a 5.1 machine to PowerShell 7
@@ -59,10 +59,11 @@ what to do next:
 | `$HOME\.dotnet\tools` | .NET global tool |
 | anything else | portable ZIP |
 
-Those four mappings are vendor documentation. Only one of them is exercised here: `$PSHOME` on this
-machine is `C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe`, the
-matching path is the resolved `pwsh` and the running process image, so the MSIX row holds. The MSI,
-global-tool and ZIP rows have not been seen, so treat them as the mapping to test, not as results.
+Those four mappings are vendor documentation. On the one install this file was written against, the
+MSIX row held: `$PSHOME` was `C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.6.0_x64__8wekyb3d8bbwe`,
+the matching path was the resolved `pwsh` and the running process image. That is one machine's answer,
+not part of the mapping - check your own `$PSHOME` against the table. The MSI, global-tool and ZIP rows
+have not been seen, so treat them as the mapping to test, not as results.
 
 ### Step 2 - Decide the flavour
 
@@ -171,7 +172,7 @@ Remove-Item $f
 **Judge this by the bytes, not by reading the text back.** Measured with the four characters `中文测试`
 plus `ABC`: PowerShell 7 wrote `E4 B8 AD E6 96 87 E6 B5 8B E8 AF 95 41 42 43 0D 0A` - UTF-8, no BOM.
 Windows PowerShell 5.1 on the same machine wrote `D6 D0 CE C4 B2 E2 CA D4 41 42 43 0D 0A` - the
-system ANSI code page, observed here as 936. The ASCII tail is identical in both, so **a test value
+system ANSI code page, which was 936 on that machine. The ASCII tail is identical in both, so **a test value
 needs non-ASCII characters or it proves nothing.**
 
 A readback cannot make this distinction, and it is worth knowing why: 5.1 reading back its own
@@ -192,7 +193,7 @@ PowerShell 5.1 was never touched, and removing 7 returns the shell to it. That i
 for when the caller that still has to work cannot be changed - not a configuration hack, and never a
 suggestion to remove 5.1.
 
-Things this file does **not** know, and must not present as fact:
+Things this file does **not** establish, and must not be read as fact:
 
 - The remoting and execution-policy consequences of MSIX in Step 2 are vendor documentation that
   was read, not tested - an unelevated session cannot isolate them. What **is** measured there is
@@ -252,18 +253,19 @@ cause damage. Decide the encoding, and check the bytes rather than trusting a sp
 - **A genuinely ANSI or GBK legacy file is the case where 5.1 was accidentally right and 7 is
   wrong.** 5.1 read it because the system ANSI code page was its default; 7 defaulted to UTF-8
   instead, so a bare `Get-Content` on that file now produces mojibake where it used to work.
-  Measured on this machine with a GBK file: `Get-Content -Raw` returned garbage, while
-  `Get-Content -Raw -Encoding ansi` returned the original text correctly. So the fix exists and is
-  one word - but note the code page is machine-specific (936 here, a Chinese system), which is why
+  A GBK file behaves this way: `Get-Content -Raw` returns garbage, while
+  `Get-Content -Raw -Encoding ansi` returns the original text correctly. So the fix exists and is
+  one word - but note the code page is machine-specific (it happened to be 936 on the machine this was
+  measured on), which is why
   the portable form is to find out what the file actually is rather than to hard-code a number.
   Upgrading is not unconditionally an improvement: identify the file's real encoding first.
 - `[Console]::OutputEncoding` is **not** set to UTF-8 automatically by 7. 7 changed the default
   encoding for **files** and `$OutputEncoding` (what a pipeline feeds an external program), but
   reading an external program's stdout still follows the system code page, so set
   `[Console]::OutputEncoding` yourself when a native tool's output matters. Treat the reason as
-  weakly evidenced - it is carried over from prior knowledge rather than measured, since both
-  settings already read `utf-8` in this session; the earlier byte-level findings are the ones with
-  measurements behind them.
+  weakly evidenced - it is carried over from prior knowledge rather than measured, because the session
+  it would have been measured in had both settings already reading `utf-8`; the earlier byte-level
+  findings are the ones with measurements behind them.
 - Keep one script's filename in **one variable** from creation to execution. A typo between where
   you wrote it and where you run it produces an error about the path, which invites a wrong
   diagnosis. Do not re-derive the path in a later statement.

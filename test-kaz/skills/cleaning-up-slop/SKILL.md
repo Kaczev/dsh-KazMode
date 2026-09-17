@@ -15,11 +15,10 @@ Two things make it dangerous, and both have a cheap answer:
 - **The reader of the code is not in the room.** So every finding carries evidence, and the two of us
   decide what is worth doing before any of it is deleted.
 
-**For the main agent.** This file is registered as main-agent-only in
+**For the main agent.** This file is registered main-agent-only in
 `functions/kaz-shared/lib/skill-visibility.js`. The cleaner carries its own instructions in its fixed
 persona; what it needs from us is scope, classes, verification and permission, which is what this file
-decides. Where a role block below appears, it is an input to `write_arrangement` — not text addressed
-to the cleaner.
+decides. The role blocks below are inputs to `write_arrangement`, not text addressed to anyone.
 
 ## What counts as slop
 
@@ -44,17 +43,16 @@ generated it?** The classes, with the symptom we look for:
 **A branch that never fires is the expensive one**: no dead-code tool reports it, because the code is
 still referenced. Where a class can be decided mechanically, decide it mechanically before spending a
 subagent — a constant-condition check, a count derived from the tree rather than written down, a grep
-for consumers — but read the consumer class honestly in this repository:
+for consumers — but read the consumer class honestly:
 
-**"No consumer inside this tree" is rarely the same as "unused".** Every module here is part of a
-preset, so a name it exports sits on an entry-point surface whose consumers are outside the tree by
-construction: `test-kaz/node_modules` is empty and both `kaz/` and `test-kaz/` are junctions to
-installed preset directories elsewhere on the machine. A search therefore settles a class-3 finding in
-one direction only — when the name is module-private (no `export`, not reachable from a composition
-row) or when a *call site* for the helper exists elsewhere in the tree. For an exported name, the
-honest verdict is `unproven`, and the finding is that it cannot be shown to have a consumer rather
-than that it has none. The first audit of this tree hit this on every exported helper it found, which
-is why every class-3 item came back unproven.
+**"No consumer inside this tree" is rarely the same as "unused".** When the module being audited
+ships as **part of a preset**, a name it exports sits on an entry-point surface whose consumers are
+outside the tree by construction: the preset is consumed from outside itself. A search therefore
+settles such a finding in one direction only — when the name is module-private (no `export`, not
+reachable from a composition row) or when a *call site* for the helper exists elsewhere in the tree.
+For an exported name, the honest verdict is `unproven`, and the finding is that it cannot be shown to
+have a consumer rather than that it has none. In a repository whose modules do **not** ship as a
+preset, an exported name with no caller is just an exported name with no caller.
 
 The distinction that makes the class still worth hunting: it is not a stale export that costs the
 reader, it is a helper that *looks live* — a named function nothing reaches while the same work is
@@ -107,14 +105,14 @@ with its own evidence, never inside a cleanup diff.
   form like `["slopCleaner", "…"]` also reaches the cleaner (the dispatcher keys on the role name, so
   the array's first element counts), but write the bare string anyway: it is what the validator, this
   file and the dispatcher all agree on, and a reader cannot tell the two apart later.
+- Only the cleaner's dispatch: everything else about recording and dispatching an entry — the two
+  hops, the `memoryMaintainer` entry, the plan-replacement rule, the reuse key — is in
+  `kaz-dispatch`.
 - The cleaner's tool face is fixed by the reserved value, so a `blacklist` written on its entry does
-  nothing — and the validator now rejects such an entry rather than ignoring it silently. Do not try
+  nothing — and the validator rejects such an entry rather than ignoring it silently. Do not try
   to widen or narrow the tool face per dispatch.
-- The plan must still carry its `memoryMaintainer` entry — `write_arrangement` replaces the whole plan,
-  so writing this dispatch drops every entry not restated in the same call.
-- Dispatching does not create a new role each time: the reuse key is the persona name, so a second
-  `slopCleaner` dispatch in the same conversation continues the cleaner that is already loaded with
-  the right context. Queue the work rather than expecting fresh eyes.
+- Re-dispatching `slopCleaner` continues the cleaner that is already loaded with the right context —
+  it does not create a fresh role. Queue the work rather than expecting fresh eyes.
 - To check the cleaner's work, dispatch a **different** name (a `[role, description]` pair is fine)
   and never `fork` from the cleaner: forking or re-dispatching `slopCleaner` hands the verification to
   the agent that produced the findings, which is the one reviewer that cannot be independent.

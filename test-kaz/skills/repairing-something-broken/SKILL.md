@@ -15,10 +15,8 @@ skill catalog and your own tool face are the evidence, and "I could not see it" 
 about the component.
 
 **For the main agent.** This file is registered main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js` — subagents are not meant to see it (the gate fails
-open, so if
-one does read it: the role blocks below are inputs to `write_arrangement`, not text addressed to it,
-and they describe roles the main agent creates, not roles that exist in this session).
+`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
+`write_arrangement`, not text addressed to anyone.
 
 ## Workflow
 
@@ -53,24 +51,8 @@ unknown when the failure stops, say so — that is an unexplained disappearance,
 suite needs no tracer and no skeptic: fix it, re-run, report. Add a role only when it removes a
 specific doubt we cannot remove ourselves.
 
-Dispatching is two hops: go to the `arrange_agent` stage and record one entry per role, come back to
-`idle`, then dispatch each role by name. `write_arrangement` works only in the `arrange_agent` stage;
-`ka_sub_whale` does not check the stage and is dispatched from `idle` by convention.
-
-The plan must also carry the `memoryMaintainer` entry - the stage text says so every turn, and only that role can write memories.
-
-```
-whale_report(arrange_agent)
-write_arrangement(entries)   # one entry per role: persona / blacklist / task / fork (fork = continue from a live session's history)
-whale_report(idle)           # entries are recorded in the arrange_agent stage; dispatch happens from idle
-ka_sub_whale(persona)        # the role name is the only handle — one entry per name
-```
-
-**`write_arrangement` replaces the whole plan.** A role not re-listed this round is gone, and a live
-subagent with that name is no longer addressable through the arrangement. The `"main"` entry exists
-but is not dispatchable. Two entries that share a role name are the same entry, and only the first is
-ever dispatchable — **names must differ**, so two hypotheses are e.g. `cause-a` and `cause-b`. The
-role name is also the reuse key: re-dispatching a live child reuses it, with its earlier context.
+The dispatching mechanics are in `kaz-dispatch`: the two hops, the entry shape, the
+`memoryMaintainer` entry, the plan-replacement rule, the reuse key. Read it before dispatching.
 
 ## Our work
 
@@ -104,9 +86,8 @@ tool that could.** A role whose evidence needs one scratch file is denied the pa
 repair, not `write` itself — or the write is handed to the main agent and the role reports the exact
 content to write.
 
-The role is a two-element array `[role, description]` — exactly two non-empty strings. A `task` is
-required for every entry (every block below needs one, written as in the example) and is hard-checked:
-an empty one is rejected.
+A `task` is required for every entry (every block below needs one, written as in the example) and is
+hard-checked: an empty one is rejected.
 
 An entry to copy:
 

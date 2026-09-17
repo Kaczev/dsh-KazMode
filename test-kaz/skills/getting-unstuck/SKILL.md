@@ -36,17 +36,16 @@ direction itself is now suspect. When condition 2 is met, the next move is not a
 third layer: it is a look for another direction.
 
 **For the main agent.** This file is registered main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js` - subagents are not meant to see it (the gate fails
-open, so if one does read it: the role blocks below are inputs to `write_arrangement`, not text
-addressed to it, and they describe roles the main agent creates, not roles that exist in this
-session).
+`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
+`write_arrangement`, not text addressed to anyone.
 
 ## Before any role is dispatched: write the failure ledger
 
 Nothing in this file works without it, and skipping it is the usual way this file fails.
 
 Write the ledger into the `task` of **each** entry we dispatch. A dispatched role can read the whole
-arrangement - `get_arrangement` is in every subagent's reserved tool set - so text placed in one
+arrangement - `get_arrangement` is in every subagent's reserved tool set, so a role can see which
+other subagents exist - so text placed in one
 entry's `persona` description is readable by the other role too. That is why the task field is the
 channel, and why what goes in it is chosen deliberately.
 
@@ -152,8 +151,5 @@ indistinguishable from work, and costs the same.
 
 ## Dispatching
 
-The dispatching mechanics are the same for every work type - the two hops, the `write_arrangement`
-call shape, the `memoryMaintainer` entry, the rule that `write_arrangement` replaces the whole plan,
-and the rule that entries sharing a role name collapse into one - so they are written once, in the
-shared tail of `repairing-something-broken`. Read that tail before dispatching; what is above is only
-what this work type adds.
+The dispatching mechanics are the same for every work type; they are in `kaz-dispatch`. What follows
+is only what this work type adds.
