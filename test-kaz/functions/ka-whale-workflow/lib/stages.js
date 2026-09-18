@@ -133,11 +133,15 @@ export const BUILDING_HINT_PATH_PLACEHOLDER = "{{path}}";
  * 不写这三条的话，这条提示会在相邻三个技能上误开，而"误开的提示会被学会无视"是这套
  * 提示系统唯一的失败模式。
  *
- * 最后那句讲的是**角色名**：`ka_sub_whale` 按名字复用子代理，所以"proposer-a / proposer-b"
- * 这种**固定的一对**在第二轮拿回来的还是同一只手、还揣着上一轮的立场——两只手会并成一只手。
- * 名字要跟着本轮真正在争的两个方向走。
+ * **原结尾还有半句讲角色命名的，已删（8.8.2）**：它劝主代理别用固定的一对名字派两只手，
+ * 理由是 `ka_sub_whale` 按名字复用子代理、同名会把两只手并成一只手。机制那半是真的，
+ * 但**依据是错的**——我当时以为 `skills/building-something-new` 在"发放" `proposer-a` /
+ * `proposer-b` 这两个角色名，实际那只是 `###` 小节**标题**，角色是块里 `role:` 那行的自由
+ * 文本，没有任何机制读标题当名字。于是那半句成了一条没有由来的规矩，还占着每个回合的常驻
+ * 位置。角色该怎么命名是技能与 `kaz-dispatch` 的事（后者已写 "Names must differ"），
+ * 不该由一条"该不该亲手造东西"的提示来管。
  */
-const BUILDING_HINT_BODY_TEMPLATE = `You have just written ${BUILDING_HINT_PATH_PLACEHOLDER} with your own hands, and nothing this round was arranged around it. If that file is a fix for something broken, a plan someone already agreed on, or an existing thing being ported, this does not apply — carry on. If it is something that does not exist yet, read building-something-new before the next write and take the round through arrange_agent: name the two hands after the directions they argue rather than a standing pair, because the same name reaches the same child, still holding its old argument — and put their disagreement in the direction each one argues, not in the wording of the task.`;
+const BUILDING_HINT_BODY_TEMPLATE = `You have just written ${BUILDING_HINT_PATH_PLACEHOLDER} with your own hands, and nothing this round was arranged around it. If that file is a fix for something broken, a plan someone already agreed on, or an existing thing being ported, this does not apply — carry on. If it is something that does not exist yet, read building-something-new before the next write and take the round through arrange_agent.`;
 
 /**
  * 路径未知时的说法。
