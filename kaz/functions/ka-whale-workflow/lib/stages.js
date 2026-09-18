@@ -145,8 +145,12 @@ const BUILDING_HINT_BODY_TEMPLATE = `You have just written ${BUILDING_HINT_PATH_
  * **宁可模糊，也不能把 `undefined` 填进提示里**（与 `elapsedCheck` 同一条理由）：
  * 那句话是给模型读的，一个 `undefined` 会让整条提示显得像坏掉了，
  * 而它本该传达的"停一下，看看这件事该不该由你做"就丢了。
+ *
+ * 措辞必须能直接连读：它填进的是 "You have just written ___ with your own hands" 的空位，
+ * 所以不能写成名词短语（写成 "the file you just wrote" 就变成
+ * "written the file you just wrote"，读起来像故障）。
  */
-const BUILDING_HINT_PATH_FALLBACK = "the file you just wrote";
+const BUILDING_HINT_PATH_FALLBACK = "a file";
 
 /**
  * 渲染"自己动手造东西"提示的正文。
