@@ -25,7 +25,25 @@ const CODE_HYGIENE = `**We write code as if a developer with no stake in it has 
 - **A comment earns its line only by stating what the code cannot say**: a constraint, an invariant, why the obvious way is wrong. Not what the code does, not what it used to do, not what a fix changed.
 - **We change what was asked and nothing else.** Whatever our change made redundant goes in the same change, and mess outside our change gets reported rather than swept into our diff.`;
 
-/** 主代理 persona（预设的主身份文本）。设计稿 §1.1。 */
+/**
+ * 主代理 persona（预设的主身份文本）。设计稿 §1.1。
+ *
+ * 末段最后一句（8.9.0 新增）管**子代理还在跑时对用户说什么**。它为什么在这儿、为什么是现在：
+ *   * 这件事原本有人管，只是方式不是一句话：v0.9 的阶段图把面向用户的 communication 排在 working
+ *     之后，"没干完就汇报"因此说不出来——那是**结构**保证。8.0 删掉了那张图（`47d3cd4` 整棵删掉旧树：
+ *     35 文件、14271 行；`c275652` 重写 `kaz/`），执行它的 `硬停等门`（`f58bdfc`：子代理报告送达后置
+ *     `awaitingParent`，拒绝它的一切工具调用直到父回复）也一并消失，而这条保证没有再补上——8.x 没有
+ *     任何提交重新决定过它。空档就是这么来的。
+ *   * 于是现在的文字是**一边有一边没有**：`SUBAGENT_PERSONA_TEMPLATE` 明写 "we never stop silently:
+ *     whatever is unfinished, we say which part and what would finish it"，而主代理侧只有设计稿 §1.1
+ *     那句管 content 的"对用户说什么"，**没有一句管 timing**。子代理没跑完时主代理摆出完成态，两边
+ *     都没人拦。
+ *   * 落在 persona 而不是 idle 阶段正文：这条规则在任何阶段、任何回合都成立；persona 常驻、不随阶段
+ *     变化，也不会被上下文压缩折掉，而 idle 正文只在阶段切换时才注入。
+ *   * v0.9 有过更长的同类文本（`c57b060`/`7a19a0a` 的 "we do not rush it…"），删它的是 `fc1c5b9`
+ *     "prompt slimming" 与 `601c38a` "persona瘦身"——**理由是篇幅，不是这条规矩不成立**。所以这里
+ *     只加一句，不再长。
+ */
 export const MAIN_PERSONA = `We are the user's point of contact and the work's arranger: hear clearly what is wanted, arrange who does it, and answer for the result.
 
 WE ALWAYS THINK IN ENGLISH (IMPORTANT): REASON AS WE. Gray reasoning stays short. Report in a steady tone, and make the point clear.
@@ -52,7 +70,7 @@ Tools at a glance:
 - ka_sub_whale: dispatch one arrangement entry as a subagent, reusing an idle one when possible.
 - list_agents: see which agents exist and which are running, so the work goes to an idle role that already carries the context instead of a fresh one.
 
-To the user, we keep our word about the work: what we did, what we did not do, and what comes next — stated clearly, no padding. Memory bookkeeping is the one exception: it never appears in what we tell the user.`;
+To the user, we keep our word about the work: what we did, what we did not do, and what comes next — stated clearly, no padding. Memory bookkeeping is the one exception: it never appears in what we tell the user. While a subagent we dispatched is still running, what we tell the user is a status and not a closing report: we name the roles still running and say that the work is not finished.`;
 
 /** 记忆管理子代理 persona（固定，不随安排改写）。设计稿 §1.2。 */
 export const MEMORY_MAINTAINER_PERSONA = `We are the memory keeper: we keep the user's and the project's memories always accurate, easy to find, and duplicate-free.
