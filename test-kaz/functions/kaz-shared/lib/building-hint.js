@@ -70,6 +70,27 @@ function resultSucceeded(event, callId) {
 }
 
 /**
+ * 一次调用的参数里写的是哪个文件，取不到返回空串。
+ *
+ * **路径从调用的参数取，不从结果的 meta 取。** 实测（2026-09-18，真跑一次之后才发现）：
+ * `write` / `edit` 的结果里**没有** path —— 它们的路径只出现在 `presentationMeta` 里，
+ * 那是给界面卡片用的，不进会话事件；事件里只有**渲染过的正文**（`<path>…</path>` 那种）。
+ * 正文是给模型读的散文，本预设别处一处都不解析它，为一条提示开这个先例不值得。
+ * `data.arguments` 是机器数据、稳定在场，这才是该读的那一份。
+ * @param {unknown} args - `tool/call` 的 `data.arguments`（JSON 字符串）。
+ * @returns {string} 文件路径，取不到时为空串。
+ */
+function pathFromArgs(args) {
+  if (typeof args !== "string" || args.length === 0) return "";
+  try {
+    const value = JSON.parse(args)?.file_path;
+    return typeof value === "string" ? value.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * 从一个会话事件里取"这次结果配的是哪次调用"的 id，取不到返回空串。
  *
  * **只认** `message.content` 里那个 `tool-result` 块的 `toolCallId`。这是会话格式自己保证的
@@ -97,8 +118,9 @@ function callIdOfResult(event) {
  *
  * 语义（按设计）：
  *   * 用户发消息 → 新的一轮开始：把所有的证据全部清掉（本轮最多提示一次）；
- *   * `tool/call` 是 write/edit → 把它的 callId 记进待配表，**此时什么都还不算数**；
- *   * `tool/result` 配上一次成功的 write/edit → 落下"这一轮自己的手写过什么"（先到先得）；
+ *   * `tool/call` 是 write/edit → 把它的 callId 与参数里那个文件路径记进待配表，
+ *     **此时什么都还不算数**（路径先存着，等结果说它成功了才拿出来用）；
+ *   * `tool/result` 配上一次成功的 write/edit → 落下"这一轮自己的手写过哪个文件"（先到先得）；
  *   * `ka_sub_whale` / `write_arrangement` 被调用 → 各自置旗标（已经安排过了，提示没有意义）。
  *
  * @param {object} state - 会话状态（就地修改）。
@@ -107,7 +129,7 @@ function callIdOfResult(event) {
  */
 export function noteBuildingEvent(state, event) {
   if (state === null || typeof state !== "object" || event === null || typeof event !== "object") return;
-  const pending = state.buildingPendingCalls instanceof Set ? state.buildingPendingCalls : null;
+  const pending = state.buildingPendingCalls instanceof Map ? state.buildingPendingCalls : null;
   if (pending === null) return;
   if (isRoundStart(event)) {
     pending.clear();
@@ -124,7 +146,9 @@ export function noteBuildingEvent(state, event) {
     const name = data.name;
     if (name === "ka_sub_whale") state.buildingDispatched = true;
     if (name === "write_arrangement") state.buildingArranged = true;
-    if (isOwnHands(name) && typeof data.callId === "string" && data.callId.length > 0) pending.add(data.callId);
+    if (isOwnHands(name) && typeof data.callId === "string" && data.callId.length > 0) {
+      pending.set(data.callId, pathFromArgs(data.arguments));
+    }
     return;
   }
   if (event.type !== "tool/result") return;
@@ -135,12 +159,14 @@ export function noteBuildingEvent(state, event) {
   if (callId.length === 0) return;
   // 配上了，但配的不是我们关心的 write/edit（普通工具的调用与结果也走这条路）→ 一样不动。
   if (!pending.has(callId)) return;
+  const path = pending.get(callId);
   pending.delete(callId);
   if (!resultSucceeded(event, callId)) return;
   state.ownHandsWritten = true;
-  // 路径是机会性读来的：只有结果恰好带了 meta.path 才有。它只是让提示更具体，不参与判断。
+  // 路径只是让提示更具体，**不决定提示发不发**：取不到（参数不是 JSON、或缺 file_path）
+  // 就留空，由渲染层说一句兜底话。两者必须分开，否则读不到路径就等于不提示。
   if (typeof state.ownHandsPath !== "string" || state.ownHandsPath.length === 0) {
-    state.ownHandsPath = typeof event.data?.meta?.path === "string" ? event.data.meta.path : "";
+    state.ownHandsPath = typeof path === "string" ? path : "";
   }
 }
 
@@ -151,7 +177,7 @@ export function noteBuildingEvent(state, event) {
  * 写过安排也没派过子代理、且本轮还没提示过。命中后把本轮的"已提示"标记置上——**同一轮里只提示
  * 一次**。
  *
- * 为什么"写过"与"路径"是两个字段：路径是**机会性**读来的（只有结果恰好带了 meta.path 才有），
+ * 为什么"写过"与"路径"是两个字段：路径是**附带**读来的（参数里没有 `file_path` 就没有），
  * 而"写过"是确定的。合成一个字段的话，读不到路径就等于不提示，触发条件会平白少掉一大块——
  * 路径只该让提示更具体，不该决定提示发不发。
  * @param {object} state - 会话状态（命中时就地置 buildingHinted）。

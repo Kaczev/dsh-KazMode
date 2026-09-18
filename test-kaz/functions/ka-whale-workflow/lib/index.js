@@ -54,7 +54,7 @@ function createStore(persistStage = null) {
         roundHinted: false,
         // "自己动手造东西"提示：本轮自己的手**成功**写过文件没有（ownHandsWritten / ownHandsPath），
         // 本轮是否已经安排过（写过安排 / 派过子代理），本轮是否已提示过，
-        // 以及"已经发出、结果还没回来"的 write/edit 调用（callId 的集合）。
+        // 以及"已经发出、结果还没回来"的 write/edit 调用（callId → 参数里那个文件路径）。
         // 判据见 kaz-shared/lib/building-hint.js：提示只认**成对**的调用与结果——
         // `tool/call` 在调用发出时就 append 了，只数它会在文件还不存在的时候说"你刚写了…"。
         ownHandsWritten: false,
@@ -62,7 +62,7 @@ function createStore(persistStage = null) {
         buildingDispatched: false,
         buildingArranged: false,
         buildingHinted: false,
-        buildingPendingCalls: new Set(),
+        buildingPendingCalls: new Map(),
         // 刹车提示：本轮（自最近一条用户消息）的全部工具调用次数、已触发到哪个节点，
         // 以及本轮的起点时刻（提示正文要报"这一轮耗了多久"，起点由 noteDivingEvent 记下）。
         roundToolCalls: 0,
