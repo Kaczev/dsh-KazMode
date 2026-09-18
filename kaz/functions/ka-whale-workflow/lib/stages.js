@@ -110,6 +110,64 @@ export function renderMemoryHintText() {
   return [MEMORY_HINT_HEADER, MEMORY_HINT_BODY].join("\n");
 }
 
+/** "自己动手造东西"提示的注入头（与阶段注入、记忆提示分开的第二类提示）。 */
+export const BUILDING_HINT_HEADER = "[ka-whale-workflow building-hint]";
+
+/**
+ * 路径占位符。
+ *
+ * 与 `ELAPSED_PLACEHOLDER` 同一个道理：路径只有**注入那一刻**才知道（而且不一定知道），
+ * 所以正文先写成模板、渲染时替换。做成导出常量是为了让"替换得对不对"能被直接比对。
+ */
+export const BUILDING_HINT_PATH_PLACEHOLDER = "{{path}}";
+
+/**
+ * "自己动手造东西"提示正文（模型面文案，英文）。
+ *
+ * 为什么开头是一句**陈述**而不是问句（与 DIVING_HINT_CHECKS 那套相反）：这条提示要说的
+ * 首先是一个模型自己看不见的事实——它刚用自己的手写了文件，而这一轮什么都没安排。
+ * 事实摆出来，后面那个"该不该由我亲手造"才有由头。
+ *
+ * 三条排除项**逐字取自技能自己的 description**（skills/building-something-new）：修一个
+ * 坏掉的东西、执行一份已经谈定的计划、把一个已有的东西搬过去——都不是这个技能的地盘。
+ * 不写这三条的话，这条提示会在相邻三个技能上误开，而"误开的提示会被学会无视"是这套
+ * 提示系统唯一的失败模式。
+ *
+ * 最后那句讲的是**角色名**：`ka_sub_whale` 按名字复用子代理，所以"proposer-a / proposer-b"
+ * 这种**固定的一对**在第二轮拿回来的还是同一只手、还揣着上一轮的立场——两只手会并成一只手。
+ * 名字要跟着本轮真正在争的两个方向走。
+ */
+const BUILDING_HINT_BODY_TEMPLATE = `You have just written ${BUILDING_HINT_PATH_PLACEHOLDER} with your own hands, and nothing this round was arranged around it. If that file is a fix for something broken, a plan someone already agreed on, or an existing thing being ported, this does not apply — carry on. If it is something that does not exist yet, read building-something-new before the next write and take the round through arrange_agent: name the two hands after the directions they argue rather than a standing pair, because the same name reaches the same child, still holding its old argument — and put their disagreement in the direction each one argues, not in the wording of the task.`;
+
+/**
+ * 路径未知时的说法。
+ *
+ * **宁可模糊，也不能把 `undefined` 填进提示里**（与 `elapsedCheck` 同一条理由）：
+ * 那句话是给模型读的，一个 `undefined` 会让整条提示显得像坏掉了，
+ * 而它本该传达的"停一下，看看这件事该不该由你做"就丢了。
+ */
+const BUILDING_HINT_PATH_FALLBACK = "the file you just wrote";
+
+/**
+ * 渲染"自己动手造东西"提示的正文。
+ * @param {string|undefined} path - 刚写过的文件路径；未知时 undefined。
+ * @returns {string} 正文。
+ */
+export function buildingHintBody(path) {
+  const text = typeof path === "string" && path.trim().length > 0 ? path : BUILDING_HINT_PATH_FALLBACK;
+  return BUILDING_HINT_BODY_TEMPLATE.replace(BUILDING_HINT_PATH_PLACEHOLDER, text);
+}
+
+/**
+ * "自己动手造东西"提示的完整注入文本：头部 + 正文。
+ * 触发条件见 kaz-shared/lib/building-hint.js（自己的手成功写过文件、且本轮什么都没安排）。
+ * @param {string|undefined} path - 刚写过的文件路径；未知时 undefined。
+ * @returns {string} 注入文本。
+ */
+export function renderBuildingHintText(path) {
+  return [BUILDING_HINT_HEADER, buildingHintBody(path)].join("\n");
+}
+
 /** "刹车"提示的注入头：一轮里工具调用太多时出现（见 kaz-shared/lib/diving-hint.js）。 */
 export const DIVING_HINT_HEADER = "[ka-whale-workflow diving-hint]";
 

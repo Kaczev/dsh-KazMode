@@ -17,6 +17,7 @@ import { noteEffectiveStage } from "../../kaz-shared/lib/index.js";
 import { patchEntryAt, readArrangement, settlePatchFromNotice } from "./arrangement.js";
 import { registerKazForkProvider } from "./fork-provider.js";
 import {
+  renderBuildingHintText,
   renderDivingHintText,
   renderDivingHintTextForSubagent,
   renderMemoryHintText,
@@ -26,6 +27,7 @@ import {
 import { readRoundMarks, readStage, writeRoundMark, writeStage } from "./stage-store.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./tools.js";
 import { noteMemoryHintEvent, shouldHintMemory } from "../../kaz-shared/lib/memory-hint.js";
+import { noteBuildingEvent, shouldHintBuilding } from "../../kaz-shared/lib/building-hint.js";
 import { divingHintStep, formatElapsedDuration, lastRoundStartAt, noteDivingEvent, shouldHintDiving } from "../../kaz-shared/lib/diving-hint.js";
 
 /** 只挂给主代理的四件（子代理必须看不到）。导出是为了让"谁拿到工作流工具"这件事可被引用与核对。 */
@@ -50,6 +52,17 @@ function createStore(persistStage = null) {
         // 记忆提示：连续调用观察工具集的次数，以及本轮（自最近一条用户消息）是否已提示过。
         streak: 0,
         roundHinted: false,
+        // "自己动手造东西"提示：本轮自己的手**成功**写过文件没有（ownHandsWritten / ownHandsPath），
+        // 本轮是否已经安排过（写过安排 / 派过子代理），本轮是否已提示过，
+        // 以及"已经发出、结果还没回来"的 write/edit 调用（callId 的集合）。
+        // 判据见 kaz-shared/lib/building-hint.js：提示只认**成对**的调用与结果——
+        // `tool/call` 在调用发出时就 append 了，只数它会在文件还不存在的时候说"你刚写了…"。
+        ownHandsWritten: false,
+        ownHandsPath: "",
+        buildingDispatched: false,
+        buildingArranged: false,
+        buildingHinted: false,
+        buildingPendingCalls: new Set(),
         // 刹车提示：本轮（自最近一条用户消息）的全部工具调用次数、已触发到哪个节点，
         // 以及本轮的起点时刻（提示正文要报"这一轮耗了多久"，起点由 noteDivingEvent 记下）。
         roundToolCalls: 0,
@@ -286,6 +299,7 @@ export function apply(ctx) {
         if (!(event.seq > state.scannedSeq)) continue;
         noteMemoryHintEvent(state, event);
         noteDivingEvent(state, event);
+        noteBuildingEvent(state, event);
         const patch = settlePatchFromNotice(event);
         if (patch === null || patch.childId.length === 0) continue;
         const index = state.entries.findIndex((entry) => entry.id === patch.childId);
@@ -414,6 +428,27 @@ export function apply(ctx) {
             plugin: "ka-whale-workflow",
             form: "notice",
             summary: "memory_hint",
+          },
+        }),
+      );
+    }
+
+    // "自己动手造东西"提示：这一轮自己的手**确实**写过文件、且这一轮既没写安排也没派子代理。
+    //
+    // 位置就是这条提示的**全部要点**：必须在下面 `stageChanged` 那道门**上面**。
+    // 那道门管的是"阶段文本每回合只注入一次"，而这条提示要说的正是**回合中途**才成立的事实
+    // （写发生在 step 1 之后），落到那道门下面它永远发不出来。
+    // 子代理在前面（isSubagentAgent）就返回了，所以它们收不到这条——它们既没有派发权，
+    // 也没有 write_arrangement，读到只会去试一个它们做不到的动作。
+    if (shouldHintBuilding(state)) {
+      decision.messages.push(
+        createUserMessage({
+          content: [{ type: "text", text: renderBuildingHintText(state.ownHandsPath) }],
+          source: {
+            kind: "plugin",
+            plugin: "ka-whale-workflow",
+            form: "notice",
+            summary: "building-hint",
           },
         }),
       );
