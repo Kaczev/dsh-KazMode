@@ -55,6 +55,52 @@ export function personaValueOf(persona) {
 }
 
 /**
+ * 会话 id 的形状：字母数字加 `-_.`，1–200 字。**只校验形状，不校验它是否还活着**——
+ * "这个会话此刻还在不在"是派发那一刻的事实，写安排时问不出来，只能由派发点判断。
+ */
+const SESSION_ID_SHAPE = /^[A-Za-z0-9._-]{1,200}$/;
+
+/**
+ * 会被当成布尔开关的字符串：`"true"` 这类值**形状上**完全像会话 id（字母数字、没有空格），
+ * 所以光靠形状检查拦不住它们，必须单列。
+ *
+ * 为什么宁可单列也不放松形状检查：这个字段名叫 `fork`，读起来就像开关，模型写 `"true"`
+ * 是最有代表性的一种误用；放它过去就等于把它当成一个永远查不到的会话 id，子代理全新开始而
+ * 回执照写 "forked from"（2026-09-19 实测）。拿一个（根本不会存在的）会话 id 恰好叫
+ * `"true"` 的风险，远小于让这种误用继续静默通过。
+ */
+const BOOLEAN_LIKE_FORK_VALUES = new Set(["true", "false", "yes", "no", "on", "off", "y", "n"]);
+
+/** `fork` 允许的两种值：`"main"`（主代理自己）、或一个会话 id。 */
+export const FORK_FROM_MAIN = "main";
+
+/**
+ * 校验 `fork`：**只有 `"main"` 和一个会话 id 是合法的**，别的一律报错。
+ *
+ * 与黑名单那条同一个立场（见 `normalizeEntry` 里那段）：静默忽略一个写错的值，比报错更坏。
+ * 早先这里只检查"是不是非空字符串"，于是布尔误用（`true` / `"true"` / `"yes"`）一路活到派发点，
+ * 在那里被当成一个永远找不到的会话 id——子代理全新开始，而回执照样写 "forked from"。
+ *
+ * @param {unknown} raw - 条目上的 `fork`。
+ * @returns {{value: string|null, error?: undefined}|{value?: undefined, error: string}}
+ *   `null` 表示这次派发不 fork（没写、`null`、空串都归到这里）。
+ */
+export function forkValueOf(raw) {
+  if (raw === undefined || raw === null) return { value: null };
+  const reject = (shown) =>
+    ({
+      error: `fork must be "main" or a subagent session id, got ${shown} — this field is not a boolean switch. Write "main" to inherit your own conversation, name a live subagent id, or leave the field out for a fresh subagent.`,
+    });
+  if (typeof raw !== "string") return reject(`${JSON.stringify(raw) ?? String(raw)} (${typeof raw})`);
+  const text = raw.trim();
+  if (text.length === 0) return { value: null };
+  if (BOOLEAN_LIKE_FORK_VALUES.has(text.toLowerCase())) return reject(JSON.stringify(raw));
+  if (text === FORK_FROM_MAIN) return { value: FORK_FROM_MAIN };
+  if (SESSION_ID_SHAPE.test(text)) return { value: text };
+  return reject(JSON.stringify(raw));
+}
+
+/**
  * 校验并规范化一个安排条目（程序字段一律重置）。
  * @param {unknown} raw - 主代理写的条目。
  * @returns {{entry: object, error?: undefined}|{entry?: undefined, error: string}}
@@ -76,13 +122,15 @@ export function normalizeEntry(raw) {
       error: `persona "${personaValue}" has a fixed tool face: a blacklist on this entry would be ignored, so it is rejected instead. Drop the blacklist field, or use [role, description] if you need to narrow a subagent's tools.`,
     };
   }
-  const fork = typeof raw.fork === "string" && raw.fork.trim().length > 0 ? raw.fork.trim() : "";
+  const fork = forkValueOf(raw.fork);
+  if (fork.error !== undefined) return { error: `entry ${JSON.stringify(personaValue)}: ${fork.error}` };
+  const forkValue = fork.value;
   return {
     entry: {
       persona: personaValue,
       blacklist,
       task,
-      ...(fork.length > 0 ? { fork } : {}),
+      ...(forkValue !== null ? { fork: forkValue } : {}),
       id: "",
       status: "pending",
       summary: "",

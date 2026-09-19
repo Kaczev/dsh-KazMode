@@ -47,9 +47,15 @@ ka_sub_whale(persona)         # dispatch one entry, by role name
   of whatever is written here; adding names narrows the role further, and an empty list adds nothing back.
   Names in the reserved set are dropped silently and a name that is not a real tool is skipped with a note
   in the dispatch receipt - so read the receipt once rather than assuming the list landed whole.
-- `fork` is optional and names a live session - `"main"` or a subagent id - whose completed history seeds
-  the new subagent. If that session is not live, the dispatch starts fresh instead of failing, and says so in
-  its receipt.
+- `fork` is optional and is **either the literal `"main"` (the dispatcher's own conversation) or a subagent id**
+  - nothing else. It is not a boolean: `true`, `false`, `"true"`, `"yes"` and any other value are **rejected
+  when the plan is written**. Two facts decide whether it can actually give the child history, and both must
+  hold at the moment of dispatch: the target must still resolve as a live session, and its log must already
+  contain a completed turn. A target that is still running has no completed turn; a target that has finished
+  may no longer resolve; and the dispatcher's own turn is open whenever it dispatches. When either fails the
+  child starts fresh and the receipt says so - it never claims history it did not inherit.
+- `fork` is also ignored whenever the role name is **reused** (see below): reuse happens before a provider is
+  chosen, so the child continues its own earlier history instead. The receipt says that too.
 - `id`, `status`, and `summary` are the program's fields. Do not write them; they are filled on dispatch and
   preserved by role name across rewrites of the plan. `get_arrangement` reads them back, with `summary`
   truncated to its first line at 200 characters - which is why a subagent's closing message must lead with
@@ -84,18 +90,23 @@ ka_sub_whale(persona)         # dispatch one entry, by role name
 - Re-dispatching a name that is already loaded **reuses** that subagent with its earlier context instead of
   starting a fresh one. That is the point: a second dispatch in the same conversation continues a role that
   already knows what it was told. The consequence to plan around is the opposite of fresh eyes - queue more
-  work for a role rather than expecting it to re-read its first instructions.
+  work for a role rather than expecting it to re-read its first instructions. A `fork` written on a reused
+  entry does nothing, and the receipt says so; if the role must actually be seeded from somewhere, it needs a
+  **new name**, so that it starts fresh and the fork is what fills its context.
 - Dispatching a name whose subagent is still running is refused; wait for its report instead.
 - A role that must be independent of another must therefore have a **different name**. Forking a role, or
   re-dispatching the same name, hands the work to an agent that has already seen it.
 
 ## Reading the result back
 
-Dispatch returns a receipt; read it. It names the subagent id, whether an existing one was reused or a fresh
-one was started, whether a requested `fork` target was reachable, and which blacklist names were skipped.
-A refusal names the reason - an unknown persona, an entry with no task, a fixed-tool-face entry carrying a
-blacklist, a name with no recorded entry, or the running cap. The refusal is the diagnosis; there is no
-second place to look.
+Dispatch returns a receipt, and **you are shown the whole thing** - not just the subagent id. It names the
+subagent id, which provider actually ran (`kaz-fork` only when a usable fork target was found), whether an
+existing one was reused, whether a requested `fork` target was reachable and whether the child therefore
+inherited anything, and which blacklist names were skipped. Read it: when it says the child started fresh, the
+role has no memory of that target's conversation, however the plan was written.
+A refusal names the reason - an unknown persona, an entry with no task, an illegal `fork` value, a
+fixed-tool-face entry carrying a blacklist, a name with no recorded entry, or the running cap. The refusal is
+the diagnosis; there is no second place to look.
 
 `get_arrangement` reads the plan back with the program's fields, in any stage. When the conversation has
 grown long, prefer it over reconstructing what was dispatched from memory.

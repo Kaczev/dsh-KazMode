@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { CONCURRENCY_CAP_REASON, MAIN_BLACKLIST, MAX_CONCURRENT_SUBAGENTS, MEMORY_MAINTAINER_BLACKLIST, MEMORY_MAINTAINER_RESERVED, SLOP_CLEANER_BLACKLIST, SLOP_CLEANER_RESERVED, SUBAGENT_DEFAULT_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
 import { MEMORY_MAINTAINER_PERSONA, SLOP_CLEANER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
 import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
-import { KAZ_FORK_PROVIDER, noteForkSource } from "./fork-provider.js";
+import { KAZ_FORK_PROVIDER, noteForkSource, resolveForkTarget } from "./fork-provider.js";
 import { LEGAL_TRANSITIONS, REFLECTION_ADVERTISED_BYTES, STAGES, reflectionProblem } from "./stages.js";
 
 const RESULT_SCHEMA = {
@@ -37,6 +37,16 @@ const TEXT_SCHEMA = {
 };
 
 const TEXT_RENDER = (_args, value) => [{ type: "text", text: value.ok ? value.text : `failure: ${value.message}` }];
+
+/**
+ * `ka_sub_whale` 的回执渲染：**把 `message` 也给模型看**。
+ *
+ * 为什么不能只回 `text`（= 一行 `subagent id: …`）：回执的全部真相都在 `message` 里——
+ * 用了哪个 provider、fork 目标解析到了没有、有没有退回、黑名单跳过了谁。只渲染 id 等于让
+ * 模型看不见这些，于是"fork 目标早已不是活会话、这次全新开始"这种事它永远学不到，还会继续
+ * 以为自己拿到了前情（2026-09-19 实测）。
+ */
+const RECEIPT_RENDER = (_args, value) => [{ type: "text", text: value.ok ? value.message : `failure: ${value.message}` }];
 
 const ok = (message) => ({ ok: true, message });
 const fail = (message) => ({ ok: false, message });
@@ -152,7 +162,7 @@ export function writeArrangementTool({ store }) {
   return defineTool({
     name: "write_arrangement",
     description:
-      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", "slopCleaner", or [role, description] (an array of exactly two non-empty strings); anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
+      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", "slopCleaner", or [role, description] (an array of exactly two non-empty strings); fork must be exactly "main" (inherit your own conversation) or a subagent session id, and is NOT a boolean — true/false/"true"/"yes" are rejected; anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
     parameters: {
       entries: { type: "array", required: true, items: { type: "json" }, description: "The dispatch plan entries." },
     },
@@ -208,11 +218,11 @@ export function kaSubWhaleTool({ ctx, store }) {
   return defineTool({
     name: "ka_sub_whale",
     description:
-      'Dispatch one arrangement entry as a subagent. Input is only the persona (the reserved values are "memoryMaintainer" for the memory keeper and "slopCleaner" for the AI-slop cleaner); blacklist / task / fork come from the arrangement, and the task becomes the subagent\'s first message. Memory dispatches and their reports stay internal: never relay them to the user.',
+      'Dispatch one arrangement entry as a subagent. Input is only the persona (the reserved values are "memoryMaintainer" for the memory keeper and "slopCleaner" for the AI-slop cleaner); blacklist / task / fork come from the arrangement, and the task becomes the subagent\'s first message. The result line is the dispatch receipt - read it, because it is the only place that says which provider ran, whether the child actually inherited a fork target\'s history, and what was skipped. Memory dispatches and their reports stay internal: never relay them to the user.',
     parameters: {
       persona: { type: "string", required: true, description: 'The arrangement entry to dispatch: "memoryMaintainer", "slopCleaner", or a custom role name.' },
     },
-    output: { schema: TEXT_SCHEMA, render: TEXT_RENDER },
+    output: { schema: TEXT_SCHEMA, render: RECEIPT_RENDER },
     async execute(args, exec) {
       const sessionId = sessionIdOf(exec);
       if (sessionId === undefined) return { ...fail("this agent has no session"), text: "" };
@@ -248,20 +258,23 @@ export function kaSubWhaleTool({ ctx, store }) {
       const skippedNote =
         skipped.length > 0 ? ` (blacklist skipped unknown tool${skipped.length > 1 ? "s" : ""}: ${skipped.join(", ")})` : "";
       const label = isKeeper ? "memoryMaintainer" : isCleaner ? "slopCleaner" : role;
-      const forkTarget = typeof entry.fork === "string" ? entry.fork : "";
+      // fork 目标：`"main"` 或一个会话 id。两种缺省分开处理（见 resolveForkTarget）——
+      // "没写 fork" 与 "目标已失效、退回派发者" 的回执含义正好相反，不能共用一句话。
+      const agents = ctx.get("agents");
+      const agentOf = (id) =>
+        agents !== undefined && agents !== null && typeof agents.get === "function" ? agents.get(id) : undefined;
+      const fork = resolveForkTarget(entry.fork, agentOf);
       let provider = "spawn";
       let forkSource = "";
       let note = "";
-      if (forkTarget.length > 0) {
-        const agents = ctx.get("agents");
-        const sourceAgent = forkTarget === "main" ? exec.agent : agents?.get?.(forkTarget);
-        if (sourceAgent === undefined || sourceAgent === null) {
-          note = ` (fork target "${forkTarget}" is not a live session; started fresh instead — read that history with context_search companion="${forkTarget}")`;
-        } else {
-          provider = KAZ_FORK_PROVIDER;
-          forkSource = forkTarget === "main" ? "" : forkTarget;
-          note = forkTarget === "main" ? " (forked from your conversation)" : ` (forked from "${forkTarget}")`;
-        }
+      if (fork.kind === "fallback") {
+        // provider 保持 `spawn`：这里**没有**任何可以继承的源，所以不许出现 "forked from"
+        // 这类字眼——那正是这个 bug 的原形（回执说继承了，子代理其实什么都没有）。
+        note = ` (fork target "${fork.target}" is not a live session right now, and there is no other source to inherit from, so this child started fresh with no inherited history)`;
+      } else if (fork.kind === "target") {
+        provider = KAZ_FORK_PROVIDER;
+        forkSource = fork.source ?? "";
+        note = fork.source === null ? " (forked from your conversation)" : ` (forked from "${fork.source}")`;
       }
       const subagents = ctx.get("subagents");
       if (subagents === undefined || subagents === null) {
@@ -270,9 +283,6 @@ export function kaSubWhaleTool({ ctx, store }) {
       // 复用（旧 kaz 的强制复用机制）：先在本对话的 continuable 子代理里按 label
       // （= 角色名）找同角色、且当前不在忙的那个 → 把新任务 sendMessage 给它；
       // 都在忙就先别派（等它报告）；找不到才新开一个。
-      const agents = ctx.get("agents");
-      const agentOf = (id) =>
-        agents !== undefined && agents !== null && typeof agents.get === "function" ? agents.get(id) : undefined;
       let reusableId = "";
       let busyId = "";
       let enumerated = false;
@@ -319,7 +329,12 @@ export function kaSubWhaleTool({ ctx, store }) {
       if (reused) {
         const continued = await patchEntryAt(sessionCwdOf(exec), sessionId, index, { id: reusableId, status: "running" });
         store.setEntries(sessionId, continued);
-        return { ok: true, message: `continued ${label} as ${reusableId} (reused, no new subagent)`, text: `subagent id: ${reusableId}` };
+        // 复用发生在选 provider 之前，所以 `fork` 在这个分支里从来不会被消费：写下来的目标
+        // **不会**被继承，子代理接着自己原有的历史。静默照写 "dispatched" 会让模型以为
+        // fork 生效了，所以这里必须自己说一句。
+        const reuseNote =
+          fork.kind === "none" ? "" : ` (reused an existing ${label}, so the fork target "${fork.target}" was NOT applied)`;
+        return { ok: true, message: `continued ${label} as ${reusableId} (reused, no new subagent)${reuseNote}`, text: `subagent id: ${reusableId}` };
       }
       // 复用不成 → 准备新开一个：先数"此刻同时活着几个"。上限见
       // kaz-shared/lib/blacklists.js（MAX_CONCURRENT_SUBAGENTS）——限的是同时运行数，不是计划条数。
