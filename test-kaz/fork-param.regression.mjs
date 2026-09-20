@@ -66,6 +66,17 @@ const dispatcherSession = { id: "session-main", snapshotEvents: () => [] };
   // 认掉 `false` 就等于承认"可以当布尔写"，`"true"` 会跟着一起被当成合法。
   check("1c'. fork=false 也报错（不给布尔留后门）", forkValueOf(false).error !== undefined, JSON.stringify(forkValueOf(false)));
 
+  // 1c''. 显式的 `"none"` = 不 fork，而且**与不写这个字段存成同一种条目**（都是 null）。
+  // 为什么单列：不给它含义时，`"none"` 形状上是个合法会话 id，会被当成一个查不到的会话投递，
+  // 回执还印一句误导的话——看起来像"我说了 none 所以没 fork"，实际含义完全不同。
+  {
+    const got = forkValueOf("none");
+    check('1c2. fork="none" 归一成"不 fork"', got.error === undefined && got.value === null, JSON.stringify(got));
+    check('1c2. fork="  none  " 裁空白后同上', forkValueOf("  none  ").value === null);
+    const entry = normalizeEntry({ persona: ["worker", "does work"], task: "t", fork: "none" });
+    check('1c2. fork="none" 的条目里没有 fork 字段（与不写等价）', entry.error === undefined && !("fork" in entry.entry), JSON.stringify(entry));
+  }
+
   // 1d. 两个合法值：字面 "main"（大小写敏感，前后空白裁掉）与会话 id 形状。
   check('1d. fork="main" 合法', forkValueOf(FORK_FROM_MAIN).value === "main");
   check('1d. fork="  main  " 裁空白后合法', forkValueOf("  main  ").value === "main");

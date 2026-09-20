@@ -47,10 +47,12 @@ ka_sub_whale(persona)         # dispatch one entry, by role name
   of whatever is written here; adding names narrows the role further, and an empty list adds nothing back.
   Names in the reserved set are dropped silently and a name that is not a real tool is skipped with a note
   in the dispatch receipt - so read the receipt once rather than assuming the list landed whole.
-- `fork` is optional and is **either the literal `"main"` (the dispatcher's own conversation) or a subagent id**
-  - nothing else. It is not a boolean: `true`, `false`, `"true"`, `"yes"` and any other value are **rejected
-  when the plan is written**. Two facts decide whether it can actually give the child history, and both must
-  hold at the moment of dispatch: the target must still resolve as a live session, and its log must already
+- `fork` is optional and is **one of three things**: the literal `"main"` (inherit the dispatcher's own
+  conversation), the literal `"none"` (start a fresh subagent), or a subagent id. `"none"` and leaving the
+  field out mean the same thing and store the same entry. It is not a boolean: `true`, `false`, `"true"`,
+  `"yes"` and any other value are **rejected when the plan is written**. Two facts decide whether a target
+  can actually give the child history, and both must hold at the moment of dispatch: the target must still
+  resolve as a live session, and its log must already
   contain a completed turn. A target that is still running has no completed turn; a target that has finished
   may no longer resolve; and the dispatcher's own turn is open whenever it dispatches. When either fails the
   child starts fresh and the receipt says so - it never claims history it did not inherit.
@@ -73,13 +75,33 @@ The whole decision reduces to one fact: **has this conversation closed a turn ye
 - **Yes** - the ordinary case, from the second dispatch of a conversation onward - write `fork: "main"`.
   The child starts with every earlier turn of this conversation and needs no backstory in its task.
 - **No** - the first dispatch of a brand-new conversation - there is no closed turn to cut at, so the
-  seed is empty and the fork buys nothing. Leave the field out; the receipt says the child started fresh.
+  seed is empty and the fork buys nothing. Write `"none"` or leave the field out; the receipt says the
+  child started fresh.
 
 Two things not to plan around. A fork of **another subagent** is rarely available in practice: the id
 arrives with that subagent's report, by which time it has usually stopped resolving, and a running
 target has no closed turn to cut at - so faking it, or waiting for the ideal moment, costs more than
 naming the role again. And a child that was **reused** rather than started fresh never sees the fork at
 all, however the entry is written - for a role that must actually be seeded, use a **new role name**.
+
+### When a fork is worth NOT writing
+
+`fork: "none"` is legal, and so is leaving the field out - write one of them, or nothing, when any of
+these holds:
+
+- **The child must be independent of what we concluded.** An adversarial check, a second opinion, a
+  fresh read of a problem this conversation has been circling: inheriting our reasoning is then a
+  defect, not a gift - a verifier that starts already agreeing with the thing it is checking is not
+  verifying. Ask for the independence in the task, and leave the prefix out.
+- **The task is small.** The prefix is the whole earlier conversation, so a child seeded with it pays
+  for that context on every step - and five subagents may run at once, which the same budget is shared
+  with. A short, self-contained job is cheaper told outright in its task.
+- **The target cannot seed anything anyway.** Aiming at a source with no closed turn (the first
+  dispatch of a new conversation), or at a role that will be reused: the receipt will say the child
+  started fresh, so write the context into the task instead of hoping it arrives by inheritance.
+
+Writing `"none"` explicitly is never wrong, and is worth it when the plan is read by someone else: it
+records that you considered the fork and decided against it, rather than that you forgot the field.
 
 ## The reserved values
 

@@ -162,7 +162,7 @@ export function writeArrangementTool({ store }) {
   return defineTool({
     name: "write_arrangement",
     description:
-      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", "slopCleaner", or [role, description] (an array of exactly two non-empty strings); fork must be exactly "main" (inherit your own conversation) or a subagent session id, and is NOT a boolean — true/false/"true"/"yes" are rejected; anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
+      'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", "slopCleaner", or [role, description] (an array of exactly two non-empty strings); fork must be exactly "main" (inherit your own conversation), "none" (start a fresh subagent — the same as leaving the field out), or a subagent session id, and is NOT a boolean — true/false/"true"/"yes" are rejected; anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
     parameters: {
       entries: { type: "array", required: true, items: { type: "json" }, description: "The dispatch plan entries." },
     },

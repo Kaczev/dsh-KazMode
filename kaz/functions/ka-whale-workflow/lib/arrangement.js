@@ -71,11 +71,27 @@ const SESSION_ID_SHAPE = /^[A-Za-z0-9._-]{1,200}$/;
  */
 const BOOLEAN_LIKE_FORK_VALUES = new Set(["true", "false", "yes", "no", "on", "off", "y", "n"]);
 
-/** `fork` 允许的两种值：`"main"`（主代理自己）、或一个会话 id。 */
+/** `fork` 的两个定向值：`"main"`（从主代理自己的对话继承）与 `"none"`（这次不 fork）。 */
 export const FORK_FROM_MAIN = "main";
 
 /**
- * 校验 `fork`：**只有 `"main"` 和一个会话 id 是合法的**，别的一律报错。
+ * `"none"`：**显式的"不 fork"**，与"不写这个字段"完全等价（两者存下来是同一种条目：没有
+ * `fork` 字段），所以在派发点没有第二种含义，也不可能出现"显式 none 和省略打起来"。
+ *
+ * 为什么值得给一个动作词：`fork` 现在是个需要判断的字段——"要不要把这个对话的前情交给这个
+ * 新角色"——有判断就会想明确表态。不给 `"none"` 含义时，它在**形状上是个完全合法的会话 id**
+ * （字母数字、无空格），于是被当成一个查不到的会话投递，回执还印一句"目标不是活会话"，看
+ * 起来像"我说了 none 所以没 fork"，实际含义完全不同。一个明确含义，比让这个猜测静默落到别的
+ * 分支上诚实。
+ *
+ * 为什么不认 `false` 而认 `"none"`：`false` 在同一个字段上和 `true` 是一对，认一个就得认另一个，
+ * 而 `true` 是这次要修掉的起点（它会被当成布尔开关，字形上还撞得上会话 id）。`"none"` 是与
+ * `"main"` 同一层的字符串，不打开布尔这扇门。
+ */
+export const FORK_NONE = "none";
+
+/**
+ * 校验 `fork`：**只有 `"main"`、`"none"` 和一个会话 id 是合法的**，别的一律报错。
  *
  * 与黑名单那条同一个立场（见 `normalizeEntry` 里那段）：静默忽略一个写错的值，比报错更坏。
  * 早先这里只检查"是不是非空字符串"，于是布尔误用（`true` / `"true"` / `"yes"`）一路活到派发点，
@@ -83,19 +99,20 @@ export const FORK_FROM_MAIN = "main";
  *
  * @param {unknown} raw - 条目上的 `fork`。
  * @returns {{value: string|null, error?: undefined}|{value?: undefined, error: string}}
- *   `null` 表示这次派发不 fork（没写、`null`、空串都归到这里）。
+ *   `null` 表示这次派发不 fork：**没写**、`null`、空串、以及显式的 `"none"` 都归到这里。
  */
 export function forkValueOf(raw) {
   if (raw === undefined || raw === null) return { value: null };
   const reject = (shown) =>
     ({
-      error: `fork must be "main" or a subagent session id, got ${shown} — this field is not a boolean switch. Write "main" to inherit your own conversation, name a live subagent id, or leave the field out for a fresh subagent.`,
+      error: `fork must be "main" (inherit your own conversation), "none" (start a fresh subagent), or a subagent session id, got ${shown} — this field is not a boolean switch: true/false/"true"/"yes" are rejected.`,
     });
   if (typeof raw !== "string") return reject(`${JSON.stringify(raw) ?? String(raw)} (${typeof raw})`);
   const text = raw.trim();
   if (text.length === 0) return { value: null };
   if (BOOLEAN_LIKE_FORK_VALUES.has(text.toLowerCase())) return reject(JSON.stringify(raw));
   if (text === FORK_FROM_MAIN) return { value: FORK_FROM_MAIN };
+  if (text === FORK_NONE) return { value: null };
   if (SESSION_ID_SHAPE.test(text)) return { value: text };
   return reject(JSON.stringify(raw));
 }
