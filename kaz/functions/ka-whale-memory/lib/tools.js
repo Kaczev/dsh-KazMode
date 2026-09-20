@@ -11,6 +11,7 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { clampInt } from "../../kaz-shared/lib/clamp-int.js";
+import { boundedShown } from "../../kaz-shared/lib/echo.js";
 import { scoreBM25 } from "./bm25.js";
 import { KINDS } from "./paths.js";
 import { findByName, listMemories, readMemoryFile, removeMemory, writeMemory } from "./store.js";
@@ -92,8 +93,15 @@ function kindsOf(value) {
   return value === "context" || value === "paths" ? [value] : [...KINDS];
 }
 
-/** 把一处记忆说成人话：`global context "名称"`。 */
-const describe = (entry) => `${entry.location} ${entry.kind} "${entry.name}"`;
+/**
+ * 把一处记忆说成人话：`global context "名称"`。
+ *
+ * 名字过 `boundedShown`：**写入**那条路有 `sizeProblem` 门禁（公布 64 / 真实 77 字节），但
+ * 读取这条路没有——**工具在门上把关，库本身不把**（与安排文件同一个边界）。所以库里已经躺着
+ * 一条超长名字的记忆时（早先版本写的、或手改的文件），`forgot … "HHH…×50000"` 这种回执会
+ * 把整个名字印进模型上下文（2026-09-21 实测 **50,022** 字）。这里界一次，三个调用点一起受益。
+ */
+const describe = (entry) => `${entry.location} ${entry.kind} ${boundedShown(entry.name)}`;
 
 /** 读出记忆正文：内容记忆 → context，路径记忆 → paths。 */
 async function bodyOf(entry) {
@@ -231,7 +239,7 @@ export function memoryDetailTool() {
           body: { type: "string", required: true },
         },
       },
-      render: (args, value) => (value.found ? renderText(value.body) : renderText(`failure: no memory named "${String(args.name ?? "")}"`)),
+      render: (args, value) => (value.found ? renderText(value.body) : renderText(`failure: no memory named ${boundedShown(String(args.name ?? ""))}`)),
     },
     async execute(args, exec) {
       const cwd = cwdOf(exec);
@@ -310,10 +318,10 @@ export function memorySaveTool() {
       if (problem !== null) return fail(problem);
       const existing = await findByName(name, cwd);
       if (existing.length > 0) {
-        return fail(`"${name}" already exists as ${describe(existing[0])} — use memory_update to replace its body`);
+        return fail(`${boundedShown(name)} already exists as ${describe(existing[0])} — use memory_update to replace its body`);
       }
       await writeMemory(location, kind, name, body, cwd, { summary: args.summary, keywords: args.keywords });
-      return ok(`saved ${location} ${kind} "${name}"`);
+      return ok(`saved ${location} ${kind} ${boundedShown(name)}`);
     },
     presentCall: (args) => present("Save memory", args),
   });
@@ -342,10 +350,10 @@ export function memoryUpdateTool() {
       const kind = hasContext ? "context" : "paths";
       const body = hasContext ? args.context : args.paths;
       const matches = await findByName(name, cwd);
-      if (matches.length === 0) return fail(`no memory named "${name}" to update`);
+      if (matches.length === 0) return fail(`no memory named ${boundedShown(name)} to update`);
       const memory = matches[0];
       if (memory.kind !== kind) {
-        return fail(`"${name}" is a ${memory.location} ${memory.kind} memory — give the matching body field`);
+        return fail(`${boundedShown(name)} is a ${memory.location} ${memory.kind} memory — give the matching body field`);
       }
       const current = await readMemoryFile(memory.file);
       const summary = typeof args.summary === "string" ? args.summary : typeof current?.summary === "string" ? current.summary : "";
@@ -373,7 +381,7 @@ export function memoryForgetTool() {
       const name = String(args.name ?? "").trim();
       if (name.length === 0) return fail("name must be a non-empty string");
       const matches = await findByName(name, cwd);
-      if (matches.length === 0) return fail(`no memory named "${name}"`);
+      if (matches.length === 0) return fail(`no memory named ${boundedShown(name)}`);
       await removeMemory(matches[0].file);
       return ok(`forgot ${describe(matches[0])}`);
     },

@@ -4,6 +4,7 @@
 
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { clampInt } from "../../kaz-shared/lib/clamp-int.js";
+import { boundedShown } from "../../kaz-shared/lib/echo.js";
 import { entriesOfSession, searchEntries } from "./session-log.js";
 
 const renderText = (value) => [{ type: "text", text: value }];
@@ -78,11 +79,11 @@ export async function resolveCompanion(ctx, agent, name) {
   );
   if (match === undefined) {
     const known = children.map((child) => child?.label ?? child?.id).filter((item) => typeof item === "string");
-    return { error: `unknown companion "${wanted}"; known companions: main${known.length > 0 ? `, ${known.join(", ")}` : ""}` };
+    return { error: `unknown companion ${boundedShown(wanted)}; known companions: main${known.length > 0 ? `, ${known.join(", ")}` : ""}` };
   }
   const session = ctx.get("sessions")?.get?.(match.id);
   if (session === undefined) {
-    return { error: `companion "${match.label ?? match.id}" is not live right now` };
+    return { error: `companion ${boundedShown(match.label ?? match.id)} is not live right now` };
   }
   return { session, from: typeof match.label === "string" && match.label.length > 0 ? match.label : String(match.id) };
 }

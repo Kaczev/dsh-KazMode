@@ -7,6 +7,13 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+// 有界回显：**实现在共享层**（kaz-shared/lib/echo.js），三个插件共用同一份，这里只转出去。
+// 从本文件转出（而不是让调用方各自去找 echo.js）是为了不炸掉 ka-whale-workflow 里已有的
+// import 面：tools.js 与本套件的测试都从 arrangement.js 取这两个名字。**不要在这里再写一份实现**
+// ——两份并排的实现迟早会各自漂移，而那正是这轮修的东西。
+export { ERROR_ECHO_MAX_CHARS, boundedShown } from "../../kaz-shared/lib/echo.js";
+import { boundedShown } from "../../kaz-shared/lib/echo.js";
+
 /** summary 超长截断的长度（设计稿：取首行、超长截断）。 */
 export const SUMMARY_MAX_CHARS = 200;
 
@@ -50,57 +57,6 @@ export const PERSONAS_WITH_FIXED_TOOL_FACE = Object.freeze(["memoryMaintainer", 
 export function personaNameOf(personaValue) {
   if (Array.isArray(personaValue)) return personaValue[0];
   return typeof personaValue === "string" ? personaValue : "";
-}
-
-/**
- * 报错里回显**原始值**时最多印多少个字符。
- *
- * 为什么必须有上界：写安排的是模型，它把一个字段写错位置时，值可能是几千到几万个字符
- * （实测形态：主代理把整段任务正文塞进 persona 数组的第二项）。报错原样回显，这段正文就
- * 整段进到它的上下文里，而它多半已经从别处收过一遍了——一次形状错误因此变成一次上下文事故。
- * 截断并写明省了多少，比原样回显更诚实：模型看到的是"值太长、被切了"，而不是"值就这么长"。
- */
-export const ERROR_ECHO_MAX_CHARS = 200;
-
-/**
- * 有界回显一个原始值：JSON 化（字符串带引号、其它值就是字面量），超长则截断并写明省了多少字符。
- *
- * **这是 `ka-whale-workflow` 里唯一允许回显模型原始值的地方**（tools.js 也从这里 import）。任何新写的报错
- * 只要要印一个模型给的值，就必须过这一道——"这条一定很短"的历史判断已经错过两次：先是 E6 的
- * 数组第二项（行为描述），再是派发回执里的黑名单与角色名。
- *
- * **别把这句读成"整个预设都盖住了"——它不是。**已知两处同类的、未做有界化的回显，都在本预设行
- * 里，都在本次改动范围之外（没有批准修它们，所以留着）：
- *   * `kaz-context-policy/lib/search.js:81` —— `unknown companion "${wanted}"`，`wanted` 来自
- *     `context_search` 的 `companion` 参数（纯字符串、无 `maxLength`）。5 万字入参实测 **50,044** 字。
- *   * `ka-whale-memory/lib/tools.js:234` —— `no memory named "${String(args.name ?? "")}"`，`name`
- *     是 `{type:"string",required:true}`，五处参数声明都没有 `maxLength`。5 万字入参实测 **50,027** 字。
- * 也就是说"这条报错有多长"这件事，本文件保证的只是**走这条路径的那些**。下一处落地前先量一遍，
- * 别按这份注释推断。
- *
- * `JSON.stringify` 会抛的两种值（BigInt、循环引用）走 `String(value)` 兜底：它们**到不了**这里
- * （工具的入参是 JSON 解析出来的，两个都构造不出来），但这个函数是导出的、会被复用到别处，
- * 一个"回显函数在回显时抛异常"的失败模式比回显得难看坏得多——抛出去会让整条报错路径变成
- * 一个未捕获异常。
- *
- * 被切的可能正好是**代理对的一半**：那样会产出孤立代理（显示成 U+FFFD，看起来像原值里本来就有
- * 乱码）。所以切点落在高位代理上时往前多让一个字符。
- *
- * @param {unknown} value - 要回显的值。
- * @returns {string} 有长度上界的回显文本：单次回显 ≤ 222 字。**有界是逐处的，不是逐条消息的**——
- *   一条派发回执最多同时拼进四个回显，实测能到 ~900 字，见测试文件 5p。
- */
-export function boundedShown(value) {
-  let text;
-  try {
-    text = JSON.stringify(value) ?? String(value);
-  } catch {
-    text = String(value);
-  }
-  if (text.length <= ERROR_ECHO_MAX_CHARS) return text;
-  const head = text.slice(0, ERROR_ECHO_MAX_CHARS - 1);
-  const safe = /[\uD800-\uDBFF]$/u.test(head) ? head.slice(0, -1) : head;
-  return `${safe}… (+${text.length - safe.length} more chars)`;
 }
 
 /**

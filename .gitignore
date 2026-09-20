@@ -7,3 +7,5 @@
 /KazPlugins/kaz-skill-*
 /test-kaz/node_modules/
 /kaz/node_modules/
+/.tmp-*/
+/发布与回滚.md
