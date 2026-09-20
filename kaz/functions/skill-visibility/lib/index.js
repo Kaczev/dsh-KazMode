@@ -36,8 +36,8 @@
 
 export const name = "skill-visibility";
 
-// 只用 `ctx.skills`；声明出来，免得挂载期取服务抛错。
-export const inject = ["skills"];
+// 用 `ctx.skills`（provider）与 `ctx.tools`（否决守卫）；两个都声明出来，免得挂载期取服务抛错。
+export const inject = ["skills", "tools"];
 
 import { FileSystemSkillProvider } from "@deepseek-ai/dsh-skill-filesystem";
 import { isSubagentAgent } from "../../kaz-shared/lib/agent-role.js";
@@ -48,6 +48,36 @@ const DEFAULT_PROVIDER_NAME = "filesystem";
 
 /** 只给主代理的技能名集合（查表用）。 */
 const MAIN_ONLY = new Set(MAIN_AGENT_ONLY_SKILLS);
+
+/** 加载单个技能的工具名（平台技能工具）。 */
+const SKILL_TOOL_NAME = "skill";
+
+/**
+ * 子代理请求一个主代理专用技能时的**否决理由**：拒绝，并说清为什么、以及该怎么补救。
+ *
+ * 为什么需要它：名单本身只让这些技能**从子代理的技能目录里消失**，而平台技能工具遇到目录里没有的
+ * 名字会抛它自己那句 `skill "X" is unknown or no longer available`——读起来像"这个技能不存在"，
+ * 而不是"你不被允许看它"。实测里正是这个误读浪费了时间（子代理拿着任务里写明的名字，被告知没有）。
+ *
+ * 为什么不能在 provider 的 `get()` 里拦：平台工具先查**过滤后的目录**（dsh-tool-skill 第 145-146 行），
+ * 名字不在目录里就在那里抛掉了，`ctx.skills.get()` 根本不会被调用；而且 `ctx.skills.get()` 自己在
+ * **同一张过滤后的表**里查（dsh-skill 第 250-255 行），查不到直接 undefined，provider 的 `get()`
+ * 同样到不了。所以否决必须**在工具主体之前**发出——也就是 `tools.guard`（或等价的 pre-execute），
+ * 它的理由会被渲染成回给模型的那句 `Error: <理由>`（dsh-tools 第 3127-3134 行）。
+ *
+ * 不改任何权限：同一批调用在改动前后都被拒（拒绝点还提前了），变的是**那句话**。
+ * 也绝不回显技能正文——理由里只有技能名。
+ *
+ * @param {object} exec - 工具执行对象（`name` / `arguments` / `agent`）。
+ * @returns {string|undefined} 否决理由；`undefined` = 放行。
+ */
+export function skillVisibilityDenial(exec) {
+  if (exec?.name !== SKILL_TOOL_NAME) return undefined;
+  if (!isSubagentAgent(exec.agent)) return undefined;
+  const requested = exec.arguments?.name;
+  if (typeof requested !== "string" || !MAIN_ONLY.has(requested)) return undefined;
+  return `skill "${requested}" is main-agent-only and cannot be loaded by a subagent; the main agent must read it and put what you need into the task text.`;
+}
 
 /**
  * 判断这次读取是不是子代理发起的。
@@ -65,11 +95,12 @@ function readBySubagent(options) {
 }
 
 /**
- * 过滤候选：子代理侧剔除主代理专用的技能。
+ * 过滤候选：子代理侧剔除主代理专用的技能。**导出是为了让套件能直接钉住"权限没变"这一步**——
+ * 名字在过滤后的目录里不存在，才是这些调用在改动前后都被拒的原因。
  * @param {readonly object[]} candidates
  * @returns {object[]}
  */
-function filterForSubagent(candidates) {
+export function filterSubagentCandidates(candidates) {
   return candidates.filter((candidate) => !MAIN_ONLY.has(candidate?.name));
 }
 
@@ -101,14 +132,16 @@ export function apply(ctx, config) {
         const listed = await inner.list(options);
         if (!readBySubagent(options)) return listed;
         // 官方 provider 可能返回"显式 observation"（发现不完整时），两种形状都要处理。
-        if (Array.isArray(listed)) return filterForSubagent(listed);
+        if (Array.isArray(listed)) return filterSubagentCandidates(listed);
         if (listed !== null && typeof listed === "object" && Array.isArray(listed.candidates)) {
-          return { ...listed, candidates: filterForSubagent(listed.candidates) };
+          return { ...listed, candidates: filterSubagentCandidates(listed.candidates) };
         }
         return listed;
       },
-      // 不按调用者过滤 get()：目录里已经看不见的名字，工具侧也载入不了（走的是同一套查找），
-      // 在这里再挡一道只会多一个可能出错的判断点。
+      // 不在**这一层**按调用者过滤 get()：目录里已经看不见的名字，工具侧也载入不了（走的是同一套
+      // 查找），在这里再挡一道只会多一个可能出错的判断点。
+      // "为什么被拒"那句话由下面的 `skillVisibilityDenial` 守卫负责——它跑在工具主体之前，是唯一
+      // 到得了的位置（理由见该函数上方）。
       get: (candidate, options) => inner.get(candidate, options),
     };
   });
@@ -123,4 +156,23 @@ export function apply(ctx, config) {
     if (!isMutationActor(actor)) return;
     inner?.observeHostMutation?.(target.displayPath);
   });
+
+  // 说清"为什么被拒"的那道否决。装两处，因为要保证子代理那条路一定被走到：
+  //   (1) 插件自己的 scope——预设这一层在**每个** agent 的 scope 祖先链上，所以主代理与子代理的
+  //       执行都会走到它（dsh-tools 的 guardReason 走 `chainLayers(exec.agent)`，层由 dsh-scope 的
+  //       `scopeChainOf` 从 agent 往上枚举）；
+  //   (2) 每个被创建的 agent 的 scope 上再装一份——子代理的 scope 是不是也绑在预设这一层上，本机
+  //       没有活体子代理可验，多装这一份就不依赖那个假设。
+  // 判定本身用 `isSubagentAgent`（对非子代理一律返回 false），所以主代理在两个方向都不受影响：
+  // 它**能**照旧载入这些技能，也照旧不被过滤。
+  const installDenialGuard = (target) => {
+    const tools = target?.tools;
+    if (tools === undefined || tools === null || typeof tools.guard !== "function") {
+      ctx.logger?.warn?.("[skill-visibility] tools.guard unavailable; the refusal reason will stay generic");
+      return;
+    }
+    tools.guard(skillVisibilityDenial);
+  };
+  installDenialGuard(ctx);
+  ctx.on("agent/created", (payload) => installDenialGuard(payload?.agent?.ctx));
 }

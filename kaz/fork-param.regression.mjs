@@ -1277,6 +1277,106 @@ const dispatcherSession = { id: "session-main", snapshotEvents: () => [] };
   }
 }
 
+// ── 5s. 技能可见性：子代理请求"主代理专用"技能时，理由要说清是**不允许**，不是"不存在" ──────
+//
+// 改动点：`functions/skill-visibility/lib/index.js` 新增的 `skillVisibilityDenial`，装成
+// `tools.guard`。它跑在**工具主体之前**（dsh-tools 的 `prepareExecution`：先 pre-execute，再
+// `guardReason(exec)`，非空即成为回给模型的 `Error: <理由>`），因为平台技能工具是在**过滤后的目录**里
+// 找不到名字就抛它自己那句 generic 的——那时候 provider 早就被跳过了，改 provider 没有用。
+//
+// 这些断言跑的是**真判据**（导出的那个函数），喂进去的执行对象是合成的最小形状：子代理判定看的是
+// `session.header`，所以这里造的就是那几个字段。**本行测不到**的只有一件事——真派发一个子代理，
+// 看它是否真收到这句话（测试区没有可派发子代理的 headless 路径），那要靠活体探针。
+{
+  const { skillVisibilityDenial } = await import("./functions/skill-visibility/lib/index.js");
+  const { MAIN_AGENT_ONLY_SKILLS } = await import("./functions/kaz-shared/lib/skill-visibility.js");
+
+  const HIDDEN = "kaz-dispatch";
+  const VISIBLE = "powershell-scripting";
+  check("5s. 前置：这两个名字确实是「隐藏」与「可见」两种", MAIN_AGENT_ONLY_SKILLS.includes(HIDDEN) && !MAIN_AGENT_ONLY_SKILLS.includes(VISIBLE), `${HIDDEN}/${VISIBLE}`);
+
+  const subagent = { id: "sub-1", session: { id: "sub-1", header: { origin: "subagent", parentSession: "session-main" } } };
+  const mainAgent = { id: "session-main", session: { id: "session-main", header: {} } };
+  const skillExec = (agent, name) => ({ name: "skill", arguments: { name }, agent });
+
+  // (1) 子代理 + 主代理专用技能 → 拒，且理由说清原因与补救
+  const denied = skillVisibilityDenial(skillExec(subagent, HIDDEN));
+  check(
+    "5s. 子代理请求主代理专用技能：整句拒绝",
+    denied === `skill "${HIDDEN}" is main-agent-only and cannot be loaded by a subagent; the main agent must read it and put what you need into the task text.`,
+    JSON.stringify(denied),
+  );
+  check("5s. 拒绝理由点名了那个技能", typeof denied === "string" && denied.includes(`"${HIDDEN}"`), String(denied));
+
+  // (2) 主代理 + 同一个名字 → 不拒（它照旧能载入）
+  check("5s. 主代理请求同一个技能：不拒（仍可载入）", skillVisibilityDenial(skillExec(mainAgent, HIDDEN)) === undefined, String(skillVisibilityDenial(skillExec(mainAgent, HIDDEN))));
+
+  // (3) 控制组：子代理请求一个**可见**技能 → 不拒
+  check("5s. 子代理请求可见技能：不拒（控制组）", skillVisibilityDenial(skillExec(subagent, VISIBLE)) === undefined, String(skillVisibilityDenial(skillExec(subagent, VISIBLE))));
+
+  // (4) 只对 `skill` 这一件工具说话，别的工具一律不碰
+  check("5s. 别的工具不受影响", skillVisibilityDenial({ name: "read", arguments: { path: "/x" }, agent: subagent }) === undefined);
+  check("5s. 没有 agent 的执行不拒", skillVisibilityDenial({ name: "skill", arguments: { name: HIDDEN } }) === undefined);
+
+  // (5) 理由里**不含技能正文**：它是固定那一句，既不可能是文件内容，也不可能随技能长短变化。
+  // 断言写成"骨架一模一样 + 没有 frontmatter/正文标记 + 长度远小于任何技能文件"，
+  // 而不是模糊地找关键词——`kaz-dispatch` 这个**名字**本身就会命中 "dispatch"。
+  check("5s. 拒绝理由就是那一句固定骨架（不含任何文件内容）", denied === `skill "${HIDDEN}" is main-agent-only and cannot be loaded by a subagent; the main agent must read it and put what you need into the task text.`, String(denied).slice(0, 80));
+  check("5s. 拒绝理由里没有 frontmatter / 正文标记", !/---|^#|\bdescription:|\buser-invocable\b|\bmetadata\b/imu.test(denied ?? ""), String(denied).slice(0, 60));
+  check(`5s. 拒绝理由长度有界（${(denied ?? "").length} ≤ 300，技能正文以千字计）`, (denied ?? "").length <= 300, String((denied ?? "").length));
+
+  // (6) 权限没变：名字在**过滤后的目录**里依然不存在，所以同一批调用在改动前后都被拒；
+  //     这里直接验"过滤"这一步本身仍然剔掉同一个名字。
+  const { filterSubagentCandidates } = await import("./functions/skill-visibility/lib/index.js");
+  const listed = [{ name: HIDDEN }, { name: VISIBLE }];
+  const filtered = filterSubagentCandidates(listed);
+  check("5s. 目录过滤仍然剔掉主代理专用技能（权限未变）", filtered.length === 1 && filtered[0].name === VISIBLE, JSON.stringify(filtered.map((s) => s.name)));
+
+  // (7) 守卫真的被装上：一个只实现 guard() 的假 tools 服务
+  {
+    const { apply: applySkillVisibility } = await import("./functions/skill-visibility/lib/index.js");
+    const guards = [];
+    const created = [];
+    const fakeCtx = {
+      skills: { registerProvider: () => ({ dispose: () => {} }) },
+      tools: { guard: (fn) => { guards.push(fn); } },
+      effect: () => {},
+      on: (event, listener) => { if (event === "agent/created") created.push(listener); },
+      logger: { warn: () => {} },
+      get: () => undefined,
+    };
+    applySkillVisibility(fakeCtx, {});
+    check("5s. 守卫装上了（预设 scope + 每个 agent 各一次）", guards.length === 1 && created.length === 1, `guards=${guards.length} agent/created=${created.length}`);
+    check("5s. 装上的是同一个判据函数", guards[0] === skillVisibilityDenial, typeof guards[0]);
+    // 这条是"装了两处"的证据：agent/created 那条路也会往该 agent 的 tools 上装一份。
+    const perAgentGuards = [];
+    created[0]({ agent: { ctx: { tools: { guard: (fn) => perAgentGuards.push(fn) } } } });
+    check("5s. agent/created 那条路也给该 agent 装一份", perAgentGuards.length === 1 && perAgentGuards[0] === skillVisibilityDenial, `n=${perAgentGuards.length}`);
+
+    // (8) 串起来跑：guard 返回的字符串**就是**模型能看到的那句话。
+    // 复刻 harness 的两步语义——`guardReason` 取第一个非空理由（dsh-tools:2823-2831），
+    // `prepareExecution` 把它渲染成 `Error: <理由>` 且 isError（dsh-tools:3127-3134）。
+    // 这不是"我以为会这样"，而是按那两段代码的形状把判据的返回值接到渲染上。
+    const guardReason = (exec) => {
+      for (const guard of guards) {
+        const reason = guard(exec);
+        if (reason !== void 0) return reason;
+      }
+      return undefined;
+    };
+    const modelText = (exec) => {
+      const reason = guardReason(exec);
+      return reason === undefined ? undefined : `Error: ${reason}`;
+    };
+    check(
+      "5s. 串到 harness 的否决路径上：子代理看到的就是这句话",
+      modelText(skillExec(subagent, HIDDEN)) === `Error: ${denied}`,
+      String(modelText(skillExec(subagent, HIDDEN))).slice(0, 80),
+    );
+    check("5s. 同一条路径上，主代理与可见技能都放行（工具主体照旧会跑）", modelText(skillExec(mainAgent, HIDDEN)) === undefined && modelText(skillExec(subagent, VISIBLE)) === undefined);
+  }
+}
+
 // ── 汇总 ─────────────────────────────────────────────────────────────────────
 for (const line of results) console.log(line);
 // 跑到这里就已经结束了：显式清一次（幂等），让"成功了"这件事**看得见**。
