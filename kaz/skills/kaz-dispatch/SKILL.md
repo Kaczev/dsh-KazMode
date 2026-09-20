@@ -61,6 +61,26 @@ ka_sub_whale(persona)         # dispatch one entry, by role name
   truncated to its first line at 200 characters - which is why a subagent's closing message must lead with
   its verdict.
 
+## When a fork is worth it
+
+A `fork` gives the child a prefix of the source's log - every closed turn up to the source's last
+`turn/end` - so use it when the child needs **what this conversation already established** and retelling
+it in the task would be long, lossy, or both: handing finished work to a new role, a second opinion, an
+independent check, a clean-slate reading of everything so far.
+
+The whole decision reduces to one fact: **has this conversation closed a turn yet?**
+
+- **Yes** - the ordinary case, from the second dispatch of a conversation onward - write `fork: "main"`.
+  The child starts with every earlier turn of this conversation and needs no backstory in its task.
+- **No** - the first dispatch of a brand-new conversation - there is no closed turn to cut at, so the
+  seed is empty and the fork buys nothing. Leave the field out; the receipt says the child started fresh.
+
+Two things not to plan around. A fork of **another subagent** is rarely available in practice: the id
+arrives with that subagent's report, by which time it has usually stopped resolving, and a running
+target has no closed turn to cut at - so faking it, or waiting for the ideal moment, costs more than
+naming the role again. And a child that was **reused** rather than started fresh never sees the fork at
+all, however the entry is written - for a role that must actually be seeded, use a **new role name**.
+
 ## The reserved values
 
 | value | what it is for | its tool face |
