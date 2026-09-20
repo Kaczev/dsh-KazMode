@@ -299,6 +299,30 @@ const dispatcherSession = { id: "session-main", snapshotEvents: () => [] };
     check("4e. 复用且没写 fork：回执不提 fork", !/fork/i.test(out.message), out.message);
   }
 
+  // 4e'. 条目上有 `fork` 这个键、值是 `undefined`（规划里写了又清掉的那一条，就会长这样）。
+  // 它必须与"根本没有这个键"同一条路：不切 provider、回执里一个 fork 字眼都不出现。
+  // 为什么单列：旧代码判的是"条目有没有 fork 属性"，于是这种条目会印出
+  // `the fork target "undefined" was NOT applied` —— 2026-09-19 实测在真环境里见过这一句
+  // （当时跑的是修复前的代码），所以它是真的会冒出来的形态，不是假想。
+  {
+    const reusableId = "77777777-8888-9999-0000-111111111113";
+    const h = harness({ children: [{ kind: "child", mode: "continuable", label: roleName, id: reusableId }] });
+    h.entries[0].fork = undefined;
+    const hasKey = Object.hasOwn(h.entries[0], "fork");
+    const out = await kaSubWhaleTool({ ctx: h.ctx, store: h.store }).execute({ persona: roleName }, h.exec);
+    check("4e'. fork 键在但值是 undefined：照旧复用", hasKey && h.calls.sendMessage.length === 1, JSON.stringify(h.calls.sendMessage.length));
+    check("4e'. fork=undefined 的复用：回执不提 fork、更不许印出 \"undefined\"", !/fork/i.test(out.message) && !/undefined/.test(out.message), out.message);
+  }
+
+  // 4e''. 全新开始那条路也一样：`fork: undefined` 不得让 provider 切到 kaz-fork。
+  {
+    const h = harness();
+    h.entries[0].fork = undefined;
+    const out = await kaSubWhaleTool({ ctx: h.ctx, store: h.store }).execute({ persona: roleName }, h.exec);
+    check("4e''. fork=undefined 且不复用：provider 是 spawn", h.calls.startContinuable[0]?.provider === "spawn", JSON.stringify(h.calls.startContinuable[0]?.provider));
+    check("4e''. fork=undefined 且不复用：回执不提 fork", !/fork/i.test(out.message), out.message);
+  }
+
   // 4f. 写安排这一层：布尔 fork 在**写下来的那一刻**就被拒，不会留到派发点。
   {
     const h = harness();
