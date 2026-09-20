@@ -9,7 +9,7 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import { randomUUID } from "node:crypto";
 import { CONCURRENCY_CAP_REASON, MAIN_BLACKLIST, MAX_CONCURRENT_SUBAGENTS, MEMORY_MAINTAINER_BLACKLIST, MEMORY_MAINTAINER_RESERVED, SLOP_CLEANER_BLACKLIST, SLOP_CLEANER_RESERVED, SUBAGENT_DEFAULT_BLACKLIST, sanitizeBlacklist } from "../../kaz-shared/lib/blacklists.js";
 import { MEMORY_MAINTAINER_PERSONA, SLOP_CLEANER_PERSONA, renderSubagentPersona } from "../../kaz-shared/lib/roles.js";
-import { normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
+import { boundedShown, duplicatePersonaProblem, normalizeEntry, patchEntryAt, writeArrangement } from "./arrangement.js";
 import { KAZ_FORK_PROVIDER, noteForkSource, resolveForkTarget } from "./fork-provider.js";
 import { LEGAL_TRANSITIONS, REFLECTION_ADVERTISED_BYTES, STAGES, reflectionProblem } from "./stages.js";
 
@@ -184,6 +184,11 @@ export function writeArrangementTool({ store }) {
         const old = previous.find((prev) => personaKey(prev.persona) === personaKey(entry.persona));
         entries.push(old === undefined ? entry : { ...entry, id: old.id, status: old.status, summary: old.summary });
       }
+      // 重复角色：只有整份计划看得见"第几条和第几条撞了"，所以这道校验在这里而不在 normalizeEntry。
+      // 拒在写下来的这一刻，而不是等派发——重复的那条永远取不到 id，静默停在 pending（见
+      // duplicatePersonaProblem 的说明）。
+      const duplicate = duplicatePersonaProblem(entries);
+      if (duplicate !== null) return fail(duplicate);
       await writeArrangement(sessionCwdOf(exec), sessionId, entries);
       store.setEntries(sessionId, entries);
       return ok(`arrangement written: ${entries.length} entr${entries.length === 1 ? "y" : "ies"}`);
@@ -207,7 +212,7 @@ export function getArrangementTool({ store }) {
       const entries = await store.loadEntries(sessionId);
       const shown = wanted.length > 0 ? entries.filter((entry) => personaKey(entry.persona) === wanted) : entries;
       if (shown.length === 0) {
-        return { ...fail(wanted.length > 0 ? `no arrangement entry with persona "${wanted}"` : "the arrangement is empty"), text: "" };
+        return { ...fail(wanted.length > 0 ? `no arrangement entry with persona ${boundedShown(wanted)}` : "the arrangement is empty"), text: "" };
       }
       return { ok: true, message: `${shown.length} entr${shown.length === 1 ? "y" : "ies"}`, text: JSON.stringify(shown, null, 2) };
     },
@@ -230,7 +235,7 @@ export function kaSubWhaleTool({ ctx, store }) {
       if (wanted.length === 0) return { ...fail("persona is required"), text: "" };
       const entries = await store.loadEntries(sessionId);
       const index = entries.findIndex((entry) => personaKey(entry.persona) === wanted);
-      if (index < 0) return { ...fail(`no arrangement entry with persona "${wanted}"`), text: "" };
+      if (index < 0) return { ...fail(`no arrangement entry with persona ${boundedShown(wanted)}`), text: "" };
       const entry = entries[index];
       if (personaKey(entry.persona) === "main") return { ...fail('the "main" entry is for the main agent itself; dispatch only subagent entries'), text: "" };
       // 两个保留角色按**匹配键**判定，不是按整个 persona 值：数组形式的 ["slopCleaner", …] 也合法
@@ -251,13 +256,37 @@ export function kaSubWhaleTool({ ctx, store }) {
         : isCleaner
           ? sanitizeBlacklist([...SLOP_CLEANER_BLACKLIST], SLOP_CLEANER_RESERVED)
           : sanitizeBlacklist([...SUBAGENT_DEFAULT_BLACKLIST, ...(Array.isArray(entry.blacklist) ? entry.blacklist : [])]);
+      // 保留角色的工具面是固定的：这条分支**丢掉**条目上写的黑名单。
+      //
+      // 可达性（这段先前写错过一次，改对）：`normalizeEntry` 那道闸只挡得住**本版本写出来的**
+      // 计划。加载器不校验——`store.loadEntries` 走 `readArrangement`，它只有 `JSON.parse` 加
+      // 一句 `Array.isArray`，没有 normalizeEntry、也没有重复角色那道闸——所以下面两种计划原样
+      // 进得到这条分支：
+      //   1. 更早版本（E6 还只认纯字符串时）写下的、带 `["memoryMaintainer", …] + blacklist` 的计划；
+      //   2. 在盘上被手工改过的计划文件。
+      // 换句话说：这道闸对"本版本新写的文件"不可达，对"已经躺在盘上的文件"仍然可达。别再把前者
+      // 当成后者——先前那条误判正是因为只用内存里构造的条目验过，没走盘。
+      // 回执是这个事实唯一的出口，漏了它，模型会一直以为自己收窄了权限。
+      const discarded = isKeeper || isCleaner ? (Array.isArray(entry.blacklist) ? entry.blacklist : []) : [];
       // 平台 toolFilter 遇到不存在的工具名会直接抛错：先按"平台已知的工具"过滤，跳过的写进回执。
       const known = knownToolNames(ctx, exec.agent);
       const applied = known === null ? blacklist : blacklist.filter((name) => known.has(name));
       const skipped = known === null ? [] : blacklist.filter((name) => !known.has(name));
       const skippedNote =
-        skipped.length > 0 ? ` (blacklist skipped unknown tool${skipped.length > 1 ? "s" : ""}: ${skipped.join(", ")})` : "";
+        skipped.length > 0
+          ? ` (blacklist skipped unknown tool${skipped.length > 1 ? "s" : ""}: ${boundedShown(skipped.join(", "))})`
+          : "";
+      const discardedNote =
+        discarded.length > 0
+          ? ` (blacklist discarded: this persona has a fixed tool face, so the entry's blacklist ${boundedShown(discarded.join(", "))} was ignored)`
+          : "";
+      // `label` **不许**有界化，它是行为值不只是展示值：复用时要按它匹配 `child.label`（:323），
+      // 还要原样作为平台 label 传下去（:386、:394）。先前在绑定处裁过一次，立刻把复用整条打掉
+      // （4d/4e' 两条既有断言当场变红）——所以展示走另一个变量 `shownLabel`。
       const label = isKeeper ? "memoryMaintainer" : isCleaner ? "slopCleaner" : role;
+      // 回显用：角色名是模型可控的（可以写到几万字），而回执是本预设最长的一句话——未做有界化时
+      // 实测到过 100,401 字。只用于回执文本，不参与任何匹配。
+      const shownLabel = boundedShown(label);
       // fork 目标：`"main"` 或一个会话 id。两种缺省分开处理（见 resolveForkTarget）——
       // "没写 fork" 与 "目标已失效、退回派发者" 的回执含义正好相反，不能共用一句话。
       const agents = ctx.get("agents");
@@ -270,11 +299,11 @@ export function kaSubWhaleTool({ ctx, store }) {
       if (fork.kind === "fallback") {
         // provider 保持 `spawn`：这里**没有**任何可以继承的源，所以不许出现 "forked from"
         // 这类字眼——那正是这个 bug 的原形（回执说继承了，子代理其实什么都没有）。
-        note = ` (fork target "${fork.target}" is not a live session right now, and there is no other source to inherit from, so this child started fresh with no inherited history)`;
+        note = ` (fork target ${boundedShown(fork.target)} is not a live session right now, and there is no other source to inherit from, so this child started fresh with no inherited history)`;
       } else if (fork.kind === "target") {
         provider = KAZ_FORK_PROVIDER;
         forkSource = fork.source ?? "";
-        note = fork.source === null ? " (forked from your conversation)" : ` (forked from "${fork.source}")`;
+        note = fork.source === null ? " (forked from your conversation)" : ` (forked from ${boundedShown(fork.source)})`;
       }
       const subagents = ctx.get("subagents");
       if (subagents === undefined || subagents === null) {
@@ -313,7 +342,7 @@ export function kaSubWhaleTool({ ctx, store }) {
         }
       }
       if (reusableId.length === 0 && busyId.length > 0) {
-        return { ...fail(`${label} is still working (subagent ${busyId}); wait for its report before dispatching it again`), text: "" };
+        return { ...fail(`${shownLabel} is still working (subagent ${boundedShown(busyId)}); wait for its report before dispatching it again`), text: "" };
       }
       let reused = false;
       if (reusableId.length > 0 && typeof subagents.sendMessage === "function") {
@@ -333,8 +362,13 @@ export function kaSubWhaleTool({ ctx, store }) {
         // **不会**被继承，子代理接着自己原有的历史。静默照写 "dispatched" 会让模型以为
         // fork 生效了，所以这里必须自己说一句。
         const reuseNote =
-          fork.kind === "none" ? "" : ` (reused an existing ${label}, so the fork target "${fork.target}" was NOT applied)`;
-        return { ok: true, message: `continued ${label} as ${reusableId} (reused, no new subagent)${reuseNote}`, text: `subagent id: ${reusableId}` };
+          fork.kind === "none"
+            ? ""
+            : ` (reused an existing ${shownLabel}, so the fork target ${boundedShown(fork.target)} was NOT applied)`;
+        // 子代理 id 也在回执里露两次（message 与 text），所以跟 busyId 一样过有界化：这三个是
+        // 同一类东西，一个过了一个没过就是不一致——今天它们全是平台生成的 id（构造不出 5 万字的），
+        // 所以这是补一致性，不是在堵一个已实测的洞。**原值照旧用在当 id 的地方**：这里只是展示。
+        return { ok: true, message: `continued ${shownLabel} as ${boundedShown(reusableId)} (reused, no new subagent)${reuseNote}${discardedNote}`, text: `subagent id: ${boundedShown(reusableId)}` };
       }
       // 复用不成 → 准备新开一个：先数"此刻同时活着几个"。上限见
       // kaz-shared/lib/blacklists.js（MAX_CONCURRENT_SUBAGENTS）——限的是同时运行数，不是计划条数。
@@ -342,7 +376,7 @@ export function kaSubWhaleTool({ ctx, store }) {
       if (liveNow >= MAX_CONCURRENT_SUBAGENTS) {
         return {
           ...fail(
-            `${liveNow} subagents are already running (cap ${MAX_CONCURRENT_SUBAGENTS}); ${CONCURRENCY_CAP_REASON} ${label} has not been dispatched.`,
+            `${liveNow} subagents are already running (cap ${MAX_CONCURRENT_SUBAGENTS}); ${CONCURRENCY_CAP_REASON} ${shownLabel} has not been dispatched.`,
           ),
           text: "",
         };
@@ -368,7 +402,7 @@ export function kaSubWhaleTool({ ctx, store }) {
       const startedId = started?.childId ?? childId;
       const next = await patchEntryAt(sessionCwdOf(exec), sessionId, index, { id: startedId, status: "running" });
       store.setEntries(sessionId, next);
-      return { ok: true, message: `dispatched ${label} as ${startedId} (${provider})${note}${skippedNote}`, text: `subagent id: ${startedId}` };
+      return { ok: true, message: `dispatched ${shownLabel} as ${boundedShown(startedId)} (${provider})${note}${skippedNote}${discardedNote}`, text: `subagent id: ${boundedShown(startedId)}` };
     },
   });
 }
@@ -390,7 +424,11 @@ export function whaleReportTool({ store, noteStage }) {
       const sessionId = sessionIdOf(exec);
       if (sessionId === undefined) return fail("this agent has no session");
       const target = String(args?.stage ?? "").trim();
-      if (!STAGES.includes(target)) return fail(`unknown stage "${target}"; known stages: ${STAGES.join(", ")}`);
+      // 从**参数校验**上够不着：`stage` 的 enum 是 STAGES，平台会在进 execute 之前就把它挡掉。
+      // 但这依然是"回显模型原始值"的一处，而且它长得像可达路径——所以照样过有界化，并在注释里
+      // 说清是谁挡住的（enum 是今天的保护，不是这段代码的形状给了保证）。哪天 enum 被放宽，
+      // 这里不会跟着变成一句几万字的报错。
+      if (!STAGES.includes(target)) return fail(`unknown stage ${boundedShown(target)}; known stages: ${STAGES.join(", ")}`);
       const current = store.getStage(sessionId);
       // 反思门禁：只在**离开 self-check 时**强制。其它阶段传了也不看（避免把普通阶段推进变成写小作文）。
       if (current === "self-check") {
