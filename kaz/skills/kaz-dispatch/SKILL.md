@@ -42,6 +42,21 @@ ka_sub_whale(persona)         # dispatch one entry, by role name
   non-empty strings**. Nothing else is accepted.
 - `task` is required on every entry and is hard-checked: an empty or whitespace-only one is rejected. It is
   the subagent's first message, so write the ask, the scope, and what counts as done into it.
+- **Do not open a task with a holding instruction.** Because the `task` *is* the first message, "stand by,
+  you will be dispatched later" is taken literally: the role reads it as its whole assignment and sits idle
+  until someone messages it again. Write the actual ask from the first word, and queue later work by
+  messaging the role once it has reported.
+- **Check a skill is visible to the subagent before naming it.** Some skills are registered
+  main-agent-only: the catalog hides them from subagents, and loading one is refused - observed on a live
+  probe, where a dispatched subagent got `unknown or no longer available` for `kaz-dispatch` and for
+  `moving-or-upgrading-a-thing`, while `powershell-scripting` loaded. That is the observed behaviour, not a
+  guarantee: the load path itself is not filtered by the gate, so it rests on the platform resolving names
+  through the filtered catalog. Either way, naming a main-agent-only skill in a task produces nothing, and
+  the role silently works without it. The list lives in `functions/kaz-shared/lib/skill-visibility.js` as
+  `MAIN_AGENT_ONLY_SKILLS` (kebab-case, matching each SKILL.md's `name`). If the skill you wanted is on that
+  list, **read it yourself and put what the role needs into the task text** rather than telling the subagent
+  to load it - a task that names a main-agent-only skill burns a dispatch on a role that never saw the
+  instructions.
 - `blacklist` is optional and is enforced, not advisory: a denied tool is absent from the subagent's tool
   face and calling it errors. The preset's own default deny list applies to every dispatched subagent on top
   of whatever is written here; adding names narrows the role further, and an empty list adds nothing back.
@@ -161,4 +176,5 @@ grown long, prefer it over reconstructing what was dispatched from memory.
 - What the subagent is told it must not be told: that belongs in the `task`, written for the dispatcher.
 - Whether a skill is visible to a subagent: this file is registered main-agent-only, in
   `functions/kaz-shared/lib/skill-visibility.js`. A skill that belongs to the main agent and is not listed
-  there is visible to every subagent.
+  there is visible to every subagent. The rule for acting on that when writing a task is in **The entry**
+  above, under `task`.

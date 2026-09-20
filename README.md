@@ -1,6 +1,6 @@
 # Kaz 模式
 
-一个给 DeepSeek Harness（dsh）用的 agent preset（代理预设）。仓库里是预设本体，放在 `kaz\` 目录：`kaz\preset.yml` 定名称与描述，`kaz\agent.cordis.yml` 定怎么装配，`kaz\skills\` 放技能，`kaz\functions\` 放各功能模块。当前版本 8.9.6，写在 `kaz\VERSION`。
+一个给 DeepSeek Harness（dsh）用的 agent preset（代理预设）。仓库里是预设本体，放在 `kaz\` 目录：`kaz\preset.yml` 定名称与描述，`kaz\agent.cordis.yml` 定怎么装配，`kaz\skills\` 放技能，`kaz\functions\` 放各功能模块。当前版本 8.9.7，写在 `kaz\VERSION`。
 
 装好之后，在 dsh 新建对话时于模式列表里选 **Kaz 模式**（preset id 为 `kaz`）。
 

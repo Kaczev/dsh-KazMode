@@ -119,6 +119,8 @@ async function collectDocs(kinds, locations, cwd) {
         const body = await bodyOf(entry);
         if (body !== null) {
           const summary = typeof entry.data?.summary === "string" ? entry.data.summary : "";
+          // name 原样进索引（不截断）：它与 `itemOf` 印出去的标识符必须是同一个串，否则检索命中
+          // 给回来的名字拿不回那条记忆。边界与理由见 `itemOf` 上方那段。
           docs.push({ name: entry.name, text: indexTextOf(entry, body), summary });
         }
       }
@@ -187,7 +189,28 @@ const NAMES_SCHEMA = {
 
 const namesRender = (_args, value) => renderText(value.items.length > 0 ? JSON.stringify(value.items) : "no memories matched");
 
-/** 列表项：name + summary。 */
+/**
+ * 列表项：name + summary。**name 在这里、以及上面 `namesRender` 那次 `JSON.stringify`，
+ * 都是原样印出的**——这是**有意划的边界**，不是漏了有界化。
+ *
+ * `memory_list` 与 `memory_search` 印的是"**可寻址资源的标识符**"。名字一旦被截断就**再也传不回**
+ * `memory_update` / `memory_forget`：它们按名字精确匹配，截断后的名字永远找不到那条记忆，
+ * 工具当场失去意义。所以标识符必须逐字输出，`itemOf` 与 `namesRender` 两处都不加界。
+ *
+ * 长度上限因此**只在写入那道闸上**（`sizeProblem` / `GATE_LIMITS`，见本文件上方）——那是唯一能
+ * 既挡住超长名字、又不破坏"按名字寻址"的地方。
+ *
+ * 后果要说清：`writeMemory` **自己不校验**（工具把门、库不把门），所以一个**已经躺在库里的**
+ * 超长名字——旧版本写的、别的写入者写的、或手工改过的文件——会让：
+ *   * 每一次 `memory_list` 每存在一条这样的记忆就多约 **50,000** 字（实测：一条时 50,118）；
+ *     同一个名字在 context 与 paths 两处都在时是**两份**，于是约 **100,000** 字（实测 100,090）；
+ *   * 每一次 `memory_search` 变成约 **50,000** 字（实测 50,037；每个命中项都带整条 name）。
+ * 两处都是**每一条**超长记忆的量级：~50,000 是一条，~100,000 是"同一个名字在 context 与 paths
+ * 两处都有、或有好几条"的上界情形。
+ * 那是**数据修复任务**（进库把那条名字改短），**不是**还等着修的"回显 bug"——这里的回显按设计
+ * 就是满长的。**别在这里加截断**：那会把"去修那条数据"换成一个更坏的问题——那条记忆从此无法
+ * 按名字操作。`collectDocs`（上面）把同一个 name 喂进检索索引，同一条边界。
+ */
 const itemOf = (name, summary) => ({
   name,
   summary: typeof summary === "string" ? summary : "",
