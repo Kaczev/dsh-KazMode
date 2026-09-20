@@ -131,6 +131,9 @@ process.on("exit", removeTempHome);
 import { arrangementFile, arrangementsDir, boundedShown, duplicatePersonaProblem, forkValueOf, normalizeEntry, patchEntryAt, readArrangement, ERROR_ECHO_MAX_CHARS, FORK_FROM_MAIN } from "./functions/ka-whale-workflow/lib/arrangement.js";
 import { KAZ_FORK_PROVIDER, completedTurnPrefix, createKazForkProvider, noteForkSource, resolveForkTarget } from "./functions/ka-whale-workflow/lib/fork-provider.js";
 import { getArrangementTool, kaSubWhaleTool, whaleReportTool, writeArrangementTool } from "./functions/ka-whale-workflow/lib/tools.js";
+// 5q 走**真代码**：这两条是另外两个插件里被有界化的回显，不从本套件复刻模板。
+import { resolveCompanion } from "./functions/kaz-context-policy/lib/search.js";
+import { memoryDetailTool } from "./functions/ka-whale-memory/lib/tools.js";
 
 /** 替身会话的 cwd：指到临时 home 里，测试因此不写到任何活 home。 */
 const TEST_CWD = join(TEST_HOME, "probe-ws");
@@ -1094,36 +1097,136 @@ const dispatcherSession = { id: "session-main", snapshotEvents: () => [] };
     check(`5p. 单次回显 ≤ ${ERROR_ECHO_MAX_CHARS + 22} 字`, boundedShown(HUGE).length <= ERROR_ECHO_MAX_CHARS + 22, String(boundedShown(HUGE).length));
   }
 
-  // 5q. **同预设行里另两处未做有界化的回显**——不在本次改动范围内（没有批准修），所以这里
-  // 只把"它们确实还在、有多长"钉成事实，好让下一个读注释的人**去查**而不是去信。
-  //   * kaz-context-policy/lib/search.js:81        —— unknown companion "${wanted}"
-  //   * ka-whale-memory/lib/tools.js:234           —— no memory named "${String(args.name ?? "")}"
-  // 断言分两层：**源码里那两行确实还在**（直接读文件，钉住行号附近的原文），以及用 5 万字入参
-  // 复刻模板串量出长度。真调用它们需要活体注册表／记忆存储，而这里要证明的只是"缺口存在"。
+  // 5q. **另外两个插件里的回显**（`kaz-context-policy` 与 `ka-whale-memory`）。这一条先前是反的：
+  // 那时它断言"这两处缺口还在、都还是 5 万字"，因为当时它们**不在批准范围内**。现在修了，所以
+  // 这里断言的是**新的有界行为**，并且仍然守住那几行源码——任何一处退回原样回显，套件就红。
+  //   * kaz-context-policy/lib/search.js   —— `unknown companion ${boundedShown(wanted)}`
+  //   * ka-whale-memory/lib/tools.js       —— `no memory named ${boundedShown(…)}`（三处）
+  // 有界化的是**回显**，不是参数：`maxLength` 没有加，模型能发的值一个字都没变。两条都走**真代码**：
+  // resolveCompanion 用空 registry 直接调；memory_detail 走它自己的 render。
   {
     const HUGE = "Y".repeat(50000);
+    const BOUND = 1000;
     const rowRoot = new URL(".", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/u, "$1");
     const readRow = (relative) => readFileSync(join(rowRoot, relative), "utf8");
 
+    // ── (a) 新行为：5 万字入参下，有界、且原值不在消息里 ────────────────────────
+    const searchResult = await resolveCompanion(
+      { get: (name) => (name === "subagents" ? { listChildren: async () => [] } : undefined) },
+      { id: "session-main", session: { id: "session-main" } },
+      HUGE,
+    );
+    const companionMessage = searchResult.error ?? "";
+    check(`5q. context_search 的 companion：长度 ${companionMessage.length} ≤ ${BOUND}`, companionMessage.length <= BOUND, `len=${companionMessage.length}`);
+    check("5q. context_search 的 companion：原值不在消息里", !companionMessage.includes(HUGE), `len=${companionMessage.length}`);
+    check("5q. context_search 的 companion：骨架没变（仍是 unknown companion …; known companions: main）", /^unknown companion "[\s\S]+… \(\+\d+ more chars\); known companions: main$/u.test(companionMessage), companionMessage.slice(0, 90));
+
+    const detail = memoryDetailTool();
+    const rendered = detail.output.render({ name: HUGE }, await detail.execute({ name: HUGE }, { agent: { session: { header: { cwd: TEST_CWD } } } }));
+    const memoryMessage = rendered.map((part) => part.text ?? "").join("");
+    check(`5q. memory_detail 的 name：长度 ${memoryMessage.length} ≤ ${BOUND}`, memoryMessage.length <= BOUND, `len=${memoryMessage.length}`);
+    check("5q. memory_detail 的 name：原值不在消息里", !memoryMessage.includes(HUGE), `len=${memoryMessage.length}`);
+    check("5q. memory_detail 的 name：骨架没变（仍是 failure: no memory named …）", /^failure: no memory named "[\s\S]+… \(\+\d+ more chars\)$/u.test(memoryMessage), memoryMessage.slice(0, 90));
+
+    // ── (b) 守住源码：任一处退回原样回显就红 ──────────────────────────────────
     const searchSrc = readRow("functions/kaz-context-policy/lib/search.js");
-    check("5q. search.js 里 `unknown companion` 回显仍在（未修）", searchSrc.includes('unknown companion "${wanted}"'), "source line moved - re-measure before citing it");
+    check(
+      "5q. search.js 的 companion 回显仍走 boundedShown",
+      searchSrc.includes("unknown companion ${boundedShown(wanted)}"),
+      "reverted to a raw echo, or the line moved - re-check before trusting this",
+    );
     const memorySrc = readRow("functions/ka-whale-memory/lib/tools.js");
     check(
-      "5q. memory tools.js 里 `no memory named` 回显仍在（未修）",
-      memorySrc.includes('no memory named "${String(args.name ?? "")}"'),
-      "source line moved - re-measure before citing it",
+      "5q. memory tools.js 的三处 name 回显都走 boundedShown",
+      memorySrc.includes('`failure: no memory named ${boundedShown(String(args.name ?? ""))}`') &&
+        memorySrc.includes("`no memory named ${boundedShown(name)} to update`") &&
+        memorySrc.includes("`no memory named ${boundedShown(name)}`"),
+      "one of the three reverted to a raw echo",
+    );
+    // 守名字回显的**形状**，而不是逐个字面量：先前这条只认 `${name}"` 与 `${name}" is a` 两种写法，
+    // 于是 `describe()` 里那个 `${entry.name}"`（第九处）从它眼皮底下溜了过去。现在按形状查：
+    // 模板串里凡是"引号里直接插一个提到 name 的表达式"就算红——`boundedShown(name)` 不含字面量
+    // `name}`，所以有界的那几处不会误报。
+    const rawNameEcho = [...memorySrc.matchAll(/`[^`]*`/gsu)].filter((m) => /"\$\{[^}]*\bname\b[^}]*\}"/u.test(m[0]));
+    check(
+      "5q. memory tools.js 里没有「引号里插裸 name」的模板串（含 describe 那一处）",
+      rawNameEcho.length === 0,
+      rawNameEcho.map((m) => m[0].slice(0, 70)).join(" | "),
+    );
+    check("5q. describe() 本身把名字过 boundedShown", memorySrc.includes("${entry.location} ${entry.kind} ${boundedShown(entry.name)}"), "describe reverted to a raw interpolation");
+
+    // ── (c) 真正在意的两件事：回显有上界；真正的长度上限住在它该住的地方 ────────
+    // 先前这里断言"五处 name 声明都没有 maxLength"——那是个绊脚石：谁**加强** schema 加了
+    // maxLength，反而把套件弄红。现在断言的是机制本身：
+    //   * 写入路径的长度上限由 SIZE_LIMITS/GATE_LIMITS + sizeProblem 负责（真实门禁在写入路径上）；
+    //   * 回显的上界由 boundedShown 负责，与参数怎么声明无关。
+    // 所以加一个 maxLength 不会让这条变红——它本来就不该是这条要管的事。
+    check(
+      "5q. 长度上限住在写入门禁里（SIZE_LIMITS/GATE_LIMITS + sizeProblem）",
+      /export const SIZE_LIMITS = Object\.freeze\(\{ name: \d+/u.test(memorySrc) &&
+        /export const GATE_LIMITS = Object\.freeze\(\{/u.test(memorySrc) &&
+        /export function sizeProblem\(fields\)/u.test(memorySrc),
+      "the write-path size gate moved or vanished - re-check where the real cap lives",
+    );
+    const gateUses = (memorySrc.match(/sizeProblem\(\{/g) ?? []).length;
+    check(`5q. 门禁只挂在写入路径上（${gateUses} 处调用）`, gateUses === 2, `sizeProblem call sites = ${gateUses}`);
+    check(
+      "5q. 回显上界与参数声明无关（boundedShown 已在用，且 cap 来自共享层）",
+      memorySrc.includes('from "../../kaz-shared/lib/echo.js"') && boundedShown(HUGE).length <= ERROR_ECHO_MAX_CHARS + 22,
+      String(boundedShown(HUGE).length),
     );
 
-    // 名字参数没有 maxLength：五个工具各一处、都是 `{type:"string", required:true}` 开头，
-    // 而且整个文件里 `maxLength` 出现 0 次。
-    const nameDecls = memorySrc.match(/name: \{ type: "string", required: true/g) ?? [];
-    check(`5q. memory 的 name 参数声明共 ${nameDecls.length} 处（memory_search/detail/list/save/update/forget）`, nameDecls.length === 5, JSON.stringify(nameDecls.length));
-    check("5q. memory 的 name 参数没有一处带 maxLength", !/name: \{[^}]*maxLength/u.test(memorySrc), "a maxLength appeared - re-measure the gap");
+    // ── (d) describe()：第九处回显。它印的是**库里已有的**名字，而门禁只管写入，所以要先在库里
+    // 造出一条超过门禁的名字——`writeMemory` 直接写文件，正是"库不把门"这个事实的用法。
+    //
+    // 三条 describe 调用里，实测**只有 `forget` 那条够得着**：`update` 与 `save` 都在之前被
+    // `sizeProblem` 拦住（它校验的是**库里那条** name，不只是入参）。够不着的那两条按"防御纵深"
+    // 对待并断言成"够不着"，免得有人把它们读成活的洞。
+    // **只在 TEST_HOME 下操作**：DSH_HOME 在本文件开头已指向临时目录，这里再钉一条。
+    {
+      const { memoryRoot } = await import("./functions/ka-whale-memory/lib/paths.js");
+      const { writeMemory, listMemories } = await import("./functions/ka-whale-memory/lib/store.js");
+      const { memoryForgetTool, memoryUpdateTool, memorySaveTool } = await import("./functions/ka-whale-memory/lib/tools.js");
+      check("5q. describe 用例只写临时 home（不在活 store 上动）", memoryRoot("global", TEST_CWD).startsWith(TEST_HOME), memoryRoot("global", TEST_CWD));
 
-    const companion = `unknown companion "${HUGE}"; known companions: main`;
-    const memory = `failure: no memory named "${HUGE}"`;
-    check(`5q. context_search 的 companion 回显 5 万字下是 ${companion.length} 字（已知缺口，未修）`, companion.length > 50000, String(companion.length));
-    check(`5q. memory_detail 的 name 回显 5 万字下是 ${memory.length} 字（已知缺口，未修）`, memory.length > 50000, String(memory.length));
+      const LONG_NAME = `HHH${"/seg".repeat(12000)}`; // 48,003 字节 > 门禁 77，库里合法存在
+      const body = "x".repeat(20);
+      const exec = { agent: { session: { header: { cwd: TEST_CWD } } } };
+      const seed = () => writeMemory("global", "paths", LONG_NAME, body, TEST_CWD, {});
+
+      await seed();
+      const seeded = await listMemories("global", "paths", TEST_CWD);
+      check("5q. 前置条件：库里确实躺着一条超过门禁长度的名字", seeded.some((m) => m.name === LONG_NAME), `entries=${seeded.length}`);
+
+      // 唯一够得着的那条：forget 的回执 `forgot ${describe(...)}`（它真的删掉那条）。
+      const forgetMessage = (await memoryForgetTool().execute({ name: LONG_NAME }, exec)).message ?? "";
+      check(`5q. forgot 的回执（describe 那处）：长度 ${forgetMessage.length} ≤ ${BOUND}`, forgetMessage.length <= BOUND, `len=${forgetMessage.length}`);
+      check("5q. forgot 的回执：原值不在消息里", !forgetMessage.includes(LONG_NAME), `len=${forgetMessage.length}`);
+      check("5q. forgot 的回执：骨架没变（仍是 forgot global paths …）", /^forgot global paths "[\s\S]+… \(\+\d+ more chars\)$/u.test(forgetMessage), forgetMessage.slice(0, 70));
+
+      // update：门禁先动手（它校验库里那条 name），所以根本走不到 `updated ${describe(...)}`。
+      await seed();
+      const updateMessage = (await memoryUpdateTool().execute({ name: LONG_NAME, paths: "y" }, exec)).message ?? "";
+      check(
+        "5q. memory_update 在超长名字上先被门禁拦住（`updated` 回执是纵深，不是活的洞）",
+        !updateMessage.includes(LONG_NAME) && /limit 64/u.test(updateMessage),
+        updateMessage.slice(0, 80),
+      );
+
+      // save：`already exists as` 与 `saved` 两条同样够不着。
+      const saveMessage = (await memorySaveTool().execute({ location: "global", name: LONG_NAME, context: body }, exec)).message ?? "";
+      check(
+        "5q. memory_save 在超长名字上先被门禁拦住（`already exists as` / `saved` 是纵深）",
+        !saveMessage.includes(LONG_NAME) && /limit 64/u.test(saveMessage),
+        saveMessage.slice(0, 80),
+      );
+
+      // 收尾：把测试记忆从临时库里清掉。
+      await seed();
+      await memoryForgetTool().execute({ name: LONG_NAME }, exec);
+      const left = await listMemories("global", "paths", TEST_CWD);
+      check("5q. 临时库收尾干净（测试记忆已删除）", !left.some((m) => m.name === LONG_NAME), `entries=${left.length}`);
+    }
   }
   // 5r. 扫描的年龄判据：**取目录及其内容里最新的 mtime**，不是目录自己的。
   // 这条测的就是先前写错的那个理由：目录 mtime 只反映"最后一次往里面加东西"，所以一个"先把文件
