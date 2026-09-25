@@ -29,7 +29,7 @@
 
 ## 需要什么
 
-- **dsh `0.1.5-rc.2`**，只支持这一个版本。版本号读的是运行时包 `@deepseek-ai/dsh` 的 `version` 字段，不是 `dsh --version`；对不上时安装程序报错并停止。`-SkipVersionCheck` 是唯一的绕过开关，只在用户明确要求回退到 `0.1.5-rc.1` 时用，而且回退时必须把该 home 启动器的 `EXPECTED_CLI` 一起改回去，否则启动器拒绝启动——回退不是受支持的状态。
+- **dsh `0.1.5-rc.2` 或 `0.1.7-rc.2`**，只支持这两个版本。版本号读的是运行时包 `@deepseek-ai/dsh` 的 `version` 字段，不是 `dsh --version`；对不上时安装程序报错并停止。闸门读的是**目标 home 自己的运行时**，所以两个版本可以同时在线：主环境 `.dsh` 读到全局 `0.1.5-rc.2`，测试区 `.dsh-test` 读到它自己那份 `0.1.7-rc.2`。`-SkipVersionCheck` 是唯一的绕过开关，只在用户明确要求回退到 `0.1.5-rc.1` 时用，而且回退时必须把该 home 启动器的 `EXPECTED_CLI` 一起改回去，否则启动器拒绝启动——回退不是受支持的状态。
 - **Windows + PowerShell**。这不只是文档口径：预设本体就按 Windows 写，非 win32 平台上 PowerShell 工具直接禁用；安装脚本也声明只支持 Windows。
 
 ## 授权

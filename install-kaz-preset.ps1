@@ -3,7 +3,7 @@ install-kaz-preset.ps1 - Windows installer for the Kaz agent preset.
 
 What it does:
   1. Resolves a DSH home (default: %USERPROFILE%\.dsh) and one profile inside it.
-  2. Version-gates the runtime (supported: 0.1.5-rc.2 only).
+  2. Version-gates the runtime (supported: 0.1.5-rc.2 and 0.1.7-rc.2).
   3. Mirrors the preset source (repo\kaz = the released copy users install;
      pass -Source test-kaz to promote the test-area development copy instead)
      into <DshHome>\.agent-presets\kaz, node_modules excluded.
@@ -35,7 +35,10 @@ Notes:
   - Idempotent: re-run any time to update the preset; junctions are refreshed.
   - Multi-home: pass -DshHome per home, or use -AllHomes to install into every
     %USERPROFILE%\.dsh* home that has a profiles\ directory.
-  - Supported runtime is 0.1.5-rc.2 only. -SkipVersionCheck is the deliberate
+  - Supported runtimes are 0.1.5-rc.2 and 0.1.7-rc.2. The gate reads each home's
+    own runtime, so both are live at once: the main home .dsh still reads the
+    global 0.1.5-rc.2 while the test home .dsh-test reads 0.1.7-rc.2 from its own
+    pinned copy. -SkipVersionCheck is the deliberate
     rollback override (only for a user-chosen return to 0.1.5-rc.1, which also
     needs the launcher's EXPECTED_CLI set back); normal installs and updates
     must never use it.
@@ -57,7 +60,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $PresetName = 'kaz'
-$SupportedVersions = @('0.1.5-rc.2')
+$SupportedVersions = @('0.1.5-rc.2', '0.1.7-rc.2')
 
 if ([string]::IsNullOrWhiteSpace($Source)) { $Source = Join-Path $PSScriptRoot 'kaz' }
 
