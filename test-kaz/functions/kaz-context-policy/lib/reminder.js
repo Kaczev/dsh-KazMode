@@ -381,7 +381,7 @@ export function installHintInjection(ctx) {
     decision.messages.push(
       createUserMessage({
         content: [{ type: "text", text }],
-        source: { kind: "plugin", plugin: "kaz-context-policy", form: "notice", summary: "compression-hint" },
+        source: { kind: "plugin:kaz-context-policy", form: "notice", summary: "compression-hint" },
       }),
     );
     return decision;

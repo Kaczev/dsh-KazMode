@@ -384,8 +384,7 @@ export function apply(ctx) {
           createUserMessage({
             content: [{ type: "text", text: renderDivingHintTextForSubagent(elapsedFor(hintState)) }],
             source: {
-              kind: "plugin",
-              plugin: "ka-whale-workflow",
+              kind: "plugin:ka-whale-workflow",
               form: "notice",
               summary: "diving-hint",
             },
@@ -408,8 +407,7 @@ export function apply(ctx) {
         createUserMessage({
           content: [{ type: "text", text: renderDivingHintText(elapsedFor(state)) }],
           source: {
-            kind: "plugin",
-            plugin: "ka-whale-workflow",
+            kind: "plugin:ka-whale-workflow",
             form: "notice",
             summary: "diving-hint",
           },
@@ -424,8 +422,7 @@ export function apply(ctx) {
         createUserMessage({
           content: [{ type: "text", text: renderMemoryHintText() }],
           source: {
-            kind: "plugin",
-            plugin: "ka-whale-workflow",
+            kind: "plugin:ka-whale-workflow",
             form: "notice",
             summary: "memory_hint",
           },
@@ -445,8 +442,7 @@ export function apply(ctx) {
         createUserMessage({
           content: [{ type: "text", text: renderBuildingHintText(state.ownHandsPath) }],
           source: {
-            kind: "plugin",
-            plugin: "ka-whale-workflow",
+            kind: "plugin:ka-whale-workflow",
             form: "notice",
             summary: "building-hint",
           },
@@ -509,8 +505,7 @@ export function apply(ctx) {
       createUserMessage({
         content: [{ type: "text", text }],
         source: {
-          kind: "plugin",
-          plugin: "ka-whale-workflow",
+          kind: "plugin:ka-whale-workflow",
           form: "notice",
           summary: `stage:${state.stage}`,
         },
