@@ -25,12 +25,13 @@
 
 实际执行的是仓库根目录的 `install-kaz-preset.ps1`：安装和更新用同一个脚本，更新就是重跑它。常用参数有 `-DryRun`（预演，预演会打印 OK，但没有写入）、`-DshHome`、`-ProfileName`、`-AllHomes`、`-Uninstall`、`-SkipVersionCheck`。脚本先备份再镜像：已有预设备份到 `<home>\tools\kaz-preset-backup-<时间戳>`，然后用 robocopy 把 `kaz\` 镜像到 `<home>\.agent-presets\kaz`（不含 node_modules）。
 
-**两种运行时，两种交付形态**，脚本按目标 home 自己的运行时版本分流：
+**一种受支持的运行时，一种交付形态**，脚本按目标 home 自己的运行时版本分流：
 
 | 运行时 | 预设怎么被挂上 | 脚本多做的事 |
 |---|---|---|
-| `0.1.5-rc.2` | 运行时自己扫描 `<home>\.agent-presets\<名字>` | 无，镜像完就是全部 |
 | `0.1.7-rc.2` | 预设作为 profile 的一个 bundle 行进入组合 | 在预设目录里生成 `package.json` 与 `cordis.patch.yml`；把 `kaz-preset-bundle` 追进 `<home>\profiles\<profile>\package.json` 的 `dsh.profile.bundles`；在 `<profile>\node_modules\` 下建一个指回预设目录的 junction |
+
+`0.1.5-rc.2` 已不再受支持；它的挂法（运行时自己扫描 `<home>\.agent-presets\<名字>`）在 `0.1.7-rc.2` 上已经不存在，所以拿 `0.1.5-rc.2` 的 home 去装会先被版本闸门拦下。
 
 `0.1.7-rc.2` 不再扫描那个目录（提供扫描的包在这个版本里已经不存在），所以只有镜像、没有后面那三步的话，**预设不会出现在模式列表里**——那不是装坏了，是交付形态换代了。生成的那份 `cordis.patch.yml` 是一份固定模板（只有绝对路径随 home 变），它的预设行用 `cordis:include` 指回预设自己的 `agent.cordis.yml`，所以预设的装配仍然只有那一份事实源。脚本只碰上面这几处，不碰 profile 自己的 `cordis.patch.yml`（那里装着你的用户设置）。回滚一条命令：`-Uninstall`（会删掉预设目录并撤掉这三处 wiring）。
 
@@ -38,7 +39,7 @@
 
 ## 需要什么
 
-- **dsh `0.1.5-rc.2` 或 `0.1.7-rc.2`**，只支持这两个版本。版本号读的是运行时包 `@deepseek-ai/dsh` 的 `version` 字段，不是 `dsh --version`；对不上时安装程序报错并停止。闸门读的是**目标 home 自己的运行时**，所以两个版本可以同时在线：主环境 `.dsh` 读到全局 `0.1.5-rc.2`，测试区 `.dsh-test` 读到它自己那份 `0.1.7-rc.2`。`-SkipVersionCheck` 是唯一的绕过开关，只在用户明确要求回退到 `0.1.5-rc.1` 时用，而且回退时必须把该 home 启动器的 `EXPECTED_CLI` 一起改回去，否则启动器拒绝启动——回退不是受支持的状态。
+- **dsh `0.1.7-rc.2`**，只支持这一个版本。版本号读的是运行时包 `@deepseek-ai/dsh` 的 `version` 字段，不是 `dsh --version`；对不上时安装程序报错并停止。闸门读的是**目标 home 自己的运行时**，所以每个 home 各读自己那一份：主环境 `.dsh` 读到全局 `0.1.7-rc.2`，测试区 `.dsh-test` 读到它自己那份 `0.1.7-rc.2`；还是 `0.1.5-rc.2` 的 home（比如空白的 `.dsh-clean`）会被闸门拒绝。`-SkipVersionCheck` 是唯一的绕过开关，只在用户明确要求回退到 `0.1.5-rc.1` 时用，而且回退时必须把该 home 启动器的 `EXPECTED_CLI` 一起改回去，否则启动器拒绝启动——回退不是受支持的状态。
 - **Windows + PowerShell**。这不只是文档口径：预设本体就按 Windows 写，非 win32 平台上 PowerShell 工具直接禁用；安装脚本也声明只支持 Windows。
 
 ## 授权

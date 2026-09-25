@@ -3,7 +3,7 @@ install-kaz-preset.ps1 - Windows installer for the Kaz agent preset.
 
 What it does:
   1. Resolves a DSH home (default: %USERPROFILE%\.dsh) and one profile inside it.
-  2. Version-gates the runtime (supported: 0.1.5-rc.2 and 0.1.7-rc.2).
+  2. Version-gates the runtime (supported: 0.1.7-rc.2 only).
   3. Mirrors the preset source (repo\kaz = the released copy users install;
      pass -Source test-kaz to promote the test-area development copy instead)
      into <DshHome>\.agent-presets\kaz, node_modules excluded.
@@ -55,10 +55,11 @@ Notes:
     pre-install composition, because no other file of the profile is touched.
   - Multi-home: pass -DshHome per home, or use -AllHomes to install into every
     %USERPROFILE%\.dsh* home that has a profiles\ directory.
-  - Supported runtimes are 0.1.5-rc.2 and 0.1.7-rc.2. The gate reads each home's
-    own runtime, so both are live at once: the main home .dsh still reads the
-    global 0.1.5-rc.2 while the test home .dsh-test reads 0.1.7-rc.2 from its own
-    pinned copy. -SkipVersionCheck is the deliberate
+  - The only supported runtime is 0.1.7-rc.2. The gate reads each home's own
+    runtime, so a home reaches it its own way: the main home .dsh reads the
+    global 0.1.7-rc.2, the test home .dsh-test the 0.1.7-rc.2 it pins locally. A
+    home still left on 0.1.5-rc.2 -- the blank .dsh-clean is one -- now FAILS the
+    gate by design. -SkipVersionCheck is the deliberate
     rollback override (only for a user-chosen return to 0.1.5-rc.1, which also
     needs the launcher's EXPECTED_CLI set back); normal installs and updates
     must never use it.
@@ -83,7 +84,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $PresetName = 'kaz'
-$SupportedVersions = @('0.1.5-rc.2', '0.1.7-rc.2')
+$SupportedVersions = @('0.1.7-rc.2')
 
 # The 0.1.7 delivery form: a bundle package that lives in the preset directory
 # itself. BundleName must be a valid npm package name (dsh resolves it with
