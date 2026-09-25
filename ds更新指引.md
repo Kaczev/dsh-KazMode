@@ -99,10 +99,14 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1"
 1. 把现有预设备份到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）；
 2. 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）**镜像**到 `<home>\.agent-presets\kaz`（排除 `node_modules`）；
 3. **原地重建**预设 `node_modules` 下的 `@deepseek-ai` junction（必需）→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`（仅当该层没有运行时包时才回退 profile 那一层）。先 `rmdir` 旧链接再新建，幂等；
-4. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
+4. 若目标 home 的运行时是 `0.1.7-rc.2`，还要把预设接成 profile 的 bundle（**这一步是这个版本必需的**）：在预设目录里（重新）生成 `package.json` 与 `cordis.patch.yml`；把 `kaz-preset-bundle` 追进 `<home>\profiles\<profile>\package.json` 的 `dsh.profile.bundles`（已在里面就不重复加）；幂等重建 `<profile>\node_modules\kaz-preset-bundle` 这个指回预设目录的 junction；
+5. 打印 `KAZ-PRESET-INSTALL OK - <home> (<profile>)`。
+
+- **`0.1.7-rc.2` 为什么需要第 4 步**：那个版本不再扫描 `.agent-presets\<名字>`（提供扫描的包在这个版本里已经不存在），预设改为作为 profile 的一个 bundle 行进入组合。所以老 home 升到 `0.1.7-rc.2` 之后**必须重跑一次本安装程序**，否则模式列表里不会出现 Kaz——那不是装坏了，是交付形态换代了。生成的那份 `cordis.patch.yml` 是固定模板（只有绝对路径随 home 变），预设行用 `cordis:include` 指回预设自己的 `agent.cordis.yml`，装配仍然只有那一份事实源；脚本**不碰** profile 自己的 `cordis.patch.yml`（那里装着用户设置）。
 
 - **不需要** `npm install`：预设只用那两个 junction 解析运行时；`<home>\profiles\<profile>\node_modules` 里的其它内容不会被改。
 - **更新后的三项核对**：`Get-Content "<home>\.agent-presets\kaz\VERSION"` 应与仓库 `kaz\VERSION` 同一行；`(Get-ChildItem "<home>\.agent-presets\kaz\skills" -Filter SKILL.md -Recurse).Count` 应打印 `16`；`(Get-Item "<home>\.agent-presets\kaz\node_modules\@deepseek-ai").Target` 应指向 `<home>\profiles\node_modules\@deepseek-ai`（不是 profile 那一层）。后者指错会让新对话里的预设**挂不起来**——那不是可以忽略的警告，重跑当前仓库的安装程序即可。**改技能集时这一处最容易漏**：本文件与安装指引各有一处数字，而这一处是**命令**、不是正文，改的时候容易只看见正文那句——两次都漏在这行。
+- **`0.1.7-rc.2` 的 home 再加一条核对**：`Get-Content "<home>\profiles\<profile>\package.json"` 的 `dsh.profile.bundles` 里应能看到 `kaz-preset-bundle`，且 `<home>\profiles\<profile>\node_modules\kaz-preset-bundle` 是指回 `<home>\.agent-presets\kaz` 的 junction。缺任一处都是第 4 步没落地：重跑本步即可（幂等）。
 - 更新别的 home / 多个 home（去掉 `-DryRun` 即可）：
 
 ```powershell

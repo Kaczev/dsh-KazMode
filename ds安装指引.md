@@ -67,6 +67,10 @@ Test-Path (Join-Path $repo "kaz\preset.yml")
 
 安装程序 `install-kaz-preset.ps1` 会依次做：按目标 home 校验版本闸门 → 备份已有预设到 `<home>\tools\kaz-preset-backup-<时间戳>`（排除 `node_modules`）→ 用 `robocopy /MIR` 把仓库 `kaz\`（发布源）镜像到 `<home>\.agent-presets\kaz`（排除 `node_modules`）→ 幂等重建预设 `node_modules` 下的 `@deepseek-ai` junction（→ **同 home 的共享层** `<home>\profiles\node_modules\@deepseek-ai`，仅当该层没有运行时包时才回退 profile 那一层）→ 打印 `KAZ-PRESET-INSTALL OK`。
 
+**若目标 home 的运行时是 `0.1.7-rc.2`，中间还多三步**（脚本按闸门读到的那个版本自动分流，你不用判断）：在预设目录里生成 `package.json` 与 `cordis.patch.yml`；把 `kaz-preset-bundle` 追进 `<home>\profiles\<profile>\package.json` 的 `dsh.profile.bundles`；在 `<profile>\node_modules\kaz-preset-bundle` 建一个指回预设目录的 junction。
+
+> **为什么 `0.1.7-rc.2` 需要这三步**：那个版本不再扫描 `.agent-presets\<名字>`（提供扫描的包在这个版本里已经不存在），预设改为作为 profile 的一个 bundle 行进入组合。所以只有镜像、没有这三步时，预设**不会出现在模式列表里**——那是交付形态换代，不是装坏了。生成的那份 `cordis.patch.yml` 是固定模板（只有绝对路径随 home 变），它的预设行用 `cordis:include` 指回预设自己的 `agent.cordis.yml`，装配仍然只有那一份事实源。脚本**不碰** profile 自己的 `cordis.patch.yml`（那里装着用户设置）。
+
 > **`@deepseek-ai` 为什么指共享层（别改回 profile 层）**：预设解析插件名时**先看自己的 `node_modules`**，这个链接指向哪一层就决定了哪些包可见；一个指向父目录的链接还会截断向上的查找。profile 那一层（`<home>\profiles\<profile>\node_modules\@deepseek-ai`）可能只有该 profile 装过的子集，而 Kaz 的组合需要 `dsh-persona`（`kaz-system-prompt.mjs` 直接 import）与 `dsh-tool-ask-user`（组合里的一行）等**只存在于共享层**的包——指错就直接**预设挂不起来**。以 `linked: ... -> ...` 那行打印的路径为准。
 
 **2.1 单 home（最常见：装到默认 `%USERPROFILE%\.dsh`）**
@@ -180,7 +184,9 @@ powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -Uninsta
 powershell -ExecutionPolicy Bypass -File "$repo\install-kaz-preset.ps1" -DshHome "$env:USERPROFILE\.dsh-test" -Uninstall
 ```
 
-- 只删除 `<home>\.agent-presets\kaz` 这一个目录；**不碰** `<home>\profiles\<profile>\node_modules`（那两个 junction 指过去的目标保留）。
+- 删除 `<home>\.agent-presets\kaz` 这个目录；**不碰** `<home>\profiles\<profile>\node_modules` 里别的包。
+- 该 home 的运行时是 `0.1.7-rc.2` 时，还会一并撤掉那三处 bundle wiring：`dsh.profile.bundles` 里的 `kaz-preset-bundle`、`<profile>\node_modules\kaz-preset-bundle` 那个 junction，以及预设目录本身（生成的两个文件随目录一起没了）。撤完这份 profile 的组合就回到装之前的样子。
+- 若 `<home>\.agent-presets\kaz` 本身是一个 junction（开发机上仓库里的 `kaz\` / `test-kaz\` 就是），脚本**拒绝卸载**并打印它指向哪里：那是活体预设，删它会穿过链接删掉真正的东西——要真删请先手动把链接去掉。
 - **不还原**备份；备份留在 `<home>\tools\kaz-preset-backup-<时间戳>`，需要时手动取用，确认不需要后可手动删除（多次安装会累积）。
 - 成功输出：`KAZ-PRESET-UNINSTALL OK - <home>`。
 

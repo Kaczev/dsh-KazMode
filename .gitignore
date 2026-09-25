@@ -8,4 +8,12 @@
 /test-kaz/node_modules/
 /kaz/node_modules/
 /.tmp-*/
+# Installer output for the 0.1.7 profile-bundle delivery: install-kaz-preset.ps1
+# generates these two inside the preset directory and rewrites them on every
+# run. On this machine kaz/ and test-kaz/ ARE the installed preset, so copies
+# land here -- they are artifacts, not sources.
+/test-kaz/package.json
+/test-kaz/cordis.patch.yml
+/kaz/package.json
+/kaz/cordis.patch.yml
 /发布与回滚.md

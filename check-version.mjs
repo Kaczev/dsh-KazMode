@@ -1,4 +1,10 @@
-// check-version.mjs —— README 里那句"当前版本 X.Y.Z"必须与两个 VERSION 文件一致。
+// check-version.mjs —— README 里那句"当前版本 X.Y.Z"必须与两个 VERSION 文件的**主版本**一致。
+//
+// 形状：VERSION 可以是 `X.Y.Z`，也可以是 `X.Y.Z-<后缀>`（后缀 = 发布/测试标记，
+// 比如测试行领先一个 `8.9.8-b`）。后缀整体锚定：`8.9.8-bb-`、`8.9.8-`、`8.9.8.1` 都不合法。
+// 比较的是主版本（`-` 之前那截），所以 README 的 `8.9.8` 与测试行的 `8.9.8-b` 算**相符**：
+// 这个仓库在测试期的既定状态就是 README/`kaz` 在 `8.9.8`、`test-kaz` 领先一个 `-b`。
+// 于是"两个 VERSION 必须逐字相同"**不是**这句话的要求，两个主版本都等于 README 才是。
 //
 // 为什么这个检查**不在预设行里**（`kaz\fork-param.regression.mjs` 那种位置）：
 // 预设行是会**单独发出去**的东西——装机脚本把 `kaz\` 镜像到 `<home>\.agent-presets\kaz`，
@@ -22,7 +28,7 @@ const ROOT = rootFlag >= 0 && args[rootFlag + 1] !== undefined ? resolve(args[ro
 
 const README = join(ROOT, "README.md");
 const VERSIONS = [join(ROOT, "kaz", "VERSION"), join(ROOT, "test-kaz", "VERSION")];
-const SHAPE = /^\d+\.\d+\.\d+$/u;
+const SHAPE = /^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.]+)?$/u;
 
 const problems = [];
 const notes = [];
@@ -36,7 +42,8 @@ try {
 }
 
 // README 里出现**好几个**版本号形状的串（`0.1.5-rc.2` 是 dsh 运行时的要求），所以不能取"第一个"。
-// 认的是那句话本身：`当前版本 X.Y.Z`。句子改了/没了就当失败——那正是这个守卫存在的意义。
+// 认的是那句话本身：`当前版本 X.Y.Z`。只取主版本——句子里不写后缀，那是 VERSION 文件自己的事。
+// 句子改了/没了就当失败——那正是这个守卫存在的意义。
 const sentence = /当前版本\s*(\d+\.\d+\.\d+)/u.exec(readme);
 if (sentence === null) {
   problems.push(`README.md: no \`当前版本 X.Y.Z\` sentence found — the version line was reworded or removed, so this guard cannot see it`);
@@ -51,8 +58,12 @@ const readVersionFile = (path) => {
     return null;
   }
   const value = text.trim();
-  if (!SHAPE.test(value)) problems.push(`${path}: expected a bare X.Y.Z, got ${JSON.stringify(value.slice(0, 40))}`);
-  return value;
+  const shape = SHAPE.exec(value);
+  if (shape === null) {
+    problems.push(`${path}: expected X.Y.Z or X.Y.Z-<suffix>, got ${JSON.stringify(value.slice(0, 40))}`);
+    return null;
+  }
+  return { value, main: shape[1] };
 };
 
 const versions = VERSIONS.map(readVersionFile);
@@ -60,17 +71,17 @@ const [mainVersion, testVersion] = versions;
 
 if (sentence !== null) {
   const stated = sentence[1];
-  for (const [index, value] of versions.entries()) {
-    if (value === null) continue;
+  for (const [index, entry] of versions.entries()) {
+    if (entry === null) continue;
     const which = index === 0 ? "kaz\\VERSION (the published row)" : "test-kaz\\VERSION (the test row)";
-    if (value !== stated) problems.push(`README.md says 当前版本 ${stated}, but ${which} says ${value}`);
+    if (entry.main !== stated) problems.push(`README.md says 当前版本 ${stated}, but ${which} says ${entry.value}`);
   }
-  if (mainVersion !== null && testVersion !== null && mainVersion !== testVersion) {
-    // 不单独判失败：上面"两边都要等于 README"的那两条已经会因为其中一边不一致而报错。
-    notes.push(`kaz=${mainVersion} test-kaz=${testVersion} (differ)`);
+  if (mainVersion !== null && testVersion !== null && mainVersion.value !== testVersion.value) {
+    // 不单独判失败：上面"两个主版本都要等于 README"的那两条才是判据。
+    notes.push(`kaz=${mainVersion.value} test-kaz=${testVersion.value} (differ)`);
   }
   if (problems.length === 0) {
-    console.log(`OK README 当前版本 ${stated} == kaz\\VERSION == test-kaz\\VERSION`);
+    console.log(`OK README 当前版本 ${stated} == kaz\\VERSION ${mainVersion.value} == test-kaz\\VERSION ${testVersion.value}`);
   }
 }
 
