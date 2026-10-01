@@ -1,8 +1,8 @@
 # Kaz 模式
 
-一个给 DeepSeek Harness（dsh）用的 agent preset（代理预设）。仓库里是预设本体，放在 `kaz\` 目录：`kaz\preset.yml` 定名称与描述，`kaz\agent.cordis.yml` 定怎么装配，`kaz\skills\` 放技能，`kaz\functions\` 放各功能模块。当前版本 8.9.8，写在 `kaz\VERSION`。
+一个给 DeepSeek Harness（dsh）**桌面端**用的 agent preset（代理预设）。仓库里是预设本体，放在 `kaz\` 目录：`kaz\preset.yml` 定名称与描述，`kaz\agent.cordis.yml` 定怎么装配，`kaz\skills\` 放技能，`kaz\functions\` 放各功能模块。当前版本 8.9.8，写在 `kaz\VERSION`。
 
-装好之后，在 dsh 新建对话时于模式列表里选 **Kaz 模式**（preset id 为 `kaz`）。
+装好之后，在桌面端新建对话时于模式列表里选 **Kaz 模式**（preset id 为 `kaz`）。
 
 ## 装完你会得到什么
 
@@ -18,29 +18,35 @@
 
 ## 怎么装、怎么升
 
-安装和更新不在本文展开，交给写死了每一步的指引，把提示词发给 DeepSeek 让它照着做即可：
+**安装和更新是同一件事**：生成 bundle 文件，再装一次。一步一步的走法在 `桌面端安装与更新指引.md`，提示词见 `桌面端安装与更新的提示词.txt`。
 
-- **全新安装**：读 `ds安装指引.md`，提示词见 `ds安装法的提示词.txt`。
-- **已有安装的更新**：读 `ds更新指引.md`，提示词见 `ds更新法的提示词.txt`。
+一句话版：
 
-实际执行的是仓库根目录的 `install-kaz-preset.ps1`：安装和更新用同一个脚本，更新就是重跑它。常用参数有 `-DryRun`（预演，预演会打印 OK，但没有写入）、`-DshHome`、`-ProfileName`、`-AllHomes`、`-Uninstall`、`-SkipVersionCheck`。脚本先备份再镜像：已有预设备份到 `<home>\tools\kaz-preset-backup-<时间戳>`，然后用 robocopy 把 `kaz\` 镜像到 `<home>\.agent-presets\kaz`（不含 node_modules）。
+1. 在仓库根目录跑 `make-bundle-patch.mjs`（用桌面端自己的运行时当 node），它会写出 `kaz\cordis.patch.yml` 与 `kaz\package.json`；
+2. 在桌面端会话里让代理调用 `plugin_manager`：`install_bundle`，`target` = 仓库里 `kaz\` 的绝对路径。
 
-**一种受支持的运行时，一种交付形态**，脚本按目标 home 自己的运行时版本分流：
-
-| 运行时 | 预设怎么被挂上 | 脚本多做的事 |
-|---|---|---|
-| `0.1.7-rc.2` | 预设作为 profile 的一个 bundle 行进入组合 | 在预设目录里生成 `package.json` 与 `cordis.patch.yml`；把 `kaz-preset-bundle` 追进 `<home>\profiles\<profile>\package.json` 的 `dsh.profile.bundles`；在 `<profile>\node_modules\` 下建一个指回预设目录的 junction |
-
-`0.1.5-rc.2` 已不再受支持；它的挂法（运行时自己扫描 `<home>\.agent-presets\<名字>`）在 `0.1.7-rc.2` 上已经不存在，所以拿 `0.1.5-rc.2` 的 home 去装会先被版本闸门拦下。
-
-`0.1.7-rc.2` 不再扫描那个目录（提供扫描的包在这个版本里已经不存在），所以只有镜像、没有后面那三步的话，**预设不会出现在模式列表里**——那不是装坏了，是交付形态换代了。生成的那份 `cordis.patch.yml` 是一份固定模板（只有绝对路径随 home 变），它的预设行用 `cordis:include` 指回预设自己的 `agent.cordis.yml`，所以预设的装配仍然只有那一份事实源。脚本只碰上面这几处，不碰 profile 自己的 `cordis.patch.yml`（那里装着你的用户设置）。回滚一条命令：`-Uninstall`（会删掉预设目录并撤掉这三处 wiring）。
-
-生效要三步：重启 dsh、强刷浏览器页面、在**新对话**里选 Kaz 模式。
+装完**开一个新会话**才看得到新模式（已挂载的会话保留它启动时的插件修订）。更新已有安装时要先 `remove_bundle` 再 `install_bundle`——`install_bundle` 对已经装着的同一个 bundle 不是幂等的。
 
 ## 需要什么
 
-- **dsh `0.1.7-rc.2`**，只支持这一个版本。版本号读的是运行时包 `@deepseek-ai/dsh` 的 `version` 字段，不是 `dsh --version`；对不上时安装程序报错并停止。闸门读的是**目标 home 自己的运行时**，所以每个 home 各读自己那一份：主环境 `.dsh` 读到全局 `0.1.7-rc.2`，测试区 `.dsh-test` 读到它自己那份 `0.1.7-rc.2`；还是 `0.1.5-rc.2` 的 home（比如空白的 `.dsh-clean`）会被闸门拒绝。`-SkipVersionCheck` 是唯一的绕过开关，只在用户明确要求回退到 `0.1.5-rc.1` 时用，而且回退时必须把该 home 启动器的 `EXPECTED_CLI` 一起改回去，否则启动器拒绝启动——回退不是受支持的状态。
-- **Windows + PowerShell**。这不只是文档口径：预设本体就按 Windows 写，非 win32 平台上 PowerShell 工具直接禁用；安装脚本也声明只支持 Windows。
+- **dsh 桌面端**（宿主运行时 0.2.0-rc.2 或更新）。桌面端把 dsh 运行时打包在自己的安装目录里；本预设**不依赖 home 里那份运行时**，也没有版本闸门。
+- **Windows**。这不只是文档口径：预设本体就按 Windows 写，非 win32 平台上 PowerShell 工具直接禁用。
+- **仓库在本机**。桌面端 profile 里的 `node_modules\kaz-preset-bundle` 是指向仓库 `kaz\` 的符号链接——改仓库就是改生效的那份，不需要"镜像到别处"。
+- **一份与宿主同版本的依赖树**。插件代码 import 的 `@deepseek-ai/*` 由 `kaz\node_modules\@deepseek-ai` 这条 junction 解析，指向 `%USERPROFILE%\Documents\dsh-local\dsh-0.2.0-rc.2-deps`。细节与升级时机见 `桌面端安装与更新指引.md` §4。
+
+## 维护者
+
+- `kaz\agent.cordis.yml` 是装配的**唯一事实源**；`kaz\cordis.patch.yml` 与 `kaz\package.json` 是 `make-bundle-patch.mjs` 的**生成物**（都不入库，别手改）。
+- 发版、回滚、提交形状：`发布与回滚.md`（不入库，只在本机）。
+- 版本守卫：仓库根目录 `check-version.mjs`（断言 README 第 3 行那句主版本 == `kaz\VERSION`）。
+
+## 曾经的网页端（CLI）交付，已退役
+
+从桌面端交付起：
+
+- 不再有 `<home>\.agent-presets\kaz` 这一站，也不再有"把仓库镜像进 home"这一步；
+- 不再需要全局 `dsh` 命令，也没有版本闸门；
+- `install-kaz-preset.ps1`、`ds安装指引.md`、`ds更新指引.md`、`ds安装法的提示词.txt`、`ds更新法的提示词.txt` 已删除（需要时从 git 历史取）——它们的闸门钉在 dsh `0.1.7-rc.2` 上，在桌面端跑不了。
 
 ## 授权
 
