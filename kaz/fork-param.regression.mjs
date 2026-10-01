@@ -497,10 +497,23 @@ const dispatcherSession = { id: "session-main", snapshotEvents: () => [] };
   const T = "t";
 
   // 5a. E1：条目根本不是对象。
+  //
+  // **这条的"说话人"变了（2026-10-01），所以断言跟着改。** `entries.items` 现在声明成
+  // 对象（为了给模型一个照着对括号的模板，理由见 tools.js 里那段注释），于是"不是对象"
+  // 由**平台**在进 execute 之前顶掉——`normalizeEntry` 那句
+  // `each entry must be an object` 对**工具调用这条路**因此不可达（5a' 验它还活着）。
+  // 模型读到的仍然是"哪一条、错在哪"（点名 entries[0]），只是换了个说话人。
   {
     const h = writeHarness();
-    const out = await h.tool.execute({ entries: [null] }, h.exec);
-    check("5a. E1 整句", out.message === "each entry must be an object", JSON.stringify(out.message));
+    let thrown;
+    try {
+      await h.tool.execute({ entries: [null] }, h.exec);
+    } catch (error) {
+      thrown = error;
+    }
+    check("5a. E1 由平台在派发前拒（不再是工具那句）", thrown?.name === "ToolArgsError"
+      && thrown?.message === 'invalid arguments: "entries[0]" must be an object', String(thrown?.message));
+    check("5a'. 而 normalizeEntry 自己那句还在（直接调它时可达）", normalizeEntry(null).error === "each entry must be an object", JSON.stringify(normalizeEntry(null)));
   }
 
   // 5b. E2：字符串 persona 不是保留值。E4：persona 根本不是字符串也不是数组。E3：数组形状不对。
@@ -1374,6 +1387,166 @@ const dispatcherSession = { id: "session-main", snapshotEvents: () => [] };
       String(modelText(skillExec(subagent, HIDDEN))).slice(0, 80),
     );
     check("5s. 同一条路径上，主代理与可见技能都放行（工具主体照旧会跑）", modelText(skillExec(mainAgent, HIDDEN)) === undefined && modelText(skillExec(subagent, VISIBLE)) === undefined);
+  }
+}
+
+// ── 6. 整条流被判非法时的恢复 + `write_arrangement` 的工具表结构 ────────────────
+//
+// 背景（2026-10-01 实测）：官方 DeepSeek Messages 适配器在流结算时 JSON.parse 每个
+// 已完成的 tool call，一个不合法就抛 `MALFORMED_RESPONSE`；那次是 `write_arrangement`
+// 的参数里每条 `"task": "…"` 后面各多一个 `]`（3853 字全废），而该码不在默认重试码里，
+// 于是 whale_report 刚跳进 arrange_agent 的整轮作废。
+// 这一节验两件事：判据与恢复的接线；以及"工具表里那份参数到底长什么样"。
+{
+  const {
+    MALFORMED_RESPONSE_CODE,
+    MALFORMED_HINT_HEADER,
+    MAX_RECOVERIES_PER_STEP,
+    createMalformedRecovery,
+    isMalformedResponse,
+    renderMalformedRecoveryText,
+  } = await import("./functions/kaz-shared/lib/malformed-stream-recovery.js");
+
+  // 6a. 判据：只认码，不认文案。
+  //
+  // 文案是上游随手可改的东西，拿它当判据等于给自己埋一根看不见的引线——这条断言
+  // （"换个文案照样认领"）就是把这件事钉住的那一条。
+  check(
+    "6a. 实测那次失败被认领（码 + 上游那句话）",
+    isMalformedResponse({ code: MALFORMED_RESPONSE_CODE, message: "DeepSeek Messages stream: tool input is invalid JSON" }),
+  );
+  check("6a. 码对、文案换掉也认领（判据不是文案）", isMalformedResponse({ code: MALFORMED_RESPONSE_CODE, message: "whatever the provider says tomorrow" }));
+  for (const other of ["RATE_LIMIT", "SERVER", "TIMEOUT", "TRANSPORT", "EMPTY_RESPONSE", "AUTH", "QUOTA", "CONTEXT_WINDOW_EXCEEDED", "ABORTED"]) {
+    check(`6a. ${other} 不认领（那是别人/别的策略的事）`, !isMalformedResponse({ code: other, message: "x" }));
+  }
+  check("6a. 非对象不认领", !isMalformedResponse(undefined) && !isMalformedResponse(null) && !isMalformedResponse("MALFORMED_RESPONSE"));
+
+  // 6b. 提示的形状与内容：它要同时做到"说事实"和"给出动作"。
+  const hint = renderMalformedRecoveryText();
+  check("6b. 提示有头（日志与模型都按头认类）", hint.startsWith(`${MALFORMED_HINT_HEADER}\n`), hint.slice(0, 40));
+  check("6b. 提示两行：头 + 正文", hint.split("\n").length === 2, `lines=${hint.split("\n").length}`);
+  check("6b. 说了事实：被丢了、什么都没留下", /dropped before anything ran/u.test(hint) && /none of it was kept/u.test(hint));
+  check("6b. 给了动作：重发这一步 + 闭合括号", /Re-emit that step now/u.test(hint) && /close every bracket and quote/u.test(hint));
+  check("6b. 是英文（模型面文案一律英文）", !/[\u4e00-\u9fff]/u.test(hint));
+
+  // 6c. 假会话：只实现被测代码真正会用的那一面（append 把调用记下来）。
+  const appends = [];
+  const fakeSession = (id) => ({
+    id,
+    append: (type, message, options) => {
+      appends.push({ id, type, message, options });
+      return { seq: appends.length };
+    },
+  });
+  const delegate = async () => "delegated";
+  const payload = (over = {}) => ({
+    agent: { session: fakeSession("session-recover") },
+    turn: 3,
+    step: 2,
+    failure: { code: MALFORMED_RESPONSE_CODE, message: "DeepSeek Messages stream: tool input is invalid JSON" },
+    signal: new AbortController().signal,
+    ...over,
+  });
+
+  const recover = createMalformedRecovery({ logger: { warn: () => {} } });
+  const first = await recover(payload(), delegate);
+  check("6c. 第一次失败：认领重试", first?.kind === "retry", JSON.stringify(first));
+  check("6c. 插了恰好一条消息", appends.length === 1, `n=${appends.length}`);
+  check("6c. 插的是 user/message + surfaceOp=append（重试请求从历史重建，所以它会进那次请求）", appends[0]?.type === "user/message" && appends[0]?.options?.surfaceOp === "append", JSON.stringify(appends[0]?.options));
+  check(
+    "6c. 来源是 plugin:kaz-shared + notice（模型看得出是插件说的，不是用户说的）",
+    appends[0]?.message?.source?.kind === "plugin:kaz-shared" && appends[0]?.message?.source?.form === "notice",
+    JSON.stringify(appends[0]?.message?.source),
+  );
+  check("6c. summary 是 malformed-stream", appends[0]?.message?.source?.summary === "malformed-stream", String(appends[0]?.message?.source?.summary));
+  check("6c. 正文就是那条提示", appends[0]?.message?.content?.[0]?.text === hint);
+
+  // 6c'. 有界：同一个 step 只救一次；换 step、换会话各算各的。
+  const second = await recover(payload(), delegate);
+  check(`6c. 同一个 step 第二次：不再救（界=${MAX_RECOVERIES_PER_STEP}），交给上层`, second === "delegated" && appends.length === 1, `${JSON.stringify(second)} n=${appends.length}`);
+  const third = await recover(payload({ step: 3 }), delegate);
+  check("6c. 换一个 step：预算重新给", third?.kind === "retry" && appends.length === 2, `${JSON.stringify(third)} n=${appends.length}`);
+  const otherSession = await recover(payload({ agent: { session: fakeSession("session-other") } }), delegate);
+  check("6c. 别的会话不受这个会话的预算影响", otherSession?.kind === "retry" && appends.length === 3, `${JSON.stringify(otherSession)} n=${appends.length}`);
+
+  // 6d. 不该认领的路径一律 next()。
+  const fresh = createMalformedRecovery();
+  check("6d. 别的失败码：退回 next()", (await fresh(payload({ failure: { code: "SERVER", message: "x" } }), delegate)) === "delegated");
+  check("6d. 用户已取消：退回 next()（不再发请求）", (await fresh(payload({ signal: AbortSignal.abort() }), delegate)) === "delegated");
+  check("6d. 拿不到 agent：退回 next()", (await fresh(payload({ agent: {} }), delegate)) === "delegated");
+  check("6d. 会话没有 append：退回 next()", (await fresh(payload({ agent: { session: { id: "s" } } }), delegate)) === "delegated");
+  check("6d. 没有 payload：退回 next()", (await fresh(undefined, delegate)) === "delegated");
+
+  // 6e. 提示插不进去时**不重试**，而且不花预算。
+  // 理由：重试一次却不告诉模型为什么，等于让它照着坏结构再写一遍——白烧一次采样。
+  {
+    let attempts = 0;
+    let fail = true;
+    const flaky = {
+      id: "session-throw",
+      append: () => {
+        attempts += 1;
+        if (fail) throw new Error("surface is frozen");
+        return { seq: 1 };
+      },
+    };
+    const r = createMalformedRecovery({ logger: { warn: () => {} } });
+    const a = await r(payload({ agent: { session: flaky } }), delegate);
+    check("6e. 提示插不进去就不重试", a === "delegated", JSON.stringify(a));
+    fail = false;
+    const b = await r(payload({ agent: { session: flaky } }), delegate);
+    check("6e. 插不进去没花掉预算：下一次照样救", b?.kind === "retry" && attempts === 2, `${JSON.stringify(b)} attempts=${attempts}`);
+  }
+
+  // 6f. 接线：kaz-shared 的 apply() 真的把这条挂到瀑布上了。
+  {
+    const { apply: applyShared } = await import("./functions/kaz-shared/lib/index.js");
+    const listeners = [];
+    const fakeCtx = {
+      on: (event, listener) => {
+        if (event === "agent/request-error") listeners.push(listener);
+      },
+      logger: { warn: () => {} },
+      get: () => undefined,
+    };
+    applyShared(fakeCtx);
+    check("6f. apply() 挂上了 agent/request-error（恰好一条）", listeners.length === 1, `n=${listeners.length}`);
+    const wiredAppends = [];
+    const wired = await listeners[0]?.(
+      payload({ agent: { session: { id: "session-wired", append: (t, m, o) => { wiredAppends.push({ t, m, o }); return { seq: 1 }; } } } }),
+      delegate,
+    );
+    check("6f. 挂上的就是那条恢复（认领重试 + 插一条）", wired?.kind === "retry" && wiredAppends.length === 1, `${JSON.stringify(wired)} n=${wiredAppends.length}`);
+  }
+
+  // 6g. 工具表：`entries` 现在**有形状**了，而且**取值判断一件都没搬走**。
+  //
+  // 这一节是这次改动的另一半。改之前 `items` 编译出来是 `{}`，模型拿到的字段说明
+  // 只有那段散文，于是它得盲写 2–11KB 的嵌套 JSON——历史里 570 次调用坏了 64 次（11%）。
+  // 反过来，把字段写成真类型会**顶掉** `normalizeEntry` / `forkValueOf` / `personaValueOf`
+  // 那几句文案（实测：套件里 `fork: true` 那条当场变成平台的 `must be a string`），
+  // 所以这里验的是"有形状、无类型"这个组合本身。
+  {
+    const tool = writeArrangementTool({ store: { getStage: () => "arrange_agent", loadEntries: async () => [], setEntries: () => {} } });
+    const items = tool.parameters?.properties?.entries?.items ?? {};
+    const keys = Object.keys(items.properties ?? {}).sort();
+    check("6g. entries.items 不再是空结构（是对象、且有四个键名）", items.type === "object" && keys.join(",") === "blacklist,fork,persona,task", `${items.type} [${keys.join(",")}]`);
+    check(
+      "6g. 四个字段都不带类型（空 schema：取值判断留给人话文案）",
+      ["persona", "blacklist", "task", "fork"].every((k) => Object.keys(items.properties[k] ?? {}).length === 0),
+      JSON.stringify(items.properties),
+    );
+    check("6g. 没有 required（'哪些必填'仍只由散文说了算，避免顶掉 personaValueOf 那句）", items.required === undefined, JSON.stringify(items.required));
+    check("6g. 未知字段仍然放行（additionalProperties 不是 false：normalizeEntry 不拒未知字段）", items.additionalProperties !== false, String(items.additionalProperties));
+
+    // 6g'. 取值判断还在工具手里：拿那些**故意写坏**的值走一遍 execute，看到的必须是人话文案。
+    // 这一条是上面那些"不写类型"的理由的证据——写坏了仍然是这条工具自己说话。
+    const store = { getStage: () => "arrange_agent", loadEntries: async () => [], setEntries: () => {} };
+    const exec = { agent: { session: { id: "session-schema", header: { cwd: process.cwd() } } } };
+    const asked = await writeArrangementTool({ store }).execute({ entries: [{ persona: ["a", "d"], task: "t", fork: true }] }, exec);
+    check("6g'. fork=true 仍然由工具自己拒（文案没被平台顶掉）", asked.ok === false && /not a boolean switch/u.test(asked.message), String(asked.message).slice(0, 90));
+    const noPersona = await writeArrangementTool({ store }).execute({ entries: [{ task: "t" }] }, exec);
+    check("6g'. 缺 persona 仍然是工具自己那句", noPersona.ok === false && /persona must be/u.test(noPersona.message), String(noPersona.message).slice(0, 90));
   }
 }
 

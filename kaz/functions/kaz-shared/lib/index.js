@@ -11,6 +11,11 @@
 //      进了 self-check 再出来，工具面就回不来了。
 //
 // 子代理不动：子代理的黑名单由派发时交给平台处理（toolFilter），阶段对它们也不注入。
+//
+// 另外挂一条**与工具面无关**的恢复：适配器把整条流判为非法时（`MALFORMED_RESPONSE`，
+// 实测就是模型把 `write_arrangement` 的参数写坏那次），dsh 默认不重试、整轮作废。
+// 这条恢复插一条给模型看的提示、把该 step 重来一次——**主代理与子代理都受益**，
+// 所以它不跟着上面那三腿走（不分主/子）。判据与理由见 malformed-stream-recovery.js。
 
 export const name = "kaz-shared";
 
@@ -22,6 +27,7 @@ export const inject = ["tools"];
 
 import { MAIN_BLACKLIST } from "./blacklists.js";
 import { isSubagentAgent } from "./agent-role.js";
+import { installMalformedRecovery } from "./malformed-stream-recovery.js";
 import { readStageSync } from "../../ka-whale-workflow/lib/stage-store.js";
 import { SELF_CHECK_ONLY_TOOL } from "../../ka-whale-workflow/lib/stages.js";
 
@@ -151,4 +157,9 @@ export function apply(ctx) {
     }
     return next();
   });
+
+  // 「整条流被判非法」的恢复：**主代理与子代理都挂**。子代理也会写坏参数
+  // （它们手上的工具面更窄，但 write 类工具一样在），而它们那一轮同样会整轮作废；
+  // 这条恢复不改工具面、分不出主次的差别，所以不像上面三腿那样排除子代理。
+  installMalformedRecovery(ctx);
 }

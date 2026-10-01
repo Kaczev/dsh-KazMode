@@ -164,7 +164,40 @@ export function writeArrangementTool({ store }) {
     description:
       'Record this round\'s dispatch plan for the current conversation (usable only in the arrange_agent stage). Entries: { persona, blacklist?, task, fork? } — persona must be exactly one of: "main", "memoryMaintainer", "slopCleaner", or [role, description] (an array of exactly two non-empty strings); fork must be exactly "main" (inherit your own conversation), "none" (start a fresh subagent — the same as leaving the field out), or a subagent session id, and is NOT a boolean — true/false/"true"/"yes" are rejected; anything else is rejected. The plan must contain memoryMaintainer: only it can write memories.',
     parameters: {
-      entries: { type: "array", required: true, items: { type: "json" }, description: "The dispatch plan entries." },
+      // `items` 从 `{ type: "json" }` 换成**有形状的**条目（2026-10-01）。
+      //
+      // 为什么必须换：`type: "json"` 编译出来就是 `"items": {}` —— 模型拿到的工具表里
+      // 这个字段**一点结构都没有**（只剩上面那段散文描述），于是它得手写 2–11KB 的嵌套
+      // JSON（persona / blacklist 两层数组 + 大段中文）。实测代价：历史里这份参数不合法
+      // 共 64 次，占全部 570 次调用的 11%，是整份预设里最脆的一处；对照组 `ka_sub_whale`
+      // 全是标量参数，966 次调用 0 次坏。
+      //
+      // **每个字段都写成 `json`（空 schema），不加类型、不加 required、不收紧
+      // additionalProperties**：这一改要的是"给模型一个照着对括号的模板"，而**取值**的
+      // 判断一件都不许搬走——`normalizeEntry` / `forkValueOf` / `personaValueOf` 那几句
+      // 是这条工具真正的产品（"fork 不是布尔开关"、"persona 只能这三种或 [角色, 描述]"），
+      // 平台生成的 `invalid arguments: …` 会**先**把它们顶掉，模型读到的就变成一句
+      // 冷冰冰的类型错误。谁必填、哪些值合法，仍然只由上面那段散文 + 那几句文案说了算；
+      // 这里只声明**形状**（一个对象、四个键名）。
+      //
+      // 实测依据：把 persona/blacklist/task/fork 写成真类型之后，套件里
+      // `fork: true` 那条既有断言当场变成平台的 `entries[0].fork must be a string`
+      // （2026-10-01，238 条里立刻红一条）——那正是"取值判断被顶掉"的样子。
+      entries: {
+        type: "array",
+        required: true,
+        description: "The dispatch plan entries (one object per persona).",
+        items: {
+          type: "object",
+          additionalProperties: true,
+          properties: {
+            persona: { type: "json" },
+            blacklist: { type: "json" },
+            task: { type: "json" },
+            fork: { type: "json" },
+          },
+        },
+      },
     },
     output: { schema: RESULT_SCHEMA, render: RESULT_RENDER },
     async execute(args, exec) {
