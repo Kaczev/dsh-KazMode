@@ -4,157 +4,107 @@ description: Use when code carries noise that was generated rather than decided 
 user-invocable: false
 ---
 
-Removing slop from code that already exists is a different job from not writing it in the first place.
-The rules in our own persona govern what we write; this file governs what we take out of someone
-else's — usually the user's live code, where a wrong deletion costs real behaviour.
+# Cleaning up slop
 
-Two things make it dangerous, and both have a cheap answer:
+Removing slop from code that already exists is a different job from not writing it in the first
+place. Our own persona governs what we write; this file governs what we take out of someone
+else's code, usually the user's live code, where a wrong deletion costs real behaviour.
 
-- **It changes code someone depends on, while feeling like tidying.** So it is dispatched, scoped, and
-  proven, never folded into whatever else this round is doing.
-- **The reader of the code is not in the room.** So every finding carries evidence, and the two of us
-  decide what is worth doing before any of it is deleted.
+Two things make it dangerous, and both have a cheap answer. **It changes code someone depends on,
+while feeling like tidying**, so it is dispatched, scoped, and proven, never folded into whatever
+else this round is doing. **The reader of the code is not in the room**, so every finding carries
+evidence, and the two of us decide what is worth doing before any of it is deleted.
 
 **For the main agent.** This file is registered main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js`. The cleaner carries its own instructions in its fixed
-persona; what it needs from us is scope, classes, verification and permission, which is what this file
-decides. The role blocks below are inputs to `write_arrangement`, not text addressed to anyone.
+`functions/kaz-shared/lib/skill-visibility.js`; the entry below is an input to
+`write_arrangement`, not text addressed to anyone.
 
-## What counts as slop
+The dispatching mechanics, and what a dispatch is worth, are in `kaz-dispatch`. What follows is
+only what this work type adds.
 
-Judge the artifact, not the style: **is it here because someone decided it, or because something
-generated it?** The classes, with the symptom we look for:
+## Read the matching reference
 
-| class | symptom |
+| Question | File |
 |---|---|
-| kept-alive code | old code behind a condition that cannot be true, a flag, an early return, or a guard whose only job is to reject an old shape |
-| commented-out code | executable lines living inside comments |
-| narration comments | the comment says what the code does, what it used to do, or what a fix changed — instead of why |
-| no consumer | exports, parameters, helpers, config keys, whole modules nothing reads |
-| rewritten helper | a new function where the repository already had one |
-| one-caller layer | an abstraction, registry, or knob built for a single caller |
-| impossible guard | validation against a situation the call graph proves cannot occur |
-| dead fallback | a second shape kept for data or a format that has no live producer |
-| memorial test | a test asserting a mock, or written only to prove the old shape is rejected |
-| removal scaffolding | fixtures, helpers, or flag definitions left behind where something was removed |
-| drifted duplicate | two near-identical helpers that have quietly diverged |
-| stale claim | a comment, count, or reference the code no longer matches |
+| Which rows count as slop, and what proves one, mechanically or not? | `references/slop-classes.md` |
+| What goes in the cleaner's task, and what comes back? | `references/cleaner-dispatch.md` |
 
-**A branch that never fires is the expensive one**: no dead-code tool reports it, because the code is
-still referenced. Where a class can be decided mechanically, decide it mechanically before spending a
-subagent — a constant-condition check, a count derived from the tree rather than written down, a grep
-for consumers — but read the consumer class honestly:
+Read one with the file-read tool, and read it in windows: a tool result over 8192 code points is
+trimmed to its first 4096 plus its last 1024 the next time compaction runs, so a long file read
+whole loses its middle. Both references are short enough to read whole today; if either grows past
+around 200 lines, read it with `offset` and `limit` instead. This file stays short for the same
+reason.
 
-**"No consumer inside this tree" is rarely the same as "unused".** When the module being audited
-ships as **part of a preset**, a name it exports sits on an entry-point surface whose consumers are
-outside the tree by construction: the preset is consumed from outside itself. A search therefore
-settles such a finding in one direction only — when the name is module-private (no `export`, not
-reachable from a composition row) or when a *call site* for the helper exists elsewhere in the tree.
-For an exported name, the honest verdict is `unproven`, and the finding is that it cannot be shown to
-have a consumer rather than that it has none. In a repository whose modules do **not** ship as a
-preset, an exported name with no caller is just an exported name with no caller.
+## What we keep for ourselves
 
-The distinction that makes the class still worth hunting: it is not a stale export that costs the
-reader, it is a helper that *looks live* — a named function nothing reaches while the same work is
-done inline nearby. Search for the identifier as a call, not just as a word, and look for the inline
-copy; that pair is provable from inside the tree.
+We keep these; they cannot be delegated.
 
-**Not slop**, and a report that flags these is noise: the repository's own conventions, validation at a
-trust boundary, deliberate non-ASCII, an ugly but load-bearing line, a comment whose subject is a real
-constraint or the provenance of a bug that was paid for, and anything we cannot explain yet.
+- **Deciding what counts as slop for this artifact.** The cleaner classifies against the task text
+  we wrote, so a wrong class sends it to delete live code, and it cannot tell.
+- **Deciding whether anything changes at all.** Findings-only is the default; permission to change
+  code is ours to grant, in words.
+- **Accepting the result.** The cleaner's report is a lead, not a verdict, and the deletions that
+  matter are ours to check.
 
 ## Whether to dispatch at all
 
 A stale comment is not a cleanup. The cleaner earns its dispatch when the noise is **accumulated,
-scoped, and verifiable**:
+scoped, and verifiable**: the user asked for a cleanup, a whole directory or class of noise needs
+sweeping, deciding whether something is dead needs reading outside the current file (callers,
+configs, docs, live data), or the same noise must be found and removed in many files. It does not
+earn one for a handful of lines you can fix in place, for cosmetic preferences, or for code the
+user has in flight - their uncommitted work gets excluded by name, not cleaned.
 
-- **Dispatch it** when the user asks for a cleanup; when a whole directory, module, or class of noise
-  needs sweeping; when deciding whether something is dead needs reading outside the current file
-  (callers, configs, docs, live data); or when the same noise must be found and removed in many files.
-- **Do not dispatch it** for a handful of lines you can fix while you are already in the file, for
-  cosmetic preferences, or for code the user has in flight — their uncommitted work gets excluded by
-  name, not cleaned.
-- **The honest ceiling**: a cleanup pass without a way to check the result is a rewrite. If neither the
-  project's checks nor a read-only probe can tell that behaviour survived, the cleaner audits and
-  reports, and nobody deletes anything.
+**The honest ceiling**: a cleanup pass without a way to check the result is a rewrite. If neither
+the project's checks nor a read-only probe can tell that behaviour survived, the cleaner audits
+and reports, and nobody deletes anything.
 
 ## How to dispatch it
 
-One entry, one pattern-class. Name these five things in the task text:
+One entry, one class from the table. **Judge the artifact, not the style**: is a thing here
+because someone decided it, or because something generated it? **A branch that never fires is the
+expensive one** - no dead-code tool reports it, because the code is still referenced - so decide
+every class you can decide mechanically before spending a subagent: a constant-condition check, a
+count derived from the tree rather than written down, a grep for consumers.
 
-1. **Scope** — the paths, and what is explicitly out. Name the files that are dirty in the working
-   tree so they are skipped rather than swept into someone's unfinished work.
-2. **Class** — which rows of the table above, and the evidence bar for each.
-3. **Verification** — the command that proves behaviour survived, and what to do when no such command
-   exists. Name it concretely: existing tests or typecheck or lint; a probe script it writes and runs
-   against real inputs; or nothing, in which case the run is read-only. Loudest available first.
-4. **Audit or apply** — findings-only, or permission to change. Findings-only is the default and it is
-   usually enough for a first pass; a later dispatch applies what the user picked.
-5. **What must come back** — what was removed, what was only found, what it refused to touch and why,
-   and what it could not verify.
+Everything generic about recording and dispatching the entry - the two hops, the entry shape, the
+`memoryMaintainer` entry, the plan-replacement rule, the reuse key - is in `kaz-dispatch`. What is
+left here is the cleaner's own:
 
-Constraints to restate in the task, because they are the whole safety story: behaviour is preserved
-absolutely, including error types and timing; a change with no proof is reverted rather than kept;
-pre-existing code is removed only after one thought about why it is there; and anything that is a
-real fix — a latent bug, a drifted duplicate, merging two behaviours — belongs in a separate change
-with its own evidence, never inside a cleanup diff.
+- Write the entry as the reserved value `persona: "slopCleaner"`, exactly, as a bare string. An
+  array form like `["slopCleaner", "..."]` also reaches the cleaner (the dispatcher keys on the
+  role name, so the array's first element counts), but write the bare string anyway: it is what
+  the validator, this file and the dispatcher all agree on, and a reader cannot tell the two apart
+  later.
+- The cleaner's tool face is fixed by the reserved value, so a `blacklist` written on its entry
+  does nothing - and the validator rejects such an entry rather than ignoring it silently. Do not
+  try to widen or narrow the tool face per dispatch.
+- Re-dispatching `slopCleaner` continues the cleaner that is already loaded with the right context
+  - it does not create a fresh role. Queue the work rather than expecting fresh eyes.
+- To check the cleaner's work, dispatch a **different** name (a `[role, description]` pair is
+  fine) and never `fork` from the cleaner: forking or re-dispatching `slopCleaner` hands the
+  verification to the agent that produced the findings, which is the one reviewer that cannot be
+  independent.
 
-**The dispatcher's own rules**, which decide whether the dispatch happens at all:
-
-- Write the entry as the reserved value `persona: "slopCleaner"`, exactly, as a bare string. An array
-  form like `["slopCleaner", "…"]` also reaches the cleaner (the dispatcher keys on the role name, so
-  the array's first element counts), but write the bare string anyway: it is what the validator, this
-  file and the dispatcher all agree on, and a reader cannot tell the two apart later.
-- Only the cleaner's dispatch: everything else about recording and dispatching an entry — the two
-  hops, the `memoryMaintainer` entry, the plan-replacement rule, the reuse key — is in
-  `kaz-dispatch`.
-- The cleaner's tool face is fixed by the reserved value, so a `blacklist` written on its entry does
-  nothing — and the validator rejects such an entry rather than ignoring it silently. Do not try
-  to widen or narrow the tool face per dispatch.
-- Re-dispatching `slopCleaner` continues the cleaner that is already loaded with the right context —
-  it does not create a fresh role. Queue the work rather than expecting fresh eyes.
-- To check the cleaner's work, dispatch a **different** name (a `[role, description]` pair is fine)
-  and never `fork` from the cleaner: forking or re-dispatching `slopCleaner` hands the verification to
-  the agent that produced the findings, which is the one reviewer that cannot be independent.
-
-Two templates. Adapt them; do not paste one over the other's job.
-
-Audit, the default — the cleaner may not change code:
-
-> Audit `<paths>` for `<classes from the table>` and change nothing. For each finding give
-> `path:line — class — why it costs the reader — the evidence you ran — safe to fix — how you would
-> prove it`. Exclude `<dirty files>`. Where a fix cannot be proven with `<the command>`, say so and
-> leave the code. Report what you only found, what you refused to touch and why, and what you did not
-> verify.
-
-Apply, only when the user has actually asked for the code to change. **The permission has to be a word
-in this task text** — the cleaner will not read it out of the mood of your sentence, and a task text
-that never grants it lands on audit-and-report no matter how it is phrased:
-
-> **You may change code.** Apply `<the class, one class only>` in `<paths>`, and prove each change with
-> `<the check>`, run before and after. If a change cannot be proven with `<the check>`, revert it and
-> report it instead of keeping it. One class per pass; anything else you find is a finding, not a fix.
-> Report what you removed, what you only found, what you refused to touch, and what you did not verify.
-
-Do not spell the permission with a hedge — `clean up what you think is safe` is not a grant, and the
-cleaner is built to read it as the absence of one. If you are not sure the code should change, dispatch
-the audit form first and let the user pick from its findings.
+Name five things in the task text - the scope and what is out, the class and its evidence bar, the
+command that proves behaviour survived or that there is none, findings-only or permission to
+change, and what must come back. Both copy-ready task forms, and the constraints that are the whole
+safety story, are in `references/cleaner-dispatch.md`.
 
 ## After the report
 
 - **Take the report as a lead, not a verdict.** The tree may have moved since it was written, and a
-  stale finding applied verbatim writes a new lie. Re-check the cheap half of every claim ourselves —
-  does the symbol really have no consumer, can that branch really not fire — before acting on it.
-- **Verify the deletions that matter** with a second role — a separate dispatch that does not inherit
-  the cleaner's findings as facts. The cleanest case is a change that can be shown to alter no
-  behaviour; if it cannot be shown, the honest report says the leftover is unverified.
+  stale finding applied verbatim writes a new lie. Re-check the cheap half of every claim ourselves
+  before acting on it - does the symbol really have no consumer, can that branch really not fire.
+- **Check the deletions that matter yourself, against the artifact and the intent**: read the
+  claims, run the command, compare the two sides. The cleanest case is a change that can be shown
+  to alter no behaviour; if it cannot be shown, the honest report says the leftover is unverified.
 - **Keep the ledger, not the transcript.** What was cleaned, what was found and left, and what was
-  refused belongs in a file (see `planning-with-files`), because this skill will be loaded again and
-  the next pass should not re-derive it. Restated reasoning and per-file narration do not belong
-  anywhere.
+  refused belongs in a file (see `planning-with-files`), because the next pass should not
+  re-derive it. Restated reasoning and per-file narration belong nowhere.
 
 ## Where other work types take over
 
 `moving-or-upgrading-a-thing` when the target is fixed by a source or a version and the job is
-completeness. `repairing-something-broken` when behaviour is wrong and the goal is the fix. Anything
-the user has not asked for stays a finding in the report, whatever it is.
+completeness. `repairing-something-broken` when behaviour is wrong and the goal is the fix.
+Anything the user has not asked for stays a finding in the report, whatever it is.

@@ -6,11 +6,11 @@ export const STAGES = Object.freeze(["idle", "arrange_agent", "self-check"]);
 
 export const STAGE_BODIES = Object.freeze({
   idle:
-    "On each user message, first judge the work: is it one self-contained step that only we can do (talking to the user, the final integration, a decision), or does it contain any part with its own goal that can be verified on its own? Work with parts goes to arrange_agent and gets dispatched; work without parts we finish ourselves. Delegation is judged every round, not remembered from last round. Dispatch what can run in parallel in one round rather than one after another — but keep at most five subagents **running** at the same time: queue the rest and dispatch them as the running ones report back. Whenever there is experience worth keeping — not only inside a report — go to arrange_agent and dispatch a memoryMaintainer to record it; memory bookkeeping stays internal and is never narrated to the user. Subagent reports come to you automatically — handle them before moving on. To see the arrangement as it is, use get_arrangement; to change it, use whale_report to jump to arrange_agent.",
+    "On each user message, first judge the work: is it one self-contained step that only we can do (talking to the user, the final integration, a decision), or does it contain a part that needs another hand — work that runs beside ours, work that must not inherit our reasoning, or work that needs context we cannot hand over in a task? Lookup and verification we do in our own hands. Work with such a part goes to arrange_agent and gets dispatched; work without one we finish ourselves. Delegation is judged every round, not remembered from last round — and the default answer is to keep it. Dispatch what can run in parallel in one round rather than one after another — but keep at most five subagents **running** at the same time: queue the rest and dispatch them as the running ones report back. Whenever there is experience worth keeping — not only inside a report — go to arrange_agent and dispatch a memoryMaintainer to record it; memory bookkeeping stays internal and is never narrated to the user. Subagent reports come to you automatically — handle them before moving on. To see the arrangement as it is, use get_arrangement; to change it, use whale_report to jump to arrange_agent.",
   arrange_agent:
     "Arrangement stage: use write_arrangement to record this round's dispatch plan (persona / blacklist / task / fork). The arrangement must contain memoryMaintainer — only it can write memories. When done, use whale_report to return to idle, then dispatch item by item — everything that can run in parallel goes out in the same round, up to five subagents running at once, with the rest queued until the running ones report back.",
   "self-check":
-    "Self-check stage. While we are here, whale_report is the only tool that works — anything else fails. Its `reflection` argument is required here: write the self-check into it, at most 1024 bytes. These findings are not a deliverable: they are not reported to the user, and they do not go into anyone's closing message. Answer them for ourselves, briefly and honestly — Have we kept to the system prompt and to what the injected context tells us? Have we loaded the skills this situation actually needs? Have we arranged subagents where that would work better? Once back in idle, should we fold noise away with context_compress or delete? What have we got wrong? Where do we actually stand? What do we do next? Then report the stage those answers point to.",
+    "Self-check stage. While we are here, whale_report is the only tool that works — anything else fails. Its `reflection` argument is required here: write the self-check into it, at most 1024 bytes. These findings are not a deliverable: they are not reported to the user, and they do not go into anyone's closing message. Answer them for ourselves, briefly and honestly — Have we kept to the system prompt and to what the injected context tells us? Have we loaded the skills this situation actually needs? Have we arranged subagents only where another hand was genuinely needed, rather than for lookups and checks we can do ourselves? Once back in idle, should we fold noise away with context_compress or delete? What have we got wrong? Where do we actually stand? What do we do next? Then report the stage those answers point to.",
 });
 
 /**
@@ -250,7 +250,7 @@ function remainingChecks() {
  * "该不该派子代理"是主代理独有的杠杆，子代理没有派发权。
  */
 function roleQuestionsForMain() {
-  return ["Do we need to report to the users?", "Should we arrange some subagents?"];
+  return ["Do we need to report to the users?", "Does any part of this need another hand, rather than a lookup we can do ourselves?"];
 }
 
 /**
@@ -261,7 +261,7 @@ function roleQuestionsForMain() {
 function roleQuestionsForSubagent() {
   return [
     "Do we need to report to the main agent and hand back?",
-    "Is the task too much for one agent, should it be split, or should we ask the main agent for more subagents?",
+    "Is the task too much for one agent, should it be split, or does some part of it genuinely need another hand, rather than a lookup we can do ourselves?",
   ];
 }
 

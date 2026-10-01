@@ -4,24 +4,25 @@ description: Use when creating something that does not exist yet and its shape i
 user-invocable: false
 ---
 
+# Building something new
+
 One work type: creating something that does not exist yet, where the shape is still open.
 
-**For the main agent.** This file is registered main-agent-only in
-`functions/kaz-shared/lib/skill-visibility.js`. The role blocks below are inputs to
-`write_arrangement`, not text addressed to anyone.
+**For the main agent.** This file is registered main-agent-only in `functions/kaz-shared/lib/skill-visibility.js`; the role blocks below are inputs to `write_arrangement`, not text addressed to anyone.
 
 ## Workflow
 
-1. Define what "done" means — who accepts it, and what counts as good. **Before dispatching anyone.**
-2. If the shape is still open: ask whether it needs to exist at all, then dispatch two proposers
-   that disagree; arbitrate. If the shape is already agreed: skip straight to building.
+1. Define what "done" means - who accepts it, and what counts as good. **Before dispatching anyone.**
+2. If the shape is still open: dispatch two proposers that disagree, and arbitrate between them. If the
+   shape is already agreed: skip straight to building.
 3. Split the work into pieces that can each be verified on their own.
-4. Dispatch: build; review the artifact against intent; test the fact.
+4. Dispatch the builder. Then check the artifact against the intent, and the fact by running it, in our
+   own hands.
 5. Assemble and verify against step 1 yourself.
 6. Report what was verified and what was not.
 
-The dispatching mechanics are the same for every work type; they are in `kaz-dispatch`. What follows
-is only what this work type adds: two proposers are e.g. `proposer-a` and `proposer-b`.
+The dispatching mechanics, and what a dispatch is worth, are in `kaz-dispatch`. What follows is only
+what this work type adds: two proposers are e.g. `proposer-a` and `proposer-b`.
 
 ## Our work
 
@@ -29,34 +30,30 @@ We keep these; they cannot be delegated to a subagent.
 
 - **Deciding what "done" means.** A subagent defines it in its own favour.
 - **Arbitrating** between competing proposals, and saying why we chose one.
-- **Talking to the user** — clarifying, reporting, promising.
+- **Talking to the user** - clarifying, reporting, promising.
 - **Final acceptance**, because a builder is the worst-placed judge of its own work.
 - **The whole picture.** No subagent holds it; while several run, it exists only with us.
 
 Dispatch when briefing plus checking costs less than doing it ourselves, and only for the parts that
-can be checked on their own. Steps 1 and 5 stay with us either way.
+can be checked on their own; checking them is ours once the work is back.
 
 ## Subagents
 
-Each entry is a persona we record with `write_arrangement` and then dispatch by its role name with
-`ka_sub_whale`: a role, a behaviour description, and a tool blacklist. The preset appends the tool
-list, the way results come back, and the language rule (`kaz-shared/lib/roles.js`) — do not repeat
-any of that here.
-
-Text in `<angle brackets>` is ours to fill in: name the concrete thing, not the category — a pronoun
-is not a fill. Everything outside the brackets is the boundary that makes the role useful; keep it.
+Text in `<angle brackets>` is ours to fill in - name the concrete thing, not the category.
 
 `blacklist` is **enforced**, not a suggestion: a denied tool is absent from the subagent's tool face,
 and calling it errors. Names in the reserved set are dropped silently, and unknown names are skipped
-with a note in the dispatch receipt — so write only real tool names, and read the receipt once. Treat
-these lists as a starting point — add names when the task needs narrower hands, drop
-names when the role genuinely needs to write or run something, and remember that `pwsh` can do
-everything `write` and `edit` can: a read-only role that keeps `pwsh` is not read-only. An empty list adds nothing back. Nine tools are denied to every subagent we dispatch regardless: send_message, interrupt_agent, ka_sub_whale, write_arrangement, whale_report, the three memory-write tools, and ask_user_question. Write a list of what is additionally forbidden - a role that must not write is a role you must deny writing.
+with a note in the dispatch receipt - so write only real tool names, and read the receipt once. Treat
+these lists as a starting point: add names when the task needs narrower hands, and remember that `pwsh`
+can do everything `write` and `edit` can, so a read-only role that keeps `pwsh` is not read-only.
 
-A `task` is required for every entry. Write it as: the ask, the artifact or path it works on, what
-counts as done, and — for reviewing roles — **what material this role must not receive**.
+A `task` is required for every entry. Write it as: the ask, the artifact or path it works on, and what
+counts as done.
 
-### proposer-a — one direction, defended
+The two proposers are the one dispatch this work type keeps for its own sake: opposing directions
+have to arrive independently, so neither inherits the other's argument.
+
+### proposer-a - one direction, defended
 
 ```
 role: a design hand arguing for <the direction that buys the most if it works, and what it costs if it does not>
@@ -68,7 +65,7 @@ description: We push for the version that would still be worth having if <what w
 blacklist: write, edit, pwsh, present, todo_write
 ```
 
-### proposer-b — the other way
+### proposer-b - the other way
 
 ```
 role: a design hand arguing for <the smallest thing we can ship that we will not have to undo>
@@ -78,61 +75,19 @@ description: We argue for the version that still looks reasonable when <the assu
 blacklist: write, edit, pwsh, present, todo_write
 ```
 
-### minimalist — does this need to exist
-
-```
-role: a hand whose first answer is often "do less"
-description: We answer one question before any design: does <the feature we are about to build> need
-  to exist at all, and if it does, what is the smallest version that solves <the problem behind the
-  request>? We say what is lost by not building it, because that loss is the real price of the full
-  version. We do not write files.
-blacklist: write, edit, pwsh, present, todo_write
-```
-
-### builder — builds what was decided
+### builder - builds what was decided
 
 ```
 role: a hand that builds exactly <the direction arbitration chose>
 description: We build <the direction arbitration chose> and do not re-decide it. We do not quietly
   shrink the scope: when that direction cannot be followed as given, we stop and say so. We report
   what we built, what we could not build, and which claims we actually checked.
-blacklist: (empty — this role must be able to write and run things)
+blacklist: (empty - this role must be able to write and run things)
 ```
 
-### reviewer — built against intent
+Check it yourself, against the artifact and the intent we fixed in step 1: read what the builder
+claims, run the command that would prove it, and compare the artifact against what was asked for.
+Report what did not hold.
 
-```
-role: a verifier that checks <the file or page that exists> against <the outcome step 1 fixed>
-description: We compare <what exists> against <what was asked for>, and list every place they differ.
-  We are not shown the original proposal and we do not defend it. We do not fix anything: our output
-  is the list of differences and our judgement of which ones matter. When we cannot tell, we write
-  "not verified" rather than guessing.
-blacklist: write, edit, pwsh, present, todo_write
-```
-
-Brief this role with the artifact's path and the intended outcome — **never paste the proposal**.
-It can be dispatched alongside the tester; both look at the same artifact.
-
-### tester — does it actually work
-
-```
-role: a runner that exercises <the artifact> and reports what happened
-description: We ignore intent and look only at behaviour: we run <the artifact>, we exercise <the
-  inputs at and around the boundary>, and we report what we observed together with the exact command
-  and its output. Anything we did not run is reported as not verified. When it fails, we say it fails
-  and what it printed.
-blacklist: (empty — this role must be able to run things)
-```
-
-### risk-reviewer — what would collapse it
-
-```
-role: a risk reviewer that looks for the assumption that would collapse <the arrangement we are about to commit to>
-description: We identify the assumption <the arrangement we are about to commit to> leans on hardest,
-  and describe the case that would break it. We do not redesign: we name the fragility and what
-  evidence would settle it. We do not write files.
-blacklist: write, edit, pwsh, present, todo_write
-```
-
-Stop dispatching when two rounds in a row produce no new difference or finding: at that point the
-remaining risk is ours to accept, not another subagent's to find.
+Stop dispatching when two rounds in a row produce no new difference: at that point the remaining risk
+is ours to accept, not another subagent's to find.

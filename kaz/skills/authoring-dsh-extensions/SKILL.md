@@ -32,15 +32,17 @@ is evidence that something did not land. "I could not see the component" is neve
 
 | Question | File |
 |---|---|
-| Skill file shape, frontmatter keys, roots and ranks, the catalog, loading a body | `references/skills.md` |
-| Plugin export forms, Config, services, prompt seams, tool definitions, policy hooks, finding the API | `references/plugins.md` |
-| Bundles, `plugin_manager`, composition row semantics, isolate realms, version floors, mount faults | `references/installing.md` |
-| Declaring a preset, the patch dialect, overriding a row, verifying the roster | `references/presets.md` |
+| Skill file shape, frontmatter keys, roots and ranks, the catalog, loading a body; verifying a skill landed, and when not to write one | `references/skills.md`, `references/verify-and-scope.md` |
+| Plugin export forms, Config, services, prompt seams; the tool a plugin registers and the text it injects mid-turn | `references/plugins.md`, `references/tool-surface.md` |
+| Bundles, `plugin_manager`, version floors, mount faults; what makes a composition row mount, and finding the API | `references/installing.md`, `references/composition.md` |
+| Declaring a preset, overriding a row, verifying the roster; the patch dialect, row fields, isolate realms, the one-plane rule | `references/presets.md`, `references/patch-layers.md` |
 
-Read one with the file-read tool, and read it in windows: a tool result over 8192 code
-points is trimmed to its first 4096 plus its last 1024 the next time compaction runs,
-so a long file read whole loses its middle. This file stays short for the same reason,
-and so should every `SKILL.md` you write.
+Read one with the file-read tool, whole: every reference here renders under 7,200 code
+points, so none of them is long enough to need windows. The rule that forced the split is
+worth keeping in view anyway: a tool result over 8192 code points is trimmed to its first
+4096 plus its last 1024 the next time compaction runs, so a long file read whole loses its
+middle. This file stays short for that reason, and so should every `SKILL.md` you write -
+and a reference that does grow past that line is read with `offset` and `limit`.
 
 ## Facts that decide the shape before you read further
 
