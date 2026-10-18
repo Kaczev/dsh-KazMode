@@ -1,0 +1,12 @@
+{
+    "name": "kaz-preset-bundle",
+    "version": "9.0.0",
+    "private": true,
+    "dsh": {
+        "bundle": {
+            "patch": [
+                "./cordis.patch.yml"
+            ]
+        }
+    }
+}

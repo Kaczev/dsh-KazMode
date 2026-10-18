@@ -1,52 +1,55 @@
 # Kaz 模式
 
-一个给 DeepSeek Harness（dsh）**桌面端**用的 agent preset（代理预设）。仓库里是预设本体，放在 `kaz\` 目录：`kaz\preset.yml` 定名称与描述，`kaz\agent.cordis.yml` 定怎么装配，`kaz\skills\` 放技能，`kaz\functions\` 放各功能模块。当前版本 8.10.0，写在 `kaz\VERSION`。
+一个给 DeepSeek Harness（dsh）**桌面端**用的 agent preset（代理预设）。当前版本 9.0.0。
 
-装好之后，在桌面端新建对话时于模式列表里选 **Kaz 模式**（preset id 为 `kaz`）。
+v9 的 Kaz 模式**就是标准模式**（preset id `standard`），只多两样东西：
+
+1. **系统提示词里多一段话。** 位置固定在 `You are an AI agent powered by DeepSeek Harness.` 与 `You are a coding agent powered by the <模型> model.` 之后、`Tokens prefixed with @ ...` 之前。这段讲的是怎么说话、怎么安排计划、怎么验收，写法上要求先加载 `write-like-a-person` 技能。
+2. **一个技能：`write-like-a-person`。** 讲怎么把文字写成像人写的。技能随预设发版，放在 `kaz\skills\`。
+
+没有别的了：工具面一个不加一个不减，不派子代理、不做记忆、不自己压缩上下文。plan 组、compaction 组、delegation 组、工具开关、顺序，全部是标准模式的逐行副本。所以 Kaz 模式的行为 = 标准模式的行为 + 那段提示词 + 那个技能。
+
+仓库里是预设本体，放在 `kaz\`：`kaz\cordis.patch.yml` 是**唯一事实源**（它同时就是 bundle 的补丁层），`kaz\package.json` 是 bundle 元数据，`kaz\skills\` 放技能。
+
+装好之后，在桌面端新建对话时于模式列表里选 **Kaz 模式**（preset id 为 `kaz`，排在最后）。
 
 ## 装完你会得到什么
 
-- **一个主代理，是你唯一的联系人。** 它把你的需求听清、拆开，决定哪些自己做、哪些交出去，交出去之后仍然对结果负责。说话也归它管：做了什么、没做什么、接下来干什么，说清，不掺水。
-- **按需派遣的子代理。** 主代理为某件事临时定义角色并派出去，同时最多五个子代理在跑；再多就排队，等跑着的收工再派。上限是在派发那一刻数出来的，不是硬锁。
-- **问清楚再动手。** 需求有含糊的地方，它先问，不猜着往下做。
-- **它手上的工具是收拾过的。** 官方留的那些用不上的工具已经卸掉，只留用得上的；所以它不会以为自己有某些其实没有的工具。
-- **按阶段收拾工作。** 每轮开头先把活拆开、决定派谁；每 4 条真人消息自动做一次自检。自检那一阶段它只能推进流程、干不了别的活，逼着它把这一轮看清再走。
-- **记忆只由一个专职角色写。** 主代理自己不能写记忆，只能读；要记下的东西交给专职的记忆管家去写。记忆分两层：机器与环境级的放全局，项目级的放项目，换项目不串味。
-- **它能自己框选压缩上下文。** 挑出中间一段折成摘要，最近的对话原样留着；折掉的原文没有丢，以后照样能检索回来，也能按位置整段读回。另外平台自带的自动压缩和长结果裁剪也同时在。
-- **代理之间可以互查记录。** 想知道某个帮手当时到底怎么做的，可以翻它自己的记录，而不只是看它交回来的结论。
-- **16 个技能随预设一起发版。** 技能在 `kaz\skills\` 下，一个技能一个目录；模型按需自己取用，不常驻上下文。其中 9 个讲的是怎么安排和验收多个代理，只给主代理；另外 7 个讲的是某类活本身怎么干，主代理和子代理都能用（写作纪律、界面观感、Office 文档、长任务落盘、PowerShell、扩展开发与诊断等）。
+- **标准模式的全部能力**：同一套工具、同一个 plan 模式、同一套压缩与子代理。
+- **一段统一的说话与办事提示词**：直接、按分量决定长度、不重述、不表演过程；计划与执行不搞两套身位；视觉设计要给能直接打开的 HTML；写完要按 `write-like-a-person` 自检。
+- **一个写作技能**，在技能目录里按需加载，不常驻上下文。
 
 ## 怎么装、怎么升
 
-**安装和更新是同一件事**：生成 bundle 文件，再装一次。一步一步的走法在 `桌面端安装与更新指引.md`，提示词见 `桌面端安装与更新的提示词.txt`。
+**安装和更新是同一件事**：把仓库里的 `kaz\` 当作 bundle 装进当前 profile。一步一步的走法在 `桌面端安装与更新指引.md`，提示词见 `桌面端安装与更新的提示词.txt`。
 
 一句话版：
 
-1. 在仓库根目录跑 `make-bundle-patch.mjs`（用桌面端自己的运行时当 node），它会写出 `kaz\cordis.patch.yml` 与 `kaz\package.json`；
-2. 在桌面端会话里让代理调用 `plugin_manager`：`install_bundle`，`target` = 仓库里 `kaz\` 的绝对路径。
+1. 在桌面端会话里让代理调用 `plugin_manager`：`install_bundle`，`target` = 仓库里 `kaz\` 的绝对路径；
+2. 更新已有安装时，先 `remove_bundle`（`target: "kaz-preset-bundle"`）再 `install_bundle`——`install_bundle` 对已经装着的同一个 bundle 不是幂等的。
 
-装完**开一个新会话**才看得到新模式（已挂载的会话保留它启动时的插件修订）。更新已有安装时要先 `remove_bundle` 再 `install_bundle`——`install_bundle` 对已经装着的同一个 bundle 不是幂等的。
+**从 v8 升到 v9 要重启一次桌面端**：v8 里有按文件路径挂的插件（`kaz-system-prompt.mjs`、`functions\**`），这些行不在插件表里，插件管理器卸不掉，装完会返回 `application: restart-required`。v9 只剩纯 YAML 补丁层，以后改它就即时重载，不再需要重启。
+
+装完**开一个新会话**才看得到新模式（已挂载的会话保留它启动时的插件修订）。
 
 ## 需要什么
 
-- **dsh 桌面端**（宿主运行时 0.2.0-rc.2 或更新）。桌面端把 dsh 运行时打包在自己的安装目录里；本预设**不依赖 home 里那份运行时**，也没有版本闸门。
-- **Windows**。这不只是文档口径：预设本体就按 Windows 写，非 win32 平台上 PowerShell 工具直接禁用。
-- **仓库在本机**。桌面端 profile 里的 `node_modules\kaz-preset-bundle` 是指向仓库 `kaz\` 的符号链接——改仓库就是改生效的那份，不需要"镜像到别处"。
-- **一份与宿主同版本的依赖树**。插件代码 import 的 `@deepseek-ai/*` 由 `kaz\node_modules\@deepseek-ai` 这条 junction 解析，指向 `%USERPROFILE%\Documents\dsh-local\dsh-0.2.0-rc.2-deps`。细节与升级时机见 `桌面端安装与更新指引.md` §4。
+- **dsh 桌面端**（0.2.1-rc.2 上验过；预设本身没有版本闸门）。
+- **Windows**。和标准模式一样：预设里 bash 那一行在非 win32 上直接禁用，改用 pwsh。
+- **仓库在本机**。桌面端 profile 里的 `node_modules\kaz-preset-bundle` 是指向仓库 `kaz\` 的符号链接——改仓库就是改生效的那份。
+- **不需要依赖树**。v9 没有任何自带 JS 模块，`kaz\node_modules`、版本对齐的 `@deepseek-ai/*` 全都不需要了。
 
 ## 维护者
 
-- `kaz\agent.cordis.yml` 是装配的**唯一事实源**；`kaz\cordis.patch.yml` 与 `kaz\package.json` 是 `make-bundle-patch.mjs` 的**生成物**（都不入库，别手改）。
+- `kaz\cordis.patch.yml` 是装配的唯一事实源，也是生效的补丁层；`kaz\package.json` 只放版本和 `dsh.bundle.patch`。
+- 与标准模式的差集必须**只有两处**（`persona` 的 prefix、`skill-filesystem` 的 `customSkillDirs`）。多出第三处就说明它已经不是 v9 的 Kaz 模式了。
+- 技能目录那行用的是 `createRequire(baseUrl).resolve('kaz-preset-bundle/package.json')`：预设行在挂载时的 `baseUrl` 是 profile 目录，不是补丁文件目录。**改包名要同步改这行表达式。**
 - 发版、回滚、提交形状：`发布与回滚.md`（不入库，只在本机）。
-- 版本守卫：仓库根目录 `check-version.mjs`（断言 README 第 3 行那句主版本 == `kaz\VERSION`）。
+- 版本守卫：仓库根目录 `check-version.mjs`（断言 README 那句「当前版本 X.Y.Z」与 `kaz\package.json` 的主版本一致）。
 
-## 曾经的网页端（CLI）交付，已退役
+## 从 v8 删掉了什么
 
-从桌面端交付起：
-
-- 不再有 `<home>\.agent-presets\kaz` 这一站，也不再有"把仓库镜像进 home"这一步；
-- 不再需要全局 `dsh` 命令，也没有版本闸门；
-- `install-kaz-preset.ps1`、`ds安装指引.md`、`ds更新指引.md`、`ds安装法的提示词.txt`、`ds更新法的提示词.txt` 已删除（需要时从 git 历史取）——它们的闸门钉在 dsh `0.1.7-rc.2` 上，在桌面端跑不了。
+v8 的整套东西都不在了：`kaz\functions\`（记忆、工作流、上下文策略、技能可见性四个模块）、16 个技能、`kaz-system-prompt.mjs`、`agent.cordis.yml` / `preset.yml` / `VERSION`、`make-bundle-patch.mjs`、回归测试。需要旧的实现时从 git 历史取（`8.10.0` 那条提交是最后一个 v8 版本）。
 
 ## 授权
 
