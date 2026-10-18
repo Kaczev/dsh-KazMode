@@ -5,7 +5,7 @@ description: Write prose that reads like a person wrote it instead of a machine,
 
 # Write like a person
 
-These are not suggestions. They are corrections the user has already made, across several projects. The rules below are the general form; the real before-and-after cases are in `examples/corrections.md`. The examples in this file are ordinary work prose on purpose: a rule you can only recognize in one project's sentences is not a rule yet.
+These are not suggestions. They are corrections the user has already made, across several projects. The rules below are the general form. The examples in this file are ordinary work prose on purpose: a rule you can only recognize in one project's sentences is not a rule yet.
 
 ## The rule underneath all the others
 
@@ -35,6 +35,36 @@ Then apply the section test: **for each section, ask whether a person writing th
 Do not import a structure from another genre. A thesis defense, a consulting deck, a Wikipedia article, and a five-paragraph essay each have their own scaffolding. Scaffolding is not argument. A course essay that ends with a rubric is not a more rigorous essay; it is a different document.
 
 Your notes are not a draft. Phrases you coin while planning — a metaphor, a label, a way of putting the argument — are there to help you think, not to be handed to the reader. When you start drafting, say the idea again in the voice of the piece. If a phrase survives from the notes, it should be because it is the best way to say it, not because it is already written.
+
+## The shape is the biggest tell
+
+Sentence-level habits can all pass while the piece still sounds like a machine, because the machine's signature is often the **order of the moves**. A common AI essay goes:
+
+1. correct a view the reader probably did not hold ("课本上讲的是……其实……");
+2. list evidence in parallel;
+3. announce the synthesis ("把这几件事放在一起……");
+4. concede in a tone that advertises honesty ("还有一种更难听的可能……");
+5. offer a test or a rubric ("十年之内应该能看到……");
+6. close with a rhetorical question that restates the theme.
+
+Every move can be grammatical and locally clear. Together they are a template. A person writing this essay would start from the thought, not from the need to appear rigorous.
+
+Before fixing sentences, write the move sequence in one line per paragraph. If it matches that template, change the shape: cut the strawman, state the synthesis instead of narrating it, drop the staged concession, and end where the thought ends. **Do not compress a section the occasion does not need into one sentence; the move is the problem, not its length.**
+
+Two more shape tells:
+
+- **The rule of three.** One triad can be emphasis; three is a pattern. Count the three-part lists. Cut or vary all but the one doing real work.
+- **The not-X-but-Y contrast.** "不是……而是……" and "不只……还……" are strong moves; a piece that uses them every other paragraph is arguing by symmetry, not by evidence. Keep the one that carries the turn; rewrite the rest as plain statements.
+
+Test: cover the paragraph's first and last sentence and read only the middle. If the middle is a list of facts and the first and last are the argument's scaffolding, the shape is doing the work the thought should do.
+
+## When revising a text the user has already corrected
+
+If the user has already marked sentences or supplied a replacement, that is the target, not a suggestion. Read the corrections first. A rewrite that is smoother but loses the user's specific image, claim, or ending is a regression, even if every sentence passes the habits.
+
+- Keep the user's ending if they wrote one. Do not replace it with a generic conclusion or a rhetorical question.
+- Keep the user's concrete word when it is the point. Do not smooth it into a more generic metaphor.
+- If you change a corrected passage, say why; do not silently improve it.
 
 ## The twelve habits
 
@@ -118,6 +148,8 @@ Say the thing. Do not announce that you are about to say it, where you will come
 - No: 下面我从三个方面展开。
 - No: 这一点后面还会提到。
 - No: 先说结论：这个方案可行。
+- No: 把这几件事放在一起，下一次大综合的样子大致是……
+- No: 我们大概要先回答一个问题……
 
 Test: delete the sentence. If the next sentence still works and no information is lost, the sentence was stagecraft. Most sentences that describe the writing rather than the subject fail this test.
 
@@ -131,8 +163,10 @@ Let them draw the conclusion. Do not hand it over, and do not tell them how seri
 - Yes: 这次改版还有三个问题。第一，……
 - No: 我给它定三条考核标准。
 - No: 必须承认，这件事很难。
+- No: 还有一种更难听的可能：不是 AI 不行，而是理论物理已经到顶了。
+- No: 十年之内应该能看到一件事：……
 
-A person who is actually being careful gives the specific reason, the actual uncertainty, or the test that would settle it. They do not announce that they are being rigorous, and they do not label their own draft. If you have a real test, state it as a sentence; if you do not, do not manufacture a rubric.
+A person who is actually being careful gives the specific reason, the actual uncertainty, or the test that would settle it. They do not announce that they are being rigorous, and they do not label their own draft. If you have a real test, state it as a sentence; if you do not, do not manufacture a rubric. A concession that advertises its own difficulty, or a test that turns a paragraph into a rubric, is still staged rigor even when it is one sentence.
 
 Test: does the sentence contain a fact, a reason, or a concrete uncertainty? If it only contains a judgment about what the reader should think, cut it. "真正的" and "本质上" are not banned, but they are claims that a surface reading is wrong: if you have not named the surface or the specific thing that makes the claim true, the word is empty.
 
@@ -181,15 +215,16 @@ Test: does the last paragraph add a thought that was not already on the page? If
 
 The habits above fail in a predictable way: they are read once, at the start of a session, and then the draft is written from memory. That is not a pass; it is a style briefing. Run this on the finished text, with this file open.
 
-1. **Read as a stranger.** Mark every place where you had to supply a fact, a referent, or a premise that is not on the page. Circle every 这、那、它、该 and every 这一层、这条线、在这个意义上; name the noun or cut the pointer. For every 不是、不、没有, ask whether the denied thing was already on the page. Count the sentences under six characters; expand any that are not deliberate emphasis.
-2. **Delete.** For each paragraph, try deleting the first sentence and then the last. If nothing is lost, delete it. This is the fastest way to find stagecraft.
-3. **Check every connective.** For each 所以、因此、于是、可见、这说明、之所以, write the premise in the margin. No premise, no connective. Replace 首先、其次、最后一点、综上所述、值得注意的是、不难发现、众所周知、由此可见、换言之、换句话说 with the actual relation, or with nothing.
-4. **Check every verb-object pair.** Read the text aloud. Would a Chinese speaker say it? Rebuild the translationese. When the concrete instances are already on the page, do not replace them with an abstract summary noun. Where you stumble, the reader stumbles.
-5. **Check every metaphor.** Rewrite it literally. Keep only the ones whose literal version loses something, and make sure each one is sustained or native to the frame. Do not mix domains in one clause.
-6. **Check the judgments.** For every 真正的、本质上、必须承认、显然、最…的是, ask what fact or reason is on the page. If the sentence only tells the reader how to feel or how seriously to take the text, cut it.
-7. **Check the sections.** List them. Would a person writing this occasion include each one? Cut the ones that exist only to prove rigor.
-8. **Check the ending.** Does it add a thought, or restate? If it restates, cut it.
-9. **Report the substantive changes.** Quote the phrase that changed and say what it changed to. Do not paste the checklist unless the user asks.
+1. **Outline the moves.** Write one line per paragraph: what it does (correct a view, list evidence, announce synthesis, concede, test, ask). If the sequence matches the template in "The shape is the biggest tell", change the shape before fixing sentences. Count the triads and the not-X-but-Y contrasts; cut or vary all but the one doing real work.
+2. **Read as a stranger.** Mark every place where you had to supply a fact, a referent, or a premise that is not on the page. Circle every 这、那、它、该 and every 这一层、这条线、在这个意义上; name the noun or cut the pointer. For every 不是、不、没有, ask whether the denied thing was already on the page. Count the sentences under six characters; expand any that are not deliberate emphasis.
+3. **Delete.** For each paragraph, try deleting the first sentence and then the last. If nothing is lost, delete it. This is the fastest way to find stagecraft.
+4. **Check every connective.** For each 所以、因此、于是、可见、这说明、之所以, write the premise in the margin. No premise, no connective. Replace 首先、其次、最后一点、综上所述、值得注意的是、不难发现、众所周知、由此可见、换言之、换句话说 with the actual relation, or with nothing.
+5. **Check every verb-object pair.** Read the text aloud. Would a Chinese speaker say it? Rebuild the translationese. When the concrete instances are already on the page, do not replace them with an abstract summary noun. Where you stumble, the reader stumbles.
+6. **Check every metaphor.** Rewrite it literally. Keep only the ones whose literal version loses something, and make sure each one is sustained or native to the frame. Do not mix domains in one clause.
+7. **Check the judgments.** For every 真正的、本质上、必须承认、显然、最…的是, ask what fact or reason is on the page. If the sentence only tells the reader how to feel or how seriously to take the text, cut it.
+8. **Check the sections.** List them. Would a person writing this occasion include each one? Cut the ones that exist only to prove rigor.
+9. **Check the ending.** Does it add a thought, or restate? If the user supplied an ending, compare against it; do not replace it with a generic conclusion or a rhetorical question.
+10. **Report the substantive changes.** Quote the phrase that changed and say what it changed to. Do not paste the checklist unless the user asks.
 
 ## When the text is meant to be spoken
 
@@ -201,8 +236,6 @@ Leave cut points for the speaker: mark the sentences that can be dropped without
 
 ## Where these came from
 
-These habits were worked out across several rounds of correcting machine-written drafts in different subjects. The rules are the general form; `examples/corrections.md` holds the real before-and-after cases. The examples in this file are generic on purpose: a rule you can only recognize in one project's sentences is not a rule yet.
-
-When a rule is unclear, read `examples/corrections.md` for one real case. Do not copy its subject or its wording; copy the test.
+These habits were worked out across several rounds of correcting machine-written drafts in different subjects. The rules are the general form. The examples in this file are generic on purpose: a rule you can only recognize in one project's sentences is not a rule yet. The specific corrections that produced them are not published.
 
 The examples are specimens, not the boundary. When a new sentence feels machine-written but does not match any example, classify it by the test, not by the wording. The subject changes; the failure modes do not.
