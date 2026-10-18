@@ -133,8 +133,10 @@ function manifestMismatch() {
   } catch (error) {
     return `SOURCE.json unreadable (${error instanceof Error ? error.message : String(error)})`;
   }
-  for (const key of Object.keys(expected)) {
-    if (current[key] !== expected[key]) return `SOURCE.json ${key}: ${JSON.stringify(current[key])} != ${JSON.stringify(expected[key])}`;
+  // 只比内容哈希。源仓库改 README、改 LICENSE 这类不随预设发出去的提交不该让这里失败；
+  // SOURCE.json 里的 commit 记的是「这份正文抄自哪一次提交」，不是「源仓库当前 HEAD」。
+  if (current.contentSha256 !== expected.contentSha256) {
+    return `SOURCE.json contentSha256: ${JSON.stringify(current.contentSha256)} != ${JSON.stringify(expected.contentSha256)}`;
   }
   return null;
 }
@@ -151,12 +153,13 @@ function contentMismatch() {
 const mismatch = existsSync(DEST) ? contentMismatch() : "destination missing";
 
 if (checkOnly) {
-  if (mismatch !== null) fail(`presets out of sync: ${mismatch} — run node scripts/sync-skill.mjs`);  console.log(`OK ${SKILL_NAME} in presets matches ${SOURCE} at ${commit.slice(0, 12)}`);
+  if (mismatch !== null) fail(`presets out of sync: ${mismatch} — run node scripts/sync-skill.mjs`);
+  console.log(`OK ${SKILL_NAME} in presets matches ${SOURCE} (${digest.slice(0, 12)})`);
   process.exit(0);
 }
 
 if (mismatch === null) {
-  console.log(`OK ${SKILL_NAME} already in sync at ${commit.slice(0, 12)}`);
+  console.log(`OK ${SKILL_NAME} already in sync (${digest.slice(0, 12)})`);
   process.exit(0);
 }
 
