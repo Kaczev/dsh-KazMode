@@ -58,6 +58,17 @@ Two more shape tells:
 
 Test: cover the paragraph's first and last sentence and read only the middle. If the middle is a list of facts and the first and last are the argument's scaffolding, the shape is doing the work the thought should do.
 
+## The stance is the last tell
+
+A piece can pass every sentence rule and every shape rule and still sound like a machine, because the machine writes like a columnist: it has a verdict on everything, it opens with a law of history, and it ends every paragraph with a line worth quoting. A person writing a course essay is allowed to be unsure.
+
+- **Mark what is yours.** A measurement, a cited result, and your inference should not wear the same tone. 这次改版的复购率提高了 4 个百分点 is a result; 我猜原因是新入口更好找 is a guess; 两者之间还差一步 is the gap. If the sentence is a guess, say so; if it is a fact, give the source.
+- **Let some paragraphs end flat.** A paragraph can end on a date, a number, or a plain sentence. If every paragraph ends with a line that could be pulled out as a quote, the piece is performing.
+- **A leading metaphor has to survive repetition.** A figure that runs through the whole piece earns more scrutiny, not less. If it is cute but slightly wrong, the third repetition turns it into a gimmick. Sustained is not the same as right.
+- **In a course essay, state the claim early.** The reader should know what the evidence is for; do not make them read a page of history first. A magazine feature can delay the thesis; an assignment usually cannot.
+
+Do not solve this by imitating the user's own prose. The target is a person writing, not this particular person's handwriting. A corrected sentence is a decision; a sample of the user's writing is not a template.
+
 ## When revising a text the user has already corrected
 
 If the user has already marked sentences or supplied a replacement, that is the target, not a suggestion. Read the corrections first. A rewrite that is smoother but loses the user's specific image, claim, or ending is a regression, even if every sentence passes the habits.
@@ -215,15 +226,15 @@ Test: does the last paragraph add a thought that was not already on the page? If
 
 The habits above fail in a predictable way: they are read once, at the start of a session, and then the draft is written from memory. That is not a pass; it is a style briefing. Run this on the finished text, with this file open.
 
-1. **Outline the moves.** Write one line per paragraph: what it does (correct a view, list evidence, announce synthesis, concede, test, ask). If the sequence matches the template in "The shape is the biggest tell", change the shape before fixing sentences. Count the triads and the not-X-but-Y contrasts; cut or vary all but the one doing real work.
+1. **Outline the moves.** Write one line per paragraph: what it does (correct a view, list evidence, announce synthesis, concede, test, ask). If the sequence matches the template in "The shape is the biggest tell", change the shape before fixing sentences. Count the triads and the not-X-but-Y contrasts; cut or vary all but the one doing real work. Where does the claim first appear? In a course essay it should be early enough that the evidence has a question to answer.
 2. **Read as a stranger.** Mark every place where you had to supply a fact, a referent, or a premise that is not on the page. Circle every 这、那、它、该 and every 这一层、这条线、在这个意义上; name the noun or cut the pointer. For every 不是、不、没有, ask whether the denied thing was already on the page. Count the sentences under six characters; expand any that are not deliberate emphasis.
 3. **Delete.** For each paragraph, try deleting the first sentence and then the last. If nothing is lost, delete it. This is the fastest way to find stagecraft.
 4. **Check every connective.** For each 所以、因此、于是、可见、这说明、之所以, write the premise in the margin. No premise, no connective. Replace 首先、其次、最后一点、综上所述、值得注意的是、不难发现、众所周知、由此可见、换言之、换句话说 with the actual relation, or with nothing.
 5. **Check every verb-object pair.** Read the text aloud. Would a Chinese speaker say it? Rebuild the translationese. When the concrete instances are already on the page, do not replace them with an abstract summary noun. Where you stumble, the reader stumbles.
 6. **Check every metaphor.** Rewrite it literally. Keep only the ones whose literal version loses something, and make sure each one is sustained or native to the frame. Do not mix domains in one clause.
-7. **Check the judgments.** For every 真正的、本质上、必须承认、显然、最…的是, ask what fact or reason is on the page. If the sentence only tells the reader how to feel or how seriously to take the text, cut it.
+7. **Check the judgments.** For every 真正的、本质上、必须承认、显然、最…的是, ask what fact or reason is on the page. If the sentence only tells the reader how to feel or how seriously to take the text, cut it. Mark every sentence that is a guess; does it sound like a guess, or like a measurement?
 8. **Check the sections.** List them. Would a person writing this occasion include each one? Cut the ones that exist only to prove rigor.
-9. **Check the ending.** Does it add a thought, or restate? If the user supplied an ending, compare against it; do not replace it with a generic conclusion or a rhetorical question.
+9. **Check the ending.** Does it add a thought, or restate? If the user supplied an ending, compare against it; do not replace it with a generic conclusion or a rhetorical question. Read the last sentence of each paragraph: if every one is quotable, let some end on a fact.
 10. **Report the substantive changes.** Quote the phrase that changed and say what it changed to. Do not paste the checklist unless the user asks.
 
 ## When the text is meant to be spoken
