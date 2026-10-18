@@ -6,11 +6,11 @@ v9 的 Kaz 模式就是标准模式的逐行副本，只多了两样东西。
 
 第一样是系统提示词里的一段话。它讲怎么说话、怎么排计划、怎么验收，并要求写作之前先加载 `write-like-a-person` 这个技能。位置在 `You are an AI agent powered by DeepSeek Harness.` 和 `You are a coding agent powered by the <模型> model.` 之后、`Tokens prefixed with @ ...` 那段之前。
 
-第二样是一个技能 `write-like-a-person`，源码在 `kaz\skills\`，跟着预设一起发版。
+第二样是一个技能 `write-like-a-person`。它有自己的仓库（`Kaczev/write-like-a-person`），`kaz\skills\write-like-a-person\` 里是同步过来的副本，跟着预设一起发版。改技能去那个仓库，改完在仓库根跑 `node scripts\sync-skill.mjs`。
 
 工具面没动过：没有加工具，也没有关掉任何一个。plan 组、compaction 组、delegation 组里的每一项，连同顺序和 `disabled` 标记，都是从标准模式逐行抄过来的。所以装好之后，Kaz 模式的行为等于标准模式的行为，再加上那段提示词和那个技能。
 
-仓库里放的是预设本体，在 `kaz\` 目录下：`kaz\cordis.patch.yml` 是唯一的事实源，它同时就是 bundle 的补丁层；`kaz\package.json` 放 bundle 元数据；技能在 `kaz\skills\`。
+仓库里放的是预设本体，在 `kaz\` 目录下：`kaz\cordis.patch.yml` 是唯一的事实源，它同时就是 bundle 的补丁层；`kaz\package.json` 放 bundle 元数据；技能副本在 `kaz\skills\`，同步脚本在 `scripts\`。
 
 装好之后，在桌面端新建对话，模式列表里会多一个 **Kaz 模式**（preset id 是 `kaz`，`order` 为 5）。
 
@@ -45,6 +45,7 @@ v9 的 Kaz 模式就是标准模式的逐行副本，只多了两样东西。
 - `kaz\cordis.patch.yml` 是装配的唯一事实源，也是生效的那层补丁。`kaz\package.json` 只管版本号和 `dsh.bundle.patch`。
 - 和标准模式的差集必须只有两处：`persona` 的 `prefix`，以及 `skill-filesystem` 的 `customSkillDirs`。出现第三处，它就不再是 v9 的 Kaz 模式。
 - 技能目录那一行用的是 `createRequire(baseUrl).resolve('kaz-preset-bundle/package.json')`。预设行挂载时的 `baseUrl` 是 profile 目录，不是补丁文件所在的目录，所以不能拿它直接拼 `skills/`。改包名的时候要同步改这行表达式。
+- 技能副本由 `scripts\sync-skill.mjs` 从 `..\write-like-a-person` 拷进来，源路径可用 `--from` 或环境变量 `WLAP_REPO` 覆盖。拷过去的是 `SKILL.md`（以及将来的 `references\`、`examples\`），`SOURCE.json` 记来源仓库、分支、commit 和内容哈希。`node scripts\sync-skill.mjs --verify` 退出码非 0 就说明两边对不上；发布前先跑它。不要直接编辑 `kaz\skills\` 里的副本，下次同步会覆盖。
 - 发版、回滚和提交形状写在 `发布与回滚.md` 里。它在 `.gitignore` 里，只留在本机。
 - 版本守卫是仓库根目录的 `check-version.mjs`，它断言 README 里「当前版本 X.Y.Z」那句和 `kaz\package.json` 的主版本一致。
 
