@@ -16,8 +16,9 @@
 # 预设行在**挂载时**的 `baseUrl` 是 profile 目录（例如
 # file:///C:/Users/<user>/.dsh/profiles/desktop/），不是本补丁文件所在目录——实测过。
 # 所以 `new URL('skills/', baseUrl)` 会指到 <profile>/skills（那里什么都没有，且不会报错，
-# 只是技能悄悄不见了）。bundle 是以 `link:` 安装进 profile 的，于是用 baseUrl 作解析基点
-# 去 require 自己的 package.json，拿到的才是本目录的真实路径。
+# 只是技能悄悄不见了）。bundle 装在 profile 的 node_modules 下（本地开发时是 `link:`，从 npm
+# 安装时是包本身），于是用 baseUrl 作解析基点去 require 自己的 package.json，拿到的才是本目录
+# 的真实路径。包名 `dsh-kazmode` 与 package.json 的 name 必须一致：改包名就要同步改这一行。
 - insert:
     - id: preset-kaz
       name: '@deepseek-ai/dsh-agent-preset'
@@ -100,7 +101,7 @@
             name: '@deepseek-ai/dsh-skill-filesystem'
             config:
               customSkillDirs:
-                - !!js "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('kaz-preset-bundle/package.json')), 'skills')"
+                - !!js "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:path').dirname(process.getBuiltinModule('node:module').createRequire(baseUrl).resolve('dsh-kazmode/package.json')), 'skills')"
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
           - id: command-goal

@@ -17,6 +17,10 @@
 // 2026-10-18（v9）：仓库换代成"纯 YAML 预设 + 一个技能"后，`kaz\VERSION` 与生成器一起删了，
 // 版本号的唯一出处收窄成 `kaz\package.json`；本守卫的判据仍是"仓库说的 == 打包的"，只是右边
 // 换了文件。
+//
+// 2026-10-18（发 npm）：这个守卫多了三项「还发得出去吗」的检查——包名是 `dsh-kazmode`、
+// 没有 `private: true`、`files` 里带着 `cordis.patch.yml` 与 `skills`。包名要和
+// `kaz\cordis.patch.yml` 里那段 createRequire 表达式对得上，漏改一边技能会静默消失。
 
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -74,6 +78,23 @@ if (sentence !== null && published !== undefined) {
     problems.push(`README.md says 当前版本 ${stated}, but kaz\\package.json says ${published.value}`);
   }
   if (problems.length === 0) console.log(`OK README 当前版本 ${stated} == kaz\\package.json ${published.value}`);
+}
+
+// 发布守卫：这个目录就是要发到 npm 的包，所以顺手确认它还发得出去。
+// 包名被改掉、`private` 回来、`files` 少了补丁或技能，都会让使用者 `dsh plugin add dsh-kazmode`
+// 拿不到能用的 bundle——现场的症状是「装上了但模式列表里没有它」，查起来比在这里拦下贵得多。
+if (manifest !== undefined) {
+  if (manifest.private === true) problems.push("kaz\\package.json is private: `npm publish` would refuse it");
+  if (manifest.name !== "dsh-kazmode") {
+    problems.push(`kaz\\package.json name is ${JSON.stringify(manifest.name)}, expected "dsh-kazmode" (cordis.patch.yml resolves its own package.json by this name)`);
+  }
+  const files = manifest.files;
+  if (!Array.isArray(files) || !files.includes("cordis.patch.yml") || !files.includes("skills")) {
+    problems.push(`kaz\\package.json files is ${JSON.stringify(files)}: the tarball must carry cordis.patch.yml and skills`);
+  }
+  if (manifest.dsh?.bundle?.patch?.length !== 1 || manifest.dsh.bundle.patch[0] !== "./cordis.patch.yml") {
+    problems.push(`kaz\\package.json dsh.bundle.patch is ${JSON.stringify(manifest.dsh?.bundle?.patch)}`);
+  }
 }
 
 for (const problem of problems) console.error(`FAIL ${problem}`);

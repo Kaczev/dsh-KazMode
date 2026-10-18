@@ -1,7 +1,30 @@
 {
-    "name": "kaz-preset-bundle",
+    "name": "dsh-kazmode",
     "version": "9.0.0",
-    "private": true,
+    "description": "Kaz 模式：dsh 标准模式的逐行副本，多一段说话与办事的提示词，并附带 write-like-a-person 写作技能。",
+    "license": "MIT",
+    "author": "Kaczev",
+    "homepage": "https://github.com/Kaczev/dsh-KazMode#readme",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Kaczev/dsh-KazMode.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Kaczev/dsh-KazMode/issues"
+    },
+    "keywords": [
+        "dsh",
+        "deepseek-harness",
+        "agent-preset",
+        "bundle",
+        "kaz"
+    ],
+    "files": [
+        "cordis.patch.yml",
+        "skills",
+        "README.md",
+        "LICENSE.md"
+    ],
     "dsh": {
         "bundle": {
             "patch": [
