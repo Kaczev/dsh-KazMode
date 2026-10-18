@@ -1,6 +1,6 @@
 {
     "name": "dsh-kazmode",
-    "version": "9.0.0",
+    "version": "9.0.1",
     "description": "Kaz 模式：dsh 标准模式的逐行副本，多一段说话与办事的提示词，并附带 write-like-a-person 写作技能。",
     "license": "MIT",
     "author": "Kaczev",

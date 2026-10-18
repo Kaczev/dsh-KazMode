@@ -1,6 +1,6 @@
 # Kaz 模式
 
-给 DeepSeek Harness（dsh）桌面端用的 agent preset（代理预设），当前版本 9.0.0。npm 包名 `dsh-kazmode`。
+给 DeepSeek Harness（dsh）桌面端用的 agent preset（代理预设），当前版本 9.0.1。npm 包名 `dsh-kazmode`。
 
 v9 的 Kaz 模式就是标准模式的逐行副本，只多了两样东西。
 
@@ -28,7 +28,7 @@ v9 的 Kaz 模式就是标准模式的逐行副本，只多了两样东西。
 dsh-kazmode
 ```
 
-要钉版本就写 `dsh-kazmode@9.0.0`。命令行等价物是 `dsh plugin add dsh-kazmode`。装完在插件页启用它，再开一个新会话，模式列表里就有 **Kaz 模式**。
+要钉版本就写 `dsh-kazmode@9.0.1`。命令行等价物是 `dsh plugin add dsh-kazmode`。装完在插件页启用它，再开一个新会话，模式列表里就有 **Kaz 模式**。
 
 更新走「先卸载、再装」：社区插件没有单独的更新按钮，先 `remove_bundle`（`target: "dsh-kazmode"`），再按上面装一次。装完开新会话。
 
