@@ -184,7 +184,8 @@ function removeStale(dir) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       removeStale(full);
-      if (readdirSync(full).length === 0) rmSync(full, { force: true });
+      // 空目录也必须带 recursive：rmSync 对目录不带 recursive 会抛 EISDIR。
+      if (readdirSync(full).length === 0) rmSync(full, { recursive: true, force: true });
     } else if (!keep.has(full)) {
       rmSync(full, { force: true });
     }
