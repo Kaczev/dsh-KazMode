@@ -83,12 +83,10 @@ function git(cwd, ...rest) {
   }).trim();
 }
 
-let commit = "";
 let ref = "";
 let repo = "";
 let dirty = false;
 try {
-  commit = git(SOURCE, "rev-parse", "HEAD");
   ref = git(SOURCE, "rev-parse", "--abbrev-ref", "HEAD");
   dirty = git(SOURCE, "status", "--porcelain", "--untracked-files=no") !== "";
   if (git(SOURCE, "remote").split("\n").includes("origin")) {
@@ -110,6 +108,16 @@ for (const dir of COPY_DIRS) {
   const full = join(SOURCE, dir);
   if (!existsSync(full)) continue;
   for (const nested of listFiles(full)) files.push(`${dir}/${nested.replace(/\\/gu, "/")}`);
+}
+
+// 记「这份正文最后一次由哪次提交改出来」，不是源仓库当前 HEAD。
+// 源仓库只改 README / workflow 时，两条同步路径才不会各记一个不同的 commit。
+let commit = "";
+try {
+  commit = git(SOURCE, "log", "-1", "--format=%H", "--", ...files);
+  if (commit === "") commit = git(SOURCE, "rev-parse", "HEAD");
+} catch {
+  fail(`${SOURCE}: could not read the commit that last changed the synced files`);
 }
 
 const payload = files.map((rel) => ({ rel, data: readFileSync(join(SOURCE, rel)) }));
