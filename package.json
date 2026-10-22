@@ -1,0 +1,12 @@
+{
+  "name": "dsh-kazmode-maintenance",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/presets.test.mjs",
+    "check": "node check-version.mjs && npm test"
+  },
+  "devDependencies": {
+    "yaml": "^2.8.1"
+  }
+}

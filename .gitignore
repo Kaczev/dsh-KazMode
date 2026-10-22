@@ -8,5 +8,6 @@
 /.tmp-*/
 # v9 起 kaz/package.json 与 kaz/cordis.patch.yml 是**源文件**（不再是生成物），要入库。
 # kaz/ 里唯一还不该入库的是可能冒出来的依赖树。
+/node_modules/
 /kaz/node_modules/
 /发布与回滚.md

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Kaz PTC 模式",
+    "description": "基于 PTC 模式，使用相同的 Kaz 提示词与写作技能，保留 PTC 工具调用方式。"
+  }
+}
