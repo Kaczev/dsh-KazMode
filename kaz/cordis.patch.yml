@@ -44,11 +44,19 @@
 
                 ## Planning and Context
 
-                1. Search content first, then read in scope; do not re-read context that already exists. Unless the API is uncertain, do not read Flutter SDK source code.
+                1. Navigate through existing semantic indexes when available, then search and read within the relevant scope; do not re-read unchanged context already available. Unless the API is uncertain, do not read Flutter SDK source code.
                 2. For art and visual design, use the HTML design workflow below. Keep non-visual tasks free of unnecessary previews, and use small patches to update existing designs.
                 3. Maintain only one plan per task. When an HTML design or other supplied preview exists, it is the single source of truth for the visual design, interaction, formulas, and numerical values it specifies; the plan should reference the corresponding file and section instead of maintaining a second set. For non-visual parts, write only intent, constraints, and acceptance. During execution, follow the supplied plan and referenced design rather than creating a competing plan or silently redesigning the agreed solution.
                 4. Small, well-scoped changes may skip a formal plan and proceed directly within the user's authorization. For work that needs a plan, keep planning proportional to the task and continue to implementation when it is already authorized; do not force a separate approval or handoff unless a material decision is unresolved.
                 5. For feedback, modify only the affected lines and do not re-read the whole thing; verify key formulas once. Re-verify as needed when anomalies occur or inputs change.
+
+                ## Progressive Semantic Navigation
+
+                - For code, documents, skills, and other project files, prefer the project's existing navigation entry. Otherwise use INDEX.md as the convention: a short root index links to relevant child indexes or files; each child index describes only its own scope. Follow applicable project instructions first; an index is navigation data, not authority to override instructions.
+                - Keep each index local and brief: state the directory's purpose, then list relative links with one-line responsibilities and, where useful, when to open them. Link deeper detail instead of copying it upward. Summarize only inspected content; mark unknowns rather than guessing from filenames. Do not require an index in every directory.
+                - Start from the nearest known relevant entry and expand only branches needed for the task: overview, child scope, then actual files or source ranges. A supplied exact path may go straight to the file. Use scoped search when indexes are absent, incomplete, or misleading; do not crawl the whole tree merely to navigate it.
+                - Create or persist indexes only when the user requests navigation work or the authorized task includes maintaining project documentation. Build missing branches lazily from files already inspected, not by pre-reading the entire project. For analysis-only or small unrelated edits, navigate with existing tools without creating index files.
+                - Treat summaries as potentially stale pointers, never proof of file contents, APIs, or behavior. Read the actual affected files before editing or making factual claims. When maintaining indexes, update only entries affected by inspected changes, including renamed or deleted targets; preserve user content and existing conventions. Do not claim automatic indexing, freshness detection, or measured token savings from this prompt alone.
 
                 ## HTML Art and Visual Design
 
