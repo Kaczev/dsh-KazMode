@@ -1,34 +1,19 @@
 # dsh-kazmode
 
-给 **DeepSeek Harness（dsh）桌面端**用的双预设包，当前版本 9.1.0：
+当前版本 10.0.0。Kaz 是独立叠加插件，不再提供标准/PTC 两份复制预设。
 
-- **Kaz 模式**（`kaz`）：标准模式，加上一段说话与办事的提示词，以及 `write-like-a-person` 写作技能。
-- **Kaz PTC 模式**（`kaz-ptc`）：PTC 模式，加上同一段提示词和同一个技能。
+启用后，原来的预设列表保持原名，新会话在模式选择器同一行右侧显示「Kaz 已启用」，已有会话在顶部模式名旁显示 `· Kaz`；同时为所有预设提供一份 Kaz 提示词和 `write-like-a-person` 技能。不修改原生工具组合、预设 ID 或选择器状态。关闭插件可撤销贡献。
 
-两个预设保留各自原生的工具组合。PTC 版保留 `mode: ptc` 的工具呈现插件，并按原生 PTC 配置禁用 workflow 两项。
+标记使用原版 DSH 0.2.1-rc.2 已有的 `conversation.hero.options` 和 `conversation.session.header.actions` 插槽，无需修改或重打包 DSH，不操作 DOM 或替换原生选择器。未绑定会话的空白首页不显示标记。本版尚未发布到 npm；实际位置与窄屏效果仍需视觉验收。
 
-## 安装
+安装：桌面端插件页安装并启用 `dsh-kazmode`；发布后可指定 `dsh-kazmode@10.0.0`。本地开发可直接安装此目录。
 
-在桌面端打开 **添加插件**，输入：
+从 v9 升级前，请先把默认预设和要继续使用的旧会话切换到原生预设，再卸载旧 bundle、安装新版；不再保留 `kaz` 和 `kaz-ptc` ID。按管理器返回值处理重启或卸载重装，不能假定旧会话会自动迁移。
 
-```
-dsh-kazmode
-```
+维护入口：[装配补丁](./cordis.patch.yml)、[宿主入口](./index.js)、[浏览器入口](./client.js)、[提示词](./prompt.md)、[技能副本](./skills/write-like-a-person/SKILL.md)。技能在独立仓库维护，使用主仓库同步脚本更新。
 
-要指定本版，输入 `dsh-kazmode@9.1.0`。装完启用，再**开一个新会话**，模式列表里会出现两个预设。命令行等价物是 `dsh plugin add dsh-kazmode`。已有会话保留旧的插件版本。
+完整提示词（`complete`）预设仍遵循 DSH 自身规则，Kaz 不强行修改。预设层的同名技能优先；没有技能工具的预设不会因此自动获得工具。
 
-更新按桌面端的安装提示操作；若返回 `ambiguous-install`，先卸载再安装。
-
-## 维护：只改一处
-
-[cordis.patch.yml](./cordis.patch.yml) 同时包含两个预设。标准版中的 `&kaz-persona` 定义提示词配置，`&kaz-skills` 定义技能目录配置；PTC 版通过 `*kaz-persona` 和 `*kaz-skills` 引用。修改锚点中的内容即同时修改两版，不要在 PTC 版复制正文。
-
-技能只有 [skills/write-like-a-person/SKILL.md](./skills/write-like-a-person/SKILL.md) 这一份随包副本。技能正文在独立仓库 `Kaczev/write-like-a-person` 维护，再用主仓库的同步脚本同步一次，两个预设同时使用。
-
-插件列表也分别显示 **Kaz 模式** 与 **Kaz PTC 模式**，各自带有能力说明。展示元数据放在 [标准版资源](./presets/standard/locale/zh.json)和 [PTC 版资源](./presets/ptc/locale/zh.json)，共用原创鲸鱼图标。轻量入口通过[共享注册函数](./presets/shared.js)使用宿主预设服务，不改变提示词、技能或工具组合。
-
-包没有运行时依赖，不 import 任何 `@deepseek-ai/*`；YAML 锚点由 DSH 的 Loader 解析。仓库根的 YAML 测试依赖不随此包发布。
-
-完整维护与验证说明：<https://github.com/Kaczev/dsh-KazMode>。
+完整维护、测试与迁移说明：<https://github.com/Kaczev/dsh-KazMode>。
 
 MIT，Copyright (c) 2026 Kaczev。

@@ -1,62 +1,44 @@
 # Kaz 模式
 
-给 DeepSeek Harness（dsh）桌面端用的 agent presets（代理预设），当前版本 9.1.0。npm 包名 `dsh-kazmode`。
+给 DeepSeek Harness（DSH）用的独立叠加插件，当前版本 10.0.0。npm 包名 `dsh-kazmode`。
 
-一个包提供两个预设：
+启用 Kaz 后，仍然选择原来的标准、PTC 或其他预设。模式列表保持原名；新会话在模式选择器同一行右侧显示「Kaz 已启用」，已有会话在顶部模式名旁显示「· Kaz」。两处标记统一使用 14px 常规字重；顶部标记使用主题三级文字色，右侧标记使用正文色并另留 12px 内边距，避开输入框圆角。关闭插件后标记消失。Kaz 不再注册 `kaz`、`kaz-ptc` 两份预设，也不复制任何原生工具组合。
 
-- **Kaz 模式**（`kaz`，order 5）：基于标准模式，保留原有 ID。
-- **Kaz PTC 模式**（`kaz-ptc`，order 6）：基于 PTC 模式。
+## 内容与边界
 
-两者各自在原生系统提示词中插入同一段话，并挂载同一个 `write-like-a-person` 技能。除此之外，保留各自原生预设的插件、顺序、配置与禁用标记。PTC 版保留原生的 `mode: ptc` 工具呈现插件，并禁用 delegation 组中的 `workflow-ptc` 与 `tool-workflow`。
+- [提示词](./kaz/prompt.md)只有一份，作为独立系统提示词段落，位于原生 persona 后、规划等策略段落前，不覆盖原生 persona。
+- [写作技能](./kaz/skills/write-like-a-person/SKILL.md)注册到全局技能层，所有预设可用；同名预设层技能仍按 DSH 的规则优先。
+- [浏览器入口](./kaz/client.js)只添加状态标记，不改预设 ID、菜单选项或会话状态。
+- 完整替换系统提示词（`complete`）的预设遵从 DSH 的完整提示词策略，不强行插入 Kaz。Kaz 不会给没有技能工具的预设补装工具。
 
-## 共享内容放在哪
+这是全局插件：启用时覆盖当前 profile 内的预设，不是另一个可选预设。禁用时撤销提示词、技能和标签注册。已有会话的生效边界仍取决于 DSH 的作用域与模块重载策略。
 
-[cordis.patch.yml](./kaz/cordis.patch.yml) 是装配源文件，也是直接生效的 bundle 补丁层，没有生成步骤。
+## DSH 兼容要求
 
-- **提示词**：标准版 `persona` 的 `config: &kaz-persona` 下定义完整 prefix，PTC 版用 `config: *kaz-persona` 引用。只改锚点中的正文，两个预设一起变。
-- **技能目录配置**：标准版 `skill-filesystem` 的 `config: &kaz-skills` 定义一次目录，PTC 版用 `config: *kaz-skills` 引用。
-- **技能正文**：两版都指向同一份 [SKILL.md](./kaz/skills/write-like-a-person/SKILL.md)，不按预设复制目录。
+**标记使用原版 DSH 0.2.1-rc.2 已有的 `conversation.hero.options` 与 `conversation.session.header.actions` 插槽，无需修改或重打包 DSH。** 新会话标记位于模式选择器同一行右侧，不紧贴下拉箭头；已有会话标记排在原生模式名之后。未绑定会话的空白首页不提供这些插槽，因此不显示标记。
 
-YAML 锚点只共享这两项配置；其余插件列表分别跟随标准和 PTC 基底。不要把 PTC 版改成标准版工具组合，也不要在 PTC 版复制提示词或技能配置。
+当前版本尚未发布到 npm。单元测试与运行时插槽检查不能替代实际界面的视觉验收。
 
-提示词正文沿用 9.0.2：直接回答、按任务分量决定长度、统一规划与执行、渐进式语义导航、HTML 视觉设计交付、实际验证，以及写作前加载 `write-like-a-person`。插入位置仍在模型身份句之后、`Tokens prefixed with @ ...` 之前。
+## 安装与迁移
 
-## 安装与更新
+使用支持上述接口的 DSH，在插件页安装并启用 `dsh-kazmode`。本地开发安装 [kaz 包目录](./kaz/)，发布后可使用 `dsh-kazmode@10.0.0`。
 
-在桌面端打开 **添加插件**，输入：
+从 v9 升级前，将默认预设和需要继续使用的旧会话切换到原生标准、PTC 或其他保留的预设，再移除旧 Kaz bundle，安装新版。旧 `kaz`、`kaz-ptc` ID 不保留兼容壳；依赖旧 ID 的会话不要直接假定可恢复。若管理器返回 `restart-required`，按提示重启；返回 `ambiguous-install` 时先卸载再装。
 
-```
-dsh-kazmode
-```
+验收：列表无重复 Kaz 预设；新会话同一行右侧显示 `Kaz 已启用`，已有会话的顶部模式名旁显示 `· Kaz`；系统提示词包含一次 Kaz 正文；技能可加载；工具组合、设置同步与 Creator 引导保持原样；禁用后所有 Kaz 贡献消失。详见[安装与更新指引](./桌面端安装与更新指引.md)。
 
-要钉版本就写 `dsh-kazmode@9.1.0`。命令行等价物是 `dsh plugin add dsh-kazmode`。本版须发布到 npm 后才能按版本号安装；本地验证可安装 [kaz](./kaz/) 包目录。
+## 维护与验证
 
-装完启用，再开一个新会话，模式列表应同时出现 **Kaz 模式** 和 **Kaz PTC 模式**。已有会话保留启动时的插件版本。更新按插件管理器的提示操作；若返回 `ambiguous-install`，先卸载再安装。
+[装配补丁](./kaz/cordis.patch.yml)只挂载一个插件。[宿主入口](./kaz/index.js)负责提示词、技能及生命周期；[包清单](./kaz/package.json)维护版本和发布资源。原创[鲸鱼图标](./kaz/icon.svg)继续复用。
 
-从 v8 升级如果返回 `application: restart-required`，需重启桌面端。v8 的文件路径插件不能全部就地卸载。
-
-插件列表的卡片标题与说明由各自入口的展示资源提供：[标准版中文元数据](./kaz/presets/standard/locale/zh.json)、[PTC 版中文元数据](./kaz/presets/ptc/locale/zh.json)，英文资源放在相邻目录。两版共享原创[鲸鱼图标](./kaz/icon.svg)。仅改预设的 `config.name` 不会改变插件列表中的标题。
-
-两个轻量入口通过[共享注册函数](./kaz/presets/shared.js)调用宿主的 `agentPresets.register`，返回注销函数，并保留延迟求值子插件配置所需的 Cordis group 标记。它们不复制 DSH 实现、不安装第二套宿主依赖；提示词与技能仍各只有一个来源。
-
-包没有运行时依赖，不 import 任何 `@deepseek-ai/*`。所需 DSH 插件由宿主提供；宿主升级后仍需对照其标准与 PTC 预设验证兼容性，不能只凭没有依赖树判断兼容。
-
-## 技能怎么维护
-
-技能的编辑源在独立仓库 [Kaczev/write-like-a-person](https://github.com/Kaczev/write-like-a-person)，包内仅存一份随包副本。修改源仓库后，在此仓库根目录执行：
+技能源在 [Kaczev/write-like-a-person](https://github.com/Kaczev/write-like-a-person)，不要直接修改随包副本：
 
 ```sh
 node scripts/sync-skill.mjs
 node scripts/sync-skill.mjs --verify
 ```
 
-[sync-skill.mjs](./scripts/sync-skill.mjs) 默认读取同级 `../write-like-a-person`，可用 `--from <路径>` 或 `WLAP_REPO` 指定。它同步正文及可选的资源目录，并在 [SOURCE.json](./kaz/skills/write-like-a-person/SOURCE.json) 记录来源和哈希。不要直接编辑包内技能副本。
-
-技能目录的 Loader 表达式使用 `createRequire(baseUrl).resolve('dsh-kazmode/package.json')` 定位已安装包。挂载时 `baseUrl` 是 profile 目录，不能直接拿它拼 `skills/`；改包名时必须同步修改 resolve 参数。
-
-## 验证与发布
-
-在仓库根目录安装开发依赖，再运行：
+同步脚本默认读取同级仓库，支持 `--from <路径>` 或 `WLAP_REPO`。[来源记录](./kaz/skills/write-like-a-person/SOURCE.json)保留来源和哈希。
 
 ```sh
 npm ci
@@ -65,16 +47,6 @@ node scripts/sync-skill.mjs --verify
 npm pack ./kaz --dry-run
 ```
 
-[check-version.mjs](./check-version.mjs) 检查本页版本与 [包清单](./kaz/package.json) 一致，并检查发布必需字段。[presets.test.mjs](./tests/presets.test.mjs) 使用 YAML 解析器验证两个 ID、共享对象身份、单处修改同时作用于两版、PTC 原生差异、技能路径和包资源配置。
+单元测试覆盖单插件装配、提示词和技能注册/撤销、标签后缀与发布资源；不把模拟测试冒充实际桌面端验证。包无新增运行时依赖，不安装另一套 DSH 或 React。
 
-若有可供 Node 读取的 DSH 源码或解包目录，可设置 `DSH_WEB_APP_DIR` 指向 `@deepseek-ai/dsh-web-app` 包目录，再运行 `npm test`。这会额外逐项比较原生标准与 PTC 插件列表，允许的差异仅为 `persona` 和 `skill-filesystem` 配置。未设置时这两项明确标为跳过；Desktop 的 `app.asar` 不能直接由普通 Node 读取。
-
-仓库根的 [package.json](./package.json) 与锁文件仅供开发测试；实际发布的仍是 [kaz/package.json](./kaz/package.json)，包本身没有新增依赖。发布前还应在 DSH 中安装并分别开新会话，确认两个预设均可挂载、提示词位置正确、技能可加载。详细操作见 [桌面端安装与更新指引](./桌面端安装与更新指引.md)。
-
-## 语义导航约定
-
-沿用项目已有入口；没有约定时使用 `INDEX.md`。索引只写本层职责和相对链接，按任务需要展开。只有用户要求导航工作或任务授权包含文档维护时才创建索引，不为小修改通读全仓库。摘要仅帮助定位，实际文件仍是事实依据；提示词不提供后台索引、过期检测或 token 节省保证。
-
-## 授权
-
-MIT，见 [LICENSE.md](./LICENSE.md)（Copyright (c) 2026 Kaczev）。
+MIT，见 [LICENSE.md](./LICENSE.md)。

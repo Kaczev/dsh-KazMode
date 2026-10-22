@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Kaz 模式",
+    "description": "保留原生预设和工具组合，统一添加 Kaz 提示词与 write-like-a-person 技能，并在新会话选项行和会话顶部显示启用标记。"
+  }
+}

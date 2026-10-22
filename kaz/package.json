@@ -1,48 +1,24 @@
 {
-    "name": "dsh-kazmode",
-    "version": "9.1.0",
-    "description": "Kaz 双预设：标准模式与 PTC 模式，共用一份说话与办事提示词和 write-like-a-person 写作技能。",
-    "license": "MIT",
-    "author": "Kaczev",
-    "homepage": "https://github.com/Kaczev/dsh-KazMode#readme",
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/Kaczev/dsh-KazMode.git"
-    },
-    "bugs": {
-        "url": "https://github.com/Kaczev/dsh-KazMode/issues"
-    },
-    "keywords": [
-        "dsh",
-        "deepseek-harness",
-        "agent-preset",
-        "bundle",
-        "kaz"
-    ],
-    "type": "module",
-    "exports": {
-        "./package.json": "./package.json",
-        "./presets/standard": "./presets/standard.js",
-        "./presets/ptc": "./presets/ptc.js",
-        "./presets/standard/locale/*.json": "./presets/standard/locale/*.json",
-        "./presets/ptc/locale/*.json": "./presets/ptc/locale/*.json",
-        "./presets/standard/icon": "./icon.svg",
-        "./presets/ptc/icon": "./icon.svg",
-        "./icon": "./icon.svg"
-    },
-    "files": [
-        "presets",
-        "icon.svg",
-        "cordis.patch.yml",
-        "skills",
-        "README.md",
-        "LICENSE.md"
-    ],
-    "dsh": {
-        "bundle": {
-            "patch": [
-                "./cordis.patch.yml"
-            ]
-        }
-    }
+  "name": "dsh-kazmode",
+  "version": "10.0.0",
+  "description": "Kaz 独立叠加插件：为所选预设添加说话与办事提示词、写作技能和 Kaz 标签。",
+  "license": "MIT",
+  "author": "Kaczev",
+  "homepage": "https://github.com/Kaczev/dsh-KazMode#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/Kaczev/dsh-KazMode.git" },
+  "bugs": { "url": "https://github.com/Kaczev/dsh-KazMode/issues" },
+  "keywords": ["dsh", "deepseek-harness", "bundle", "kaz"],
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "client.js", "prompt.md", "icon.svg", "locale", "cordis.patch.yml", "skills", "README.md", "LICENSE.md"],
+  "dsh": {
+    "bundle": { "patch": ["./cordis.patch.yml"] },
+    "client": { "platform": "web", "immediately": true, "inject": ["slots", "locale"] }
+  }
 }

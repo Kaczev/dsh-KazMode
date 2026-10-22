@@ -86,11 +86,12 @@ if (sentence !== null && published !== undefined) {
 if (manifest !== undefined) {
   if (manifest.private === true) problems.push("kaz\\package.json is private: `npm publish` would refuse it");
   if (manifest.name !== "dsh-kazmode") {
-    problems.push(`kaz\\package.json name is ${JSON.stringify(manifest.name)}, expected "dsh-kazmode" (cordis.patch.yml resolves its own package.json by this name)`);
+    problems.push(`kaz\\package.json name is ${JSON.stringify(manifest.name)}, expected "dsh-kazmode" (the bundle patch mounts this package)`);
   }
   const files = manifest.files;
-  if (!Array.isArray(files) || !files.includes("cordis.patch.yml") || !files.includes("skills")) {
-    problems.push(`kaz\\package.json files is ${JSON.stringify(files)}: the tarball must carry cordis.patch.yml and skills`);
+  const required = ["cordis.patch.yml", "skills", "index.js", "client.js", "prompt.md", "locale", "icon.svg"];
+  if (!Array.isArray(files) || required.some((file) => !files.includes(file))) {
+    problems.push(`kaz\\package.json files is ${JSON.stringify(files)}: the tarball must carry ${required.join(', ')}`);
   }
   if (manifest.dsh?.bundle?.patch?.length !== 1 || manifest.dsh.bundle.patch[0] !== "./cordis.patch.yml") {
     problems.push(`kaz\\package.json dsh.bundle.patch is ${JSON.stringify(manifest.dsh?.bundle?.patch)}`);
