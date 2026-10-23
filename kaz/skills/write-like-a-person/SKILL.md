@@ -1,6 +1,6 @@
 ---
 name: write-like-a-person
-description: Write prose that reads like a person wrote it instead of a machine, for speeches, reports, explanations, documentation, and any text meant to be read or heard by someone. Use when drafting or revising prose, when the user says a draft sounds like AI or reads awkwardly, when writing something that will be spoken aloud, or when checking a draft for machine-writing habits such as words that do not go together, connectives with no premise, metaphors used in place of the claim, staged rigor, sections the occasion does not need, fragmented sentences, premature negation, dangling references, anthropomorphism, filler transitions, and recaps.
+description: Use when the requested deliverable is a prose composition or substantive prose revision, such as an article, speech, report, documentation, or a substantial passage of UI copy; when the user asks to revise a prose draft that sounds like AI or reads awkwardly; or when the user explicitly asks to apply this skill. Do not load solely for ordinary chat replies, code investigation, implementation, debugging, concise technical explanations, working plans, progress updates, or completion summaries. Load when the writing phase begins, not at task startup; reuse loaded instructions while available in context.
 ---
 
 # Write like a person

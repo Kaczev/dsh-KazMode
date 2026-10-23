@@ -64,12 +64,25 @@ function host() {
 }
 
 test('prompt preserves the extracted Kaz preferences without a model persona', () => {
-  // Snapshot taken from the original YAML scalar, minus its generic first line
-  // and blank separator, with one conventional final Markdown newline.
+  // Snapshot includes the narrowed writing-skill trigger; unrelated preferences
+  // remain unchanged. Normalize platform line endings before hashing.
   assert.equal(createHash('sha256').update(prompt.replaceAll('\r\n', '\n')).digest('hex'),
-    '2306aab8896a5f07106582a25b74b207b3274c6f2d81c72882ab9661e7f933b6');
+    '549d60fd45106847542bdc8e59ff5f6cd623c222e1b774849f0f7a6ea9f0ca84');
   assert.ok(prompt.startsWith('Be direct: match the length'));
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}/u);
+});
+
+test('writing skill is scoped to prose deliverables in both prompt and catalog', () => {
+  const { description } = parse(/^---\r?\n([\s\S]*?)\r?\n---/u.exec(skillSource)[1]);
+  for (const text of [prompt, description]) {
+    assert.match(text, /requested deliverable is a prose composition or substantive prose revision/u);
+    assert.match(text, /user explicitly asks to apply/u);
+    assert.match(text, /Do not load (?:it )?solely for ordinary chat replies, code investigation, implementation, debugging, concise technical explanations, working plans, progress updates, or completion summaries\./u);
+    assert.match(text, /when the writing phase begins, not at task startup/u);
+    assert.doesNotMatch(text, /any text meant to be read or heard|including chat replies|loaded many turns ago/u);
+  }
+  assert.match(prompt, /reload only when needed instructions are no longer available/u);
+  assert.match(description, /reuse loaded instructions while available in context/u);
 });
 
 test('Host overlay preserves native persona and follows central placement', () => {
