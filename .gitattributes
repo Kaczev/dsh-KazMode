@@ -1,3 +1,5 @@
 # kaz/skills/ 下的文件由 scripts/sync-skill.mjs 从 write-like-a-person 仓库按字节拷进来。
 # 行尾锁成 LF，否则 clone 时的 autocrlf 会让拷贝与源仓库看起来不一致。
 /kaz/skills/** text eol=lf
+/README.md text eol=lf
+/kaz/README.md text eol=lf
