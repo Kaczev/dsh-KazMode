@@ -64,12 +64,28 @@ function host() {
 }
 
 test('prompt preserves the extracted Kaz preferences without a model persona', () => {
-  // Snapshot includes the narrowed writing-skill trigger; unrelated preferences
-  // remain unchanged. Normalize platform line endings before hashing.
+  // Snapshot includes the HTML-first workflow and narrowed writing-skill trigger.
+  // Normalize platform line endings before hashing.
   assert.equal(createHash('sha256').update(prompt.replaceAll('\r\n', '\n')).digest('hex'),
-    '549d60fd45106847542bdc8e59ff5f6cd623c222e1b774849f0f7a6ea9f0ca84');
+    'ee30beea5ca314995803ec6b2f17e078967232d055ad95b2f0be17f4e9454f91');
   assert.ok(prompt.startsWith('Be direct: match the length'));
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}/u);
+});
+
+test('visual work requires rendered HTML with explicit scope and preview boundaries', () => {
+  for (const fragment of [
+    'Trigger this workflow by the requested result',
+    'create, plan, propose, compare, or change a human-visible screen or visual asset',
+    'MUST express the proposed result in a directly renderable HTML artifact',
+    'stop at the HTML proposal and do not implement the production app',
+    'Do not finish with only a prose design',
+    'not a document describing that interface',
+    'A fenced HTML code block alone is not a rendered preview',
+    'state that rendering was not verified',
+    "not permission to replace the project's implementation stack",
+    'behavior-only fixes with no proposed visual change',
+    'An explicit user request for text only, another format, or no prototype takes precedence',
+  ]) assert.ok(prompt.includes(fragment), `missing visual rule: ${fragment}`);
 });
 
 test('writing skill is scoped to prose deliverables in both prompt and catalog', () => {
