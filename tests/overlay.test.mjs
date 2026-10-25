@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { parse } from 'yaml';
 import * as overlay from '../kaz/index.js';
 
-const prompt = readFileSync(new URL('../kaz/prompt.md', import.meta.url), 'utf8');
+const prompt = readFileSync(new URL('../kaz/prompt.md', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
 const skillUrl = new URL('../kaz/skills/write-like-a-person/SKILL.md', import.meta.url);
 const skillSource = readFileSync(skillUrl, 'utf8');
 
@@ -64,12 +64,60 @@ function host() {
 }
 
 test('prompt preserves the extracted Kaz preferences without a model persona', () => {
-  // Snapshot includes the HTML-first workflow and narrowed writing-skill trigger.
+  // Snapshot includes proactive navigation, file placement, and existing visual/writing rules.
   // Normalize platform line endings before hashing.
   assert.equal(createHash('sha256').update(prompt.replaceAll('\r\n', '\n')).digest('hex'),
-    'ee30beea5ca314995803ec6b2f17e078967232d055ad95b2f0be17f4e9454f91');
+    '3d24330412beb7c0e168ab8bbb5451496e228d7ab6430b346987d7c72b0b70b3');
   assert.ok(prompt.startsWith('Be direct: match the length'));
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}/u);
+});
+
+test('development proactively builds reachable navigation without broad repository scans', () => {
+  const navigation = prompt.split('## Progressive Semantic Navigation\n')[1]?.split('\n## ')[0];
+  assert.ok(navigation, 'navigation rules must have a dedicated section');
+  for (const fragment of [
+    'During authorized development, proactively create or extend minimal navigation',
+    'when adding a module or directory',
+    'following relationships across multiple files or directories',
+    'do not wait for the user to request an index',
+    'For a single-file edit with no structural change, creating an index is optional',
+    'correct any existing navigation entries affected by the edit',
+    'create a brief root INDEX.md linking to the inspected scope',
+    'link it from the nearest parent entry so it is reachable',
+    'Reuse existing navigation conventions rather than creating a parallel index tree',
+    'Build missing branches lazily from files already inspected',
+    'Never scan the entire repository just to populate indexes',
+    'including additions, renames, and deletions',
+    'For read-only analysis or planning, do not write navigation files unless requested',
+    'Explicit user limits on scope, paths, or file creation take precedence',
+  ]) assert.ok(navigation.includes(fragment), `missing navigation rule: ${fragment}`);
+  assert.doesNotMatch(prompt, /Create or persist indexes only when|without creating index files/u);
+});
+
+test('new files follow ownership and keep the root and published package free of scratch artifacts', () => {
+  const placement = prompt.split('## File Placement and Workspace Hygiene\n')[1]?.split('\n## ')[0];
+  assert.ok(placement, 'file placement must have a dedicated section');
+  for (const fragment of [
+    'Before creating any file, choose its location by responsibility',
+    "Reuse the project's established layout and naming conventions",
+    'create a small, purpose-named directory within the owning scope',
+    'do not use the repository root as a default drop zone',
+    'source files with their owning feature or module',
+    "tests in the project's test layout",
+    'documentation and HTML design references in the relevant documentation/design scope',
+    'reusable scripts in the scripts/tooling scope',
+    'responsibility categories, not mandatory directory names',
+    'create only files whose role is genuinely project-wide',
+    'Honor explicit user paths and required discovery locations',
+    'or a task-scoped temporary directory',
+    'Keep them out of source navigation and published packages unless intentionally required',
+    'Do not change ignore rules or delete user files merely to hide artifacts',
+    'Do not reorganize unrelated existing files or move public entry points',
+    'update affected imports, links, tests, and packaging paths',
+    'Do not add empty placeholder folders or create a folder for every file',
+    'review newly added paths for correct ownership',
+    'verify that those links resolve',
+  ]) assert.ok(placement.includes(fragment), `missing placement rule: ${fragment}`);
 });
 
 test('visual work requires rendered HTML with explicit scope and preview boundaries', () => {
@@ -109,7 +157,7 @@ test('Host overlay preserves native persona and follows central placement', () =
   const section = runtime.sections.get('kaz:preferences');
   assert.deepEqual(runtime.calls, ['DEPLOYMENT_PERSONA_PREFIX', 'PLAN_POLICY']);
   assert.equal(section.order, 160);
-  assert.equal(section.text, prompt);
+  assert.equal(section.text.replaceAll('\r\n', '\n'), prompt);
   assert.equal(section.interpolate, false);
   assert.equal(section.complete, undefined);
   for (const mode of ['standard', 'ptc', 'custom']) {
