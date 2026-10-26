@@ -2,7 +2,7 @@
 
 Kaz 为 DeepSeek Harness（DSH）添加一套日常工作偏好：默认用中文，直接回答，在用户授权后把实施和验证做完；写文章或修改文稿时，再按需加载写作技能。
 
-当前版本 9.3.0。支持 **DSH v0.2.1-rc.3 及以上版本**，npm 包名为 `dsh-kazmode`。
+当前版本 9.3.1。支持 **DSH v0.2.1-rc.3 及以上版本**，npm 包名为 `dsh-kazmode`。
 
 ## Kaz 会改变什么
 
@@ -27,7 +27,7 @@ Kaz 随包提供 [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blo
 
 ## 安装与使用
 
-1. 在 DSH 桌面端的插件页添加 `dsh-kazmode` 并启用。需要固定当前版本时，输入 `dsh-kazmode@9.3.0`。
+1. 在 DSH 桌面端的插件页添加 `dsh-kazmode` 并启用。需要固定当前版本时，输入 `dsh-kazmode@9.3.1`。
 2. 新建会话，照常选择标准、PTC 或其他预设，无须寻找额外的 Kaz 预设。
 3. 已绑定会话的新会话界面会显示「Kaz 已启用」，已有会话顶部会显示「· Kaz」。未绑定会话的空白首页可能不显示标记。
 

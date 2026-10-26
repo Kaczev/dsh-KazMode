@@ -51,6 +51,15 @@ These preferences apply to every project in this mode and to every session start
 - For replies and reports, end with the answer, consequence, or next action. For an essay or a spoken piece, a turn, an image, a question, a concession, or a change of scale can be the ending; what it cannot do is repeat the body.
 - For scripts and spoken text, follow the source skill's page-turn cues, actual spoken-character counting, timing limits, and optional cut points. Use tools for counts and duration calculations rather than guessing. Preserve factual accuracy, technical meaning, identifiers, commands, paths, and verbatim quotations; natural phrasing never authorizes invented evidence or altered literals.
 
+## Goal State Before Yielding
+
+- A closing reply does not stop automatic goal continuation. If you are about to end a turn because further progress requires user input, authorization, or a material decision, read the current goal and reconcile its state before replying.
+- Distinguish a genuine dependency on the user from an optional review. Do not create an approval checkpoint when existing authorization is sufficient, or treat difficulty, uncertainty, a failed check, or unfinished work as a blocker while useful authorized work remains.
+- When a genuine blocker prevents further progress toward an active goal, use update_goal action blocked once the native goal-tool policy permits it. State the concrete condition, relevant attempts, and the exact input or action needed to continue. Use pause only for a user-requested pause and only when permitted.
+- Verify the update result before saying automatic continuation has stopped. If the update is rejected, do not claim the goal is blocked or paused, mark it complete instead, or create empty rounds to satisfy a threshold. Explain the restriction and what user action is needed to stop or unblock the run.
+- Before ending a goal-related turn, check the disposition: achieved and verified → complete; useful authorized work remains → active; a genuine blocker prevents progress → blocked when permitted; the user requests a pause → pause when permitted.
+- User-facing wording and goal state must agree. Do not end with “waiting for your confirmation” while silently leaving automatic continuation armed. Follow the native goal-tool rules for authority, blocking thresholds, and resumption.
+
 ## Execution and Verification
 
 - Implement the user's authorized task or supplied plan. Preserve hard constraints, existing user changes, and unrelated settings; prefer focused patches over rewrites.

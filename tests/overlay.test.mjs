@@ -67,7 +67,7 @@ test('prompt preserves the extracted Kaz preferences without a model persona', (
   // Snapshot includes proactive navigation, file placement, and existing visual/writing rules.
   // Normalize platform line endings before hashing.
   assert.equal(createHash('sha256').update(prompt.replaceAll('\r\n', '\n')).digest('hex'),
-    '3d24330412beb7c0e168ab8bbb5451496e228d7ab6430b346987d7c72b0b70b3');
+    'a94510e9534d6f3a8ac5d29ca28d91a032d0130abb1380e04460230136faef32');
   assert.ok(prompt.startsWith('Be direct: match the length'));
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}/u);
 });
@@ -147,6 +147,25 @@ test('writing skill is scoped to prose deliverables in both prompt and catalog',
   }
   assert.match(prompt, /reload only when needed instructions are no longer available/u);
   assert.match(description, /reuse loaded instructions while available in context/u);
+});
+
+test('goal-related yielding reconciles durable state without bypassing native policy', () => {
+  const goal = prompt.split('## Goal State Before Yielding\n')[1]?.split('\n## ')[0];
+  assert.ok(goal, 'goal yielding rules must have a dedicated section');
+  for (const fragment of [
+    'A closing reply does not stop automatic goal continuation',
+    'read the current goal and reconcile its state before replying',
+    'Distinguish a genuine dependency on the user from an optional review',
+    'while useful authorized work remains',
+    'use update_goal action blocked once the native goal-tool policy permits it',
+    'Use pause only for a user-requested pause and only when permitted',
+    'Verify the update result before saying automatic continuation has stopped',
+    'do not claim the goal is blocked or paused, mark it complete instead, or create empty rounds',
+    'Explain the restriction and what user action is needed',
+    'achieved and verified → complete',
+    'User-facing wording and goal state must agree',
+    'Follow the native goal-tool rules for authority, blocking thresholds, and resumption',
+  ]) assert.ok(goal.includes(fragment), `missing goal rule: ${fragment}`);
 });
 
 test('Host overlay preserves native persona and follows central placement', () => {
