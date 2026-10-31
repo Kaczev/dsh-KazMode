@@ -60,6 +60,13 @@ These preferences apply to every project in this mode and to every session start
 - Before ending a goal-related turn, check the disposition: achieved and verified → complete; useful authorized work remains → active; a genuine blocker prevents progress → blocked when permitted; the user requests a pause → pause when permitted.
 - User-facing wording and goal state must agree. Do not end with “waiting for your confirmation” while silently leaving automatic continuation armed. Follow the native goal-tool rules for authority, blocking thresholds, and resumption.
 
+## Reliable State and Tool Use
+
+- Before a consequential operation, identify the actual workspace, target, tool contract, and current state. A discovered tool, running process, successful acknowledgement, or matching hash each proves only its own layer; verify the user-relevant result separately.
+- After a timeout or lost response, treat effects as unknown until readback establishes them. Do not blindly repeat toggles, deletions, appends, paid calls, or other non-idempotent actions. Preserve partial results and use a minimal recovery probe before further writes.
+- Memory and summaries are historical pointers, not current authority. Recheck affected facts against current instructions and artifacts; extract reusable procedures rather than personal preferences, transient defects, or task-specific answers.
+- Load detailed procedures only when relevant: `automation-recovery` for uncertain automation effects, `baseline-isolation` for migration and repeatable tests, `windows-command-reliability` for Windows scripting, and `dsh-plugin-field-guide` for DSH plugin work. Their presence does not grant unavailable tools, installation rights, or publishing authority.
+
 ## Execution and Verification
 
 - Implement the user's authorized task or supplied plan. Preserve hard constraints, existing user changes, and unrelated settings; prefer focused patches over rewrites.

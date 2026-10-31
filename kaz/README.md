@@ -2,7 +2,7 @@
 
 Kaz 为 DeepSeek Harness（DSH）添加一套日常工作偏好：默认用中文，直接回答，在用户授权后把实施和验证做完；写文章或修改文稿时，再按需加载写作技能。
 
-当前版本 9.3.1。支持 **DSH v0.2.1-rc.3 及以上版本**，npm 包名为 `dsh-kazmode`。
+当前版本 9.4.0。支持 **DSH v0.2.1-rc.3 及以上版本**，npm 包名为 `dsh-kazmode`。
 
 ## Kaz 会改变什么
 
@@ -19,6 +19,15 @@ Kaz 为 DeepSeek Harness（DSH）添加一套日常工作偏好：默认用中�
 
 这些是给模型的工作指令，实际执行仍受所选模型、预设、权限和可用工具约束。
 
+### 按需技能
+
+Kaz 随包注册下列四个通用技能及下一节的写作技能，共五个；只在相关任务加载正文，无须再安装到本地技能根。
+
+- [automation-recovery](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/automation-recovery/SKILL.md)：分层取证、超时效果核对和安全恢复。
+- [baseline-isolation](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/baseline-isolation/SKILL.md)：迁移、备份、增量恢复及测试隔离。
+- [windows-command-reliability](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/windows-command-reliability/SKILL.md)：shell、路径、编码和产物验收。
+- [dsh-plugin-field-guide](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/dsh-plugin-field-guide/SKILL.md)：DSH 插件开发、重载与发布验证。
+
 ### 写作技能
 
 Kaz 随包提供 [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/write-like-a-person/SKILL.md)，用于文章、演讲、文档等文稿创作和实质性修订。技能要求先明确读者和用途，再检查文章结构、句子的主语和指代、事实与推测的区分，以及结尾是否只是在重复正文。
@@ -27,7 +36,7 @@ Kaz 随包提供 [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blo
 
 ## 安装与使用
 
-1. 在 DSH 桌面端的插件页添加 `dsh-kazmode` 并启用。需要固定当前版本时，输入 `dsh-kazmode@9.3.1`。
+1. 在 DSH 桌面端的插件页添加 `dsh-kazmode` 并启用。需要固定当前版本时，输入 `dsh-kazmode@9.4.0`。
 2. 新建会话，照常选择标准、PTC 或其他预设，无须寻找额外的 Kaz 预设。
 3. 已绑定会话的新会话界面会显示「Kaz 已启用」，已有会话顶部会显示「· Kaz」。未绑定会话的空白首页可能不显示标记。
 
@@ -37,7 +46,7 @@ Kaz 随包提供 [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blo
 
 ## 生效范围
 
-Kaz 是当前 profile 的全局叠加插件。[宿主入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/index.js)将偏好放在原生 persona 之后、规划策略之前，并注册写作技能；[浏览器入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/client.js)添加启用标记。原生 persona、模式菜单和预设的工具组合保持不变。
+Kaz 是当前 profile 的全局叠加插件。[宿主入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/index.js)将偏好放在原生 persona 之后、规划策略之前，并注册五个随包技能；[浏览器入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/client.js)添加启用标记。原生 persona、模式菜单和预设的工具组合保持不变。
 
 - 使用完整系统提示词（`complete`）的预设按 DSH 自身的装配规则处理，Kaz 不强行插入偏好。
 - 技能注册不等于增加技能工具：预设没有技能加载工具时，Kaz 不会代为补装。同名技能的优先级遵循 DSH 的作用域规则。

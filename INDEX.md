@@ -6,10 +6,18 @@
 
 - [使用说明](README.md)：安装、生效范围与维护命令。
 - [包清单](kaz/package.json)：npm 版本、发布资源和运行时入口。
-- [宿主入口](kaz/index.js)：注册 Kaz 提示词和写作技能。
+- [宿主入口](kaz/index.js)：注册 Kaz 提示词和五个随包技能。
 - [系统提示词](kaz/prompt.md)：工作偏好、渐进导航、新文件归类、HTML 设计约束与 goal 结束回复前的状态检查。
 
+## 技能
+
+- [技能目录](kaz/skills/INDEX.md)：通用操作、测试隔离、Windows、DSH 插件开发与写作。
+- [七方向归属](docs/skill-catalog.md)：跨仓库单一来源、整理与安装边界。
+- [技能回归](tests/skills.test.mjs)：全目录注册卸载、frontmatter 和通用政策边界。
+
 ## 测试与维护
+
+- [9.4.0 发布说明](docs/release-v9.4.0.md)：五技能更新与真实宿主验收记录。
 
 - [根包清单](package.json)：`npm test` 与 `npm run check`。
 - [叠加插件测试](tests/overlay.test.mjs)：提示词快照与规则、注册、卸载和技能资源。

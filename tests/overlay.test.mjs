@@ -67,7 +67,7 @@ test('prompt preserves the extracted Kaz preferences without a model persona', (
   // Snapshot includes proactive navigation, file placement, and existing visual/writing rules.
   // Normalize platform line endings before hashing.
   assert.equal(createHash('sha256').update(prompt.replaceAll('\r\n', '\n')).digest('hex'),
-    'a94510e9534d6f3a8ac5d29ca28d91a032d0130abb1380e04460230136faef32');
+    '30df7f957a80db92fd4b3d1113cf7fd11af4ac743643ca6e91e893c1ed506351');
   assert.ok(prompt.startsWith('Be direct: match the length'));
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}/u);
 });
@@ -215,10 +215,10 @@ test('enable/disable/re-enable produces no duplicates or leaked registrations', 
   for (let i = 0; i < 3; i++) {
     const dispose = runtime.mount();
     assert.equal(runtime.sections.size, 2);
-    assert.equal(runtime.skills.size, 1);
+    assert.equal(runtime.skills.size, 5);
     assert.throws(() => runtime.mount(), /duplicate registration: kaz:preferences/u);
     assert.equal(runtime.sections.size, 2);
-    assert.equal(runtime.skills.size, 1);
+    assert.equal(runtime.skills.size, 5);
     dispose();
     dispose();
     assert.deepEqual([...runtime.sections.keys()], ['native']);
@@ -242,7 +242,7 @@ test('complete prompt naturally overrides overlay without assembly interception'
   const complete = { name: 'custom', order: 0, complete: true, text: 'Complete custom prompt' };
   assert.deepEqual(runtime.assemble([complete]), [complete]);
   assert.equal(runtime.sections.size, 1);
-  assert.equal(runtime.skills.size, 1);
+  assert.equal(runtime.skills.size, 5);
   assert.equal(runtime.assemble().length, 1);
   dispose();
 });
