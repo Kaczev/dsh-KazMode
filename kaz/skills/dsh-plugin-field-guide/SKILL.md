@@ -1,49 +1,49 @@
 ---
 name: dsh-plugin-field-guide
-description: DSH 创造模式的插件开发与排障经验。用于创建或修改 Cordis bundle、Host/Client 插件、配置 GUI、模型供应商，以及排查安装成功但界面不生效、服务注入失败、流式输出和图片能力问题。配合 cordis-plugin-development 使用，先核实当前接口，再实施和验收。
+description: Practical plugin development and troubleshooting in DSH Creation Mode. Use for Cordis bundles, Host/Client plugins, configuration GUIs and model providers, or installation/UI mismatches, service injection, streaming and image support. Use with cordis-plugin-development; verify current interfaces before implementation and acceptance.
 ---
 
-# DSH 插件开发实战
+# DSH plugin field guide
 
-这份技能供创造模式下的插件开发使用，是 `cordis-plugin-development` 的经验补充。环境提供官方开发技能时先加载；否则核验已安装包公开文档与接口，必要能力缺失时如实说明。本文件不能代替当前版本的接口核验。普通使用插件、聊天或无关代码任务不需要加载。
+Use this skill for plugin development in Creation Mode, as a practical supplement to `cordis-plugin-development`. Load the official development skill first when available. Otherwise, check the installed package's public documentation and interfaces, and state when required capabilities are missing. This file does not replace verification against the current version. Do not load it for ordinary plugin use, chat or unrelated coding tasks.
 
-## 开始之前
+## Before starting
 
-- 从任务交接入口和仓库导航进入，只读相关源码。区分插件工作目录、DSH 源码 checkout、已安装运行时和当前 GUI URL；四者可能不同。
-- 先写清授权范围：开发、本地安装、付费调用、推送、tag、Release、npm 发布分别确认。开发授权不等于发布授权。
-- 默认不修改 DSH 核心、内置 preset、已有配置或用户凭据。SDK 接入不逆向私有协议，不从其他软件读取 Key。
-- 创造模式有 inspect 工具时先取得 Provider 清单，再定向查询 Service、Event、Config、Slots。Inspect 是只读查询，不是业务服务；标准模式不伪造安装与 inspect 能力。
-- 用 `Config.listConfigs` 返回的 `packageDir` 找当前安装包文档。checkout 中的同名源码可能与运行版本不同。
+- Enter through the task handoff and repository navigation; read only relevant source. Distinguish the plugin working directory, DSH source checkout, installed runtime and current GUI URL. All four may differ.
+- Establish authorization separately for development, local installation, paid calls, pushes, tags, Releases and npm publication. Development authorization does not authorize publication.
+- By default, leave DSH core, built-in presets, existing configuration and user credentials unchanged. Do not reverse-engineer private protocols for SDK integration or read Keys from other applications.
+- When Creation Mode provides inspect tools, obtain the Provider list first, then query the relevant Service, Event, Config and Slots. Inspect is read-only discovery, not a business service. Do not invent installation or inspect capabilities in Standard Mode.
+- Locate the installed package's documentation through `packageDir` returned by `Config.listConfigs`. The same-named checkout source may differ from the running version.
 
-## 选接入点
+## Choose an integration point
 
-1. 优先使用服务注册和明确开放的 slot。区分 additive 扩展区、keyed 替换和整页覆盖；扩展区不自动拥有其父控件的排序或表单权限。
-2. 想让第三方 provider 与官方表单完全一致，先核实该表单是否接受第三方 namespace。发现硬编码时如实说明，不伪装内置 namespace，不修改他人 DOM，不导入私有前端模块绕过限制。
-3. 没有合适入口时，采用官方插件配置 slot 等可维护方案；涉及范围变化先让用户决定。
-4. UI 改动沿用现有 HTML 视觉参考，小范围更新，再实现到插件。HTML 不代替真实插件；按当前会话要求展示渲染结果，无法渲染就明确说明。
+1. Prefer service registration and explicitly open slots. Distinguish additive extension areas, keyed replacement and full-page replacement. An extension area does not automatically control its parent's ordering or form permissions.
+2. Before making a third-party provider match the official form exactly, check whether the form accepts third-party namespaces. Report hard-coded restrictions; do not impersonate a built-in namespace, modify another component's DOM or import private frontend modules to bypass them.
+3. If no suitable entry point exists, use a maintainable alternative such as the official plugin-configuration slot. Ask the user before changing scope.
+4. For UI changes, patch the existing HTML visual reference locally, then implement it in the plugin. HTML does not replace the actual plugin. Show the rendered result as required by the current session; state when rendering is unavailable.
 
-## Host、Client 与配置
+## Host, Client and configuration
 
-- Cordis 服务注入必须对应实际访问。曾出现只注入 `remote.credentials` 等子服务，读取 `ctx.remote` 根服务时仍被拒绝；需要访问根服务就显式声明根依赖，并用真实 Cordis 契约测试验证。
-- 配置面板应使用官方配置 scope、revision 和 mutate；保留未知字段，防止并发保存覆盖用户修改。不要把“可配置”误当成“已配置”，也不要绕过 remote access 权限。
-- 密钥输入框只写不回填，提交到 credentials 服务，配置只存 credential reference。密钥保存与配置保存通常不是一个事务，必须说明部分成功的恢复办法。
-- 发布需独立授权。发布后核验公开元数据、下载产物和干净安装；回执不能代替消费者可获取性，短暂查询失败先取证，不立即重复发布。
-- 元数据、英文与中文 locale、图标、exports、files 清单都是交付内容。用 pack dry-run 检查真实产物，确认测试、研究下载物和密钥没有被打包。
-- 注册、订阅、定时器、异步任务都要有卸载清理责任者。异步结果晚到时检查 disposed，避免卸载后重新注册或泄漏资源。
+- Cordis injection must match actual service access. A past case injected only a child service such as `remote.credentials`, yet access to the root `ctx.remote` was denied. Declare the root dependency explicitly when needed, and verify it with a real Cordis contract test.
+- Use the official configuration scope, revision and mutate mechanisms. Preserve unknown fields so concurrent saves cannot overwrite user changes. Configurable does not mean configured; do not bypass remote access permissions.
+- Key fields are write-only: never populate them with saved values. Submit Keys to the credentials service and store only a credential reference in configuration. Key storage and configuration storage are usually separate transactions; explain recovery from partial success.
+- Publication requires separate authorization. Afterwards, verify public metadata, the downloaded artifact and a clean installation. An acknowledgment does not prove consumer availability. Gather evidence after a brief lookup failure instead of publishing again immediately.
+- Metadata, English and Chinese locales, icons, exports and the files list are part of delivery. Inspect the actual package with a pack dry-run; exclude tests, research downloads and secrets.
+- Assign cleanup ownership for registrations, subscriptions, timers and asynchronous tasks. Check disposed state when asynchronous results arrive late to prevent post-unload registration and resource leaks.
 
-## 安装成功不等于界面已更新
+## Installation does not prove that the UI updated
 
-- 通过 `plugin_manager` 管理 profile，不手写 profile 配置。先 list 获取准确包名，再安装；检查 `application`、warnings 和 nextStep。
-- `already-installed` 不是重新加载成功。不要反复安装同版本，也不要未经确认移除插件，因为这可能影响配置和其他会话。
-- Host 服务注册、Client slot 注册、页面实际渲染分别验证。离线 React 测试通过不能证明用户页面已加载新包。
-- 本地 link 只证明磁盘指向源码，不证明进程已重新加载。需要重启时明确告知，不擅自杀掉用户 DSH。
-- 内置 Client 插件只有在对应构建 watcher 工作时才能承诺 HMR；不要启动另一个 Vite 服务来冒充更新当前 GUI。
-- app.asar 内文本可能仅 Host 文件读取工具可读；shell 和普通文件系统程序失败不代表文件不存在。不要编辑打包运行时来修插件。
+- Manage profiles through `plugin_manager`, not handwritten profile configuration. List first to obtain the exact package name, then install. Check `application`, warnings and nextStep.
+- `already-installed` does not prove a successful reload. Do not repeatedly install the same version or remove a plugin without confirmation; removal can affect configuration and other sessions.
+- Verify Host-service registration, Client-slot registration and actual page rendering separately. Passing offline React tests does not prove that the user's page loaded the new package.
+- A local link proves only where disk files point, not that the process reloaded. Tell the user when a restart is needed; do not kill their DSH process without authorization.
+- Promise HMR for built-in Client plugins only when the matching build watcher is running. Do not start another Vite server and present it as an update to the current GUI.
+- Text inside app.asar may be readable only through Host file-reading tools. Shell or ordinary filesystem failures do not prove absence. Do not edit the packaged runtime to fix a plugin.
 
-## 逐项验收
+## Acceptance checks
 
-- 建立仓库自己的 test、build、pack 命令并实际运行；参考仓库的测试命令不能当本插件通过记录。
-- 用 mock 覆盖请求映射、配置保存、失败路径和清理；必要时再用真实宿主类型、Cordis 或流组装器补契约测试。
-- UI 至少验证加载、空状态、只读/权限拒绝、保存失败、恢复操作，以及受影响的交互。测试后恢复被改变的用户状态。
-- 报告分开写：离线验证、当前 profile 应用状态、实际页面验证、用户实测。用户确认成功是有效记录，但不外推到其他模型或未测试状态。
-- 涉及模型供应商、图片或 SDK 生命周期时，再读 [模型适配经验](provider-notes.md)。
+- Establish and actually run this repository's test, build and pack commands. Commands from a reference repository are not passing results for this plugin.
+- Mock request mapping, configuration saves, failure paths and cleanup. Add contract tests with real host types, Cordis or the stream assembler where needed.
+- For UI, cover loading, empty states, read-only/permission denial, save failure, recovery and affected interactions. Restore user state changed by testing.
+- Report offline verification, current-profile application state, actual page verification and user testing separately. User-confirmed success is valid evidence, but does not extend to other models or untested states.
+- For model providers, images or SDK lifecycle work, read [Provider adaptation notes](provider-notes.md).

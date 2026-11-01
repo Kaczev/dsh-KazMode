@@ -25,3 +25,5 @@
 - [文档与导航测试](tests/readme.test.mjs)：导航链接目标、npm README 内容和链接转换。
 - [版本检查](check-version.mjs)：README 版本与 npm 包清单一致性、必需发布资源。
 - [文档同步脚本](scripts/sync-readme.mjs)：将根 README 同步到 npm 包并转换相对链接。
+
+- [9.4.1 release notes](docs/release-v9.4.1.md): English skill documentation and verification scope.

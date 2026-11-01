@@ -1,44 +1,44 @@
-# 模型适配经验
+# Provider adaptation notes
 
-仅在开发 LLM adapter、SDK transport 或图片通道时阅读。以下来自 Cursor provider 的开发记录；SDK 和 DSH 字段必须按目标版本重新核实。
+Read only when developing an LLM adapter, SDK transport or image channel. These notes come from Cursor provider development; recheck SDK and DSH fields against the target version.
 
-## 目录、配置与切换速度
+## Catalogs, configuration and switching latency
 
-- 将账号可用模型目录与用户选择展示的模型列表分开。显式空列表应保持空列表，不能用 `length === 0` 自动恢复全部目录；兼容旧字符串 ID 时不要丢失新对象字段。
-- 本地名称和上下文预算不证明账号能调用该模型，也不证明上游支持相应参数。参数组合应校验，完整变体应参与缓存身份。
-- 模型选择、能力解析、标题和压缩都可能触发目录查询。不要每次解析元数据都联网；为账号目录设置有限缓存、失效规则和显式刷新，先测试请求次数，再声称提速。
-- 缓存按凭据身份隔离，不记录原始 Key；有界、可清理、返回副本。缓存不能消除首次和过期时的网络延迟。并发去重与取消需单独设计，不能让一个调用者的取消误伤其他调用者。
-- SDK 不暴露的 temperature、maxTokens、stop 必须明确拒绝或通过已核实的接口实现，不能静默忽略。上下文预算只是宿主配置，不会扩大服务端窗口。
+- Separate the account's available-model catalog from the models the user chooses to display. Preserve an explicitly empty list; do not restore the entire catalog on `length === 0`. When supporting legacy string IDs, retain fields from newer object entries.
+- A local name and context budget do not prove account access or upstream parameter support. Validate parameter combinations and include the complete variant in cache identity.
+- Model selection, capability resolution, titles and compression can all query the catalog. Do not fetch on every metadata lookup. Give the account catalog a bounded cache, invalidation rules and explicit refresh. Measure request counts before claiming a speedup.
+- Isolate caches by credential identity without recording raw Keys. Bound them, make them clearable and return copies. Caching cannot remove first-load or expiry latency. Design concurrent deduplication and cancellation separately so one caller's cancellation does not cancel other callers.
+- Explicitly reject temperature, maxTokens and stop when the SDK does not expose them, or implement them through a verified interface. Never silently ignore them. A context budget is host configuration; it does not enlarge the server's context window.
 
-## 流式内容
+## Streaming content
 
-- 一段连续文本的多个 token delta 应共用内容块；每个 delta 都新建块，宿主可能把它们显示成一行一个 token。文本与 reasoning 转换、工具块或终态才关闭当前块。
-- 一个流恰有一个 finish；usage 在 finish 前，finish 后无内容。错误和取消使用结构化 failure，SDK 原始错误可能含凭据 URL，不能直接显示或记录。
-- 显式工具协议必须跨 chunk 解析并校验名称、JSON 和参数 schema。普通文字“我要读取文件”不是工具调用。未知调用、截断 JSON 和意外原生工具通道应失败关闭。
-- 保留 DSH 执行与审批权。SDK custom-tool callback 若直接执行宿主工具，可能绕过宿主审批；不要将整个任务外包给另一个自主 agent 冒充模型 adapter。
+- Token deltas for a continuous text segment should share a content block. Creating a block for every delta may make the host display one token per line. Close the current block only on a text/reasoning transition, a tool block or a terminal state.
+- Emit exactly one finish per stream, with usage before finish and no content afterwards. Use structured failure for errors and cancellation. Raw SDK errors may contain credential-bearing URLs; never display or log them directly.
+- Parse explicit tool protocols across chunks and validate names, JSON and argument schemas. Ordinary text such as "I will read the file" is not a tool call. Fail closed on unknown calls, truncated JSON and unexpected native tool channels.
+- Preserve DSH execution and approval authority. An SDK custom-tool callback that executes host tools directly may bypass host approval. Do not outsource the whole task to another autonomous agent and present it as a model adapter.
 
-## 图片与输入类型
+## Images and input types
 
-- 先理解宿主 `inputModalities` 的投影语义：显式不含 `image` 可使宿主把图片替换为文字占位；未声明不等于纯文本。SDK 目录未提供视觉字段时保持未知，允许用户声明，不把全部模型标为已验证识图。
-- 沿用官方输入类型控件的行为：文字和图片都可选，至少保留一种；不要固定勾文字，也不要因接通图片就删掉用户控制。`image` 单选声明不意味着 adapter 自行删除系统和工具协议文字。
-- 兼容已有未声明模型时明确默认策略，避免一次 UI 保存无意关闭用户已能使用的图片。新模型默认与官方一致；实际配置字段、列表元数据和精确模型解析必须一致。
-- 从 DSH 附件服务校验读取图片，不凭附件 ID 拼文件路径。已有 offload 标记保持文字，不重新上传；支持工具结果中的图片，不只处理最后一条用户消息。
-- SDK 单次 send 只有独立 images 数组时，保留 JSON 历史位置并用显式索引对应图片；这仍是消息归属约定，不是原生多轮多模态历史。多图和历史图片需要真实验收。
-- 按宿主策略选择 normalized image 或 request variant，保证尺寸、MIME、字节内容一致。不要把 base64 塞进文字历史或日志；图像预算、计费未知时不要编造数字。
+- Understand the host's `inputModalities` projection semantics first. Explicitly excluding `image` may cause the host to replace images with text placeholders; leaving it undeclared does not mean text-only. If the SDK catalog has no vision field, keep capability unknown and allow user declarations rather than marking every model as vision-verified.
+- Preserve the official input-type control's behavior: text and images are selectable, with at least one retained. Do not force text on or remove user control after enabling images. An `image`-only declaration does not authorize the adapter to strip system and tool-protocol text.
+- Define the fallback for existing undeclared models so a UI save does not accidentally disable images that already worked. Match official defaults for new models. Keep actual configuration fields, list metadata and exact-model resolution consistent.
+- Validate and read images through the DSH attachment service; do not construct file paths from attachment IDs. Keep existing offload markers as text instead of uploading again. Support images in tool results, not only in the latest user message.
+- If an SDK send accepts only a separate images array, retain positions in JSON history and map images by explicit indexes. This is a message-association convention, not native multi-turn multimodal history. Verify multiple images and historical images live.
+- Select the normalized image or request variant under host policy, keeping dimensions, MIME and bytes consistent. Do not embed base64 in text history or logs. Do not invent image budgets or billing figures when unknown.
 
-## 生命周期与费用
+## Lifecycle and cost
 
-- send、stream pull、wait 都可能阻塞；超时要覆盖全程。取消、卸载和晚到结果应有唯一清理责任者，避免双重 dispose 或泄漏。
-- 禁用 SDK 内建工具、MCP 和环境设置导入，并使用隔离 cwd/store；临时目录不是操作系统安全沙箱。公开 API 能否真正禁用执行需要验证，不能只根据提示词承诺。
-- 每轮新 agent 简单且隔离，但完整历史重发更贵。复用 agent 之前覆盖历史重写、压缩、system/tools 改动、Key/模型变化、辅助调用、并发和失败失效规则。
-- 多个内部模型 turn 的累计输入是计费用量，不能当成单次上下文大小；没有单 turn 数据就保留未知。不要偷偷添加纠正输入或内部重试，模型输入须可从宿主日志重建。
-- 真实 smoke 需要明确付费授权；不沿用旧聊天中的 Key，不将 Key 写进脚本、命令行、仓库或日志。只做约定范围的少量测试，记录实测与未测项。
+- send, stream pull and wait may all block; timeouts must cover the entire operation. Give cancellation, unload and late-result cleanup a single owner to prevent double dispose and leaks.
+- Disable SDK built-in tools, MCP and environment-settings import, and use an isolated cwd/store. A temporary directory is not an OS security sandbox. Verify whether the public API really disables execution; prompts alone cannot guarantee it.
+- A fresh agent per turn is simple and isolated, but resending the entire history costs more. Before reusing agents, cover history rewriting, compression, system/tools changes, Key/model changes, auxiliary calls, concurrency and failure invalidation.
+- Cumulative input across internal model turns is billable usage, not the size of one context. Keep per-turn size unknown when no per-turn data exists. Do not add hidden corrective input or internal retries; model input must be reconstructible from host logs.
+- Live smoke tests require explicit paid-call authorization. Do not reuse Keys from old chats or put Keys in scripts, command lines, repositories or logs. Run only a few tests within the agreed scope and record tested and untested cases.
 
-## 常用回归场景
+## Common regression cases
 
-- 连续文本无额外换行；工具 JSON 每个可能的 chunk 切分；非法名称和 schema。
-- 空目录、重复模型 ID、用户名称/预算/输入类型的往返保存。
-- 账号切换、目录过期和刷新、取消后不回填缓存；失败不缓存为成功。
-- 单图、多图、重复图片、工具图片、offload、读取失败、取消。
-- send/pull/wait 超时，卸载后晚到 agent/run 恰好清理一次。
-- 最终检查真实宿主投影和页面交互；mock 传递成功只能证明映射，不能证明模型理解图片。
+- Continuous text without extra newlines; every possible tool-JSON chunk split; invalid names and schemas.
+- Empty catalogs, duplicate model IDs and round-trip saves of user names, budgets and input types.
+- Account switching, catalog expiry and refresh, no cache refill after cancellation, and no caching failures as success.
+- Single, multiple, repeated and tool-result images; offload, read failure and cancellation.
+- send/pull/wait timeouts; exactly-once cleanup of agents/runs arriving after unload.
+- Finish by checking real host projection and page interactions. Successful mock forwarding proves mapping, not that the model understands images.

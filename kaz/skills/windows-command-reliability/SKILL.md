@@ -1,26 +1,26 @@
 ---
 name: windows-command-reliability
-description: 在 Windows 编写或执行跨 Bash、PowerShell、CMD 脚本，处理中文路径、编码、文件锁和产物验证时使用。
+description: Use when writing or running scripts across Bash, PowerShell and CMD on Windows, including Chinese paths, encoding, file locks and artifact verification.
 ---
 
-# Windows 命令可靠执行
+# Reliable Windows command execution
 
-## 确认执行环境
+## Confirm the execution environment
 
-检查工具契约、实际 shell、工作目录和解释器。工具名字不证明 shell 类型；显式指定工作目录，不把另一工具的 cd 当已生效。Bash、PowerShell、CMD 语法分别使用；复杂脚本放到所属脚本或临时目录，用匹配的解释器运行。
+Check the tool contract, actual shell, working directory and interpreter. A tool's name does not prove which shell it runs. Set the working directory explicitly; do not assume that another tool's cd applies. Keep Bash, PowerShell and CMD syntax separate. Put complex scripts in their owning scripts directory or a temporary directory and run them with the matching interpreter.
 
-用包含空格和中文的临时路径做无损探针，确认参数边界、输入输出编码及退出码。乱码不直接证明文件损坏。二进制和压缩文件用对应解码器；搜索失败不证明文件不存在。
+Use a non-destructive probe in a temporary path containing spaces and Chinese characters to verify argument boundaries, input/output encoding and exit codes. Garbled display does not by itself prove file corruption. Read binary and compressed files with the appropriate decoder; a failed search does not prove that a file is absent.
 
-## 写文件与重试
+## File writes and retries
 
-- 解析绝对路径，核对归属与链接；覆盖前读取，删除或移动前复核范围。
-- 区分路径不存在、共享文件锁、内存未保存、ACL 和沙箱策略拒绝；不换 shell 绕过门禁。
-- 批处理采用与 CMD 兼容的编码和换行，用 cmd.exe 实测完整入口，不只测试内部脚本。
-- 非零退出先读 stderr，再检查副作用。中断不等于业务失败，失败不等于零写入。
-- 修 ACL 前证明具体路径和祖先权限异常，不递归放宽整个用户目录，不擅自关闭安全策略。
+- Resolve absolute paths and check ownership and links. Read before overwriting; recheck scope before deleting or moving.
+- Distinguish a missing path, a shared-file lock, unsaved in-memory changes, ACL problems and a sandbox-policy denial. Do not switch shells to bypass a guard.
+- Use CMD-compatible encoding and line endings for batch files. Test the complete entry point with cmd.exe, not just its internal scripts.
+- On a non-zero exit, read stderr before checking side effects. Interruption does not mean the operation failed, and failure does not mean nothing was written.
+- Before repairing an ACL, prove the specific permission problem on the path and its ancestors. Do not recursively relax permissions across the user's directory or disable security policies without authorization.
 
-## 验收
+## Acceptance checks
 
-检查产物真实路径、内容、格式和重新打开结果。覆盖有空格和中文路径、文件占用、父目录缺失及重复执行。日志放输出或临时目录，凭据不进命令行和日志。
+Check each artifact's actual path, content, format and ability to reopen. Cover paths with spaces and Chinese characters, files in use, missing parent directories and repeated execution. Keep logs in output or temporary directories; keep credentials out of command lines and logs.
 
-例：替换表格被拒先查应用占用，不直接认定权限错误。脚本成功但文件不见时，检查工作目录及返回的真实输出路径。
+For example, if replacing a spreadsheet is denied, first check whether the application holds the file; do not immediately assume a permission error. If a script succeeds but its file seems missing, check the working directory and the actual output path returned.

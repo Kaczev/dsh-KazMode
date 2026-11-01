@@ -1,28 +1,28 @@
 ---
 name: baseline-isolation
-description: 建立、迁移或恢复基线，进行 agent 横向评测或可重复实验时使用；校验范围、备份变更并隔离跨组状态。
+description: Use when creating, migrating or restoring a baseline, comparing agents or running repeatable experiments; validate scope, back up changes and isolate state between groups.
 ---
 
-# 可重复基线与安全恢复
+# Repeatable baselines and safe restoration
 
-## 定义起点
+## Define the starting point
 
-列出纳入范围、排除项和外部状态。Git 只恢复受管理文件；忽略配置、缓存、数据库、存档和记忆库需单独决定。未同步不等于可删除。先读仓库指令和状态，不重置或清理未授权内容。
+List included paths, exclusions and external state. Git restores only the files it manages; decide separately how to handle ignored configuration, caches, databases, saved games and memory stores. Unsynced does not mean disposable. Read repository instructions and status first; do not reset or clean unauthorized content.
 
-关闭写入者或取得一致快照，确认内存修改已保存。记录相对路径、类型、字节数、内容哈希与来源标识。哈希一致不证明项目可运行。
+Stop writers or obtain a consistent snapshot, and confirm that in-memory edits have been saved. Record relative paths, types, byte counts, content hashes and source identifiers. Matching hashes do not prove that the project runs.
 
-## 恢复流程
+## Restoration procedure
 
-1. 校验基线自身及完整清单，拒绝越界路径和意外链接；检查目标及祖先目录，不沿符号链接或目录联接写出范围。
-2. 只读列出修改、缺失、新增项，确认授权和写入者已停止。
-3. 在恢复范围外备份覆盖和移除项，保留原路径与差异清单，校验备份；不可恢复操作另行确认。
-4. 写入前复核目标与差异，发生竞争就停止。按清单增量恢复，不用全盘清空替代比较。
-5. 复核全部范围，再实际打开或运行。失败时保留备份和现场，不声称成功。
+1. Validate the baseline itself and its full manifest. Reject out-of-scope paths and unexpected links. Check the destination and its ancestor directories; do not follow symlinks or directory junctions into writes outside the scope.
+2. List changed, missing and added items read-only. Confirm authorization and that writers have stopped.
+3. Back up items to be overwritten or removed outside the restoration scope. Preserve original paths and a difference manifest, and validate the backup. Obtain separate confirmation for irreversible operations.
+4. Recheck targets and differences before writing; stop if a race occurs. Restore incrementally from the manifest rather than replacing comparison with a wholesale wipe.
+5. Recheck the entire scope, then actually open or run the project. On failure, preserve the backup and current state; do not claim success.
 
-恢复程序在隔离夹具中测试修改、缺失、新增、无变化、基线损坏、链接越界、竞争和保护拒绝；列明未验证项。
+Test the restoration program in isolated fixtures covering changed, missing, added and unchanged files, a corrupt baseline, links escaping the scope, races and protection refusals. List unverified cases.
 
-## 横向评测
+## Comparisons between agents
 
-各组使用相同基线、需求、权限、预算及冻结交接材料。隔离上一组代码、评分、会话与跨会话记忆；仅关自动注入不能阻止主动检索。需要记忆时从同一快照分别开始，不共享增长中的库。
+Give each group the same baseline, requirements, permissions, budget and frozen handoff material. Isolate previous groups' code, scores, sessions and cross-session memory. Disabling automatic injection alone does not prevent active retrieval. If memory is required, start each group from the same snapshot rather than sharing a growing store.
 
-发现环境缺陷时记录影响，统一修订下一版或重测，不只给后测者提示。保留各组来源和验收记录，不把本题解法写进通用技能。
+When an environment defect is found, record its impact and revise the next version uniformly or rerun the tests. Do not give the hint only to later participants. Preserve each group's provenance and acceptance records; do not put this task's solution into a general-purpose skill.

@@ -1,29 +1,29 @@
 ---
 name: automation-recovery
-description: 排查 MCP、桥接服务和桌面自动化连接、超时或执行状态不明；按层取证并安全恢复，避免重复写操作。
+description: Use to diagnose MCP, bridge-service and desktop-automation connection failures, timeouts or unknown execution states; gather evidence by layer and recover without repeating writes.
 ---
 
-# 自动化分层排障与恢复
+# Layered automation diagnosis and recovery
 
-连接失败、超时、队列阻塞或执行结果不明时使用。接口名和恢复方式以当前工具契约为准，不沿用历史版本补丁。
+Use when a connection fails, a request times out, a queue blocks or an operation's result is unknown. Follow the current tool contract for interface names and recovery procedures rather than reusing historical version-specific fixes.
 
-## 固定目标与证据
+## Fix the target and preserve evidence
 
-记录目标、动作、错误原文、时间及是否可能写入。分别确认宿主工具、桥接服务、目标进程和业务对象；工具目录可列出不证明应用可操作。认证信息先脱敏。
+Record the target, action, verbatim error, time and whether a write may have occurred. Check the host tool, bridge service, target process and business object separately. A discoverable tool catalog does not prove that the application is usable. Redact authentication information first.
 
-## 按失败位置处理
+## Respond at the point of failure
 
-- 明确未发送：修正参数或连接前置条件，再执行一次。
-- 业务明确拒绝且无副作用：按拒绝原因处理；权限拒绝不绕过，缺授权时询问。
-- 已发送但超时、断连或回执缺失：标为“效果未知”。只读查询对象和产物，不把超时当作取消。
-- 应用阻塞：检查忙碌、编译、模态窗口和待完成请求。保存、覆盖、登录和未知对话框不自动确认，不靠杀进程清队列。
+- Definitely not sent: correct the parameters or connection prerequisites, then execute once.
+- Explicit business refusal with no side effects: address the stated reason. Do not bypass a permission denial; ask when authorization is missing.
+- Sent, but timed out, disconnected or missing an acknowledgment: mark the effects as unknown. Query objects and artifacts read-only; do not treat a timeout as cancellation.
+- Blocked application: check busy states, compilation, modal windows and pending requests. Do not automatically confirm save, overwrite, login or unknown dialogs, or kill the process to clear the queue.
 
-切换、删除、追加和付费操作不盲目重试。先确定原请求仍在运行、已成功或部分完成；无法确认时保留现场并报告缺少的证据。
+Do not blindly retry toggles, deletions, appends or paid operations. First establish whether the original request is still running, succeeded or partially completed. If that cannot be established, preserve the state and report which evidence is missing.
 
-## 恢复后验证
+## Verify after recovery
 
-按当前工具约定等待原调用结束或恢复连接，执行最小只读探针，再检查目标。进程存活或窗口关闭不能代替业务探针。只补做确认未完成且仍获授权的部分，限定重试次数。
+Follow the current tool contract to wait for the original call or restore the connection. Run a minimal read-only probe, then inspect the target. A live process or a closed window cannot replace a business-level probe. Complete only the parts confirmed unfinished and still authorized, with a bounded retry count.
 
-例：播放切换后断连，先查询播放状态，已经切换就不重放。导出超时先核对实际路径、格式与可解码性，同时确认原任务是否结束。
+For example, after a disconnect during a playback toggle, query playback first; do not toggle again if it already changed. After an export timeout, check the actual path, format and decodability, and establish whether the original job has ended.
 
-交付说明失败层、已确认副作用、恢复动作、实际验证及未知状态。
+Report the failing layer, confirmed side effects, recovery actions, actual verification and unknown states.
