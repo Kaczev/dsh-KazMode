@@ -1,29 +1,32 @@
 ---
 name: automation-recovery
-description: Use to diagnose MCP, bridge-service and desktop-automation connection failures, timeouts or unknown execution states; gather evidence by layer and recover without repeating writes.
+description: Diagnoses MCP, bridge-service and desktop-automation failures by layer; use for connection errors, blocked queues, timeouts or unknown operation results.
 ---
 
-# Layered automation diagnosis and recovery
+# Automation diagnosis and recovery
 
-Use when a connection fails, a request times out, a queue blocks or an operation's result is unknown. Follow the current tool contract for interface names and recovery procedures rather than reusing historical version-specific fixes.
+## Locate the failure
 
-## Fix the target and preserve evidence
+Capture the target, requested action, verbatim error and time; redact credentials. Probe only the layers needed to distinguish:
 
-Record the target, action, verbatim error, time and whether a write may have occurred. Check the host tool, bridge service, target process and business object separately. A discoverable tool catalog does not prove that the application is usable. Redact authentication information first.
+- Host tool: is the tool available, and did it accept the call?
+- Bridge: can it reach the intended application or session?
+- Application: is it ready, busy, compiling or waiting on a modal dialog?
+- Business object: did the requested state or artifact actually change?
 
-## Respond at the point of failure
+A working tool catalog or live process does not establish business-level success. Use the current tool contract for connection and recovery methods, not historical version-specific fixes.
 
-- Definitely not sent: correct the parameters or connection prerequisites, then execute once.
-- Explicit business refusal with no side effects: address the stated reason. Do not bypass a permission denial; ask when authorization is missing.
-- Sent, but timed out, disconnected or missing an acknowledgment: mark the effects as unknown. Query objects and artifacts read-only; do not treat a timeout as cancellation.
-- Blocked application: check busy states, compilation, modal windows and pending requests. Do not automatically confirm save, overwrite, login or unknown dialogs, or kill the process to clear the queue.
+## Choose the recovery branch
 
-Do not blindly retry toggles, deletions, appends or paid operations. First establish whether the original request is still running, succeeded or partially completed. If that cannot be established, preserve the state and report which evidence is missing.
+- **Confirmed not sent:** correct the parameters or connection prerequisite, then submit once.
+- **Explicit refusal without side effects:** address the stated cause within existing authorization; a permission refusal is not a connection fault.
+- **Sent, result unknown:** use request/job identifiers and read-only target queries to distinguish running, completed and partial work before another write. If evidence is unavailable, preserve the state and identify the missing observation.
+- **Application blocked:** inspect busy state, pending requests and dialogs. Do not dismiss save, overwrite or login prompts, or kill the application merely to clear a queue.
 
-## Verify after recovery
+## Verify recovery
 
-Follow the current tool contract to wait for the original call or restore the connection. Run a minimal read-only probe, then inspect the target. A live process or a closed window cannot replace a business-level probe. Complete only the parts confirmed unfinished and still authorized, with a bounded retry count.
+Wait for or reconnect to the original request as the tool contract permits. Run one minimal read-only connection probe, then inspect the business object. Resume only confirmed unfinished work; bound retries and stop when the same failure recurs without new evidence.
 
-For example, after a disconnect during a playback toggle, query playback first; do not toggle again if it already changed. After an export timeout, check the actual path, format and decodability, and establish whether the original job has ended.
+For a disconnected playback toggle, read playback state before deciding whether another toggle is needed. For an export timeout, check the original job and whether the destination artifact opens in the expected format.
 
-Report the failing layer, confirmed side effects, recovery actions, actual verification and unknown states.
+Report the failed layer, confirmed outcome and unresolved state; include recovery actions only when they affect the result or next step.

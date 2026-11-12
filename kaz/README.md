@@ -1,8 +1,8 @@
 # Kaz 模式
 
-Kaz 为 DeepSeek Harness（DSH）添加一套日常工作偏好：默认用中文，直接回答，在用户授权后把实施和验证做完；写文章或修改文稿时，再按需加载写作技能。
+Kaz 为 DeepSeek Harness（DSH）添加一套工作规则：先观察再决策，按授权范围完成实施与验证；涉及视觉方案或成篇写作时，再应用相应协议。
 
-当前版本 9.4.1。支持 **DSH v0.2.1-rc.3 及以上版本**，npm 包名为 `dsh-kazmode`。
+当前版本 9.5.0。支持 **DSH v0.2.1-rc.3 及以上版本**，npm 包名为 `dsh-kazmode`。
 
 ## Kaz 会改变什么
 
@@ -10,8 +10,8 @@ Kaz 为 DeepSeek Harness（DSH）添加一套日常工作偏好：默认用中�
 
 [完整提示词](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/prompt.md)约定了具体的工作方式：
 
-- **回答按问题的分量来写。** 简单问题简短回答，复杂问题再展开；省去寒暄、复述和空泛评价，不确定时直接说明。
-- **按授权范围办事。** 只要分析或方案，就停在分析或方案；已经授权实施，就在同一条对话里完成改动和验证，不另设规划者到执行者的交接，也不自行切换模型或思考强度。
+- **先观察，再决定怎么做。** 核对用户目标与实际状态；事实不足先补充必要观察，有实质取舍才比较方向，路径明确就直接处理。
+- **按授权范围办事。** 只要分析或方案，就保持实施对象只读；已授权实施，就尽量在当前轮次完成改动和验证。需要额外授权时直接请求，不绕路或自行扩大权限。
 - **边开发边补导航。** 新增模块、目录，或需要跨文件理解改动时，主动建立或补充最小索引；只记录已经检查过的内容，不为建索引扫描全仓库。只读分析不默认写文件，单文件小修改不强制新建索引。
 - **新文件按职责归类。** 沿用现有目录结构；没有合适位置时，在所属范围创建用途明确的目录。功能代码、HTML 设计稿、报告和临时脚本不默认堆在根目录，也不为整理目录擅自搬动无关旧文件。
 - **用 HTML 展示拟议画面。** 制作或调整 GUI/UI、比较布局、设计美术或可见交互时，必须交付可直接渲染的 HTML，方案阶段也不只写文字；用户明确指定其他格式时遵从用户。后续实现以同一份设计为依据，仍使用项目原有技术栈。
@@ -21,12 +21,10 @@ Kaz 为 DeepSeek Harness（DSH）添加一套日常工作偏好：默认用中�
 
 ### 按需技能
 
-Kaz 随包注册下列四个通用技能及下一节的写作技能，共五个；只在相关任务加载正文，无须再安装到本地技能根。
+Kaz 随包注册下列两个通用技能及下一节的写作技能，共三个；只在相关任务加载正文，无须再安装到本地技能根。
 
-- [automation-recovery](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/automation-recovery/SKILL.md)：分层取证、超时效果核对和安全恢复。
-- [baseline-isolation](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/baseline-isolation/SKILL.md)：迁移、备份、增量恢复及测试隔离。
-- [windows-command-reliability](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/windows-command-reliability/SKILL.md)：shell、路径、编码和产物验收。
-- [dsh-plugin-field-guide](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/dsh-plugin-field-guide/SKILL.md)：DSH 插件开发、重载与发布验证。
+- [automation-recovery](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/automation-recovery/SKILL.md)：自动化分层诊断、恢复分支与业务结果核验。
+- [windows-command-reliability](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/windows-command-reliability/SKILL.md)：Windows shell 边界、路径编码与文件锁诊断。
 
 ### 写作技能
 
@@ -36,7 +34,7 @@ Kaz 随包提供 [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blo
 
 ## 安装与使用
 
-1. 在 DSH 桌面端的插件页添加 `dsh-kazmode` 并启用。需要固定当前版本时，输入 `dsh-kazmode@9.4.1`。
+1. 在 DSH 桌面端的插件页添加 `dsh-kazmode` 并启用。需要固定当前版本时，输入 `dsh-kazmode@9.5.0`。
 2. 新建会话，照常选择标准、PTC 或其他预设，无须寻找额外的 Kaz 预设。
 3. 已绑定会话的新会话界面会显示「Kaz 已启用」，已有会话顶部会显示「· Kaz」。未绑定会话的空白首页可能不显示标记。
 
@@ -46,7 +44,7 @@ Kaz 随包提供 [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blo
 
 ## 生效范围
 
-Kaz 是当前 profile 的全局叠加插件。[宿主入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/index.js)将偏好放在原生 persona 之后、规划策略之前，并注册五个随包技能；[浏览器入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/client.js)添加启用标记。原生 persona、模式菜单和预设的工具组合保持不变。
+Kaz 是当前 profile 的全局叠加插件。[宿主入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/index.js)将偏好放在原生 persona 之后、规划策略之前，并注册三个随包技能；[浏览器入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/client.js)添加启用标记。原生 persona、模式菜单和预设的工具组合保持不变。
 
 - 使用完整系统提示词（`complete`）的预设按 DSH 自身的装配规则处理，Kaz 不强行插入偏好。
 - 技能注册不等于增加技能工具：预设没有技能加载工具时，Kaz 不会代为补装。同名技能的优先级遵循 DSH 的作用域规则。

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
 import { apply } from '../kaz/index.js';
 
-const names = ['automation-recovery', 'baseline-isolation', 'dsh-plugin-field-guide', 'windows-command-reliability', 'write-like-a-person'];
+const names = ['automation-recovery', 'windows-command-reliability', 'write-like-a-person'];
 test('all packaged skills expose real bodies and dispose exactly once', () => {
   const registered = new Map();
   const disposers = [];
@@ -37,7 +37,7 @@ test('partial skill registration failure leaves no prompt or skill behind', () =
     assert.throws(() => apply({
       systemPrompt: { getSectionOrder: () => 100, section: () => { active.add('prompt'); return () => active.delete('prompt'); } },
       skills: { register(skill) {
-        if (skill.name === 'dsh-plugin-field-guide') throw new Error('registration failed');
+        if (skill.name === 'windows-command-reliability') throw new Error('registration failed');
         active.add(skill.name);
         return () => active.delete(skill.name);
       } },
@@ -50,11 +50,26 @@ test('partial skill registration failure leaves no prompt or skill behind', () =
   assert.equal(active.size, 0);
 });
 
-test('state policy requires readback and does not grant unavailable capabilities', () => {
+test('state policy requires readback and treats summaries as unverified cues', () => {
   const prompt = readFileSync(new URL('../kaz/prompt.md', import.meta.url), 'utf8');
-  for (const fragment of ['treat effects as unknown', 'non-idempotent actions', 'Memory and summaries are historical pointers', 'does not grant unavailable tools']) assert.ok(prompt.includes(fragment));
-  const section = prompt.split('## Reliable State and Tool Use')[1].split('## Execution and Verification')[0];
+  for (const fragment of ['operation may have partially completed', 'non-idempotent operations', 'confirm the effect with minimal readback or status queries', 'Indexes and summaries are only potentially stale location cues']) assert.ok(prompt.includes(fragment), `missing state policy: ${fragment}`);
+  const section = prompt.split('## Implementation and Verification')[1].split('## Project Navigation')[0];
   assert.doesNotMatch(section, /Photoshop|Unity|ComfyUI|RootOfDecite|Kaczev/u);
+});
+
+test('retired skills are absent from discovery and prompt references', () => {
+  const directories = readdirSync(new URL('../kaz/skills/', import.meta.url), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  assert.deepEqual(directories, names);
+  const prompt = readFileSync(new URL('../kaz/prompt.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(prompt, /baseline-isolation|dsh-plugin-field-guide/u);
+});
+
+test('operational skills retain their specialized recovery and Windows branches', () => {
+  const recovery = readFileSync(new URL('../kaz/skills/automation-recovery/SKILL.md', import.meta.url), 'utf8');
+  for (const fragment of ['Confirmed not sent', 'Explicit refusal without side effects', 'Sent, result unknown', 'Application blocked', 'original job']) assert.ok(recovery.includes(fragment));
+  const windows = readFileSync(new URL('../kaz/skills/windows-command-reliability/SKILL.md', import.meta.url), 'utf8');
+  for (const fragment of ['-LiteralPath', '$env:NAME', '$HOME', 'spaces and Chinese characters', 'cmd.exe', 'file lock', 'sandbox denial']) assert.ok(windows.includes(fragment));
 });
 
 test('packaged frontmatter follows the strict loader contract', () => {

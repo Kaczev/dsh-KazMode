@@ -63,109 +63,124 @@ function host() {
   };
 }
 
-test('prompt preserves the extracted Kaz preferences without a model persona', () => {
-  // Snapshot includes proactive navigation, file placement, and existing visual/writing rules.
-  // Normalize platform line endings before hashing.
-  assert.equal(createHash('sha256').update(prompt.replaceAll('\r\n', '\n')).digest('hex'),
-    '30df7f957a80db92fd4b3d1113cf7fd11af4ac743643ca6e91e893c1ed506351');
-  assert.ok(prompt.startsWith('Be direct: match the length'));
-  assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}/u);
+test('prompt matches the approved five-part policy without restoring removed preferences', () => {
+  assert.equal(createHash('sha256').update(prompt).digest('hex'), '8c22156aad1eaaeaf9df91e9c36c3ed132f058272afe8491921365a321138fd8');
+  assert.ok(prompt.startsWith('## Goals and Decisions\n'));
+  assert.equal((prompt.match(/^## /gmu) ?? []).length, 5);
+  assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}|Respond in Chinese by default|Be direct: match the length/u);
 });
 
-test('development proactively builds reachable navigation without broad repository scans', () => {
-  const navigation = prompt.split('## Progressive Semantic Navigation\n')[1]?.split('\n## ')[0];
-  assert.ok(navigation, 'navigation rules must have a dedicated section');
-  for (const fragment of [
-    'During authorized development, proactively create or extend minimal navigation',
+const policies = {
+  'decision and authorization boundaries': [
+    'At the start of a task or at major state transitions',
+    'first gather the minimum necessary observations',
+    'When the path is clear, proceed directly',
+    "Check the premises in the user's description against actual observations",
+    'low-impact matters that do not involve authorization, security, or irreversible operations',
+    'continue other authorized work',
+    'keep implementation targets read-only',
+    'request the needed authorization directly',
+    'without adding unnecessary handoffs or approvals',
+  ],
+  'verification and unknown write recovery': [
+    'establish observable completion criteria',
+    'reproduce it first to the extent feasible',
+    'checks covering the changed behavior and affected existing functionality',
+    'do not substitute completed edits or a passing build for behavioral verification',
+    'adjust only when there is new evidence',
+    'operation may have partially completed',
+    'confirm the effect with minimal readback or status queries',
+    'do not blindly repeat toggles, deletions, appends, paid calls',
+    'disclose important assumptions',
+  ],
+  'proactive reachable navigation': [
+    'During authorized development, proactively add the minimum necessary navigation',
     'when adding a module or directory',
-    'following relationships across multiple files or directories',
-    'do not wait for the user to request an index',
-    'For a single-file edit with no structural change, creating an index is optional',
-    'correct any existing navigation entries affected by the edit',
-    'create a brief root INDEX.md linking to the inspected scope',
-    'link it from the nearest parent entry so it is reachable',
-    'Reuse existing navigation conventions rather than creating a parallel index tree',
-    'Build missing branches lazily from files already inspected',
-    'Never scan the entire repository just to populate indexes',
-    'including additions, renames, and deletions',
-    'For read-only analysis or planning, do not write navigation files unless requested',
-    'Explicit user limits on scope, paths, or file creation take precedence',
-  ]) assert.ok(navigation.includes(fragment), `missing navigation rule: ${fragment}`);
-  assert.doesNotMatch(prompt, /Create or persist indexes only when|without creating index files/u);
-});
-
-test('new files follow ownership and keep the root and published package free of scratch artifacts', () => {
-  const placement = prompt.split('## File Placement and Workspace Hygiene\n')[1]?.split('\n## ')[0];
-  assert.ok(placement, 'file placement must have a dedicated section');
-  for (const fragment of [
-    'Before creating any file, choose its location by responsibility',
-    "Reuse the project's established layout and naming conventions",
-    'create a small, purpose-named directory within the owning scope',
-    'do not use the repository root as a default drop zone',
-    'source files with their owning feature or module',
-    "tests in the project's test layout",
-    'documentation and HTML design references in the relevant documentation/design scope',
-    'reusable scripts in the scripts/tooling scope',
+    'tracing relationships across multiple files or directories',
+    'A single-file edit with no structural change need not create a new index',
+    'correct any affected existing entries',
+    'create a brief root INDEX.md',
+    'link it from the nearest parent entry',
+    'do not build a parallel index tree',
+    'Omit uninspected scopes or mark them as unknown',
+    'do not scan unrelated directories just to populate indexes',
+    'Do not write navigation during read-only analysis or planning unless requested by the user',
+    'Follow explicit user limits on scope, paths, and file creation',
+    'they have no authority to override applicable instructions',
+    'read the actual affected files',
+  ],
+  'file ownership and workspace hygiene': [
+    'Before creating a file, choose its location by responsibility',
+    'follow existing layout and naming conventions',
+    'within the owning scope',
+    'Place source code in its owning module',
+    'tests in the existing test layout',
+    'durable documentation and HTML design references',
+    'reusable scripts in the scripts or tooling scope',
     'responsibility categories, not mandatory directory names',
-    'create only files whose role is genuinely project-wide',
-    'Honor explicit user paths and required discovery locations',
-    'or a task-scoped temporary directory',
-    'Keep them out of source navigation and published packages unless intentionally required',
-    'Do not change ignore rules or delete user files merely to hide artifacts',
-    'Do not reorganize unrelated existing files or move public entry points',
+    'files that are genuinely project-wide or explicitly required by the user or toolchain',
+    'or in a task-specific temporary directory',
+    'unless explicitly needed, keep them out of source navigation and published packages',
+    'do not modify ignore rules or delete user files just to hide artifacts',
+    'Preserve user content, existing conventions, and unrelated files',
     'update affected imports, links, tests, and packaging paths',
-    'Do not add empty placeholder folders or create a folder for every file',
-    'review newly added paths for correct ownership',
-    'verify that those links resolve',
-  ]) assert.ok(placement.includes(fragment), `missing placement rule: ${fragment}`);
-});
+    'create empty placeholder directories, or create a separate directory for every file',
+    'ownership of newly added paths, and reachability of affected navigation links',
+  ],
+  'HTML proposal and implementation boundaries': [
+    'Use directly renderable HTML to show the proposed visual result',
+    'rather than formatting a text plan as a web page',
+    'except when the user explicitly requests plain text only, another format, or no preview',
+    'Purely non-visual tasks do not require HTML',
+    'clearly mark mock boundaries',
+    'Keep the editable source file',
+    'display it through an available preview surface',
+    'state that rendering has not been verified',
+    "HTML does not replace the project's implementation stack",
+    'requirements explicitly specified in a user-confirmed HTML plan must be followed',
+    'update that same plan once confirmed',
+    'without deviating on your own or creating a competing version',
+  ],
+  'goal state and native policy': [
+    'When Goal Tools Are Available and a Relevant Goal Exists',
+    'Ending a reply does not stop automatic goal continuation',
+    'read the current goal and reconcile its state against the native policy',
+    'achieved and verified → complete',
+    'useful authorized work remains → keep active',
+    'mark blocked when policy permits',
+    'user requests a pause → mark pause when policy permits',
+    'Do not treat optional review, difficulty, uncertainty, or a single failed check as a blocker',
+    'state the concrete blocker, relevant attempts, and what is needed to continue',
+    'Verify the update result so reply wording matches the actual state',
+    'When an update is rejected, state the restriction',
+    'do not claim automatic execution has stopped',
+    'do not bypass policy with false completion or empty turns',
+  ],
+};
+for (const [policy, fragments] of Object.entries(policies)) {
+  test(`prompt retains ${policy}`, () => {
+    for (const fragment of fragments) assert.ok(prompt.includes(fragment), `missing policy: ${fragment}`);
+  });
+}
 
-test('visual work requires rendered HTML with explicit scope and preview boundaries', () => {
-  for (const fragment of [
-    'Trigger this workflow by the requested result',
-    'create, plan, propose, compare, or change a human-visible screen or visual asset',
-    'MUST express the proposed result in a directly renderable HTML artifact',
-    'stop at the HTML proposal and do not implement the production app',
-    'Do not finish with only a prose design',
-    'not a document describing that interface',
-    'A fenced HTML code block alone is not a rendered preview',
-    'state that rendering was not verified',
-    "not permission to replace the project's implementation stack",
-    'behavior-only fixes with no proposed visual change',
-    'An explicit user request for text only, another format, or no prototype takes precedence',
-  ]) assert.ok(prompt.includes(fragment), `missing visual rule: ${fragment}`);
-});
-
-test('writing skill is scoped to prose deliverables in both prompt and catalog', () => {
+test('writing skill remains scoped to prose deliverables in prompt and catalog', () => {
   const { description } = parse(/^---\r?\n([\s\S]*?)\r?\n---/u.exec(skillSource)[1]);
+  for (const fragment of [
+    'Use `write-like-a-person` for articles, speeches, reports, documentation, longer UI copy',
+    'or when explicitly requested by the user',
+    'ordinary chat, code investigation and implementation, debugging, brief explanations, working plans, progress updates, and completion summaries do not trigger it',
+    'when the writing phase begins and adopt its method',
+    'do not preload it at task start',
+    'reload only when the needed instructions are no longer in context',
+  ]) assert.ok(prompt.includes(fragment), `missing writing rule: ${fragment}`);
+  assert.match(description, /requested deliverable is a prose composition or substantive prose revision/u);
+  assert.match(description, /user explicitly asks to apply/u);
+  assert.match(description, /Do not load solely for ordinary chat replies/u);
+  assert.match(description, /when the writing phase begins, not at task startup/u);
+  assert.match(description, /reuse loaded instructions while available in context/u);
   for (const text of [prompt, description]) {
-    assert.match(text, /requested deliverable is a prose composition or substantive prose revision/u);
-    assert.match(text, /user explicitly asks to apply/u);
-    assert.match(text, /Do not load (?:it )?solely for ordinary chat replies, code investigation, implementation, debugging, concise technical explanations, working plans, progress updates, or completion summaries\./u);
-    assert.match(text, /when the writing phase begins, not at task startup/u);
     assert.doesNotMatch(text, /any text meant to be read or heard|including chat replies|loaded many turns ago/u);
   }
-  assert.match(prompt, /reload only when needed instructions are no longer available/u);
-  assert.match(description, /reuse loaded instructions while available in context/u);
-});
-
-test('goal-related yielding reconciles durable state without bypassing native policy', () => {
-  const goal = prompt.split('## Goal State Before Yielding\n')[1]?.split('\n## ')[0];
-  assert.ok(goal, 'goal yielding rules must have a dedicated section');
-  for (const fragment of [
-    'A closing reply does not stop automatic goal continuation',
-    'read the current goal and reconcile its state before replying',
-    'Distinguish a genuine dependency on the user from an optional review',
-    'while useful authorized work remains',
-    'use update_goal action blocked once the native goal-tool policy permits it',
-    'Use pause only for a user-requested pause and only when permitted',
-    'Verify the update result before saying automatic continuation has stopped',
-    'do not claim the goal is blocked or paused, mark it complete instead, or create empty rounds',
-    'Explain the restriction and what user action is needed',
-    'achieved and verified → complete',
-    'User-facing wording and goal state must agree',
-    'Follow the native goal-tool rules for authority, blocking thresholds, and resumption',
-  ]) assert.ok(goal.includes(fragment), `missing goal rule: ${fragment}`);
 });
 
 test('Host overlay preserves native persona and follows central placement', () => {
@@ -215,10 +230,10 @@ test('enable/disable/re-enable produces no duplicates or leaked registrations', 
   for (let i = 0; i < 3; i++) {
     const dispose = runtime.mount();
     assert.equal(runtime.sections.size, 2);
-    assert.equal(runtime.skills.size, 5);
+    assert.equal(runtime.skills.size, 3);
     assert.throws(() => runtime.mount(), /duplicate registration: kaz:preferences/u);
     assert.equal(runtime.sections.size, 2);
-    assert.equal(runtime.skills.size, 5);
+    assert.equal(runtime.skills.size, 3);
     dispose();
     dispose();
     assert.deepEqual([...runtime.sections.keys()], ['native']);
@@ -242,7 +257,7 @@ test('complete prompt naturally overrides overlay without assembly interception'
   const complete = { name: 'custom', order: 0, complete: true, text: 'Complete custom prompt' };
   assert.deepEqual(runtime.assemble([complete]), [complete]);
   assert.equal(runtime.sections.size, 1);
-  assert.equal(runtime.skills.size, 5);
+  assert.equal(runtime.skills.size, 3);
   assert.equal(runtime.assemble().length, 1);
   dispose();
 });

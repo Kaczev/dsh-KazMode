@@ -1,26 +1,23 @@
 ---
 name: windows-command-reliability
-description: Use when writing or running scripts across Bash, PowerShell and CMD on Windows, including Chinese paths, encoding, file locks and artifact verification.
+description: Handles Windows shell boundaries, path quoting, encoding and file-lock diagnosis; use when writing scripts or troubleshooting Windows command execution.
 ---
 
-# Reliable Windows command execution
+# Windows command reliability
 
-## Confirm the execution environment
+## Shell and argument boundaries
 
-Check the tool contract, actual shell, working directory and interpreter. A tool's name does not prove which shell it runs. Set the working directory explicitly; do not assume that another tool's cd applies. Keep Bash, PowerShell and CMD syntax separate. Put complex scripts in their owning scripts directory or a temporary directory and run them with the matching interpreter.
+- Match syntax to the actual shell and interpreter: PowerShell, CMD and Bash are not interchangeable. Set the command's working directory explicitly; another tool's directory change may not carry over.
+- In PowerShell, use `$env:NAME` for environment variables and avoid automatic variable names such as `$HOME` (names are case-insensitive). Prefer `-LiteralPath` for file paths and pass executable arguments separately rather than building an evaluated command string.
+- When crossing shells or introducing unfamiliar quoting or encoding, test a harmless fixture whose path contains spaces and Chinese characters. Check the arguments received and exit code; do not repeat this probe for routine commands on an already verified path.
 
-Use a non-destructive probe in a temporary path containing spaces and Chinese characters to verify argument boundaries, input/output encoding and exit codes. Garbled display does not by itself prove file corruption. Read binary and compressed files with the appropriate decoder; a failed search does not prove that a file is absent.
+## Encoding and entry points
 
-## File writes and retries
+- Choose encoding for the actual reader. Distinguish display corruption from file corruption by reopening with the intended decoder; binary or compressed files need their own reader.
+- For batch files, use encoding and line endings supported by the target CMD environment. Test the complete `cmd.exe` entry point, not just the scripts it launches.
 
-- Resolve absolute paths and check ownership and links. Read before overwriting; recheck scope before deleting or moving.
-- Distinguish a missing path, a shared-file lock, unsaved in-memory changes, ACL problems and a sandbox-policy denial. Do not switch shells to bypass a guard.
-- Use CMD-compatible encoding and line endings for batch files. Test the complete entry point with cmd.exe, not just its internal scripts.
-- On a non-zero exit, read stderr before checking side effects. Interruption does not mean the operation failed, and failure does not mean nothing was written.
-- Before repairing an ACL, prove the specific permission problem on the path and its ancestors. Do not recursively relax permissions across the user's directory or disable security policies without authorization.
+## File-access failures
 
-## Acceptance checks
+Distinguish a missing parent, an application-held file lock, unsaved in-memory changes, ACL failure and sandbox denial before choosing a fix. For an ACL diagnosis, inspect the target and ancestors; do not broadly relax permissions. A sandbox denial requires the documented authorization path, not a different shell.
 
-Check each artifact's actual path, content, format and ability to reopen. Cover paths with spaces and Chinese characters, files in use, missing parent directories and repeated execution. Keep logs in output or temporary directories; keep credentials out of command lines and logs.
-
-For example, if replacing a spreadsheet is denied, first check whether the application holds the file; do not immediately assume a permission error. If a script succeeds but its file seems missing, check the working directory and the actual output path returned.
+If a command reports success but its output is missing, resolve the actual working directory and output path. After a write affected by quoting, encoding or locking, reopen the artifact with its intended reader. Exercise only relevant edge cases, such as Chinese paths or a file held open by another application.
