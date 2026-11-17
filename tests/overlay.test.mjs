@@ -214,8 +214,13 @@ test('runtime skill exposes full actual body, frontmatter, and package-local res
   assert.equal(skill.description, metadata.description);
   assert.equal(skill.source, 'runtime');
   assert.equal(skill.content, body);
-  assert.match(skill.content, /## The pass before you send/u);
-  assert.ok(skill.content.includes('The examples are specimens, not the boundary.'));
+  assert.deepEqual([...skill.content.matchAll(/^## \d\. (.+)$/gmu)].map((match) => match[1]), [
+    'Before drafting', 'Draft', 'Revise paragraphs', 'Revise sentences',
+    'Scripts intended for speaking', 'Before delivery',
+  ]);
+  assert.ok(skill.content.includes('do not choose a candidate by guesswork'));
+  assert.ok(skill.content.includes('Adding a hedge or removing a connective alone does not repair an unsupported claim.'));
+  assert.doesNotMatch(skill.content, /^- (?:No|Yes|Machine|Person):/mu);
   assert.equal(skill.path, fileURLToPath(skillUrl));
   assert.deepEqual(skill.resourceBase, {
     kind: 'directory', path: fileURLToPath(new URL('./', skillUrl)),

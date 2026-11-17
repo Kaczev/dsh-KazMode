@@ -1,56 +1,66 @@
 # Kaz 模式
 
-Kaz 是 DeepSeek Harness（DSH）的全局叠加插件，为当前预设添加工作规则、三个按需技能和界面启用标记。它不替换原生预设，也不增加一套工具。
+Kaz 为 DeepSeek Harness（DSH）当前选用的预设叠加工作规则，并附带三个按需加载的技能。启用后，你仍使用原来的标准、PTC 或自定义预设；Kaz 不另建预设，也不添加工具。
 
-当前版本 9.5.1。支持 **DSH v0.2.1-rc.3 及以上版本**。npm 包名：`dsh-kazmode`。
+当前版本 9.5.1，npm 包名为 `dsh-kazmode`。适配目标从 DSH v0.2.1-rc.3 起；包清单没有声明 DSH 版本约束，仓库测试也不代表已经验证每个后续版本。升级 DSH 后仍需检查插件能否正常加载。
 
-## 安装与使用
+## 安装前：它会影响什么
 
-1. 在 DSH 的插件页添加 `dsh-kazmode` 并启用。需要固定版本时，使用 `dsh-kazmode@9.5.1`。
-2. 新建会话，照常选择标准、PTC 或自定义预设，无须寻找单独的 Kaz 预设。
-3. 已绑定会话的新会话界面显示「Kaz 已启用」，已有会话顶部显示「· Kaz」。未绑定会话的空白首页可能不显示标记。
+Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/index.js)把工作规则注册在原生 persona 之后、规划策略之前，并注册随包技能；[客户端插件](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/client.js)只在已有界面位置显示启用标记。
 
-更新后，按插件管理器返回的提示操作，不要假定已有会话立即采用新版。禁用插件会撤销 Kaz 注册的提示词、技能和界面标记；其他来源提供的同名技能不受影响。
+原生 persona、模式菜单和预设的工具组合不由 Kaz 改写。Kaz 不指定模型或默认回复语言，不补装预设缺少的技能加载工具。若预设采用完整系统提示词（`complete`），其装配仍由 DSH 决定，Kaz 不强制把自己的规则插进去。同名技能也由 DSH 按作用域选择，不保证选中 Kaz 提供的版本。
 
-## 工作规则
+这些规则是给模型的工作要求，不是对每次输出的保证。模型、预设、权限与可用工具都会影响实际执行。
 
-[完整提示词](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/prompt.md)按五个部分组织：
+## 安装、更新与停用
 
-- **目标与决策**：核对目标和实际状态。事实不足先观察，有实质取舍再比较方向；路径明确时直接处理。低影响的信息缺口可以采用合理假设，高影响事项先查明。
-- **授权与澄清**：只要求分析或计划时，保持实施对象只读；已授权实施时，尽量在当前轮次完成改动和验证。需要额外授权就直接请求，只询问影响结果且无法自行确定的问题。
-- **实施与验证**：先明确可观察的完成标准，再检查改动行为和受影响的已有功能。写入报错、超时或响应丢失后先核对状态，避免盲目重复操作；交付时区分事实、假设及验证结果。
-- **项目导航与文件管理**：按需读取实际文件，不把索引或摘要当作证据。开发中主动补充最少必要的导航，沿用目录约定，按职责放置文件，不顺手整理无关内容。
-- **条件协议**：视觉方案用 HTML 展示拟议效果，成篇写作按需加载写作技能；有相关 Goal 时，结束回复前按原生策略核对目标状态。
+1. 打开 DSH 插件页，添加 `dsh-kazmode` 并启用。需要固定到本版时，填写 `dsh-kazmode@9.5.1`。
+2. 新建会话，选择平时使用的预设，直接提出任务。模式菜单里不需要出现一个单独的 Kaz 选项。
+3. 检查界面标记：已绑定会话的新会话界面显示「Kaz 已启用」，已有会话顶部显示「· Kaz」。未绑定会话的空白首页可能没有标记。
 
-视觉方案允许轻量模拟，但应标明模拟边界，并保留可编辑源文件。用户要求纯文字、其他格式或不要预览时，以用户要求为准。用户确认的视觉与交互要求约束后续实现；变更需确认并更新同一份计划，实际实现仍使用项目原有技术栈。
+更新后按插件管理器返回的提示操作，并在新会话中核验；不能仅凭安装成功就认定已有会话采用了新版。停用时，Kaz 注册的提示词、技能和界面标记会撤销，其他来源的同名技能不会因此被删除。
 
-Kaz 本身不指定默认回复语言或模型。规则的实际执行取决于所选模型、预设、权限和可用工具，不代表每次输出都能达到要求。
+## 日常使用
 
-## 按需技能
+无须专用命令。照常描述目标、提供材料，并说明允许改动的范围。Kaz 的[完整工作规则](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/prompt.md)要求模型这样处理任务：
 
-插件注册三个技能；只有相关任务才加载正文，无须再向本地技能目录安装副本。
+- **决定怎么做之前**，核对目标和现场。缺少事实就先做必要观察；确有取舍才比较方案，路径明确就直接处理。低影响的信息缺口可作合理假设，高影响事项须先查明。
+- **区分分析与实施授权**。你只要求分析或计划时，实施对象保持只读；已经授权实施时，尽量在当前轮次完成改动和验证。需要额外授权时直接询问，不为无关细节打断工作。
+- **用检查确认结果**。动手前确定可观察的完成标准；改动后检查新行为和受影响的已有功能。写入报错、超时或响应丢失时，先回读状态，避免重复执行可能已生效的操作。交付时分清已验证事实、假设和未验证项。
+- **沿用项目的组织方式**。按导航查找，再读实际文件；索引和摘要不能代替证据。开发中只补必要的导航，按职责放置文件，保留用户内容，不顺手整理无关目录。
 
-- [automation-recovery](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/automation-recovery/SKILL.md)：诊断 MCP、桥接服务和桌面自动化故障，区分未发送、无副作用拒绝、结果未知及应用阻塞，再核验业务结果。
-- [windows-command-reliability](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/windows-command-reliability/SKILL.md)：处理 Windows shell 边界、路径引用、编码、文件锁与命令执行问题。
-- [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/write-like-a-person/SKILL.md)：用于文章、演讲、报告、文档和较长 UI 文案的创作及实质性修订，检查读者与用途、结构、指代和事实表达。
+遇到视觉方案，模型应提供可直接渲染的 HTML，保留可编辑源文件，并说明模拟边界；你要求纯文字、其他格式或不预览时，按你的要求交付。确认后的视觉与交互要求约束后续实现；变更需先确认并更新原方案，HTML 预览也不替代项目原有技术栈。
 
-普通聊天、代码排查、工作计划和完成摘要不会仅因包含自然语言而触发写作技能。写作阶段开始或用户明确要求时才加载全文；指令仍在上下文中时复用。
+遇到成篇写作，模型应在写作阶段加载下面的写作技能。若当前任务有相关 Goal，模型应在结束回复前按 DSH 原生策略核对目标状态，而不是把回复结束当作自动执行已停止。
 
-## 生效边界
+## 随包技能
 
-Kaz 作用于当前 profile。[宿主入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/index.js)将提示词放在原生 persona 之后、规划策略之前，并注册技能；[浏览器入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/client.js)负责启用标记。
+插件启用时注册技能目录，相关任务需要时才加载正文，不必再往本地技能目录复制一份。
 
-- 原生 persona、模式菜单和预设的工具组合保持不变。技能注册不等于提供技能加载工具；预设没有该工具时，Kaz 不会代为补装。
-- 使用完整系统提示词（`complete`）的预设遵循 DSH 的装配规则，Kaz 不强行插入。
-- 同名技能按 DSH 的作用域规则选择。界面标记表示插件启用，不足以证明某次会话已加载全部内容。
+| 技能 | 用在什么地方 |
+| --- | --- |
+| [automation-recovery](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/automation-recovery/SKILL.md) | 排查 MCP、桥接服务和桌面自动化故障，先区分请求未发送、无副作用拒绝、结果未知和应用阻塞，再核验业务结果。 |
+| [windows-command-reliability](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/windows-command-reliability/SKILL.md) | 编写或排查 Windows 命令，处理 shell 边界、路径引用、编码和文件锁。 |
+| [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/write-like-a-person/SKILL.md) | 创作或实质性修订文章、演讲、报告、文档及较长 UI 文案；从读者与用途出发，依次起草、修改段落、修改句子并核对交付内容。演讲稿另检查翻页提示、字数和时长。 |
 
-需要核验会话时，应确认系统提示词只有一份 Kaz 正文、技能可以加载，且切换预设后的工具组合没有变化。
+你也可以明确要求使用写作技能。普通聊天、代码排查、工作计划和完成摘要，不会仅因含有自然语言就触发它。技能全文仍在上下文时复用，不必反复加载。
 
-## 仓库维护
+## 没有生效时查哪里
 
-发布包位于 [kaz 目录](https://github.com/Kaczev/dsh-KazMode/tree/main/kaz/)，版本与资源清单见[包清单](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/package.json)。[项目导航](https://github.com/Kaczev/dsh-KazMode/blob/main/INDEX.md)提供测试和维护入口。
+「Kaz 已启用」或「· Kaz」只能说明界面插件已启用，不能证明这次会话加载了全部规则和技能。可按现象检查：
 
-在仓库根目录运行：
+- **没有标记**：先确认当前 profile 中插件是否启用，以及页面是否已有绑定会话；不要只用空白首页判断。
+- **有标记，但规则似乎没加载**：检查会话实际系统提示词，确认 Kaz 正文只出现一份；再核对预设是否使用 `complete`。标记和提示词来自不同入口。
+- **技能无法加载**：确认预设提供技能加载工具，并检查同名技能的作用域选择。Kaz 注册技能，不改变工具组合。
+- **切换预设或更新后行为不同**：在新会话核验提示词和技能，同时确认切换前后的工具组合仍与各自预设一致。
+
+核对注册逻辑可读[宿主入口](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/index.js)，核对文字要求可读[提示词](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/prompt.md)。报告问题时请附 DSH 与 Kaz 版本、所用预设、复现步骤和实际报错，提交到 [Issues](https://github.com/Kaczev/dsh-KazMode/issues)。
+
+## 维护仓库
+
+[项目导航](https://github.com/Kaczev/dsh-KazMode/blob/main/INDEX.md)列出实现、测试和维护入口。npm 发布内容来自 [kaz 目录](https://github.com/Kaczev/dsh-KazMode/tree/main/kaz/)，版本及资源范围由[包清单](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/package.json)定义。
+
+安装维护依赖后，在仓库根目录运行：
 
 ```sh
 npm ci
@@ -59,10 +69,10 @@ npm run check
 npm pack ./kaz --dry-run
 ```
 
-根 README 是说明文档的维护入口；同步脚本生成包内 README，并把相对链接转换为仓库链接。检查覆盖版本一致性、文档同步、提示词与技能注册和撤销、客户端标记及发布资源。测试使用模拟宿主，不代替真实 DSH 重载和模型行为验证。
+只编辑根 README；[同步脚本](https://github.com/Kaczev/dsh-KazMode/blob/main/scripts/sync-readme.mjs)负责生成包内 README，并将相对链接转换为 GitHub 仓库链接。`npm run check` 检查版本、README 同步状态，并运行提示词、技能、客户端标记及发布资源测试。测试采用模拟宿主，不代替真实 DSH 重载或模型行为验证；`npm pack` 的 `--dry-run` 用于检查打包范围，不会发布。
 
-写作技能源于 [Kaczev/write-like-a-person](https://github.com/Kaczev/write-like-a-person)。修改时先更新来源仓库，再通过[技能同步脚本](https://github.com/Kaczev/dsh-KazMode/blob/main/scripts/sync-skill.mjs)同步，来源提交与哈希记录在[来源记录](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/write-like-a-person/SOURCE.json)中。
+写作技能的唯一来源是 [Kaczev/write-like-a-person](https://github.com/Kaczev/write-like-a-person)。维护该技能时先改来源仓库，再运行[技能同步脚本](https://github.com/Kaczev/dsh-KazMode/blob/main/scripts/sync-skill.mjs)；[来源记录](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/write-like-a-person/SOURCE.json)保存来源提交和内容哈希。不要直接改随包副本。
 
 ## 许可
 
-[MIT](https://github.com/Kaczev/dsh-KazMode/blob/main/LICENSE.md)
+本项目采用 [MIT 许可](https://github.com/Kaczev/dsh-KazMode/blob/main/LICENSE.md)。
