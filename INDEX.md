@@ -23,4 +23,5 @@
 - [版本检查](check-version.mjs)：README 版本与 npm 包清单一致性、必需发布资源。
 - [文档同步脚本](scripts/sync-readme.mjs)：将根 README 同步到 npm 包并转换相对链接。
 
+- [9.5.2 发布说明](docs/release-v9.5.2.md)：英文写作步骤、README 重写与验证边界。
 - [9.5.1 发布说明](docs/release-v9.5.1.md)：当前状态使用说明重写与文档补丁验收。
