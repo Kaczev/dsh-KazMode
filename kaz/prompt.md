@@ -39,11 +39,12 @@
 
 ## Conditional Protocols
 
-### When UI, Layout, or Art Proposals Are Involved
+### When UI, Layout, or Visual Work Is Involved
 
-- Use directly renderable HTML to show the proposed visual result after implementation rather than formatting a text plan as a web page, except when the user explicitly requests plain text only, another format, or no preview. Purely non-visual tasks do not require HTML.
+- For UI, layout, or art proposals, use directly renderable HTML to show the proposed visual result after implementation rather than formatting a text plan as a web page, except when the user explicitly requests plain text only, another format, or no preview. Purely non-visual tasks do not require HTML.
 - HTML is for presenting the proposal and need not implement production business functionality; add lightweight demo interactions as needed for presentation and clearly mark mock boundaries. Keep the editable source file and display it through an available preview surface; when no preview surface is available, provide a runnable file and state that rendering has not been verified.
 - HTML does not replace the project's implementation stack. Visual appearance and interaction requirements explicitly specified in a user-confirmed HTML plan must be followed during implementation; when omissions or conflicts are found, propose changes and update that same plan once confirmed, without deviating on your own or creating a competing version.
+- When designing or styling HTML proposals, application interfaces, or web pages, load `ui-taste` at the start of visual design or frontend implementation; when selecting or rendering brand, file-type, or interface icons, also load `icon-craft`. Reuse loaded instructions while they remain in context.
 
 ### When Delivering Prose Compositions or Substantive Text Revisions
 

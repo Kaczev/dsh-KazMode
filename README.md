@@ -1,8 +1,8 @@
 # Kaz 模式
 
-Kaz 为 DeepSeek Harness（DSH）当前选用的预设叠加工作规则，并附带三个按需加载的技能。启用后，你仍使用原来的标准、PTC 或自定义预设；Kaz 不另建预设，也不添加工具。
+Kaz 为 DeepSeek Harness（DSH）当前选用的预设叠加工作规则，并附带五个按需加载的技能。启用后，你仍使用原来的标准、PTC 或自定义预设；Kaz 不另建预设，也不添加工具。
 
-当前版本 9.5.2，npm 包名为 `dsh-kazmode`。适配目标从 DSH v0.2.1-rc.3 起；包清单没有声明 DSH 版本约束，仓库测试也不代表已经验证每个后续版本。升级 DSH 后仍需检查插件能否正常加载。
+当前版本 9.6.0，npm 包名为 `dsh-kazmode`。适配目标从 DSH v0.2.1-rc.3 起；包清单没有声明 DSH 版本约束，仓库测试也不代表已经验证每个后续版本。升级 DSH 后仍需检查插件能否正常加载。
 
 ## 安装前：它会影响什么
 
@@ -14,7 +14,7 @@ Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](./kaz/in
 
 ## 安装、更新与停用
 
-1. 打开 DSH 插件页，添加 `dsh-kazmode` 并启用。需要固定到本版时，填写 `dsh-kazmode@9.5.2`。
+1. 打开 DSH 插件页，添加 `dsh-kazmode` 并启用。需要固定到本版时，填写 `dsh-kazmode@9.6.0`。
 2. 新建会话，选择平时使用的预设，直接提出任务。模式菜单里不需要出现一个单独的 Kaz 选项。
 3. 检查界面标记：已绑定会话的新会话界面显示「Kaz 已启用」，已有会话顶部显示「· Kaz」。未绑定会话的空白首页可能没有标记。
 
@@ -29,7 +29,7 @@ Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](./kaz/in
 - **用检查确认结果**。动手前确定可观察的完成标准；改动后检查新行为和受影响的已有功能。写入报错、超时或响应丢失时，先回读状态，避免重复执行可能已生效的操作。交付时分清已验证事实、假设和未验证项。
 - **沿用项目的组织方式**。按导航查找，再读实际文件；索引和摘要不能代替证据。开发中只补必要的导航，按职责放置文件，保留用户内容，不顺手整理无关目录。
 
-遇到视觉方案，模型应提供可直接渲染的 HTML，保留可编辑源文件，并说明模拟边界；你要求纯文字、其他格式或不预览时，按你的要求交付。确认后的视觉与交互要求约束后续实现；变更需先确认并更新原方案，HTML 预览也不替代项目原有技术栈。
+遇到视觉方案、应用界面或网页样式设计，模型在开始视觉设计或前端实现时加载 UI 审美技能；涉及品牌、文件类型或界面图标时一并加载图标技能。交付视觉方案时提供可直接渲染的 HTML，保留可编辑源文件，并说明模拟边界；你要求纯文字、其他格式或不预览时，按你的要求交付。确认后的视觉与交互要求约束后续实现；变更需先确认并更新原方案，HTML 预览也不替代项目原有技术栈。
 
 遇到成篇写作，模型应在写作阶段加载下面的写作技能。若当前任务有相关 Goal，模型应在结束回复前按 DSH 原生策略核对目标状态，而不是把回复结束当作自动执行已停止。
 
@@ -40,6 +40,8 @@ Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](./kaz/in
 | 技能 | 用在什么地方 |
 | --- | --- |
 | [automation-recovery](./kaz/skills/automation-recovery/SKILL.md) | 排查 MCP、桥接服务和桌面自动化故障，先区分请求未发送、无副作用拒绝、结果未知和应用阻塞，再核验业务结果。 |
+| [icon-craft](./kaz/skills/icon-craft/SKILL.md) | 选择与排布品牌、文件类型及界面图标，附带单进程 SVG 解析脚本（支持单文件 HTML 内联输出与本地图标清单生成）和深浅底色适配样式。 |
+| [ui-taste](./kaz/skills/ui-taste/SKILL.md) | 约束 HTML 视觉方案、应用插件界面与网页的密度分类、中性底色与单强调色克制、层级边框、字号对齐和微交互状态。 |
 | [windows-command-reliability](./kaz/skills/windows-command-reliability/SKILL.md) | 编写或排查 Windows 命令，处理 shell 边界、路径引用、编码和文件锁。 |
 | [write-like-a-person](./kaz/skills/write-like-a-person/SKILL.md) | 创作或实质性修订文章、演讲、报告、文档及较长 UI 文案；从读者与用途出发，依次起草、修改段落、修改句子并核对交付内容。演讲稿另检查翻页提示、字数和时长。 |
 
@@ -71,7 +73,7 @@ npm pack ./kaz --dry-run
 
 只编辑根 README；[同步脚本](./scripts/sync-readme.mjs)负责生成包内 README，并将相对链接转换为 GitHub 仓库链接。`npm run check` 检查版本、README 同步状态，并运行提示词、技能、客户端标记及发布资源测试。测试采用模拟宿主，不代替真实 DSH 重载或模型行为验证；`npm pack` 的 `--dry-run` 用于检查打包范围，不会发布。
 
-写作技能的唯一来源是 [Kaczev/write-like-a-person](https://github.com/Kaczev/write-like-a-person)。维护该技能时先改来源仓库，再运行[技能同步脚本](./scripts/sync-skill.mjs)；[来源记录](./kaz/skills/write-like-a-person/SOURCE.json)保存来源提交和内容哈希。不要直接改随包副本。
+写作技能的唯一来源是 [Kaczev/write-like-a-person](https://github.com/Kaczev/write-like-a-person)。维护该技能时先改来源仓库，再运行[技能同步脚本](./scripts/sync-skill.mjs)；[来源记录](./kaz/skills/write-like-a-person/SOURCE.json)保存来源提交和内容哈希。不要直接改随包副本。图标技能中的 SVG 解析脚本、索引与样式改编自 MIT 许可的 `Leonxlnx/taste-skill`，上游提交与改编范围记录在[图标来源记录](./kaz/skills/icon-craft/SOURCE.json)。
 
 ## 许可
 

@@ -6,13 +6,13 @@
 
 - [使用说明](README.md)：安装、生效范围与维护命令。
 - [包清单](kaz/package.json)：npm 版本、发布资源和运行时入口。
-- [宿主入口](kaz/index.js)：注册 Kaz 提示词和三个随包技能。
-- [系统提示词](kaz/prompt.md)：五部分工作规则：目标决策、授权澄清、实施验证、项目导航与文件管理，以及 HTML、写作和 goal 条件协议。
+- [宿主入口](kaz/index.js)：注册 Kaz 提示词和五个随包技能。
+- [系统提示词](kaz/prompt.md)：五部分工作规则：目标决策、授权澄清、实施验证、项目导航与文件管理，以及 UI 视觉、写作和 goal 条件协议。
 
 ## 技能
 
-- [技能目录](kaz/skills/INDEX.md)：自动化恢复、Windows 专项操作与写作。
-- [技能回归](tests/skills.test.mjs)：全目录注册卸载、frontmatter 和通用政策边界。
+- [技能目录](kaz/skills/INDEX.md)：自动化恢复、SVG 图标解析、UI 审美与 HTML 方案、Windows 专项操作与写作。
+- [技能回归](tests/skills.test.mjs)：全目录注册卸载、frontmatter、图标解析器及政策边界。
 
 ## 测试与维护
 
@@ -23,5 +23,6 @@
 - [版本检查](check-version.mjs)：README 版本与 npm 包清单一致性、必需发布资源。
 - [文档同步脚本](scripts/sync-readme.mjs)：将根 README 同步到 npm 包并转换相对链接。
 
+- [9.6.0 发布说明](docs/release-v9.6.0.md)：新增 `ui-taste` 与 `icon-craft` 随包技能、视觉条件协议与验证边界。
 - [9.5.2 发布说明](docs/release-v9.5.2.md)：英文写作步骤、README 重写与验证边界。
 - [9.5.1 发布说明](docs/release-v9.5.1.md)：当前状态使用说明重写与文档补丁验收。

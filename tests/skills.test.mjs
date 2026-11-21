@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { apply } from '../kaz/index.js';
+import { loadIndex, renderIconMarkup, SETS } from '../kaz/skills/icon-craft/scripts/icons.mjs';
 
-const names = ['automation-recovery', 'windows-command-reliability', 'write-like-a-person'];
+const names = [
+  'automation-recovery',
+  'icon-craft',
+  'ui-taste',
+  'windows-command-reliability',
+  'write-like-a-person',
+];
 test('all packaged skills expose real bodies and dispose exactly once', () => {
   const registered = new Map();
   const disposers = [];
@@ -70,6 +79,51 @@ test('operational skills retain their specialized recovery and Windows branches'
   for (const fragment of ['Confirmed not sent', 'Explicit refusal without side effects', 'Sent, result unknown', 'Application blocked', 'original job']) assert.ok(recovery.includes(fragment));
   const windows = readFileSync(new URL('../kaz/skills/windows-command-reliability/SKILL.md', import.meta.url), 'utf8');
   for (const fragment of ['-LiteralPath', '$env:NAME', '$HOME', 'spaces and Chinese characters', 'cmd.exe', 'file lock', 'sandbox denial']) assert.ok(windows.includes(fragment));
+});
+
+test('ui-taste and icon-craft cover HTML proposals, anti-slop discipline, and single-process SVG rendering', () => {
+  const uiTaste = readFileSync(new URL('../kaz/skills/ui-taste/SKILL.md', import.meta.url), 'utf8');
+  for (const fragment of [
+    'HTML visual proposals',
+    'Application, workbench, and plugin UI',
+    '90%–95% of the surface neutral',
+    'violet/indigo/lavender',
+    'Two container levels maximum',
+    '4px / 8px',
+    'tabular-nums',
+    'prefers-reduced-motion: reduce',
+    'load `icon-craft`',
+  ]) assert.ok(uiTaste.includes(fragment), `missing ui-taste rule: ${fragment}`);
+
+  const iconDir = fileURLToPath(new URL('../kaz/skills/icon-craft/', import.meta.url));
+  const iconSkill = readFileSync(join(iconDir, 'SKILL.md'), 'utf8');
+  for (const fragment of ['--inline', 'icons-credits.json', 'ic-tile', 'DSH_NODE_EXECUTABLE', 'Nominative trademark notice']) {
+    assert.ok(iconSkill.includes(fragment), `missing icon-craft rule: ${fragment}`);
+  }
+  for (const rel of ['SOURCE.json', 'scripts/icons.mjs', 'assets/index.json', 'assets/icon.css']) {
+    assert.ok(existsSync(join(iconDir, rel)), `missing icon-craft asset: ${rel}`);
+  }
+  const resolverSource = readFileSync(join(iconDir, 'scripts/icons.mjs'), 'utf8');
+  assert.doesNotMatch(resolverSource, /child_process|spawnSync|execFileSync|process\.exit\(/u);
+
+  const idx = loadIndex();
+  assert.ok(idx.apps.length >= 400);
+  assert.ok(idx.files.length >= 30);
+  assert.ok(idx.ui.length >= 400);
+  assert.deepEqual(Object.keys(SETS).sort(), ['file', 'logos', 'si', 'ui']);
+
+  const glyphMarkup = renderIconMarkup(
+    { set: 'ui', name: 'arrow-right', title: 'arrow right', svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path d="M5 12h14"/></svg>', w: 24, h: 24 },
+    { inline: true, size: 20 },
+  );
+  assert.match(glyphMarkup, /^<svg class="ic ic-svg ic-20" role="img" aria-label="arrow right"/u);
+  assert.doesNotMatch(glyphMarkup, /width="24"/u);
+
+  const brandTileMarkup = renderIconMarkup(
+    { set: 'logos', name: 'stripe', title: 'Stripe', svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 100"><path fill="#635bff" d="M0 0h240v100H0z"/></svg>', w: 240, h: 100, violet: true },
+    { inline: true, tile: true, size: 32 },
+  );
+  assert.match(brandTileMarkup, /^<span class="ic-tile ic-tile--32 ic-tile--wide"><img class="ic ic-32 ic-wide" src="data:image\/svg\+xml,/u);
 });
 
 test('packaged frontmatter follows the strict loader contract', () => {

@@ -64,7 +64,7 @@ function host() {
 }
 
 test('prompt matches the approved five-part policy without restoring removed preferences', () => {
-  assert.equal(createHash('sha256').update(prompt).digest('hex'), '8c22156aad1eaaeaf9df91e9c36c3ed132f058272afe8491921365a321138fd8');
+  assert.equal(createHash('sha256').update(prompt).digest('hex'), '245028690864614845752d8d676b0962f4853acaed265df5208c2b6dc865a681');
   assert.ok(prompt.startsWith('## Goals and Decisions\n'));
   assert.equal((prompt.match(/^## /gmu) ?? []).length, 5);
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}|Respond in Chinese by default|Be direct: match the length/u);
@@ -128,7 +128,8 @@ const policies = {
     'ownership of newly added paths, and reachability of affected navigation links',
   ],
   'HTML proposal and implementation boundaries': [
-    'Use directly renderable HTML to show the proposed visual result',
+    'When UI, Layout, or Visual Work Is Involved',
+    'use directly renderable HTML to show the proposed visual result',
     'rather than formatting a text plan as a web page',
     'except when the user explicitly requests plain text only, another format, or no preview',
     'Purely non-visual tasks do not require HTML',
@@ -140,6 +141,8 @@ const policies = {
     'requirements explicitly specified in a user-confirmed HTML plan must be followed',
     'update that same plan once confirmed',
     'without deviating on your own or creating a competing version',
+    'load `ui-taste` at the start of visual design or frontend implementation',
+    'when selecting or rendering brand, file-type, or interface icons, also load `icon-craft`',
   ],
   'goal state and native policy': [
     'When Goal Tools Are Available and a Relevant Goal Exists',
@@ -235,10 +238,10 @@ test('enable/disable/re-enable produces no duplicates or leaked registrations', 
   for (let i = 0; i < 3; i++) {
     const dispose = runtime.mount();
     assert.equal(runtime.sections.size, 2);
-    assert.equal(runtime.skills.size, 3);
+    assert.equal(runtime.skills.size, 5);
     assert.throws(() => runtime.mount(), /duplicate registration: kaz:preferences/u);
     assert.equal(runtime.sections.size, 2);
-    assert.equal(runtime.skills.size, 3);
+    assert.equal(runtime.skills.size, 5);
     dispose();
     dispose();
     assert.deepEqual([...runtime.sections.keys()], ['native']);
@@ -262,7 +265,7 @@ test('complete prompt naturally overrides overlay without assembly interception'
   const complete = { name: 'custom', order: 0, complete: true, text: 'Complete custom prompt' };
   assert.deepEqual(runtime.assemble([complete]), [complete]);
   assert.equal(runtime.sections.size, 1);
-  assert.equal(runtime.skills.size, 3);
+  assert.equal(runtime.skills.size, 5);
   assert.equal(runtime.assemble().length, 1);
   dispose();
 });

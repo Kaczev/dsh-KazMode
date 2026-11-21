@@ -1,0 +1,14 @@
+{
+  "upstream": {
+    "repository": "https://github.com/Leonxlnx/taste-skill",
+    "commit": "f6b76575f949707b4e3c37cd86cb44b0b98643e8",
+    "version": "2.5.1",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2026 Leonxlnx"
+  },
+  "adaptedFiles": [
+    "scripts/icons.mjs (single-process Node resolver with --inline mode, unrestricted --out paths, and graceful process.exitCode shutdown avoiding Windows libuv async handle crashes)",
+    "assets/index.json (curated app, file-type, and UI glyph catalogue with pre-measured bounding boxes)",
+    "assets/icon.css (tile, chip, list, grid, and aspect-ratio classes with :where(:root) token fallbacks)"
+  ]
+}

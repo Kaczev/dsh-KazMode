@@ -4,15 +4,20 @@ import { test } from 'node:test';
 import { npmReadme } from '../scripts/sync-readme.mjs';
 
 test('project navigation has reachable local file targets', () => {
-  const entry = new URL('../INDEX.md', import.meta.url);
-  const source = readFileSync(entry, 'utf8');
-  const links = [...source.matchAll(/\]\(([^\s)]+)\)/gu)].map((match) => match[1]);
-  assert.ok(links.includes('kaz/prompt.md'));
-  assert.ok(links.includes('tests/overlay.test.mjs'));
-  for (const link of links) {
-    assert.doesNotMatch(link, /^(?:[a-z]+:|\/)|\.\./iu);
-    assert.ok(existsSync(new URL(link, entry)), `broken navigation link: ${link}`);
+  for (const rel of ['../INDEX.md', '../kaz/skills/INDEX.md']) {
+    const entry = new URL(rel, import.meta.url);
+    const source = readFileSync(entry, 'utf8');
+    const links = [...source.matchAll(/\]\(([^\s)]+)\)/gu)].map((match) => match[1]);
+    assert.ok(links.length > 0, `empty navigation: ${rel}`);
+    for (const link of links) {
+      assert.doesNotMatch(link, /^(?:[a-z]+:|\/)|\.\./iu);
+      assert.ok(existsSync(new URL(link, entry)), `broken navigation link in ${rel}: ${link}`);
+    }
   }
+  const rootLinks = [...readFileSync(new URL('../INDEX.md', import.meta.url), 'utf8').matchAll(/\]\(([^\s)]+)\)/gu)].map((m) => m[1]);
+  assert.ok(rootLinks.includes('kaz/prompt.md'));
+  assert.ok(rootLinks.includes('kaz/skills/INDEX.md'));
+  assert.ok(rootLinks.includes('tests/overlay.test.mjs'));
 });
 
 test('npm README contains the complete root README with usable repository links', () => {

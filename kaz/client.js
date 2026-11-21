@@ -19,10 +19,10 @@ window.__ModuleLoader__.load({
       inject: ['slots', 'locale'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register('kaz-mode', 'zh', {
-          enabled: 'Kaz 已启用', suffix: '· Kaz', detail: 'Kaz 模式已叠加：提示词与写作技能已启用，不改变当前预设的工具组合。',
+          enabled: 'Kaz 已启用', suffix: '· Kaz', detail: 'Kaz 模式已叠加：工作规则与随包技能已启用，不改变当前预设的工具组合。',
         }));
         ctx.effect(() => ctx.locale.register('kaz-mode', 'en', {
-          enabled: 'Kaz enabled', suffix: '· Kaz', detail: 'Kaz mode is active: preferences and writing skill are enabled; preset tools stay unchanged.',
+          enabled: 'Kaz enabled', suffix: '· Kaz', detail: 'Kaz mode is active: working preferences and bundled skills are enabled; preset tools stay unchanged.',
         }));
         for (const [name, order, component] of [
           ['conversation.hero.options', 0, HeroIndicator],

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Kaz Mode",
-    "description": "Adds Kaz preferences and the write-like-a-person skill without cloning presets or changing tools. Shows enabled indicators in the new-session options row and session header."
+    "description": "Adds Kaz working preferences and bundled on-demand skills (including UI aesthetics, SVG icon resolver, and writing) without cloning presets or changing tools. Shows enabled indicators in the new-session options row and session header."
   }
 }
