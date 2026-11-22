@@ -64,7 +64,7 @@ function host() {
 }
 
 test('prompt matches the approved five-part policy without restoring removed preferences', () => {
-  assert.equal(createHash('sha256').update(prompt).digest('hex'), '245028690864614845752d8d676b0962f4853acaed265df5208c2b6dc865a681');
+  assert.equal(createHash('sha256').update(prompt).digest('hex'), '5be2428880305e7b317d603cc75d662caaff6330413269fe31ac3bc80a6015f3');
   assert.ok(prompt.startsWith('## Goals and Decisions\n'));
   assert.equal((prompt.match(/^## /gmu) ?? []).length, 5);
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}|Respond in Chinese by default|Be direct: match the length/u);
@@ -142,7 +142,7 @@ const policies = {
     'update that same plan once confirmed',
     'without deviating on your own or creating a competing version',
     'load `ui-taste` at the start of visual design or frontend implementation',
-    'when selecting or rendering brand, file-type, or interface icons, also load `icon-craft`',
+    'when selecting or rendering brand, file-type, or interface icons, or drawing an app or plugin icon, also load `icon-craft`',
   ],
   'goal state and native policy': [
     'When Goal Tools Are Available and a Relevant Goal Exists',

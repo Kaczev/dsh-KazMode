@@ -81,7 +81,7 @@ test('operational skills retain their specialized recovery and Windows branches'
   for (const fragment of ['-LiteralPath', '$env:NAME', '$HOME', 'spaces and Chinese characters', 'cmd.exe', 'file lock', 'sandbox denial']) assert.ok(windows.includes(fragment));
 });
 
-test('ui-taste and icon-craft cover HTML proposals, anti-slop discipline, and single-process SVG rendering', () => {
+test('ui-taste and icon-craft cover HTML proposals, anti-slop discipline, identity tiles, and single-process SVG rendering', () => {
   const uiTaste = readFileSync(new URL('../kaz/skills/ui-taste/SKILL.md', import.meta.url), 'utf8');
   for (const fragment of [
     'HTML visual proposals',
@@ -97,7 +97,7 @@ test('ui-taste and icon-craft cover HTML proposals, anti-slop discipline, and si
 
   const iconDir = fileURLToPath(new URL('../kaz/skills/icon-craft/', import.meta.url));
   const iconSkill = readFileSync(join(iconDir, 'SKILL.md'), 'utf8');
-  for (const fragment of ['--inline', 'icons-credits.json', 'ic-tile', 'DSH_NODE_EXECUTABLE', 'Nominative trademark notice']) {
+  for (const fragment of ['--inline', 'icons-credits.json', 'ic-tile', 'DSH_NODE_EXECUTABLE', 'Nominative trademark notice', 'Identity: own the square', 'Or draw bare', 'at 24px', 'ic-tile--glyph']) {
     assert.ok(iconSkill.includes(fragment), `missing icon-craft rule: ${fragment}`);
   }
   for (const rel of ['SOURCE.json', 'scripts/icons.mjs', 'assets/index.json', 'assets/icon.css']) {

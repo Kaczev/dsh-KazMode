@@ -2,7 +2,7 @@
 
 Kaz 为 DeepSeek Harness（DSH）当前选用的预设叠加工作规则，并附带五个按需加载的技能。启用后，你仍使用原来的标准、PTC 或自定义预设；Kaz 不另建预设，也不添加工具。
 
-当前版本 9.6.0，npm 包名为 `dsh-kazmode`。适配目标从 DSH v0.2.1-rc.3 起；包清单没有声明 DSH 版本约束，仓库测试也不代表已经验证每个后续版本。升级 DSH 后仍需检查插件能否正常加载。
+当前版本 9.6.1，npm 包名为 `dsh-kazmode`。适配目标从 DSH v0.2.1-rc.3 起；包清单没有声明 DSH 版本约束，仓库测试也不代表已经验证每个后续版本。升级 DSH 后仍需检查插件能否正常加载。
 
 ## 安装前：它会影响什么
 
@@ -14,7 +14,7 @@ Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](https://
 
 ## 安装、更新与停用
 
-1. 打开 DSH 插件页，添加 `dsh-kazmode` 并启用。需要固定到本版时，填写 `dsh-kazmode@9.6.0`。
+1. 打开 DSH 插件页，添加 `dsh-kazmode` 并启用。需要固定到本版时，填写 `dsh-kazmode@9.6.1`。
 2. 新建会话，选择平时使用的预设，直接提出任务。模式菜单里不需要出现一个单独的 Kaz 选项。
 3. 检查界面标记：已绑定会话的新会话界面显示「Kaz 已启用」，已有会话顶部显示「· Kaz」。未绑定会话的空白首页可能没有标记。
 
@@ -29,7 +29,7 @@ Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](https://
 - **用检查确认结果**。动手前确定可观察的完成标准；改动后检查新行为和受影响的已有功能。写入报错、超时或响应丢失时，先回读状态，避免重复执行可能已生效的操作。交付时分清已验证事实、假设和未验证项。
 - **沿用项目的组织方式**。按导航查找，再读实际文件；索引和摘要不能代替证据。开发中只补必要的导航，按职责放置文件，保留用户内容，不顺手整理无关目录。
 
-遇到视觉方案、应用界面或网页样式设计，模型在开始视觉设计或前端实现时加载 UI 审美技能；涉及品牌、文件类型或界面图标时一并加载图标技能。交付视觉方案时提供可直接渲染的 HTML，保留可编辑源文件，并说明模拟边界；你要求纯文字、其他格式或不预览时，按你的要求交付。确认后的视觉与交互要求约束后续实现；变更需先确认并更新原方案，HTML 预览也不替代项目原有技术栈。
+遇到视觉方案、应用界面或网页样式设计，模型在开始视觉设计或前端实现时加载 UI 审美技能；涉及品牌、文件类型或界面图标，或要绘制应用、插件图标时一并加载图标技能。交付视觉方案时提供可直接渲染的 HTML，保留可编辑源文件，并说明模拟边界；你要求纯文字、其他格式或不预览时，按你的要求交付。确认后的视觉与交互要求约束后续实现；变更需先确认并更新原方案，HTML 预览也不替代项目原有技术栈。
 
 遇到成篇写作，模型应在写作阶段加载下面的写作技能。若当前任务有相关 Goal，模型应在结束回复前按 DSH 原生策略核对目标状态，而不是把回复结束当作自动执行已停止。
 
@@ -40,7 +40,7 @@ Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](https://
 | 技能 | 用在什么地方 |
 | --- | --- |
 | [automation-recovery](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/automation-recovery/SKILL.md) | 排查 MCP、桥接服务和桌面自动化故障，先区分请求未发送、无副作用拒绝、结果未知和应用阻塞，再核验业务结果。 |
-| [icon-craft](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/icon-craft/SKILL.md) | 选择与排布品牌、文件类型及界面图标，附带单进程 SVG 解析脚本（支持单文件 HTML 内联输出与本地图标清单生成）和深浅底色适配样式。 |
+| [icon-craft](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/icon-craft/SKILL.md) | 规定应用、插件与界面图标怎么构成：身份图标自有底板，主图形、线宽与配色在小尺寸下仍然成立；界面线形图标与真实品牌、文件类型标志只解析不手绘。附带单进程 SVG 解析脚本、预量测索引和深浅底色适配样式。 |
 | [ui-taste](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/ui-taste/SKILL.md) | 约束 HTML 视觉方案、应用插件界面与网页的密度分类、中性底色与单强调色克制、层级边框、字号对齐和微交互状态。 |
 | [windows-command-reliability](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/windows-command-reliability/SKILL.md) | 编写或排查 Windows 命令，处理 shell 边界、路径引用、编码和文件锁。 |
 | [write-like-a-person](https://github.com/Kaczev/dsh-KazMode/blob/main/kaz/skills/write-like-a-person/SKILL.md) | 创作或实质性修订文章、演讲、报告、文档及较长 UI 文案；从读者与用途出发，依次起草、修改段落、修改句子并核对交付内容。演讲稿另检查翻页提示、字数和时长。 |
