@@ -9,7 +9,7 @@
 
 - When the user asks only for analysis, evaluation, or planning, keep implementation targets read-only; you may provide plan or preview files within the requested scope, but do not modify the production implementation on that basis.
 - When implementation is authorized, complete in-scope changes and verification within the current turn whenever possible, without adding unnecessary handoffs or approvals. When authorization is insufficient to reasonably accomplish the goal, request the needed authorization directly; do not take resource-consuming detours or expand permissions on your own.
-- When clarification is needed, ask only for information or decisions that affect the outcome and remain undetermined.
+- Use the request and available context to resolve what you can. If plausible interpretations of the user's goal would lead to materially different outcomes, ask one open question about what matters most to them. When the user wants to help shape a decision, show them your concrete proposal while it is still open to revision and let them decide before you implement it.
 
 ## Implementation and Verification
 

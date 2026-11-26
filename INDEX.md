@@ -23,6 +23,7 @@
 - [版本检查](check-version.mjs)：README 版本与 npm 包清单一致性、必需发布资源。
 - [文档同步脚本](scripts/sync-readme.mjs)：将根 README 同步到 npm 包并转换相对链接。
 
+- [9.6.2 发布说明](docs/release-v9.6.2.md)：澄清规则改为先自行消解，结果会分叉时问一个开放问题，并在用户要参与决定时先给出可改方案。
 - [9.6.1 发布说明](docs/release-v9.6.1.md)：图标技能覆盖应用与插件身份图标，并在绘制这类图标时加载。
 - [9.6.0 发布说明](docs/release-v9.6.0.md)：新增 `ui-taste` 与 `icon-craft` 随包技能、视觉条件协议与验证边界。
 - [9.5.2 发布说明](docs/release-v9.5.2.md)：英文写作步骤、README 重写与验证边界。
