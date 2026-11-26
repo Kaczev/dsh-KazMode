@@ -2,7 +2,7 @@
 
 Kaz 为 DeepSeek Harness（DSH）当前选用的预设叠加工作规则，并附带五个按需加载的技能。启用后，你仍使用原来的标准、PTC 或自定义预设；Kaz 不另建预设，也不添加工具。
 
-当前版本 9.6.3，npm 包名为 `dsh-kazmode`。适配目标从 DSH v0.2.1-rc.3 起；包清单没有声明 DSH 版本约束，仓库测试也不代表已经验证每个后续版本。升级 DSH 后仍需检查插件能否正常加载。
+当前版本 9.6.4，npm 包名为 `dsh-kazmode`。适配目标从 DSH v0.2.1-rc.3 起；包清单没有声明 DSH 版本约束，仓库测试也不代表已经验证每个后续版本。升级 DSH 后仍需检查插件能否正常加载。
 
 ## 安装前：它会影响什么
 
@@ -14,7 +14,7 @@ Kaz 安装在当前 profile，供其中的会话使用。[宿主插件](./kaz/in
 
 ## 安装、更新与停用
 
-1. 打开 DSH 插件页，添加 `dsh-kazmode` 并启用。需要固定到本版时，填写 `dsh-kazmode@9.6.3`。
+1. 打开 DSH 插件页，添加 `dsh-kazmode` 并启用。需要固定到本版时，填写 `dsh-kazmode@9.6.4`。
 2. 新建会话，选择平时使用的预设，直接提出任务。模式菜单里不需要出现一个单独的 Kaz 选项。
 3. 检查界面标记：已绑定会话的新会话界面显示「Kaz 已启用」，已有会话顶部显示「· Kaz」。未绑定会话的空白首页可能没有标记。
 
@@ -73,7 +73,7 @@ npm pack ./kaz --dry-run
 
 只编辑根 README；[同步脚本](./scripts/sync-readme.mjs)负责生成包内 README，并将相对链接转换为 GitHub 仓库链接。`npm run check` 检查版本、README 同步状态，并运行提示词、技能、客户端标记及发布资源测试。测试采用模拟宿主，不代替真实 DSH 重载或模型行为验证；`npm pack` 的 `--dry-run` 用于检查打包范围，不会发布。
 
-写作技能的唯一来源是 [Kaczev/write-like-a-person](https://github.com/Kaczev/write-like-a-person)。维护该技能时先改来源仓库，再运行[技能同步脚本](./scripts/sync-skill.mjs)；[来源记录](./kaz/skills/write-like-a-person/SOURCE.json)保存来源提交和内容哈希。不要直接改随包副本。图标技能中的 SVG 解析脚本、索引与样式改编自 MIT 许可的 `Leonxlnx/taste-skill`，上游提交与改编范围记录在[图标来源记录](./kaz/skills/icon-craft/SOURCE.json)。
+写作技能直接改随包正文 [write-like-a-person](./kaz/skills/write-like-a-person/SKILL.md)。图标技能中的 SVG 解析脚本、索引与样式改编自 MIT 许可的 `Leonxlnx/taste-skill`，上游提交与改编范围记录在[图标来源记录](./kaz/skills/icon-craft/SOURCE.json)。
 
 ## 许可
 

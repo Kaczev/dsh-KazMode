@@ -4,4 +4,4 @@
 - [icon-craft](icon-craft/SKILL.md)：应用、插件与界面图标的构成规范（自有底板的身份图标、界面线形图标、品牌与文件类型标志），含[单进程 SVG 解析脚本](icon-craft/scripts/icons.mjs)、[预量测索引](icon-craft/assets/index.json)、[底色适配样式](icon-craft/assets/icon.css)与[上游来源记录](icon-craft/SOURCE.json)。
 - [ui-taste](ui-taste/SKILL.md)：HTML 视觉方案、应用界面与网页的密度分类、色彩克制、排版对齐与微交互规范。
 - [windows-command-reliability](windows-command-reliability/SKILL.md)：Windows shell 边界、路径编码与文件锁诊断。
-- [write-like-a-person](write-like-a-person/SKILL.md)：写作，独立来源同步。
+- [write-like-a-person](write-like-a-person/SKILL.md)：成篇写作，直接改随包正文。
