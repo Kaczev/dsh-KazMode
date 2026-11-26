@@ -5,7 +5,7 @@ description: Use when the requested deliverable is a prose composition or substa
 
 # Write like a person
 
-Apply the stages below in order to the requested prose. Keep working notes out of the deliverable. Skip a conditional step when its condition is absent. For a local revision, work on the requested passage and check its connections to the surrounding text; do not rewrite unrelated passages.
+Apply the stages below in order to the requested prose. Skip a conditional step when its condition is absent. For a local revision, work on the requested passage and check its connections to the surrounding text; do not rewrite unrelated passages.
 
 ## 1. Before drafting
 

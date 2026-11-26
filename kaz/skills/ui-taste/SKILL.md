@@ -32,9 +32,8 @@ Apply these rules whenever designing an HTML visual proposal, building an applic
 1. **Animate only `transform`, `opacity`, and colour tokens.** Never animate `width`, `height`, `top`, `left`, `margin`, or `padding`. Do not add scroll-jacking, text parallax, or staggered scroll-reveal fade-ins on rows and cards.
 2. **Crisp feedback curves.** Use `150ms` hover-in, `120ms` hover-out, and `90ms` press with `cubic-bezier(0.2, 0.8, 0.2, 1)` (no bouncy overshoot). Limit hover lift to `1px–2px` on interactive cards or primary buttons under `@media (hover: hover) and (pointer: fine)`; static informational cards never lift on hover.
 3. **Keyboard and reduced-motion parity.** Provide an immediate, high-contrast `2px` `:focus-visible` ring (`outline-offset: 2px`) on every interactive element, and honor `@media (prefers-reduced-motion: reduce)` so every view is complete and readable at rest.
-4. **Icons:** When an interface or HTML proposal includes interface glyphs, file types, or real third-party brand marks, load `icon-craft` instead of drawing approximations, mixing icon packs, or substituting emojis.
 
 ## 5. Pre-delivery visual check
 
 1. Verify that `<meta name="viewport" content="width=device-width, initial-scale=1">` and `*, *::before, *::after { box-sizing: border-box; }` are set on standalone HTML files, and check layout flow at both desktop (`1280px–1440px`) and narrow (`390px` or panel-split) widths without horizontal overflow.
-2. Confirm there is exactly one primary filled call-to-action per view context, container nesting stays within two levels, contrast holds in every supported theme, and interactive demo controls in HTML proposals work without console errors.
+2. Confirm contrast holds in every supported theme and interactive demo controls in HTML proposals work without console errors.

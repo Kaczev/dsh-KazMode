@@ -12,9 +12,9 @@ Capture the target, requested action, verbatim error and time; redact credential
 - Host tool: is the tool available, and did it accept the call?
 - Bridge: can it reach the intended application or session?
 - Application: is it ready, busy, compiling or waiting on a modal dialog?
-- Business object: did the requested state or artifact actually change?
+- Business object: did the requested state or artifact actually change? A working tool catalog or live process alone does not establish business-level success.
 
-A working tool catalog or live process does not establish business-level success. Use the current tool contract for connection and recovery methods, not historical version-specific fixes.
+Use the current tool contract for connection and recovery methods, not historical version-specific fixes.
 
 ## Choose the recovery branch
 

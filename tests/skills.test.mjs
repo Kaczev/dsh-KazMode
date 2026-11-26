@@ -74,11 +74,12 @@ test('retired skills are absent from discovery and prompt references', () => {
   assert.doesNotMatch(prompt, /baseline-isolation|dsh-plugin-field-guide/u);
 });
 
-test('operational skills retain their specialized recovery and Windows branches', () => {
+test('operational skills retain recovery branches and Windows edge-case safeguards', () => {
   const recovery = readFileSync(new URL('../kaz/skills/automation-recovery/SKILL.md', import.meta.url), 'utf8');
-  for (const fragment of ['Confirmed not sent', 'Explicit refusal without side effects', 'Sent, result unknown', 'Application blocked', 'original job']) assert.ok(recovery.includes(fragment));
+  for (const fragment of ['Confirmed not sent', 'Explicit refusal without side effects', 'Sent, result unknown', 'Application blocked', 'original job', 'business-level success']) assert.ok(recovery.includes(fragment));
   const windows = readFileSync(new URL('../kaz/skills/windows-command-reliability/SKILL.md', import.meta.url), 'utf8');
-  for (const fragment of ['-LiteralPath', '$env:NAME', '$HOME', 'spaces and Chinese characters', 'cmd.exe', 'file lock', 'sandbox denial']) assert.ok(windows.includes(fragment));
+  for (const fragment of ['-LiteralPath', '$env:NAME', '$HOME', 'spaces and Chinese characters', 'received arguments and exit code', 'already covered', 'cmd.exe', 'file lock', 'sandbox denial']) assert.ok(windows.includes(fragment));
+  assert.doesNotMatch(windows, /Exercise only relevant edge cases/u);
 });
 
 test('ui-taste and icon-craft cover HTML proposals, anti-slop discipline, identity tiles, and single-process SVG rendering', () => {
@@ -92,14 +93,17 @@ test('ui-taste and icon-craft cover HTML proposals, anti-slop discipline, identi
     '4px / 8px',
     'tabular-nums',
     'prefers-reduced-motion: reduce',
-    'load `icon-craft`',
   ]) assert.ok(uiTaste.includes(fragment), `missing ui-taste rule: ${fragment}`);
+  assert.doesNotMatch(uiTaste, /load `icon-craft`/u);
+  const prompt = readFileSync(new URL('../kaz/prompt.md', import.meta.url), 'utf8');
+  assert.match(prompt, /also load `icon-craft`/u);
 
   const iconDir = fileURLToPath(new URL('../kaz/skills/icon-craft/', import.meta.url));
   const iconSkill = readFileSync(join(iconDir, 'SKILL.md'), 'utf8');
-  for (const fragment of ['--inline', 'icons-credits.json', 'ic-tile', 'DSH_NODE_EXECUTABLE', 'Nominative trademark notice', 'Identity: own the square', 'Or draw bare', 'at 24px', 'ic-tile--glyph']) {
+  for (const fragment of ['--inline', 'icons-credits.json', 'ic-tile', 'DSH_NODE_EXECUTABLE', 'Nominative trademark notice', 'Identity: own the square', 'Or draw bare', 'at 24px', 'ic-tile--glyph', 'Counterweight (optional)', 'For a wordmark (`w/h > 1.8`), pass `--tile`']) {
     assert.ok(iconSkill.includes(fragment), `missing icon-craft rule: ${fragment}`);
   }
+  assert.doesNotMatch(iconSkill, /Marks are cropped to their pre-measured drawn bounds/u);
   for (const rel of ['SOURCE.json', 'scripts/icons.mjs', 'assets/index.json', 'assets/icon.css']) {
     assert.ok(existsSync(join(iconDir, rel)), `missing icon-craft asset: ${rel}`);
   }

@@ -9,7 +9,7 @@ description: Handles Windows shell boundaries, path quoting, encoding and file-l
 
 - Match syntax to the actual shell and interpreter: PowerShell, CMD and Bash are not interchangeable. Set the command's working directory explicitly; another tool's directory change may not carry over.
 - In PowerShell, use `$env:NAME` for environment variables and avoid automatic variable names such as `$HOME` (names are case-insensitive). Prefer `-LiteralPath` for file paths and pass executable arguments separately rather than building an evaluated command string.
-- When crossing shells or introducing unfamiliar quoting or encoding, test a harmless fixture whose path contains spaces and Chinese characters. Check the arguments received and exit code; do not repeat this probe for routine commands on an already verified path.
+- When crossing shells or introducing unfamiliar quoting or encoding, test a harmless fixture whose path contains spaces and Chinese characters. Check the received arguments and exit code; do not repeat these checks for routine commands or cases already covered.
 
 ## Encoding and entry points
 
@@ -20,4 +20,4 @@ description: Handles Windows shell boundaries, path quoting, encoding and file-l
 
 Distinguish a missing parent, an application-held file lock, unsaved in-memory changes, ACL failure and sandbox denial before choosing a fix. For an ACL diagnosis, inspect the target and ancestors; do not broadly relax permissions. A sandbox denial requires the documented authorization path, not a different shell.
 
-If a command reports success but its output is missing, resolve the actual working directory and output path. After a write affected by quoting, encoding or locking, reopen the artifact with its intended reader. Exercise only relevant edge cases, such as Chinese paths or a file held open by another application.
+If a command reports success but its output is missing, resolve the actual working directory and output path. After a write affected by quoting, encoding or locking, reopen the artifact with its intended reader.

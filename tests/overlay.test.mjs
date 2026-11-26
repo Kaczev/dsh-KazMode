@@ -64,7 +64,7 @@ function host() {
 }
 
 test('prompt matches the approved five-part policy without restoring removed preferences', () => {
-  assert.equal(createHash('sha256').update(prompt).digest('hex'), 'd3065c4db1624544aad412d316e168e73e86274c01c043a2d6c9d12cba99f288');
+  assert.equal(createHash('sha256').update(prompt).digest('hex'), 'e38648415ff990a6dc088829ebbf54b2e04cc2a31acd1c83e57b708ae820959f');
   assert.ok(prompt.startsWith('## Goals and Decisions\n'));
   assert.equal((prompt.match(/^## /gmu) ?? []).length, 5);
   assert.doesNotMatch(prompt, /You are a coding agent|\{\{model\}\}|Respond in Chinese by default|Be direct: match the length/u);

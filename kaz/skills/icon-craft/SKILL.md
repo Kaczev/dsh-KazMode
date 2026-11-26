@@ -26,7 +26,7 @@ Draw one object that fills the square, not a glyph with empty space around it. T
 - **Mark box.** 30–46 units on its longest side, optically centred, at least 8 units from every edge. The tile carries the mass, so the subject may stay modest: 33 of 64 units is enough on a dark plate.
 - **Weight.** 6–8 units (9–13% of the square), as filled shapes or round-capped strokes with round joins. Below 5 units a stroke greys out at 24px whatever its colour.
 - **Colour.** Ground, one mark hue, at most one accent. Saturation belongs to the mark rather than the ground; keep mark-to-ground luminance contrast at 3:1 or more; two stops of one hue beat a rainbow.
-- **Counterweight.** One small detail — a dot, a tick, a four-point sparkle of 3–5 units in the empty quadrant. Two subjects of equal weight make a diagram.
+- **Counterweight (optional).** If the composition needs balance, add one small detail — a dot, a tick, or a 3–5-unit four-point sparkle in the empty quadrant. Keep it subordinate to the main subject.
 
 ```svg
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Plugin name">
@@ -70,7 +70,7 @@ Resolve `<skill-dir>` from this skill's directory path (shown in `<skill_content
 - **Files for a multi-file project:** `fetch github slack file:pdf2 ui:check --out assets/icons --base assets/icons` writes the SVGs plus `icons-credits.json`.
 - **Everything a page already references:** `scan index.html --out assets/icons` fetches each `data-icon` and `icons/<name>.svg`.
 
-Marks are cropped to their pre-measured drawn bounds (`assets/index.json`) and tagged `ic-land`, `ic-tall`, or `ic-wide` by aspect, so a row of mixed logos carries even weight; a wordmark (`w/h > 1.8`) always takes `--tile`, which widens the container to `2.4x` rather than shrinking the mark into an illegible sliver.
+For a wordmark (`w/h > 1.8`), pass `--tile`; the resolver warns if it is omitted.
 
 ## 6. Placement (`assets/icon.css`)
 
